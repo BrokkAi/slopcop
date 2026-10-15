@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,9 +50,9 @@ func readEmbeddedSkill(t *testing.T, name string) string {
 	return string(data)
 }
 
-// Every run installs the skill for the harnesses it finds, so an agent gets the
-// skill without anyone remembering to ask for it.
-func TestEveryRunInstallsTheBundledSkill(t *testing.T) {
+// init is the only thing that writes the skill: running another command leaves
+// the filesystem alone.
+func TestOnlyInitInstallsTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	agents := filepath.Join(home, ".agents")
 	makeHarness(t, agents)
@@ -59,7 +61,18 @@ func TestEveryRunInstallsTheBundledSkill(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
+	if _, err := os.Stat(filepath.Join(agents, "skills")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a plain run wrote %s, want nothing", filepath.Join(agents, "skills"))
+	}
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
 	dir := filepath.Join(agents, "skills", "slopcop")
+	if !strings.Contains(stdout, dir) {
+		t.Errorf("stdout = %q, want it to name %s", stdout, dir)
+	}
 	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
 		t.Error("the installed SKILL.md does not match the bundled one")
 	}
@@ -145,6 +158,39 @@ func TestInitWithoutAHarnessInstallsNothing(t *testing.T) {
 		if _, err := os.Stat(filepath.Join(home, dir)); err == nil {
 			t.Errorf("init created %s for a harness that is not installed", dir)
 		}
+	}
+}
+
+// --no-skill leaves the skill alone, whether it is installed or not.
+func TestInitNoSkillWritesNothing(t *testing.T) {
+	home := isolateAgentHome(t)
+	agents := filepath.Join(home, ".agents")
+	makeHarness(t, agents)
+
+	code, stdout, stderr := runCLI(t, "init", "--no-skill")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "--no-skill") {
+		t.Errorf("stdout = %q, want it to say the skill step was skipped", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(agents, "skills")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("--no-skill wrote %s", filepath.Join(agents, "skills"))
+	}
+
+	// An installed skill is left as it is, and stays untouched.
+	if code, _, stderr := runCLI(t, "init"); code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	path := filepath.Join(agents, "skills", "slopcop", "SKILL.md")
+	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runCLI(t, "init", "--no-skill"); code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if got := readSkillFile(t, path); got != "mine\n" {
+		t.Errorf("SKILL.md = %q, want --no-skill to leave it alone", got)
 	}
 }
 

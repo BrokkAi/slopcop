@@ -35,9 +35,6 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	root.SetOut(stdout)
 	root.SetErr(stderr)
 	err := root.ExecuteContext(ctx)
-	// The skill install runs after the command, so `slopcop init` reports the
-	// install it just did instead of finding the startup pass already done.
-	installSkillOnStartup()
 	if err == nil {
 		return 0
 	}

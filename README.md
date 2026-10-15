@@ -24,6 +24,18 @@ go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
 
 Go 1.25 or newer is required to build.
 
+On Windows, the PowerShell installer takes the latest release instead of
+building:
+
+```powershell
+irm https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.ps1 | iex
+```
+
+It verifies the release checksum, installs `slopcop.exe` to
+`%LOCALAPPDATA%\Programs\slopcop`, and adds that directory to the user `Path`.
+`SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and `SLOPCOP_NO_MODIFY_PATH` override
+its defaults.
+
 The npm package carries the release binary for macOS, Linux, and Windows on x64
 and arm64, so it needs no Go toolchain:
 
@@ -37,9 +49,8 @@ Node 22 or newer is required to run that package.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop. Every run installs it, and `slopcop init` does the same install and
-names what it did. The skill goes into each well-known skills directory whose
-harness is present:
+slopcop. `slopcop init` installs it into each well-known skills directory whose
+harness is present, and names what it did:
 
 | Location | Harness |
 | --- | --- |
@@ -48,7 +59,8 @@ harness is present:
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
 
 A skill that is already there is left alone, so local edits survive and running
-init again is safe.
+init again is safe. `slopcop init --no-skill` skips the install and any update
+of it.
 
 ## Sign in
 
