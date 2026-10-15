@@ -2,7 +2,18 @@
   "name": "@brokkai/slopcop",
   "version": "0.0.0",
   "private": true,
-  "description": "Check a change through the hosted SlopCop check API",
+  "description": "Static analysis for coding agents and CI: check a change through the hosted SlopCop API",
+  "keywords": [
+    "agents",
+    "ai-agent",
+    "ci",
+    "cli",
+    "code-review",
+    "coding-agent",
+    "git",
+    "sarif",
+    "static-analysis"
+  ],
   "license": "Apache-2.0",
   "repository": {
     "type": "git",

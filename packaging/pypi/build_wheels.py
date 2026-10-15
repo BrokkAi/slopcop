@@ -8,8 +8,9 @@ wheel per platform, and the release workflow uploads them with the PyPA
 action.
 
 Each wheel carries the real binary for its platform plus the launcher package
-in ``packaging/pypi/slopcop``, so ``pip install slopcop``, ``pipx install
-slopcop``, and ``uvx slopcop`` all run the same binary as the archives.
+in ``packaging/pypi/brokk_slopcop``, so ``pip install brokk-slopcop``, ``pipx
+install brokk-slopcop``, and ``uv tool install brokk-slopcop`` all run the same
+binary as the archives.
 
 A wheel is a zip with a ``<name>-<version>.dist-info`` directory, and writing
 it here keeps the build dependency-free: no packaging backend has to be
@@ -45,7 +46,7 @@ DIST_NAME = "brokk-slopcop"
 #: distributions cannot install the same module without breaking each other.
 PACKAGE = "brokk_slopcop"
 
-SUMMARY = "Check a change through the hosted SlopCop check API"
+SUMMARY = "Static analysis for coding agents and CI: check a change through the hosted SlopCop API"
 
 CLASSIFIERS = (
     "Environment :: Console",
@@ -53,6 +54,7 @@ CLASSIFIERS = (
     "Operating System :: MacOS",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
+    "Programming Language :: Go",
     "Topic :: Software Development :: Quality Assurance",
 )
 
@@ -241,7 +243,7 @@ def metadata(version: str, readme: Path) -> str:
         "License-File: LICENSE",
         "Description-Content-Type: text/markdown",
         "Requires-Python: >=3.9",
-        "Keywords: agents,ci,cli,git,review",
+        "Keywords: agents,ai-agent,ci,cli,code-review,coding-agent,git,sarif,static-analysis",
         *(f"Project-URL: {label}, {url}" for label, url in PROJECT_URLS),
         *(f"Classifier: {classifier}" for classifier in CLASSIFIERS),
     ]
