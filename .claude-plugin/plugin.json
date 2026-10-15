@@ -1,0 +1,9 @@
+{
+  "name": "slopcop",
+  "description": "Run hosted SlopCop checks on a working-tree change.",
+  "author": {
+    "name": "BrokkAi"
+  },
+  "repository": "https://github.com/BrokkAi/slopcop",
+  "license": "Apache-2.0"
+}

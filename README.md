@@ -24,6 +24,29 @@ go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
 
 Go 1.25 or newer is required to build.
 
+## Enable it in an agent
+
+The binary carries the agent skill that teaches a coding agent how to run
+slopcop. Every run installs it, and `slopcop init` does the same install and
+names what it did. The skill goes into each well-known skills directory whose
+harness is present:
+
+| Location | Harness |
+| --- | --- |
+| `~/.agents/skills/slopcop/` | Codex, opencode |
+| `~/.claude/skills/slopcop/` | Claude Code, opencode |
+| `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
+
+A skill that is already there is left alone, so local edits survive and running
+init again is safe.
+
+The repository is also a Claude Code plugin marketplace, for harnesses that
+install skills from a plugin rather than from a directory:
+
+```console
+/plugin marketplace add BrokkAi/slopcop
+```
+
 ## Sign in
 
 ```console
@@ -170,4 +193,6 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
+| `skills/slopcop` | the agent skill the binary embeds and installs |
+| `.claude-plugin` | Claude Code plugin and marketplace metadata |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |

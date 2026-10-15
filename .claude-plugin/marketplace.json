@@ -1,0 +1,16 @@
+{
+  "name": "slopcop",
+  "owner": {
+    "name": "BrokkAi"
+  },
+  "metadata": {
+    "description": "SlopCop checks for coding agents."
+  },
+  "plugins": [
+    {
+      "name": "slopcop",
+      "source": "./",
+      "description": "Run hosted SlopCop checks on a working-tree change."
+    }
+  ]
+}

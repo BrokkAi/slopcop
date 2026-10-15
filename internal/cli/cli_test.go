@@ -56,9 +56,11 @@ func isolateUserConfig(t *testing.T) {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
+	t.Setenv("CODEX_HOME", "")
 }
 
 func runCLI(t *testing.T, args ...string) (int, string, string) {
