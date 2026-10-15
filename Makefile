@@ -68,7 +68,7 @@ npm-pack:
 # that cannot start fails here instead of in someone's terminal.
 npm-smoke:
 	rm -rf "$(NPM_SMOKE)"
-	npm install --prefix "$(NPM_SMOKE)" --ignore-scripts --no-audit --no-fund "$(NPM_OUTPUT)"/brokkai-slopcop-*.tgz
+	npm install --prefix "$(NPM_SMOKE)" --ignore-scripts --no-audit --no-fund "./$(NPM_OUTPUT)"/brokkai-slopcop-*.tgz
 	@binary="$(NPM_SMOKE)/node_modules/.bin/slopcop"; \
 	reported="$$($$binary version)"; \
 	case "$$reported" in \
