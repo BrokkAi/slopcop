@@ -10,7 +10,6 @@ import {
   ROOT_PACKAGE,
   TARGETS,
   archiveNames,
-  binaryName,
   distTag,
   pack,
   parseChecksums,
@@ -18,10 +17,10 @@ import {
   publish,
   registryVersion,
   selectArchive,
-  sha256,
   stage,
   versionFromTag,
 } from '../scripts/release.mjs';
+import { buildFixtureRelease, standInBinary } from '../scripts/fixture-release.mjs';
 
 const TAG = 'v1.2.3';
 const VERSION = '1.2.3';
@@ -35,44 +34,12 @@ function temporary(t, prefix) {
 }
 
 function binaryContent(target) {
-  return Buffer.from(`slopcop binary for ${target.goos}/${target.goarch}\n`);
+  return Buffer.from(standInBinary(TAG, target));
 }
 
-function tarGz(staging, archive) {
-  execFileSync('tar', ['-czf', archive, '-C', staging, '.'], { stdio: 'ignore' });
-}
-
-function zip(staging, archive) {
-  try {
-    execFileSync('zip', ['-q', '-r', archive, '.'], { cwd: staging, stdio: 'ignore' });
-    return;
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  // bsdtar reads and writes zip archives; GNU tar does not, so CI installs zip.
-  execFileSync('tar', ['-a', '-cf', archive, '-C', staging, '.'], { stdio: 'ignore' });
-}
-
-// Builds the release directory a GoReleaser tag run publishes, alternating the
-// archive name spelling between the tag and the bare version.
-function buildRelease(t, tag = TAG) {
+function buildRelease(t) {
   const directory = temporary(t, 'slopcop-release-assets-');
-  const archives = [];
-  const sums = [];
-  for (const [index, target] of TARGETS.entries()) {
-    const staging = temporary(t, 'slopcop-release-target-');
-    fs.writeFileSync(path.join(staging, binaryName(target.goos)), binaryContent(target));
-    fs.writeFileSync(path.join(staging, 'README.md'), '# SlopCop\n');
-    const spelling = index % 2 === 0 ? tag : versionFromTag(tag);
-    const name = `slopcop_${spelling}_${target.goos}_${target.goarch}.${target.extension}`;
-    const archive = path.join(directory, name);
-    if (target.extension === 'zip') zip(staging, archive);
-    else tarGz(staging, archive);
-    archives.push({ target, name, archive });
-    sums.push(`${sha256(fs.readFileSync(archive))}  ${name}`);
-  }
-  fs.writeFileSync(path.join(directory, 'checksums.txt'), `${sums.join('\n')}\n`);
-  return { directory, archives };
+  return { directory, archives: buildFixtureRelease(directory, TAG) };
 }
 
 // npm writes its cache and logs outside the repository, so keep them beside

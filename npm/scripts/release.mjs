@@ -214,13 +214,14 @@ export async function stage({ assets, tag, directory }) {
 export async function pack({ assets, output, tag }) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'slopcop-npm-package-'));
   try {
-    const manifest = await stage({ assets, tag, directory });
-    await mkdir(output, { recursive: true });
+    const manifest = await stage({ assets: path.resolve(assets), tag, directory });
+    const destination = path.resolve(output);
+    await mkdir(destination, { recursive: true });
     const reported = JSON.parse(await npmOutput(
-      ['pack', '--json', '--ignore-scripts', `--pack-destination=${path.resolve(output)}`],
+      ['pack', '--json', '--ignore-scripts', `--pack-destination=${destination}`],
       directory,
     ));
-    const archive = path.join(output, reported[0].filename);
+    const archive = path.join(destination, reported[0].filename);
     const integrity = `sha512-${createHash('sha512').update(await readFile(archive)).digest('base64')}`;
     if (reported[0].integrity !== integrity) {
       fail(`npm pack reported ${reported[0].integrity} for ${reported[0].filename}, but the tarball is ${integrity}`);

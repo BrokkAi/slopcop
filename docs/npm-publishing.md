@@ -28,6 +28,10 @@ rerun skips a version that already exists only when the tarball integrity
 matches exactly; different contents need a new version. After publishing, the
 run waits for the registry to expose the version rather than publishing twice.
 
+CI packs and installs a stand-in release (`npm/scripts/fixture-release.mjs`)
+on every change, so the packing, installing, and launcher targets are
+exercised before a tag can use them.
+
 ## First publication and the trusted publisher
 
 npm only accepts a trusted publisher for a package that exists, so the first
