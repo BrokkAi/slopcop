@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -19,13 +21,47 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// fixtureConfig keeps the fixtures byte-for-byte what the test wrote,
+// whatever the machine's global config says: Git for Windows defaults to
+// core.autocrlf=true and core.symlinks=false.
+func fixtureConfig() []string {
+	return []string{
+		"core.autocrlf=false",
+		"core.symlinks=" + strconv.FormatBool(symlinkError() == nil),
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "-q", "-b", "main", ".")
+	for _, setting := range fixtureConfig() {
+		key, value, _ := strings.Cut(setting, "=")
+		git(t, dir, "config", key, value)
+	}
 	git(t, dir, "config", "user.email", "test@example.com")
 	git(t, dir, "config", "user.name", "Test")
 	return dir
+}
+
+var symlinkProbe struct {
+	once sync.Once
+	err  error
+}
+
+// symlinkError reports why this process cannot create symlinks, or nil if it
+// can. Windows needs SeCreateSymbolicLinkPrivilege (admin or Developer Mode).
+func symlinkError() error {
+	symlinkProbe.once.Do(func() {
+		dir, err := os.MkdirTemp("", "slopcop-symlink-probe")
+		if err != nil {
+			symlinkProbe.err = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		symlinkProbe.err = os.Symlink("target", filepath.Join(dir, "link"))
+	})
+	return symlinkProbe.err
 }
 
 func writeFile(t *testing.T, root, name, content string) {
@@ -50,13 +86,19 @@ func readFile(t *testing.T, root, name string) string {
 
 func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	root := initRepo(t)
+	symlinks := symlinkError() == nil
+	if !symlinks {
+		t.Logf("skipping the symlink cases: %v", symlinkError())
+	}
 	writeFile(t, root, ".gitignore", ".slopcop/\nbuild/\n")
 	writeFile(t, root, "src/a.txt", "one\n")
 	writeFile(t, root, "src/del.txt", "delete me\n")
 	writeFile(t, root, "src/moved.bin", "binary\x00one")
 	writeFile(t, root, "src/mod.bin", "binary\x00keep")
-	if err := os.Symlink("target-one", filepath.Join(root, "src", "link")); err != nil {
-		t.Fatal(err)
+	if symlinks {
+		if err := os.Symlink("target-one", filepath.Join(root, "src", "link")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-qm", "base")
@@ -77,11 +119,13 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, root, "src/mod.bin", "binary\x00changed")
-	if err := os.Remove(filepath.Join(root, "src", "link")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("target-two", filepath.Join(root, "src", "link")); err != nil {
-		t.Fatal(err)
+	if symlinks {
+		if err := os.Remove(filepath.Join(root, "src", "link")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("target-two", filepath.Join(root, "src", "link")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	writeFile(t, root, "src/new.txt", "untracked\n")
 	if err := os.Chmod(filepath.Join(root, "src", "new.txt"), 0o755); err != nil {
@@ -100,7 +144,7 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 		t.Fatal("expected changed files")
 	}
 	patch := string(change.Patch)
-	for _, required := range []string{
+	required := []string{
 		"diff --git a/src/a.txt b/src/a.txt",
 		"diff --git a/src/del.txt b/src/del.txt",
 		"diff --git a/src/new.txt b/src/new.txt",
@@ -108,9 +152,12 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 		"rename from src/moved.bin",
 		"rename to src/renamed.bin",
 		"diff --git a/src/mod.bin b/src/mod.bin",
-		"diff --git a/src/link b/src/link",
 		"diff --git a/.slopcop/policies/local.rqlp b/.slopcop/policies/local.rqlp",
-	} {
+	}
+	if symlinks {
+		required = append(required, "diff --git a/src/link b/src/link")
+	}
+	for _, required := range required {
 		if !strings.Contains(patch, required) {
 			t.Errorf("patch is missing %q", required)
 		}
@@ -123,7 +170,11 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	}
 
 	clone := filepath.Join(t.TempDir(), "clone")
-	if out, err := exec.Command("git", "clone", "-q", "--no-hardlinks", root, clone).CombinedOutput(); err != nil {
+	cloneArgs := []string{"clone", "-q", "--no-hardlinks"}
+	for _, setting := range fixtureConfig() {
+		cloneArgs = append(cloneArgs, "-c", setting)
+	}
+	if out, err := exec.Command("git", append(cloneArgs, root, clone)...).CombinedOutput(); err != nil {
 		t.Fatalf("clone: %v\n%s", err, out)
 	}
 	git(t, clone, "checkout", "-q", base)
