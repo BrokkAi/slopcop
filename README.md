@@ -24,6 +24,16 @@ go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
 
 Go 1.25 or newer is required to build.
 
+The npm package carries the release binary for macOS, Linux, and Windows on x64
+and arm64, so it needs no Go toolchain:
+
+```console
+npm install --global @brokkai/slopcop
+npx @brokkai/slopcop --help
+```
+
+Node 22 or newer is required to run that package.
+
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
@@ -167,6 +177,7 @@ make test        # go test ./...
 make vet         # go vet ./...
 make build       # bin/slopcop-<goos>-<goarch>
 make cross-check # linux, darwin, and windows on amd64 and arm64
+make npm-test    # node --test npm/test
 ```
 
 Releases are tag-driven. Pushing a `v*.*.*` tag runs GoReleaser, which builds
@@ -174,7 +185,10 @@ linux, darwin, and windows for amd64 and arm64, packages `tar.gz` archives
 (`zip` on Windows) with `checksums.txt`, and publishes the GitHub release.
 `.goreleaser.yaml` is the single source of truth; CI runs `goreleaser check`
 and a snapshot build on every change, and `make release-check` runs the same
-locally when GoReleaser is installed.
+locally when GoReleaser is installed. The same tag push then packs
+`@brokkai/slopcop` from those release archives and publishes it to npm with
+[trusted publishing](docs/npm-publishing.md), so the package needs no npm
+token.
 
 Layout:
 
@@ -186,5 +200,7 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
+| `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |
+| `docs/npm-publishing.md` | npm release flow and trusted publisher setup |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |
