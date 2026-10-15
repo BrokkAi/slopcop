@@ -10,8 +10,8 @@ jobs:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # The release ships linux, darwin, and windows on amd64 and arm64, so all
-    # three get a real test run. The Windows leg stays non-blocking while #4,
-    # #5, and #6 are open.
+    # three get a real test run. The Windows leg stays non-blocking while #6
+    # is open.
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
