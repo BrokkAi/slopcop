@@ -40,13 +40,6 @@ harness is present:
 A skill that is already there is left alone, so local edits survive and running
 init again is safe.
 
-The repository is also a Claude Code plugin marketplace, for harnesses that
-install skills from a plugin rather than from a directory:
-
-```console
-/plugin marketplace add BrokkAi/slopcop
-```
-
 ## Sign in
 
 ```console
@@ -194,5 +187,4 @@ Layout:
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
 | `skills/slopcop` | the agent skill the binary embeds and installs |
-| `.claude-plugin` | Claude Code plugin and marketplace metadata |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |
