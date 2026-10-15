@@ -197,6 +197,9 @@ func TestInitNoSkillWritesNothing(t *testing.T) {
 // The skill has to carry the frontmatter a harness reads to find it.
 func TestBundledSkillIsDiscoverable(t *testing.T) {
 	content := readEmbeddedSkill(t, "SKILL.md")
+	if strings.Contains(content, "\r") {
+		t.Fatal("the bundled skill has CRLF line endings; .gitattributes should check skills/ out as LF, so re-checkout it")
+	}
 	if !strings.HasPrefix(content, "---\n") {
 		t.Fatalf("the bundled skill has no frontmatter:\n%s", content)
 	}

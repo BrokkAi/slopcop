@@ -1,0 +1,4 @@
+# Check out LF everywhere, whatever core.autocrlf says. go:embed ships the
+# bytes on disk (skills/), and gofmt flags CRLF, so a Windows checkout has to
+# match the one the release is built from.
+* text=auto eol=lf
