@@ -75,6 +75,14 @@ traditional access: package Settings, Publishing access, "Require two-factor
 authentication and disallow tokens". Trusted publishers keep working; only
 long-lived tokens stop.
 
+SlopCop's own bootstrap went through exactly this: `0.0.1` was published by
+hand from the `v0.0.1` release archives, and `v0.0.2` was the first tag the
+workflow published on its own, with provenance. Both `npm publish` and
+`npm trust` need an interactive 2FA approval in a browser when they run, and
+npm records a `0.0.0-stage` placeholder alongside the first version: it is
+npm's own record of the package, described as a "Temporary package placeholder
+for staged publishing", not something this repository released.
+
 ## Recovery
 
 If npm publication fails after the GitHub release succeeded, rerun the same tag
