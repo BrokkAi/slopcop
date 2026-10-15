@@ -42,6 +42,19 @@ jobs:
           name: slopcop-snapshot
           path: dist/*
           if-no-files-found: error
+      # The wheels are packed here, where GoReleaser left the binaries, and
+      # the jobs below check them on every platform that can run them before
+      # anything reaches PyPI. See docs/pypi-publishing.md.
+      - name: Pack the PyPI wheels
+        if: startsWith(github.ref, 'refs/tags/')
+        run: make wheels PYPI_FLAGS='--dist dist' PYPI_VERSION="$GITHUB_REF_NAME"
+      - name: Upload the PyPI wheels
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v7
+        with:
+          name: pypi-dist
+          path: pypi-dist/*.whl
+          if-no-files-found: error
 
   npm:
     name: npm package
@@ -79,3 +92,62 @@ jobs:
       # and nothing else, so there is no npm token anywhere in this repository.
       - name: Publish with trusted publishing
         run: make npm-publish
+
+  pypi-install:
+    name: pypi install (${{ matrix.runner }})
+    needs: goreleaser
+    if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: pypi-dist
+          path: pypi-dist
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.x'
+      # Nothing is published until the wheel for every platform GitHub can run
+      # has been installed there and the command it puts on PATH has answered.
+      - name: Install the wheel for this platform and run it
+        run: |
+          case "$RUNNER_OS" in
+            Windows) PY=python; VENV=venv/Scripts; EXE=.exe ;;
+            *) PY=python3; VENV=venv/bin; EXE= ;;
+          esac
+          "$PY" -m venv venv
+          "$VENV/python" -m pip install --quiet --no-index --find-links pypi-dist brokk-slopcop
+          "$VENV/slopcop$EXE" version
+          "$VENV/python" -m brokk_slopcop version
+
+  pypi:
+    name: pypi package
+    needs: [goreleaser, pypi-install]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/brokk-slopcop
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: pypi-dist
+          path: pypi-dist
+      # PyPI exchanges the OIDC token GitHub issues to this job for short-lived
+      # credentials and signs the uploads, so no PyPI token exists anywhere in
+      # this repository.
+      - name: Publish with trusted publishing
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pypi-dist
+          # A rerun of a half-finished upload publishes whatever is missing.
+          skip-existing: true

@@ -46,6 +46,17 @@ npx @brokkai/slopcop --help
 
 Node 22 or newer is required to run that package.
 
+The PyPI package carries the release binary for those same targets as wheels,
+so it needs no Go toolchain either:
+
+```console
+pip install brokk-slopcop
+```
+
+The package is `brokk-slopcop` because PyPI already has an unrelated project
+named `slopcop`; the command it installs is still `slopcop`, and `python -m
+brokk_slopcop` runs the same binary.
+
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
@@ -190,6 +201,7 @@ make vet         # go vet ./...
 make build       # bin/slopcop-<goos>-<goarch>
 make cross-check # linux, darwin, and windows on amd64 and arm64
 make npm-test    # node --test npm/test
+make wheels      # pypi-dist/, one wheel per release target
 ```
 
 Releases are tag-driven. Pushing a `v*.*.*` tag runs GoReleaser, which builds
@@ -202,6 +214,12 @@ locally when GoReleaser is installed. The same tag push then packs
 [trusted publishing](docs/npm-publishing.md), so the package needs no npm
 token.
 
+The same tag also packs a wheel per release target from the binaries GoReleaser
+just built, installs the wheel for every platform GitHub can run, and
+publishes `brokk-slopcop` to PyPI with
+[trusted publishing](docs/pypi-publishing.md), so that package needs no PyPI
+token either.
+
 Layout:
 
 | Path | Purpose |
@@ -213,6 +231,8 @@ Layout:
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
+| `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |
 | `docs/npm-publishing.md` | npm release flow and trusted publisher setup |
+| `docs/pypi-publishing.md` | PyPI release flow and trusted publisher setup |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |

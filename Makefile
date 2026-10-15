@@ -13,7 +13,15 @@ NPM_ASSETS ?= release-assets
 NPM_OUTPUT ?= npm-dist
 NPM_SMOKE ?= npm-smoke
 
-.PHONY: all build install test test-short vet fmt fmt-check cross-check release-check npm-test npm-pack npm-smoke npm-publish clean
+# The PyPI wheels are packed from the binaries of a release: the release
+# workflow points the packer at GoReleaser's dist/ and at the tag, while the
+# default packs what `make cross-check` left in bin/, under a version that
+# cannot be mistaken for a release.
+PYPI_FLAGS ?= --bin-dir bin
+PYPI_VERSION ?= 0.0.0.dev0
+PYPI_OUTPUT ?= pypi-dist
+
+.PHONY: all build install test test-short vet fmt fmt-check cross-check release-check npm-test npm-pack npm-smoke npm-publish wheels clean
 
 all: build
 
@@ -82,5 +90,11 @@ npm-smoke:
 npm-publish:
 	node npm/scripts/release.mjs publish --release-tag "$(NPM_TAG)" --assets "$(NPM_ASSETS)" --output "$(NPM_OUTPUT)"
 
+# Packs one wheel per release target, each carrying the binary for its
+# platform, plus a musllinux wheel for each Linux binary. See
+# docs/pypi-publishing.md.
+wheels:
+	python3 packaging/pypi/build_wheels.py --version "$(PYPI_VERSION)" $(PYPI_FLAGS) --out "$(PYPI_OUTPUT)"
+
 clean:
-	rm -rf bin dist "$(NPM_OUTPUT)" "$(NPM_SMOKE)" "$(NPM_ASSETS)"
+	rm -rf bin dist "$(NPM_OUTPUT)" "$(NPM_SMOKE)" "$(NPM_ASSETS)" "$(PYPI_OUTPUT)"
