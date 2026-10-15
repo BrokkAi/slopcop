@@ -69,3 +69,20 @@ jobs:
           distribution: goreleaser
           version: '~> v2'
           args: build --snapshot --clean
+
+  npm:
+    name: npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: make npm-test
+      # Packs and installs a stand-in release, so a packaging target that
+      # cannot run fails here instead of after a tag published a release.
+      - name: Pack and smoke-test the packaging
+        run: |
+          node npm/scripts/fixture-release.mjs --tag v0.0.0-fixture --assets release-assets
+          make npm-pack NPM_TAG=v0.0.0-fixture
+          make npm-smoke NPM_TAG=v0.0.0-fixture

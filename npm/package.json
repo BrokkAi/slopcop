@@ -1,0 +1,26 @@
+{
+  "name": "@brokkai/slopcop",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Check a change through the hosted SlopCop check API",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/BrokkAi/slopcop.git"
+  },
+  "homepage": "https://github.com/BrokkAi/slopcop#readme",
+  "bugs": "https://github.com/BrokkAi/slopcop/issues",
+  "bin": {
+    "slopcop": "bin/slopcop.cjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "os": ["darwin", "linux", "win32"],
+  "cpu": ["x64", "arm64"],
+  "files": ["bin/", "native/", "README.md", "LICENSE"],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}

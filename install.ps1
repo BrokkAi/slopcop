@@ -173,13 +173,16 @@
     $environment = Get-Item -Path 'HKCU:\Environment'
     # Keep entries such as %USERPROFILE%\bin unexpanded when writing Path back.
     $userPath = $environment.GetValue('Path', '', 'DoNotExpandEnvironmentNames')
-    $entries = @($userPath -split ';' | Where-Object { $_ })
+    # The entries go back exactly as they came: an empty entry someone left
+    # behind is theirs, not ours to clean up.
+    $entries = @($userPath -split ';')
     $present = $entries | Where-Object {
-        [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $installDir.TrimEnd('\')
+        $_ -and [Environment]::ExpandEnvironmentVariables($_).TrimEnd('\') -ieq $installDir.TrimEnd('\')
     }
     if (-not $present) {
         $kind = if ($userPath -match '%') { 'ExpandString' } else { 'String' }
-        New-ItemProperty -Path 'HKCU:\Environment' -Name 'Path' -Value (($entries + $installDir) -join ';') `
+        $updated = ($entries -join ';').TrimEnd(';') + ';' + $installDir
+        New-ItemProperty -Path 'HKCU:\Environment' -Name 'Path' -Value $updated `
             -PropertyType $kind -Force | Out-Null
         # Setting any user variable through .NET broadcasts the environment
         # change, so terminals opened from now on see the new Path.
