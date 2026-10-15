@@ -194,6 +194,27 @@ func TestInitNoSkillWritesNothing(t *testing.T) {
 	}
 }
 
+// go:embed ships the bytes on disk, so a CRLF checkout would install a
+// different skill than the release does.
+func TestBundledSkillIsLF(t *testing.T) {
+	err := fs.WalkDir(skills.Files, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return err
+		}
+		data, err := skills.Files.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if strings.Contains(string(data), "\r") {
+			t.Errorf("%s has CRLF line endings; .gitattributes pins LF, but an existing clone needs `git rm -r --cached . && git reset --hard` to re-checkout", path)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 // The skill has to carry the frontmatter a harness reads to find it.
 func TestBundledSkillIsDiscoverable(t *testing.T) {
 	content := readEmbeddedSkill(t, "SKILL.md")

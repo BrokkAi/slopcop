@@ -10,8 +10,8 @@ jobs:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # The release ships linux, darwin, and windows on amd64 and arm64, so all
-    # three get a real test run. The Windows leg stays non-blocking while #4,
-    # #5, and #6 are open.
+    # three get a real test run. The Windows leg stays non-blocking while #6
+    # is open.
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     strategy:
       fail-fast: false
@@ -25,12 +25,7 @@ jobs:
           cache: true
       # bash keeps one recipe working on all three runners, where `make` and a
       # POSIX shell are not a given.
-      #
-      # Formatting is checked on the canonical LF checkout only: a Windows
-      # checkout with core.autocrlf=true makes gofmt flag every file, which
-      # says nothing about the code. See issue #4.
       - name: Check formatting
-        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           files="$(gofmt -l .)"
