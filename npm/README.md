@@ -17,5 +17,15 @@ node --test npm/test/
 node npm/scripts/release.mjs pack --release-tag v0.1.0 --assets release-assets
 ```
 
+`npm/scripts/fixture-release.mjs` writes stand-in archives for a tag, which is
+how the packaging targets are exercised without a published release (CI does
+exactly that on every change). Their binaries only run on POSIX systems:
+
+```console
+node npm/scripts/fixture-release.mjs --tag v0.0.0-fixture
+make npm-pack NPM_TAG=v0.0.0-fixture
+make npm-smoke NPM_TAG=v0.0.0-fixture
+```
+
 See [npm publishing](../docs/npm-publishing.md) for the release flow, the
 trusted publisher configuration, and the first-publication steps.
