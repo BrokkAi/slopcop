@@ -13,13 +13,17 @@ the analyzer's exit contract.
 ## Install
 
 ```console
-pip install slopcop
+pip install slopcop-cli
 ```
 
-`pipx install slopcop` and `uvx slopcop` install the same wheels. Each wheel
-carries the released binary for its platform, so this is the same command as
-the archives, with the same exit codes; `python -m slopcop` works too. Wheels
-cover Linux, macOS, and Windows on amd64 and arm64.
+`pipx install slopcop-cli` and `uvx --from slopcop-cli slopcop` install the
+same wheels. Each wheel carries the released binary for its platform, so this
+is the same command as the archives, with the same exit codes; `python -m
+slopcop_cli` works too. Wheels cover Linux, macOS, and Windows on amd64 and
+arm64.
+
+The distribution is named `slopcop-cli` because PyPI already has an unrelated
+project named `slopcop`; the command it installs is `slopcop`.
 
 Building from source:
 
@@ -183,8 +187,8 @@ platform it names.
 
 Claiming the project on PyPI is the one manual step: at
 <https://pypi.org/manage/account/publishing/>, add a pending publisher for
-owner `BrokkAi`, repository `slopcop`, workflow `release.yml`, environment
-`pypi`.
+project `slopcop-cli`, owner `BrokkAi`, repository `slopcop`, workflow
+`release.yml`, environment `pypi`.
 
 Layout:
 

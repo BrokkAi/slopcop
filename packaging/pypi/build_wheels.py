@@ -31,9 +31,18 @@ import time
 import zipfile
 from pathlib import Path
 
-#: The binary GoReleaser builds (.goreleaser.yaml) and the project name on PyPI.
+#: The Go binary GoReleaser builds (.goreleaser.yaml), and the command the
+#: wheel installs.
 BINARY = "slopcop"
-DIST_NAME = "slopcop"
+
+#: The distribution name on PyPI. It cannot be `slopcop`, which an unrelated
+#: project already publishes, but it still installs the `slopcop` command.
+DIST_NAME = "slopcop-cli"
+
+#: The import package inside the wheel. It follows the distribution name
+#: because the `slopcop` module belongs to that other project, and two
+#: distributions cannot install the same module without breaking each other.
+PACKAGE = "slopcop_cli"
 
 SUMMARY = "Check a change through the hosted SlopCop check API"
 
@@ -52,7 +61,7 @@ PROJECT_URLS = (
     ("Issues", "https://github.com/BrokkAi/slopcop/issues"),
 )
 
-ENTRY_POINTS = f"[console_scripts]\n{DIST_NAME} = {DIST_NAME}.__main__:main\n"
+ENTRY_POINTS = f"[console_scripts]\n{BINARY} = {PACKAGE}.__main__:main\n"
 
 #: Zip members cannot carry a timestamp before 1980, and nothing needs the
 #: real one, so wheels are stamped from SOURCE_DATE_EPOCH when a release sets
@@ -85,6 +94,11 @@ PRERELEASE_WORDS = {
 
 class BuildError(Exception):
     """A release cannot be packaged as it stands."""
+
+
+def export_name(name: str) -> str:
+    """The name as it appears in a wheel filename and a dist-info directory."""
+    return re.sub(r"[-_.]+", "_", name).lower()
 
 
 def pypi_version(tag: str) -> str:
@@ -259,7 +273,7 @@ def wheel_entries(
 ) -> list[tuple[str, bytes, int]]:
     """Every member of one wheel, as (archive name, content, file mode)."""
     entries = [
-        (f"{DIST_NAME}/{path.name}", path.read_bytes(), 0o644)
+        (f"{PACKAGE}/{path.name}", path.read_bytes(), 0o644)
         for path in sorted(shim.glob("*.py"))
     ]
     if not entries:
@@ -269,9 +283,9 @@ def wheel_entries(
     # The name is the launcher's, not the build's: `make build` names binaries
     # after their target, GoReleaser after the binary.
     packed = f"{BINARY}.exe" if goos == "windows" else BINARY
-    entries.append((f"{DIST_NAME}/_bin/{packed}", binary.read_bytes(), 0o755))
+    entries.append((f"{PACKAGE}/_bin/{packed}", binary.read_bytes(), 0o755))
 
-    info = f"{DIST_NAME}-{version}.dist-info"
+    info = f"{export_name(DIST_NAME)}-{version}.dist-info"
     entries.extend(
         [
             (f"{info}/METADATA", metadata(version, readme).encode(), 0o644),
@@ -285,7 +299,7 @@ def wheel_entries(
 
 def write_wheel(path: Path, version: str, entries, epoch: int) -> None:
     """Write one wheel, RECORD last, so it can carry every other file's hash."""
-    record = f"{DIST_NAME}-{version}.dist-info/RECORD"
+    record = f"{export_name(DIST_NAME)}-{version}.dist-info/RECORD"
     lines = [
         f"{name},sha256={_digest(content)},{len(content)}"
         for name, content, _ in entries
@@ -345,7 +359,7 @@ def main(argv: list[str] | None = None) -> int:
     repo = Path(__file__).resolve().parents[2]
     readme = args.readme or repo / "README.md"
     license_file = args.license or repo / "LICENSE"
-    shim = Path(__file__).resolve().parent / DIST_NAME
+    shim = Path(__file__).resolve().parent / PACKAGE
 
     version = pypi_version(args.version)
     targets = (
@@ -359,7 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     wheels: list[tuple[Path, str, str]] = []
     for (goos, goarch), binary in sorted(targets.items()):
         for tag in platform_tags(goos, goarch, binary):
-            name = f"{DIST_NAME}-{version}-py3-none-{tag}.whl"
+            name = f"{export_name(DIST_NAME)}-{version}-py3-none-{tag}.whl"
             out = args.out / name
             write_wheel(
                 out,

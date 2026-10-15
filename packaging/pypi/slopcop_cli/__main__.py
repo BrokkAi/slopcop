@@ -3,7 +3,7 @@
 Every wheel carries the binary built for its platform, so the PyPI install
 behaves exactly like the release archives: same output, same exit codes. This
 module only finds that binary and hands the process over to it, which is also
-what makes ``python -m slopcop`` work.
+what makes ``python -m slopcop_cli`` work.
 """
 
 from __future__ import annotations
@@ -54,5 +54,5 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    # `python -m slopcop`: the console script calls main() itself.
+    # `python -m slopcop_cli`: the console script calls main() itself.
     raise SystemExit(main())
