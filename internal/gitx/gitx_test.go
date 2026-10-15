@@ -44,6 +44,17 @@ func initRepo(t *testing.T) string {
 	return dir
 }
 
+func cloneFixture(t *testing.T, from, to string, flags ...string) {
+	t.Helper()
+	args := append([]string{"clone", "-q"}, flags...)
+	for _, setting := range fixtureConfig() {
+		args = append(args, "-c", setting)
+	}
+	if out, err := exec.Command("git", append(args, from, to)...).CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+}
+
 var symlinkProbe struct {
 	once sync.Once
 	err  error
@@ -170,13 +181,7 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	}
 
 	clone := filepath.Join(t.TempDir(), "clone")
-	cloneArgs := []string{"clone", "-q", "--no-hardlinks"}
-	for _, setting := range fixtureConfig() {
-		cloneArgs = append(cloneArgs, "-c", setting)
-	}
-	if out, err := exec.Command("git", append(cloneArgs, root, clone)...).CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v\n%s", err, out)
-	}
+	cloneFixture(t, root, clone, "--no-hardlinks")
 	git(t, clone, "checkout", "-q", base)
 	apply := exec.Command("git", "-C", clone, "apply", "--binary", "-")
 	apply.Stdin = bytes.NewReader(change.Patch)
@@ -291,6 +296,41 @@ func gitNUL(t *testing.T, dir string, args ...string) []string {
 	return values
 }
 
+// Git for Windows defaults to core.filemode=false and core.symlinks=false, so
+// the filesystem cannot say a file is executable or a link: the committed
+// mode has to survive unless the user changed it.
+func TestWorkingTreePatchKeepsModesTheFilesystemCannotExpress(t *testing.T) {
+	root := initRepo(t)
+	git(t, root, "config", "core.filemode", "false")
+	git(t, root, "config", "core.symlinks", "false")
+	writeFile(t, root, "run.sh", "#!/bin/sh\n")
+	writeFile(t, root, "link", "target")
+	git(t, root, "add", "-A")
+	git(t, root, "update-index", "--chmod=+x", "run.sh")
+	link := git(t, root, "hash-object", "-w", "link")
+	git(t, root, "update-index", "--cacheinfo", "120000,"+link+",link")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+
+	change, err := WorkingTreePatch(root, base, nil)
+	if err != nil {
+		t.Fatalf("WorkingTreePatch: %v", err)
+	}
+	if change.Files != 0 {
+		t.Fatalf("unchanged tree produced a patch:\n%s", change.Patch)
+	}
+
+	writeFile(t, root, "run.sh", "#!/bin/sh\necho changed\n")
+	change, err = WorkingTreePatch(root, base, nil)
+	if err != nil {
+		t.Fatalf("WorkingTreePatch: %v", err)
+	}
+	patch := string(change.Patch)
+	if change.Files != 1 || !strings.Contains(patch, "index ") || strings.Contains(patch, "mode") {
+		t.Fatalf("an edit to an executable must carry content only:\n%s", patch)
+	}
+}
+
 func TestWorkingTreePatchEmptyForCleanTree(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, root, "src/a.txt", "one\n")
@@ -313,9 +353,7 @@ func TestUpstreamBaseAndPatchIncludeUnpushedWork(t *testing.T) {
 		t.Fatalf("init bare: %v\n%s", err, out)
 	}
 	work := filepath.Join(t.TempDir(), "work")
-	if out, err := exec.Command("git", "clone", "-q", origin, work).CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v\n%s", err, out)
-	}
+	cloneFixture(t, origin, work)
 	git(t, work, "config", "user.email", "test@example.com")
 	git(t, work, "config", "user.name", "Test")
 	writeFile(t, work, "src/base.txt", "base\n")
