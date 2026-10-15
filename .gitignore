@@ -4,3 +4,6 @@
 /dist/
 /.downloads/
 coverage.out
+/npm-dist/
+/npm-smoke/
+/release-assets/
