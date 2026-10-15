@@ -14,6 +14,17 @@ import { fileURLToPath } from 'node:url';
 
 import { TARGETS, binaryName, sha256, versionFromTag } from './release.mjs';
 
+// Keep the tool's own message, which a silent stdio would throw away.
+function runTool(command, args, options) {
+  try {
+    execFileSync(command, args, { ...options, stdio: ['ignore', 'ignore', 'pipe'] });
+    return true;
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw new Error(`${command} ${args.join(' ')} failed: ${String(error.stderr ?? error.message).trim()}`);
+  }
+}
+
 export function standInBinary(tag, target) {
   return [
     '#!/bin/sh',
@@ -25,20 +36,19 @@ export function standInBinary(tag, target) {
   ].join('\n');
 }
 
+// Older zip builds resolve the archive path against their working directory,
+// so it is always absolute here.
 function zip(staging, archive) {
-  try {
-    execFileSync('zip', ['-q', '-r', archive, '.'], { cwd: staging, stdio: 'ignore' });
-    return;
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
+  const target = path.resolve(archive);
+  if (runTool('zip', ['-q', '-r', target, '.'], { cwd: staging })) return;
   // bsdtar, which Windows and macOS ship, writes zip archives too.
-  execFileSync('tar', ['-a', '-cf', archive, '-C', staging, '.'], { stdio: 'ignore' });
+  if (!runTool('tar', ['-a', '-cf', target, '-C', staging, '.'])) throw new Error('neither zip nor tar can write zip archives');
 }
 
 export function buildFixtureRelease(directory, tag) {
   versionFromTag(tag);
-  mkdirSync(directory, { recursive: true });
+  const root = path.resolve(directory);
+  mkdirSync(root, { recursive: true });
   const archives = [];
   const sums = [];
   for (const target of TARGETS) {
@@ -50,16 +60,16 @@ export function buildFixtureRelease(directory, tag) {
       chmodSync(binaryPath, 0o755);
       writeFileSync(path.join(staging, 'README.md'), '# SlopCop\n');
       const name = `slopcop_${tag}_${target.goos}_${target.goarch}.${target.extension}`;
-      const archive = path.join(directory, name);
+      const archive = path.join(root, name);
       if (target.extension === 'zip') zip(staging, archive);
-      else execFileSync('tar', ['-czf', archive, '-C', staging, '.'], { stdio: 'ignore' });
+      else if (!runTool('tar', ['-czf', archive, '-C', staging, '.'])) throw new Error('tar is not installed');
       archives.push({ target, name, archive, binary });
       sums.push(`${sha256(readFileSync(archive))}  ${name}`);
     } finally {
       rmSync(staging, { recursive: true, force: true });
     }
   }
-  writeFileSync(path.join(directory, 'checksums.txt'), `${sums.join('\n')}\n`);
+  writeFileSync(path.join(root, 'checksums.txt'), `${sums.join('\n')}\n`);
   return archives;
 }
 
