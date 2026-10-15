@@ -1,0 +1,163 @@
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/BrokkAi/slopcop/skills"
+)
+
+// isolateAgentHome points every home directory the CLI resolves at a fresh
+// directory, so a test never installs a skill outside its own tree.
+func isolateAgentHome(t *testing.T) string {
+	t.Helper()
+	isolateUserConfig(t)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatalf("UserHomeDir: %v", err)
+	}
+	return home
+}
+
+// makeHarness creates the configuration directory that means a harness is
+// installed on this machine.
+func makeHarness(t *testing.T, dir string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readSkillFile(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return string(data)
+}
+
+func readEmbeddedSkill(t *testing.T, name string) string {
+	t.Helper()
+	data, err := skills.Files.ReadFile("slopcop/" + name)
+	if err != nil {
+		t.Fatalf("read the bundled %s: %v", name, err)
+	}
+	return string(data)
+}
+
+// Every run installs the skill for the harnesses it finds, so an agent gets the
+// skill without anyone remembering to ask for it.
+func TestEveryRunInstallsTheBundledSkill(t *testing.T) {
+	home := isolateAgentHome(t)
+	agents := filepath.Join(home, ".agents")
+	makeHarness(t, agents)
+
+	code, _, stderr := runCLI(t, "version")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	dir := filepath.Join(agents, "skills", "slopcop")
+	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
+		t.Error("the installed SKILL.md does not match the bundled one")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "agents", "openai.yaml")); err != nil {
+		t.Errorf("harness metadata was not installed: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude")); err == nil {
+		t.Error("a harness that is not installed here got a skills directory")
+	}
+}
+
+func TestInitInstallsForEveryHarnessFound(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".agents"))
+	makeHarness(t, filepath.Join(home, ".claude"))
+	makeHarness(t, filepath.Join(home, ".codex"))
+
+	want := []string{
+		filepath.Join(home, ".agents", "skills", "slopcop"),
+		filepath.Join(home, ".claude", "skills", "slopcop"),
+		filepath.Join(home, ".codex", "skills", "slopcop"),
+	}
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	for _, dir := range want {
+		if !strings.Contains(stdout, dir) {
+			t.Errorf("stdout = %q, want it to name %s", stdout, dir)
+		}
+		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+			t.Errorf("no skill at %s: %v", dir, err)
+		}
+	}
+
+	code, stdout, stderr = runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("second exit = %d, stderr = %s", code, stderr)
+	}
+	if strings.Contains(stdout, "installed") {
+		t.Errorf("the second run installed something again: %q", stdout)
+	}
+	if !strings.Contains(stdout, "already") {
+		t.Errorf("stdout = %q, want it to report the skill as already there", stdout)
+	}
+}
+
+// A skill that is already there stays as it is, so local edits survive.
+func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".agents"))
+	path := filepath.Join(home, ".agents", "skills", "slopcop", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "already") {
+		t.Errorf("stdout = %q", stdout)
+	}
+	if got := readSkillFile(t, path); got != "mine\n" {
+		t.Errorf("SKILL.md = %q, want the local file untouched", got)
+	}
+}
+
+func TestInitWithoutAHarnessInstallsNothing(t *testing.T) {
+	home := isolateAgentHome(t)
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "nothing to install") {
+		t.Errorf("stdout = %q", stdout)
+	}
+	for _, dir := range []string{".agents", ".claude", ".codex"} {
+		if _, err := os.Stat(filepath.Join(home, dir)); err == nil {
+			t.Errorf("init created %s for a harness that is not installed", dir)
+		}
+	}
+}
+
+// The skill has to carry the frontmatter a harness reads to find it.
+func TestBundledSkillIsDiscoverable(t *testing.T) {
+	content := readEmbeddedSkill(t, "SKILL.md")
+	if !strings.HasPrefix(content, "---\n") {
+		t.Fatalf("the bundled skill has no frontmatter:\n%s", content)
+	}
+	frontmatter := strings.SplitN(content, "---\n", 3)[1]
+	for _, want := range []string{"name: slopcop", "description: "} {
+		if !strings.Contains(frontmatter, want) {
+			t.Errorf("frontmatter %q lacks %q", frontmatter, want)
+		}
+	}
+}
