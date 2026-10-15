@@ -41,3 +41,25 @@ jobs:
           distribution: goreleaser
           version: '~> v2'
           args: build --snapshot --clean
+      - name: Build the PyPI wheels from that snapshot build
+        run: make wheels PYPI_FLAGS='--dist dist'
+      - name: Check every wheel resolves on the platform it names
+        run: |
+          for wheel in pypi-dist/*.whl; do
+            tag="${wheel##*-py3-none-}"
+            tag="${tag%.whl}"
+            echo "checking $tag"
+            resolvable=$(python3 -m pip install --dry-run --no-index --find-links pypi-dist \
+              --only-binary=:all: --target "$RUNNER_TEMP/dry" --platform "$tag" \
+              --python-version 3.12 --implementation py slopcop)
+            case "$resolvable" in
+              *"-py3-none-$tag.whl"*) ;;
+              *) echo "pip found no wheel for $tag:"; echo "$resolvable"; exit 1 ;;
+            esac
+          done
+      - name: Install the wheel for this runner and run it
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --no-index --find-links pypi-dist slopcop
+          "$RUNNER_TEMP/venv/bin/slopcop" version
+          "$RUNNER_TEMP/venv/bin/python" -m slopcop version

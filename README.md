@@ -13,6 +13,17 @@ the analyzer's exit contract.
 ## Install
 
 ```console
+pip install slopcop
+```
+
+`pipx install slopcop` and `uvx slopcop` install the same wheels. Each wheel
+carries the released binary for its platform, so this is the same command as
+the archives, with the same exit codes; `python -m slopcop` works too. Wheels
+cover Linux, macOS, and Windows on amd64 and arm64.
+
+Building from source:
+
+```console
 make install
 ```
 
@@ -151,6 +162,7 @@ make test        # go test ./...
 make vet         # go vet ./...
 make build       # bin/slopcop-<goos>-<goarch>
 make cross-check # linux, darwin, and windows on amd64 and arm64
+make wheels      # pypi-dist/, built from the binaries in bin/
 ```
 
 Releases are tag-driven. Pushing a `v*.*.*` tag runs GoReleaser, which builds
@@ -159,6 +171,20 @@ linux, darwin, and windows for amd64 and arm64, packages `tar.gz` archives
 `.goreleaser.yaml` is the single source of truth; CI runs `goreleaser check`
 and a snapshot build on every change, and `make release-check` runs the same
 locally when GoReleaser is installed.
+
+The same tag publishes the PyPI wheels, because GoReleaser has no PyPI
+publisher: `packaging/pypi/build_wheels.py` packs the binaries it just built
+into one wheel per platform, plus a musllinux wheel per Linux binary, since
+those binaries are static and satisfy both tag families. The workflow installs
+one wheel on each platform GitHub can run before `pypa/gh-action-pypi-publish`
+uploads them through PyPI trusted publishing, so no PyPI token is stored. CI
+builds the same wheels on every change and checks that each one resolves on the
+platform it names.
+
+Claiming the project on PyPI is the one manual step: at
+<https://pypi.org/manage/account/publishing/>, add a pending publisher for
+owner `BrokkAi`, repository `slopcop`, workflow `release.yml`, environment
+`pypi`.
 
 Layout:
 
@@ -170,4 +196,5 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
+| `packaging/pypi` | PyPI wheels: the build and the launcher package |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |

@@ -42,3 +42,72 @@ jobs:
           name: slopcop-snapshot
           path: dist/*
           if-no-files-found: error
+      # GoReleaser has no PyPI publisher, so the binaries it just built become
+      # the PyPI wheels here, and the jobs below check and publish them.
+      - name: Build the PyPI wheels
+        if: startsWith(github.ref, 'refs/tags/')
+        run: make wheels PYPI_FLAGS='--dist dist' PYPI_VERSION="$GITHUB_REF_NAME"
+      - name: Upload the PyPI wheels
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-artifact@v4
+        with:
+          name: pypi-dist
+          path: pypi-dist/*.whl
+          if-no-files-found: error
+
+  # Nothing is published to PyPI until the wheel for a platform has been
+  # installed on that platform and the command it puts on PATH has run.
+  install:
+    name: install (${{ matrix.runner }})
+    needs: goreleaser
+    if: startsWith(github.ref, 'refs/tags/')
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, windows-latest]
+    runs-on: ${{ matrix.runner }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-dist
+          path: pypi-dist
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install the wheel for this platform and run it
+        run: |
+          case "$RUNNER_OS" in
+            Windows) PY=python; VENV=venv/Scripts; EXE=.exe ;;
+            *) PY=python3; VENV=venv/bin; EXE= ;;
+          esac
+          "$PY" -m venv venv
+          "$VENV/python" -m pip install --quiet --no-index --find-links pypi-dist slopcop
+          "$VENV/slopcop$EXE" version
+          "$VENV/python" -m slopcop version
+
+  pypi:
+    name: publish to PyPI
+    needs: [goreleaser, install]
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/slopcop
+    # Trusted publishing: the upload is authorized by this job's OIDC token,
+    # so no PyPI API token is stored anywhere.
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: pypi-dist
+          path: pypi-dist
+      - name: Publish the wheels
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: pypi-dist
+          # A re-run after a half-finished upload finishes the release.
+          skip-existing: true
