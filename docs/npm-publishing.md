@@ -35,6 +35,14 @@ version is published by hand, with an account that can write to `@brokkai` and
 has 2FA enabled. That account also runs `npm trust`, which needs npm 11.15.0 or
 newer.
 
+Until the package exists and its trusted publisher is configured, the npm job
+of a tag run fails at its last step, after GoReleaser and after the tarball is
+packed and smoke-tested. Nothing is left half-published at that point: the
+GitHub release is complete and npm has nothing new. Bootstrap the version that
+tag released, configure the publisher, and let the next tag publish through it
+(or rerun the failed job from the Actions tab, which publishes the same version
+once the publisher is there).
+
 From a clean checkout at the released tag, with that release's archives
 downloaded:
 
