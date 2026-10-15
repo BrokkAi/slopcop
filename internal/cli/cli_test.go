@@ -58,17 +58,29 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
-	// os.UserConfigDir and os.UserCacheDir read these on Windows.
+	// os.UserConfigDir reads this on Windows.
 	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
-	t.Setenv("LocalAppData", filepath.Join(home, "AppData", "Local"))
-	// Fail rather than let a test touch the real credential if the config
-	// location ever starts depending on something not isolated above.
-	if path, err := config.Path(); err != nil || !strings.HasPrefix(path, home) {
-		t.Fatalf("config path %q (%v) escapes the isolated home %q", path, err, home)
-	}
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
 	t.Setenv("CODEX_HOME", "")
+	// Fail rather than let a test touch the real credential or skill install
+	// if either location ever depends on something not isolated above.
+	configPath, err := config.Path()
+	requireUnder(t, home, configPath, err)
+	userHome, err := os.UserHomeDir()
+	requireUnder(t, home, userHome, err)
+}
+
+func requireUnder(t *testing.T, root, path string, err error) {
+	t.Helper()
+	if err == nil {
+		var rel string
+		rel, err = filepath.Rel(root, path)
+		if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return
+		}
+	}
+	t.Fatalf("%q (%v) escapes the isolated home %q", path, err, root)
 }
 
 func runCLI(t *testing.T, args ...string) (int, string, string) {
