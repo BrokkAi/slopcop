@@ -24,6 +24,18 @@ go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
 
 Go 1.25 or newer is required to build.
 
+On Windows, the PowerShell installer takes the latest release instead of
+building:
+
+```powershell
+irm https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.ps1 | iex
+```
+
+It verifies the release checksum, installs `slopcop.exe` to
+`%LOCALAPPDATA%\Programs\slopcop`, and adds that directory to the user `Path`.
+`SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and `SLOPCOP_NO_MODIFY_PATH` override
+its defaults.
+
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
