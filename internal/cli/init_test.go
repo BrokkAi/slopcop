@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,9 +50,9 @@ func readEmbeddedSkill(t *testing.T, name string) string {
 	return string(data)
 }
 
-// Every run installs the skill for the harnesses it finds, so an agent gets the
-// skill without anyone remembering to ask for it.
-func TestEveryRunInstallsTheBundledSkill(t *testing.T) {
+// init is the only thing that writes the skill: running another command leaves
+// the filesystem alone.
+func TestOnlyInitInstallsTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	agents := filepath.Join(home, ".agents")
 	makeHarness(t, agents)
@@ -59,7 +61,18 @@ func TestEveryRunInstallsTheBundledSkill(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
+	if _, err := os.Stat(filepath.Join(agents, "skills")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("a plain run wrote %s, want nothing", filepath.Join(agents, "skills"))
+	}
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
 	dir := filepath.Join(agents, "skills", "slopcop")
+	if !strings.Contains(stdout, dir) {
+		t.Errorf("stdout = %q, want it to name %s", stdout, dir)
+	}
 	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
 		t.Error("the installed SKILL.md does not match the bundled one")
 	}

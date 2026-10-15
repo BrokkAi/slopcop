@@ -144,13 +144,6 @@ func bundledSkillFiles() ([]skillFile, error) {
 	return files, nil
 }
 
-// installSkillOnStartup is the install every run performs, so a harness picks
-// the skill up without a separate step. It is best effort: nothing here may
-// stop a check.
-func installSkillOnStartup() {
-	_, _ = installBundledSkill()
-}
-
 func isDirectory(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
@@ -166,8 +159,8 @@ knows how to run slopcop.
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
 Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
-there is left alone. Every slopcop run performs this install too, so a harness
-normally has the skill before this command is ever typed.`,
+there is left alone. Nothing else installs the skill: this command is the only
+thing that writes it.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			result, err := installBundledSkill()

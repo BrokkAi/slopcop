@@ -27,9 +27,8 @@ Go 1.25 or newer is required to build.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop. Every run installs it, and `slopcop init` does the same install and
-names what it did. The skill goes into each well-known skills directory whose
-harness is present:
+slopcop. `slopcop init` installs it into each well-known skills directory whose
+harness is present, and names what it did:
 
 | Location | Harness |
 | --- | --- |
