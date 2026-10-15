@@ -36,12 +36,12 @@ function binaryFor(root, platform, arch) {
   return path.join(root, 'native', target, platform === 'win32' ? 'slopcop.exe' : 'slopcop');
 }
 
-const SIGNAL_EXIT_CODES = { SIGHUP: 129, SIGINT: 130, SIGTERM: 143 };
+const FORWARDED_SIGNALS = ['SIGHUP', 'SIGINT', 'SIGTERM'];
 
-function launch(binary, args, spawnProcess = spawn, exitProcess = process.exit) {
+function launch(binary, args, spawnProcess = spawn) {
   const child = spawnProcess(binary, args, { stdio: 'inherit' });
   const handlers = new Map();
-  for (const signal of Object.keys(SIGNAL_EXIT_CODES)) {
+  for (const signal of FORWARDED_SIGNALS) {
     const handler = () => child.kill(signal);
     handlers.set(signal, handler);
     process.on(signal, handler);
@@ -57,8 +57,9 @@ function launch(binary, args, spawnProcess = spawn, exitProcess = process.exit) 
   child.on('exit', (code, signal) => {
     release();
     if (signal) {
-      // Report the child's death the way the binary itself would have.
-      exitProcess(SIGNAL_EXIT_CODES[signal] ?? 1);
+      // Die the way the binary did, so the caller sees the same signal.
+      if (process.platform !== 'win32') process.kill(process.pid, signal);
+      else process.exitCode = code ?? 1;
       return;
     }
     process.exitCode = code ?? 1;
