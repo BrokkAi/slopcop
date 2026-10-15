@@ -7,16 +7,44 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The release ships linux, darwin, and windows on amd64 and arm64, so all
+    # three get a real test run. The Windows leg stays non-blocking while #4,
+    # #5, and #6 are open.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: '1.25.x'
           cache: true
-      - run: make fmt-check
-      - run: make vet
-      - run: make test
+      # bash keeps one recipe working on all three runners, where `make` and a
+      # POSIX shell are not a given.
+      #
+      # Formatting is checked on the canonical LF checkout only: a Windows
+      # checkout with core.autocrlf=true makes gofmt flag every file, which
+      # says nothing about the code. See issue #4.
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt needed:"
+            echo "$files"
+            exit 1
+          fi
+      - name: Vet
+        shell: bash
+        run: go vet ./...
+      - name: Test
+        shell: bash
+        run: go test ./...
 
   release:
     name: release config
