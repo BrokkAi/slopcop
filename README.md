@@ -1,14 +1,27 @@
 # SlopCop
 
-SlopCop checks a change through the yet to be deployed hosted SlopCop check
-API. The CLI ships the working-tree change to the service, the service applies
-it to the base commit and runs the hosted policy catalog plus any repository
-rules selected, and the CLI prints the report. There is no local analyzer: a check never needs a
-Bifrost install, and the CLI never decides on its own that there is nothing to
-check.
+**Static analysis deep enough for CI, fast enough to run on every edit.**
 
-The command is built for agents and one-shot CI: no prompts, one request, and
-the analyzer's exit contract.
+[![CI](https://github.com/BrokkAi/slopcop/actions/workflows/ci.yml/badge.svg)](https://github.com/BrokkAi/slopcop/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/BrokkAi/slopcop)](https://github.com/BrokkAi/slopcop/releases/latest)
+[![npm](https://img.shields.io/npm/v/@brokkai/slopcop)](https://www.npmjs.com/package/@brokkai/slopcop)
+[![PyPI](https://img.shields.io/pypi/v/brokk-slopcop)](https://pypi.org/project/brokk-slopcop/)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Go](https://img.shields.io/badge/Go-1.25%2B-blue.svg)](https://go.dev/)
+
+`slopcop` sends one git patch, from the base commit to the working tree, to the
+hosted check API at <https://slopcop.com>. The service applies it, runs the
+hosted policy catalog plus the repository rules you selected, and returns the
+report: every finding with its severity, the file and line that triggered it,
+and the certainty behind it. The analysis is
+[Bifrost](https://github.com/BrokkAi/bifrost), an open-source static analysis
+engine rather than a language model, so a finding traces back to a rule instead
+of to a guess.
+
+There is no local analyzer and nothing to install per language: the CLI ships
+the change and prints what comes back, and it never decides on its own that
+there is nothing to check. The command is built for agents and one-shot CI: no
+prompts, one request, and the analyzer's exit contract.
 
 ## Install
 
