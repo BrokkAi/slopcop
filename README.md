@@ -13,23 +13,6 @@ the analyzer's exit contract.
 ## Install
 
 ```console
-pip install brokk-slopcop
-```
-
-`pipx install brokk-slopcop` and `uvx --from brokk-slopcop slopcop` install
-the same wheels. Each wheel carries the released binary for its platform, so
-this is the same command as the archives, with the same exit codes; `python -m
-brokk_slopcop` works too. Wheels cover Linux, macOS, and Windows on amd64 and
-arm64.
-
-The distribution is named `brokk-slopcop` because PyPI already has an
-unrelated project named `slopcop`, and the import package is `brokk_slopcop`
-for the same reason: two distributions cannot install the same module. The
-command it installs is `slopcop`.
-
-Building from source:
-
-```console
 make install
 ```
 
@@ -40,6 +23,55 @@ go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
 ```
 
 Go 1.25 or newer is required to build.
+
+On Windows, the PowerShell installer takes the latest release instead of
+building:
+
+```powershell
+irm https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.ps1 | iex
+```
+
+It verifies the release checksum, installs `slopcop.exe` to
+`%LOCALAPPDATA%\Programs\slopcop`, and adds that directory to the user `Path`.
+`SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and `SLOPCOP_NO_MODIFY_PATH` override
+its defaults.
+
+The npm package carries the release binary for macOS, Linux, and Windows on x64
+and arm64, so it needs no Go toolchain:
+
+```console
+npm install --global @brokkai/slopcop
+npx @brokkai/slopcop --help
+```
+
+Node 22 or newer is required to run that package.
+
+The PyPI package carries the release binary for those same targets as wheels,
+so it needs no Go toolchain either:
+
+```console
+pip install brokk-slopcop
+```
+
+The package is `brokk-slopcop` because PyPI already has an unrelated project
+named `slopcop`; the command it installs is still `slopcop`, and `python -m
+brokk_slopcop` runs the same binary.
+
+## Enable it in an agent
+
+The binary carries the agent skill that teaches a coding agent how to run
+slopcop. `slopcop init` installs it into each well-known skills directory whose
+harness is present, and names what it did:
+
+| Location | Harness |
+| --- | --- |
+| `~/.agents/skills/slopcop/` | Codex, opencode |
+| `~/.claude/skills/slopcop/` | Claude Code, opencode |
+| `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
+
+A skill that is already there is left alone, so local edits survive and running
+init again is safe. `slopcop init --no-skill` skips the install and any update
+of it.
 
 ## Sign in
 
@@ -168,7 +200,8 @@ make test        # go test ./...
 make vet         # go vet ./...
 make build       # bin/slopcop-<goos>-<goarch>
 make cross-check # linux, darwin, and windows on amd64 and arm64
-make wheels      # pypi-dist/, built from the binaries in bin/
+make npm-test    # node --test npm/test
+make wheels      # pypi-dist/, one wheel per release target
 ```
 
 Releases are tag-driven. Pushing a `v*.*.*` tag runs GoReleaser, which builds
@@ -176,21 +209,16 @@ linux, darwin, and windows for amd64 and arm64, packages `tar.gz` archives
 (`zip` on Windows) with `checksums.txt`, and publishes the GitHub release.
 `.goreleaser.yaml` is the single source of truth; CI runs `goreleaser check`
 and a snapshot build on every change, and `make release-check` runs the same
-locally when GoReleaser is installed.
+locally when GoReleaser is installed. The same tag push then packs
+`@brokkai/slopcop` from those release archives and publishes it to npm with
+[trusted publishing](docs/npm-publishing.md), so the package needs no npm
+token.
 
-The same tag publishes the PyPI wheels, because GoReleaser has no PyPI
-publisher: `packaging/pypi/build_wheels.py` packs the binaries it just built
-into one wheel per platform, plus a musllinux wheel per Linux binary, since
-those binaries are static and satisfy both tag families. The workflow installs
-one wheel on each platform GitHub can run before `pypa/gh-action-pypi-publish`
-uploads them through PyPI trusted publishing, so no PyPI token is stored. CI
-builds the same wheels on every change and checks that each one resolves on the
-platform it names.
-
-Claiming the project on PyPI is the one manual step: at
-<https://pypi.org/manage/account/publishing/>, add a pending publisher for
-project `brokk-slopcop`, owner `BrokkAi`, repository `slopcop`, workflow
-`release.yml`, environment `pypi`.
+The same tag also packs a wheel per release target from the binaries GoReleaser
+just built, installs the wheel for every platform GitHub can run, and
+publishes `brokk-slopcop` to PyPI with
+[trusted publishing](docs/pypi-publishing.md), so that package needs no PyPI
+token either.
 
 Layout:
 
@@ -202,5 +230,9 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
-| `packaging/pypi` | PyPI wheels: the build and the launcher package |
+| `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
+| `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
+| `skills/slopcop` | the agent skill the binary embeds and installs |
+| `docs/npm-publishing.md` | npm release flow and trusted publisher setup |
+| `docs/pypi-publishing.md` | PyPI release flow and trusted publisher setup |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |

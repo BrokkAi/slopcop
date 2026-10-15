@@ -73,6 +73,7 @@ report, so a check never needs a Bifrost install.`,
 	registerCheckFlags(root, opts)
 	root.AddCommand(
 		newCheckCommand(opts, &serviceURL, version),
+		newInitCommand(),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
 		newVersionCommand(version),
@@ -132,5 +133,6 @@ func isUsageError(err error) bool {
 	return strings.Contains(message, "unknown flag") ||
 		strings.Contains(message, "unknown shorthand flag") ||
 		strings.Contains(message, "unknown command") ||
+		strings.Contains(message, "unknown agent") ||
 		strings.Contains(message, "invalid argument")
 }

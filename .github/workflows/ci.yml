@@ -7,41 +7,105 @@ on:
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    name: check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    # The release ships linux, darwin, and windows on amd64 and arm64, so all
+    # three get a real test run. The Windows leg stays non-blocking while #4,
+    # #5, and #6 are open.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
           cache: true
-      - run: make fmt-check
-      - run: make vet
-      - run: make test
+      # bash keeps one recipe working on all three runners, where `make` and a
+      # POSIX shell are not a given.
+      #
+      # Formatting is checked on the canonical LF checkout only: a Windows
+      # checkout with core.autocrlf=true makes gofmt flag every file, which
+      # says nothing about the code. See issue #4.
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: |
+          files="$(gofmt -l .)"
+          if [ -n "$files" ]; then
+            echo "gofmt needed:"
+            echo "$files"
+            exit 1
+          fi
+      - name: Vet
+        shell: bash
+        run: go vet ./...
+      - name: Test
+        shell: bash
+        run: go test ./...
 
   release:
     name: release config
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
           cache: true
       - name: Check the release config
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
           args: check
       - name: Snapshot-build every release target
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
           args: build --snapshot --clean
-      - name: Build the PyPI wheels from that snapshot build
+
+  npm:
+    name: npm package
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: make npm-test
+      # Packs and installs a stand-in release, so a packaging target that
+      # cannot run fails here instead of after a tag published a release.
+      - name: Pack and smoke-test the packaging
+        run: |
+          node npm/scripts/fixture-release.mjs --tag v0.0.0-fixture --assets release-assets
+          make npm-pack NPM_TAG=v0.0.0-fixture
+          make npm-smoke NPM_TAG=v0.0.0-fixture
+
+  pypi:
+    name: PyPI wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: '1.25.x'
+          cache: true
+      # The wheels are packed from the same GoReleaser build the release uses,
+      # so a target whose wheel cannot be packed, resolved, or installed fails
+      # here instead of after a tag published a release.
+      - name: Snapshot-build every release target
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: build --snapshot --clean
+      - name: Pack the wheels
         run: make wheels PYPI_FLAGS='--dist dist'
       - name: Check every wheel resolves on the platform it names
         run: |
@@ -51,7 +115,7 @@ jobs:
             echo "checking $tag"
             resolvable=$(python3 -m pip install --dry-run --no-index --find-links pypi-dist \
               --only-binary=:all: --target "$RUNNER_TEMP/dry" --platform "$tag" \
-              --python-version 3.12 --implementation py slopcop)
+              --python-version 3.12 --implementation py brokk-slopcop)
             case "$resolvable" in
               *"-py3-none-$tag.whl"*) ;;
               *) echo "pip found no wheel for $tag:"; echo "$resolvable"; exit 1 ;;

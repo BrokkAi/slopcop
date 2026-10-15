@@ -12,16 +12,16 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
           cache: true
       - name: Publish the tagged release
         if: startsWith(github.ref, 'refs/tags/')
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
@@ -30,35 +30,71 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Snapshot build
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
           args: release --snapshot --clean
       - name: Upload snapshot artifacts
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: slopcop-snapshot
           path: dist/*
           if-no-files-found: error
-      # GoReleaser has no PyPI publisher, so the binaries it just built become
-      # the PyPI wheels here, and the jobs below check and publish them.
-      - name: Build the PyPI wheels
+      # The wheels are packed here, where GoReleaser left the binaries, and
+      # the jobs below check them on every platform that can run them before
+      # anything reaches PyPI. See docs/pypi-publishing.md.
+      - name: Pack the PyPI wheels
         if: startsWith(github.ref, 'refs/tags/')
         run: make wheels PYPI_FLAGS='--dist dist' PYPI_VERSION="$GITHUB_REF_NAME"
       - name: Upload the PyPI wheels
         if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pypi-dist
           path: pypi-dist/*.whl
           if-no-files-found: error
 
-  # Nothing is published to PyPI until the wheel for a platform has been
-  # installed on that platform and the command it puts on PATH has run.
-  install:
-    name: install (${{ matrix.runner }})
+  npm:
+    name: npm package
+    needs: goreleaser
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          registry-url: 'https://registry.npmjs.org'
+      # Trusted publishing needs npm 11.5.1 or newer; the packaging tests are
+      # written against this CLI.
+      - name: Install the npm CLI
+        run: npm install --global npm@11.19.0
+      - name: Test the launcher and the packer
+        run: make npm-test
+      - name: Download the release archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir release-assets \
+            --pattern 'slopcop_*' --pattern 'checksums.txt'
+      - name: Pack the tarball from the release archives
+        run: make npm-pack
+      - name: Smoke-test the packed tarball
+        run: make npm-smoke
+      # npm authenticates with the OIDC token GitHub issues to this workflow
+      # and nothing else, so there is no npm token anywhere in this repository.
+      - name: Publish with trusted publishing
+        run: make npm-publish
+
+  pypi-install:
+    name: pypi install (${{ matrix.runner }})
     needs: goreleaser
     if: startsWith(github.ref, 'refs/tags/')
     strategy:
@@ -70,13 +106,15 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pypi-dist
           path: pypi-dist
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.x'
+      # Nothing is published until the wheel for every platform GitHub can run
+      # has been installed there and the command it puts on PATH has answered.
       - name: Install the wheel for this platform and run it
         run: |
           case "$RUNNER_OS" in
@@ -89,25 +127,27 @@ jobs:
           "$VENV/python" -m brokk_slopcop version
 
   pypi:
-    name: publish to PyPI
-    needs: [goreleaser, install]
+    name: pypi package
+    needs: [goreleaser, pypi-install]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     environment:
       name: pypi
       url: https://pypi.org/p/brokk-slopcop
-    # Trusted publishing: the upload is authorized by this job's OIDC token,
-    # so no PyPI API token is stored anywhere.
     permissions:
+      contents: read
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: pypi-dist
           path: pypi-dist
-      - name: Publish the wheels
+      # PyPI exchanges the OIDC token GitHub issues to this job for short-lived
+      # credentials and signs the uploads, so no PyPI token exists anywhere in
+      # this repository.
+      - name: Publish with trusted publishing
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: pypi-dist
-          # A re-run after a half-finished upload finishes the release.
+          # A rerun of a half-finished upload publishes whatever is missing.
           skip-existing: true

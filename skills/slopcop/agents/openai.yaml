@@ -1,0 +1,4 @@
+interface:
+  display_name: "SlopCop"
+  short_description: "Run hosted SlopCop checks from an agent"
+  default_prompt: "Use $slopcop to check this change and fix what it reports."

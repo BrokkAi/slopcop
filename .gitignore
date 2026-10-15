@@ -2,8 +2,11 @@
 /slopcop
 /bin/
 /dist/
-/pypi-dist/
 /.downloads/
 coverage.out
+/npm-dist/
+/npm-smoke/
+/release-assets/
+/pypi-dist/
 __pycache__/
 *.pyc
