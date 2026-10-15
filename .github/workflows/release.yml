@@ -84,9 +84,9 @@ jobs:
             *) PY=python3; VENV=venv/bin; EXE= ;;
           esac
           "$PY" -m venv venv
-          "$VENV/python" -m pip install --quiet --no-index --find-links pypi-dist slopcop-cli
+          "$VENV/python" -m pip install --quiet --no-index --find-links pypi-dist brokk-slopcop
           "$VENV/slopcop$EXE" version
-          "$VENV/python" -m slopcop_cli version
+          "$VENV/python" -m brokk_slopcop version
 
   pypi:
     name: publish to PyPI
@@ -95,7 +95,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/p/slopcop-cli
+      url: https://pypi.org/p/brokk-slopcop
     # Trusted publishing: the upload is authorized by this job's OIDC token,
     # so no PyPI API token is stored anywhere.
     permissions:

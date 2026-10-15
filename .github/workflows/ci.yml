@@ -60,6 +60,6 @@ jobs:
       - name: Install the wheel for this runner and run it
         run: |
           python3 -m venv "$RUNNER_TEMP/venv"
-          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --no-index --find-links pypi-dist slopcop-cli
+          "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --no-index --find-links pypi-dist brokk-slopcop
           "$RUNNER_TEMP/venv/bin/slopcop" version
-          "$RUNNER_TEMP/venv/bin/python" -m slopcop_cli version
+          "$RUNNER_TEMP/venv/bin/python" -m brokk_slopcop version

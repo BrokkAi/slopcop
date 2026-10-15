@@ -36,13 +36,14 @@ from pathlib import Path
 BINARY = "slopcop"
 
 #: The distribution name on PyPI. It cannot be `slopcop`, which an unrelated
-#: project already publishes, but it still installs the `slopcop` command.
-DIST_NAME = "slopcop-cli"
+#: project already publishes, so it carries the org prefix the other Brokk
+#: packages use; it still installs the `slopcop` command.
+DIST_NAME = "brokk-slopcop"
 
 #: The import package inside the wheel. It follows the distribution name
 #: because the `slopcop` module belongs to that other project, and two
 #: distributions cannot install the same module without breaking each other.
-PACKAGE = "slopcop_cli"
+PACKAGE = "brokk_slopcop"
 
 SUMMARY = "Check a change through the hosted SlopCop check API"
 
