@@ -58,6 +58,14 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
+	// os.UserConfigDir and os.UserCacheDir read these on Windows.
+	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LocalAppData", filepath.Join(home, "AppData", "Local"))
+	// Fail rather than let a test touch the real credential if the config
+	// location ever starts depending on something not isolated above.
+	if path, err := config.Path(); err != nil || !strings.HasPrefix(path, home) {
+		t.Fatalf("config path %q (%v) escapes the isolated home %q", path, err, home)
+	}
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
 	t.Setenv("CODEX_HOME", "")
