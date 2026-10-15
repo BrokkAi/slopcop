@@ -12,50 +12,78 @@ the analyzer's exit contract.
 
 ## Install
 
-```console
-make install
-```
+npm, PyPI, the release archive, and the PowerShell installer all install the
+same release binary for macOS, Linux, and Windows on x64 and arm64, so
+`slopcop version` reports which release it came from. The Go toolchain can
+build that binary from source instead.
 
-or:
+| Channel | Platforms | Needs |
+| --- | --- | --- |
+| [npm](#npm) | macOS, Linux, Windows | Node 22 or newer |
+| [PyPI](#pypi) | macOS, Linux, Windows | Python 3.9 or newer |
+| [Release archive](#release-archive) | macOS, Linux, Windows | nothing |
+| [PowerShell installer](#powershell-installer) | Windows | PowerShell |
+| [Go](#go) | built from source | Go 1.25 or newer |
 
-```console
-go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
-```
-
-Go 1.25 or newer is required to build.
-
-On Windows, the PowerShell installer takes the latest release instead of
-building:
-
-```powershell
-irm https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.ps1 | iex
-```
-
-It verifies the release checksum, installs `slopcop.exe` to
-`%LOCALAPPDATA%\Programs\slopcop`, and adds that directory to the user `Path`.
-`SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and `SLOPCOP_NO_MODIFY_PATH` override
-its defaults.
-
-The npm package carries the release binary for macOS, Linux, and Windows on x64
-and arm64, so it needs no Go toolchain:
+### npm
 
 ```console
 npm install --global @brokkai/slopcop
-npx @brokkai/slopcop --help
+slopcop --help
 ```
 
-Node 22 or newer is required to run that package.
+The tarball carries the release binary for every supported platform, so it
+needs no Go toolchain. `npx @brokkai/slopcop` runs it without installing it.
 
-The PyPI package carries the release binary for those same targets as wheels,
-so it needs no Go toolchain either:
+### PyPI
 
 ```console
 pip install brokk-slopcop
 ```
 
-The package is `brokk-slopcop` because PyPI already has an unrelated project
-named `slopcop`; the command it installs is still `slopcop`, and `python -m
-brokk_slopcop` runs the same binary.
+`pipx install brokk-slopcop` or `uv tool install brokk-slopcop` puts it in an
+environment of its own. The wheels carry the release binary, so no Go toolchain
+is needed either. The package is `brokk-slopcop` because PyPI already has an
+unrelated project named `slopcop`; the command it installs is still `slopcop`,
+and `python -m brokk_slopcop` runs the same binary.
+
+### Release archive
+
+Each release publishes `slopcop_v<version>_<os>_<arch>.tar.gz` (`.zip` on
+Windows) holding the binary, `README.md`, and `LICENSE`, plus a `checksums.txt`
+covering every archive. Download them from
+<https://github.com/BrokkAi/slopcop/releases/latest> and check the sha256
+before unpacking:
+
+```console
+ver=0.0.3; os=linux; arch=amd64   # darwin/arm64 on Apple silicon
+base=https://github.com/BrokkAi/slopcop/releases/download/v$ver
+curl -fsSLO "$base/slopcop_v${ver}_${os}_${arch}.tar.gz"
+curl -fsSLO "$base/checksums.txt"
+grep "${os}_${arch}" checksums.txt | sha256sum -c -   # shasum -a 256 -c - on macOS
+tar -xzf "slopcop_v${ver}_${os}_${arch}.tar.gz" slopcop
+sudo install -m 755 slopcop /usr/local/bin/slopcop
+```
+
+### PowerShell installer
+
+```powershell
+irm https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.ps1 | iex
+```
+
+It takes the latest release, verifies the archive against `checksums.txt`,
+installs `slopcop.exe` to `%LOCALAPPDATA%\Programs\slopcop`, and adds that
+directory to the user `Path`. `SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and
+`SLOPCOP_NO_MODIFY_PATH` override its defaults.
+
+### Go
+
+```console
+go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
+```
+
+Go 1.25 or newer is required to build. A plain `go install` reports `dev` as
+its version; in a clone, `make install` stamps the version from `git describe`.
 
 ## Enable it in an agent
 
