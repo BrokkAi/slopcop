@@ -81,6 +81,21 @@ function npmCache(t) {
   process.env.npm_config_cache = temporary(t, 'slopcop-npm-cache-');
 }
 
+// Anything other than a matching tag push must not publish, so a test that
+// exercises the rest of publish runs as a local run does, without the GitHub
+// environment CI itself sets.
+function outsideActions(t) {
+  const keys = ['GITHUB_ACTIONS', 'GITHUB_EVENT_NAME', 'GITHUB_REF'];
+  const previous = keys.map((key) => [key, process.env[key]]);
+  t.after(() => {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  });
+  for (const key of keys) delete process.env[key];
+}
+
 test('release tags and dist tags follow the prerelease convention', () => {
   assert.equal(versionFromTag('v1.2.3'), VERSION);
   assert.equal(versionFromTag('1.2.3'), VERSION);
@@ -198,6 +213,7 @@ test('automated publication only ever follows a tag push', async (t) => {
 });
 
 test('an already published version is skipped, a different one is refused', async (t) => {
+  outsideActions(t);
   const published = { dist: { integrity: 'sha512-identical' } };
   const stubFetch = async (url) => ({
     status: 200,
