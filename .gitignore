@@ -1,0 +1,6 @@
+/target
+/slopcop
+/bin/
+/dist/
+/.downloads/
+coverage.out
