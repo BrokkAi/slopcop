@@ -34,6 +34,14 @@ func WorkingTreePatch(root, base string, policyFiles []string) (WorkingChange, e
 	defer os.RemoveAll(dir)
 
 	env := withEnv(os.Environ(), "GIT_INDEX_FILE", filepath.Join(dir, "index"))
+	// Seed the index from HEAD so git can keep the committed mode where the
+	// filesystem cannot express it: with core.filemode=false or
+	// core.symlinks=false (Git for Windows' defaults), a path with no index
+	// entry reads as 100644, which would ship every executable and symlink as
+	// a mode change.
+	if _, err := RunBytes(root, env, "read-tree", "HEAD"); err != nil {
+		return change, err
+	}
 	if _, err := RunBytes(root, env, "add", "--intent-to-add", "--all", "--", "."); err != nil {
 		return change, err
 	}

@@ -5,7 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -19,13 +21,58 @@ func git(t *testing.T, dir string, args ...string) string {
 	return strings.TrimSpace(string(out))
 }
 
+// fixtureConfig keeps the fixtures byte-for-byte what the test wrote,
+// whatever the machine's global config says: Git for Windows defaults to
+// core.autocrlf=true and core.symlinks=false.
+func fixtureConfig() []string {
+	return []string{
+		"core.autocrlf=false",
+		"core.symlinks=" + strconv.FormatBool(symlinkError() == nil),
+	}
+}
+
 func initRepo(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	git(t, dir, "init", "-q", "-b", "main", ".")
+	for _, setting := range fixtureConfig() {
+		key, value, _ := strings.Cut(setting, "=")
+		git(t, dir, "config", key, value)
+	}
 	git(t, dir, "config", "user.email", "test@example.com")
 	git(t, dir, "config", "user.name", "Test")
 	return dir
+}
+
+func cloneFixture(t *testing.T, from, to string, flags ...string) {
+	t.Helper()
+	args := append([]string{"clone", "-q"}, flags...)
+	for _, setting := range fixtureConfig() {
+		args = append(args, "-c", setting)
+	}
+	if out, err := exec.Command("git", append(args, from, to)...).CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v\n%s", err, out)
+	}
+}
+
+var symlinkProbe struct {
+	once sync.Once
+	err  error
+}
+
+// symlinkError reports why this process cannot create symlinks, or nil if it
+// can. Windows needs SeCreateSymbolicLinkPrivilege (admin or Developer Mode).
+func symlinkError() error {
+	symlinkProbe.once.Do(func() {
+		dir, err := os.MkdirTemp("", "slopcop-symlink-probe")
+		if err != nil {
+			symlinkProbe.err = err
+			return
+		}
+		defer os.RemoveAll(dir)
+		symlinkProbe.err = os.Symlink("target", filepath.Join(dir, "link"))
+	})
+	return symlinkProbe.err
 }
 
 func writeFile(t *testing.T, root, name, content string) {
@@ -50,13 +97,19 @@ func readFile(t *testing.T, root, name string) string {
 
 func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	root := initRepo(t)
+	symlinks := symlinkError() == nil
+	if !symlinks {
+		t.Logf("skipping the symlink cases: %v", symlinkError())
+	}
 	writeFile(t, root, ".gitignore", ".slopcop/\nbuild/\n")
 	writeFile(t, root, "src/a.txt", "one\n")
 	writeFile(t, root, "src/del.txt", "delete me\n")
 	writeFile(t, root, "src/moved.bin", "binary\x00one")
 	writeFile(t, root, "src/mod.bin", "binary\x00keep")
-	if err := os.Symlink("target-one", filepath.Join(root, "src", "link")); err != nil {
-		t.Fatal(err)
+	if symlinks {
+		if err := os.Symlink("target-one", filepath.Join(root, "src", "link")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-qm", "base")
@@ -77,11 +130,13 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 		t.Fatal(err)
 	}
 	writeFile(t, root, "src/mod.bin", "binary\x00changed")
-	if err := os.Remove(filepath.Join(root, "src", "link")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("target-two", filepath.Join(root, "src", "link")); err != nil {
-		t.Fatal(err)
+	if symlinks {
+		if err := os.Remove(filepath.Join(root, "src", "link")); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink("target-two", filepath.Join(root, "src", "link")); err != nil {
+			t.Fatal(err)
+		}
 	}
 	writeFile(t, root, "src/new.txt", "untracked\n")
 	if err := os.Chmod(filepath.Join(root, "src", "new.txt"), 0o755); err != nil {
@@ -100,7 +155,7 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 		t.Fatal("expected changed files")
 	}
 	patch := string(change.Patch)
-	for _, required := range []string{
+	required := []string{
 		"diff --git a/src/a.txt b/src/a.txt",
 		"diff --git a/src/del.txt b/src/del.txt",
 		"diff --git a/src/new.txt b/src/new.txt",
@@ -108,9 +163,12 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 		"rename from src/moved.bin",
 		"rename to src/renamed.bin",
 		"diff --git a/src/mod.bin b/src/mod.bin",
-		"diff --git a/src/link b/src/link",
 		"diff --git a/.slopcop/policies/local.rqlp b/.slopcop/policies/local.rqlp",
-	} {
+	}
+	if symlinks {
+		required = append(required, "diff --git a/src/link b/src/link")
+	}
+	for _, required := range required {
 		if !strings.Contains(patch, required) {
 			t.Errorf("patch is missing %q", required)
 		}
@@ -123,9 +181,7 @@ func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	}
 
 	clone := filepath.Join(t.TempDir(), "clone")
-	if out, err := exec.Command("git", "clone", "-q", "--no-hardlinks", root, clone).CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v\n%s", err, out)
-	}
+	cloneFixture(t, root, clone, "--no-hardlinks")
 	git(t, clone, "checkout", "-q", base)
 	apply := exec.Command("git", "-C", clone, "apply", "--binary", "-")
 	apply.Stdin = bytes.NewReader(change.Patch)
@@ -240,6 +296,41 @@ func gitNUL(t *testing.T, dir string, args ...string) []string {
 	return values
 }
 
+// Git for Windows defaults to core.filemode=false and core.symlinks=false, so
+// the filesystem cannot say a file is executable or a link: the committed
+// mode has to survive unless the user changed it.
+func TestWorkingTreePatchKeepsModesTheFilesystemCannotExpress(t *testing.T) {
+	root := initRepo(t)
+	git(t, root, "config", "core.filemode", "false")
+	git(t, root, "config", "core.symlinks", "false")
+	writeFile(t, root, "run.sh", "#!/bin/sh\n")
+	writeFile(t, root, "link", "target")
+	git(t, root, "add", "-A")
+	git(t, root, "update-index", "--chmod=+x", "run.sh")
+	link := git(t, root, "hash-object", "-w", "link")
+	git(t, root, "update-index", "--cacheinfo", "120000,"+link+",link")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+
+	change, err := WorkingTreePatch(root, base, nil)
+	if err != nil {
+		t.Fatalf("WorkingTreePatch: %v", err)
+	}
+	if change.Files != 0 {
+		t.Fatalf("unchanged tree produced a patch:\n%s", change.Patch)
+	}
+
+	writeFile(t, root, "run.sh", "#!/bin/sh\necho changed\n")
+	change, err = WorkingTreePatch(root, base, nil)
+	if err != nil {
+		t.Fatalf("WorkingTreePatch: %v", err)
+	}
+	patch := string(change.Patch)
+	if change.Files != 1 || !strings.Contains(patch, "index ") || strings.Contains(patch, "mode") {
+		t.Fatalf("an edit to an executable must carry content only:\n%s", patch)
+	}
+}
+
 func TestWorkingTreePatchEmptyForCleanTree(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, root, "src/a.txt", "one\n")
@@ -262,9 +353,7 @@ func TestUpstreamBaseAndPatchIncludeUnpushedWork(t *testing.T) {
 		t.Fatalf("init bare: %v\n%s", err, out)
 	}
 	work := filepath.Join(t.TempDir(), "work")
-	if out, err := exec.Command("git", "clone", "-q", origin, work).CombinedOutput(); err != nil {
-		t.Fatalf("clone: %v\n%s", err, out)
-	}
+	cloneFixture(t, origin, work)
 	git(t, work, "config", "user.email", "test@example.com")
 	git(t, work, "config", "user.name", "Test")
 	writeFile(t, work, "src/base.txt", "base\n")
