@@ -2,5 +2,8 @@
 /slopcop
 /bin/
 /dist/
+/pypi-dist/
 /.downloads/
 coverage.out
+__pycache__/
+*.pyc
