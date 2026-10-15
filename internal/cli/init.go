@@ -96,7 +96,7 @@ func installSkillAt(root string, files []skillFile) (bool, error) {
 	if _, err := os.Stat(filepath.Join(dir, skillFileName)); err == nil {
 		return false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return false, fmt.Errorf("read %s: %w", dir, err)
+		return false, fmt.Errorf("stat %s: %w", dir, err)
 	}
 	for _, file := range files {
 		path := filepath.Join(dir, file.relative)
@@ -150,7 +150,8 @@ func isDirectory(path string) bool {
 }
 
 func newInitCommand() *cobra.Command {
-	return &cobra.Command{
+	var noSkill bool
+	command := &cobra.Command{
 		Use:   "init",
 		Short: "Install the bundled agent skill",
 		Long: `Install the agent skill that ships inside this binary, so a coding agent
@@ -160,14 +161,19 @@ The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
 Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
 there is left alone. Nothing else installs the skill: this command is the only
-thing that writes it.`,
+thing that writes it. Pass --no-skill to leave the skill install and any
+update of it undone.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			stdout := cmd.OutOrStdout()
+			if noSkill {
+				fmt.Fprintln(stdout, "slopcop: left the slopcop skill alone (--no-skill)")
+				return nil
+			}
 			result, err := installBundledSkill()
 			if err != nil {
 				return err
 			}
-			stdout := cmd.OutOrStdout()
 			for _, dir := range result.installed {
 				fmt.Fprintf(stdout, "slopcop: installed the slopcop skill at %s\n", dir)
 			}
@@ -180,4 +186,6 @@ thing that writes it.`,
 			return nil
 		},
 	}
+	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")
+	return command
 }

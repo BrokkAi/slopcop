@@ -161,6 +161,39 @@ func TestInitWithoutAHarnessInstallsNothing(t *testing.T) {
 	}
 }
 
+// --no-skill leaves the skill alone, whether it is installed or not.
+func TestInitNoSkillWritesNothing(t *testing.T) {
+	home := isolateAgentHome(t)
+	agents := filepath.Join(home, ".agents")
+	makeHarness(t, agents)
+
+	code, stdout, stderr := runCLI(t, "init", "--no-skill")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "--no-skill") {
+		t.Errorf("stdout = %q, want it to say the skill step was skipped", stdout)
+	}
+	if _, err := os.Stat(filepath.Join(agents, "skills")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("--no-skill wrote %s", filepath.Join(agents, "skills"))
+	}
+
+	// An installed skill is left as it is, and stays untouched.
+	if code, _, stderr := runCLI(t, "init"); code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	path := filepath.Join(agents, "skills", "slopcop", "SKILL.md")
+	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runCLI(t, "init", "--no-skill"); code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if got := readSkillFile(t, path); got != "mine\n" {
+		t.Errorf("SKILL.md = %q, want --no-skill to leave it alone", got)
+	}
+}
+
 // The skill has to carry the frontmatter a harness reads to find it.
 func TestBundledSkillIsDiscoverable(t *testing.T) {
 	content := readEmbeddedSkill(t, "SKILL.md")

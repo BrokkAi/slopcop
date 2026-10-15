@@ -37,7 +37,8 @@ harness is present, and names what it did:
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
 
 A skill that is already there is left alone, so local edits survive and running
-init again is safe.
+init again is safe. `slopcop init --no-skill` skips the install and any update
+of it.
 
 ## Sign in
 
