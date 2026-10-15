@@ -123,6 +123,8 @@ test('staging ships only the launcher, the binaries, the README and the LICENSE'
   assert.equal(manifest.name, ROOT_PACKAGE);
   assert.equal(manifest.version, VERSION);
   assert.equal(manifest.private, undefined);
+  assert.equal(manifest.scripts, undefined);
+  assert.equal(manifest.dependencies, undefined);
   assert.deepEqual(fs.readdirSync(directory).sort(), ['LICENSE', 'README.md', 'bin', 'native', 'package.json']);
   assert.deepEqual(fs.readdirSync(path.join(directory, 'bin')), ['slopcop.cjs']);
   for (const target of TARGETS) {

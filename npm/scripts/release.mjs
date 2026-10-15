@@ -176,6 +176,11 @@ export async function stage({ assets, tag, directory }) {
   if (manifest.name !== ROOT_PACKAGE) {
     fail(`npm/package.json names ${manifest.name}, expected ${ROOT_PACKAGE}`);
   }
+  // An installation of this package runs no code of its own: the launcher and
+  // the release binaries are all it carries.
+  for (const field of ['scripts', 'dependencies', 'optionalDependencies', 'peerDependencies']) {
+    if (manifest[field]) fail(`npm/package.json declares ${field}; the package installs no code of its own`);
+  }
   const version = versionFromTag(tag);
   delete manifest.private;
   manifest.version = version;
