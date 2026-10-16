@@ -213,6 +213,11 @@ the request, so the service answers the same check whichever is used.
 | `3` | The check was still running when `--timeout` ran out |
 
 The service applies `--fail-on` and sets the status; the exit code follows it.
+The CLI always sends `--fail-on`, defaulting to `finding`: a check fails only
+on findings the change introduced, so any of them, a note or an unrated one
+included, is worth fixing before the change lands. The service's own default
+for a request without `failOn` is Bifrost's `warning`; pass `--fail-on warning`
+to match it.
 New findings that cross `--fail-on` exit `1` even when some check did not
 complete.
 
