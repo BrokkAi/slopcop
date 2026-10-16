@@ -31,7 +31,7 @@ type DeviceStart struct {
 // StartDevice begins the device flow.
 func (c *Client) StartDevice(ctx context.Context) (DeviceStart, error) {
 	var start DeviceStart
-	status, payload, err := c.postJSON(ctx, deviceStartPath, map[string]any{})
+	status, _, payload, err := c.postJSON(ctx, deviceStartPath, map[string]any{})
 	if err != nil {
 		return start, err
 	}
@@ -88,7 +88,7 @@ func (c *Client) pollDeviceToken(
 	interval *time.Duration,
 	notify func(string),
 ) (string, error) {
-	status, payload, err := c.postJSON(ctx, deviceTokenPath, map[string]any{
+	status, _, payload, err := c.postJSON(ctx, deviceTokenPath, map[string]any{
 		"deviceCode": start.DeviceCode,
 	})
 	if err != nil {

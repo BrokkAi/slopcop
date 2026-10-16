@@ -2,11 +2,24 @@
 // control plane in server/src/check.rs.
 package service
 
-// Check statuses and their exit codes, mirrored from CheckStatus.
+import "strings"
+
+// Check statuses and their exit codes, mirrored from CheckStatus. Pending is
+// the CLI's own: the service answered check_running until --timeout ran out.
 const (
 	StatusClean      = "clean"
 	StatusFindings   = "findings"
 	StatusIncomplete = "incomplete"
+	StatusPending    = "pending"
+)
+
+// Exit codes. Pending has its own code so a caller can tell "run the same
+// check again" from a check that finished incomplete.
+const (
+	ExitClean      = 0
+	ExitFindings   = 1
+	ExitIncomplete = 2
+	ExitPending    = 3
 )
 
 // Request is the POST /v1/check body. The service decodes with
@@ -57,8 +70,15 @@ type Response struct {
 
 // Summary mirrors CheckSummary.
 type Summary struct {
-	Files              int `json:"files"`
-	Findings           int `json:"findings"`
+	Files int `json:"files"`
+	// Findings counts every finding: NewFindings plus ExistingFindings.
+	Findings int `json:"findings"`
+	// NewFindings counts the findings the change introduced or touched. Only
+	// these decide the status.
+	NewFindings int `json:"newFindings"`
+	// ExistingFindings counts the findings that were already in the code.
+	// They never change the status.
+	ExistingFindings   int `json:"existingFindings"`
 	IncompletePolicies int `json:"incompletePolicies"`
 	// IncompletePolicyIDs names at most 50 incomplete checks;
 	// IncompletePolicies counts them all.
@@ -86,16 +106,41 @@ type Finding struct {
 	StartLine *int   `json:"startLine"`
 	EndLine   *int   `json:"endLine"`
 	Title     string `json:"title"`
+	// New says the change introduced or touched the finding.
+	New bool `json:"new"`
 }
 
 // ExitCode maps the response status to the analyzer exit contract.
 func (r Response) ExitCode() int {
 	switch r.Status {
 	case StatusFindings:
-		return 1
+		return ExitFindings
 	case StatusIncomplete:
-		return 2
+		return ExitIncomplete
 	default:
-		return 0
+		return ExitClean
 	}
+}
+
+// Pending is a check that was still running when --timeout ran out. The
+// service keeps running it, and the same check asked again attaches to it.
+type Pending struct {
+	// RetryAfter is the service's suggested wait in seconds before asking
+	// again.
+	RetryAfter int
+	// Message and Remedy are the service's check_running text.
+	Message string
+	Remedy  string
+}
+
+const (
+	pendingMessage = "The check is still running."
+	pendingRemedy  = "Run the same check again to wait for its result."
+)
+
+func (p *Pending) Error() string { return p.Message }
+
+// RemedyText is the message and remedy an agent prints verbatim.
+func (p *Pending) RemedyText() string {
+	return strings.TrimSpace(p.Message + "\n" + p.Remedy)
 }

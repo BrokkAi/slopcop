@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -81,16 +82,30 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		)
 	}
 
-	response, err := client.Check(cmd.Context(), request)
+	// --timeout bounds the whole wait for a result: the client asks again
+	// while the service answers check_running, and every ask attaches to the
+	// same running check.
+	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
+	defer cancel()
+	response, err := client.Check(ctx, request)
 	if err != nil {
+		var pending *service.Pending
+		if errors.As(err, &pending) {
+			fmt.Fprintln(cmd.ErrOrStderr(), pending.RemedyText())
+			if err := report.WritePending(stdout, *pending, format); err != nil {
+				return err
+			}
+			return silentExit{service.ExitPending}
+		}
 		var serviceError *service.Error
 		if errors.As(err, &serviceError) {
 			fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
-			return silentExit{2}
+			return silentExit{service.ExitIncomplete}
 		}
 		return err
 	}
-	if err := report.Write(stdout, response, format); err != nil {
+	options := report.Options{ShowExisting: opts.showExisting}
+	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}
 	return silentExit{response.ExitCode()}

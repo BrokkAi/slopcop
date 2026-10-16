@@ -21,8 +21,9 @@ type silentExit struct{ code int }
 
 func (e silentExit) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
-// Execute runs the CLI and returns the process exit code: 0 clean, 1 findings
-// at or above the fail-on level, 2 incomplete or failed.
+// Execute runs the CLI and returns the process exit code: 0 clean, 1 a new
+// finding at or above the fail-on level, 2 incomplete or failed, 3 still
+// running when --timeout ran out.
 func Execute(args []string, version string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -95,14 +96,15 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 }
 
 type checkOptions struct {
-	root        string
-	base        string
-	format      string
-	failOn      string
-	policies    []string
-	noDiscovery bool
-	verbose     bool
-	timeout     time.Duration
+	root         string
+	base         string
+	format       string
+	failOn       string
+	policies     []string
+	noDiscovery  bool
+	verbose      bool
+	showExisting bool
+	timeout      time.Duration
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
@@ -110,11 +112,12 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringVar(&opts.root, "root", ".", "repository path to check")
 	flags.StringVar(&opts.base, "base", "", "base commit or revision (default: merge-base with the upstream branch)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
-	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 at or above this finding level: never, finding, note, warning, or error")
+	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
+	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
 	flags.StringArrayVar(&opts.policies, "policy", nil, "repository-relative .rqlp policy file to evaluate (repeatable)")
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")
 	flags.BoolVar(&opts.verbose, "verbose", false, "print the resolved request to stderr")
-	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "timeout for one check request")
+	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "how long to wait for the result; a check still running then exits 3")
 }
 
 func newVersionCommand(version string) *cobra.Command {

@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -17,6 +19,12 @@ const (
 	checkPath        = "/v1/check"
 	maxResponseBytes = 32 * 1024 * 1024
 	defaultTimeout   = 10 * time.Minute
+	// checkRunning is the retryable answer to a check that is still running.
+	checkRunning = "check_running"
+	// defaultRetryAfter is the wait when check_running names none, and
+	// maxRetryAfter bounds a wait the service names.
+	defaultRetryAfter = 5 * time.Second
+	maxRetryAfter     = time.Minute
 )
 
 // Client posts checks to one service URL.
@@ -58,6 +66,14 @@ func New(baseURL, token, userAgent string, timeout time.Duration) (*Client, erro
 	}, nil
 }
 
+// Timeout is the longest a check waits for its result.
+func (c *Client) Timeout() time.Duration {
+	if c.HTTP != nil && c.HTTP.Timeout > 0 {
+		return c.HTTP.Timeout
+	}
+	return defaultTimeout
+}
+
 func isLoopback(host string) bool {
 	if host == "localhost" {
 		return true
@@ -66,23 +82,61 @@ func isLoopback(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
-// Check posts one change and returns the report. Service failures come back as
+// Check posts one change and returns the report, asking again while the
+// service answers check_running until ctx ends. An identical request attaches
+// to the running check, so asking again never starts a second one. When ctx
+// ends first, Check returns a *Pending. Other service failures come back as
 // *Error so callers can print the closed code, message, and remedy.
 func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
-	status, payload, err := c.postJSON(ctx, checkPath, request)
+	pending := &Pending{
+		RetryAfter: int(defaultRetryAfter / time.Second),
+		Message:    pendingMessage,
+		Remedy:     pendingRemedy,
+	}
+	for {
+		response, retryAfter, err := c.checkOnce(ctx, request)
+		var serviceError *Error
+		switch {
+		case err == nil:
+			return response, nil
+		case ctx.Err() != nil:
+			// The wait ran out mid-request; the service keeps the check.
+			return Response{}, pending
+		case !errors.As(err, &serviceError) || serviceError.Body.Code != checkRunning:
+			return Response{}, err
+		}
+		pending.RetryAfter = int((retryAfter + time.Second - 1) / time.Second)
+		if serviceError.Body.Message != "" {
+			pending.Message = serviceError.Body.Message
+			pending.Remedy = serviceError.Body.Remedy
+		}
+		// Asking again after the deadline would only be cut short.
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= retryAfter {
+			return Response{}, pending
+		}
+		if err := c.sleep(ctx, retryAfter); err != nil {
+			return Response{}, pending
+		}
+	}
+}
+
+// checkOnce posts the change once. It returns the service's Retry-After wait
+// alongside a failure.
+func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time.Duration, error) {
+	status, header, payload, err := c.postJSON(ctx, checkPath, request)
 	if err != nil {
-		return Response{}, err
+		return Response{}, 0, err
 	}
 	if status < 200 || status >= 300 {
-		return Response{}, decodeError(status, payload)
+		return Response{}, retryAfter(header), decodeError(status, payload)
 	}
 
 	var decoded Response
 	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return Response{}, fmt.Errorf("decode check response: %w", err)
+		return Response{}, 0, fmt.Errorf("decode check response: %w", err)
 	}
 	if decoded.Status == "" {
-		return Response{}, fmt.Errorf("check service returned no status")
+		return Response{}, 0, fmt.Errorf("check service returned no status")
 	}
 	if decoded.Findings == nil {
 		decoded.Findings = []Finding{}
@@ -93,20 +147,45 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 	if decoded.Summary.IncompletePolicyIDs == nil {
 		decoded.Summary.IncompletePolicyIDs = []string{}
 	}
-	return decoded, nil
+	// A service from before new findings were marked gates on every finding,
+	// so every finding is one the check fails on.
+	var marked struct {
+		Summary struct {
+			NewFindings *int `json:"newFindings"`
+		} `json:"summary"`
+	}
+	if err := json.Unmarshal(payload, &marked); err == nil && marked.Summary.NewFindings == nil {
+		for index := range decoded.Findings {
+			decoded.Findings[index].New = true
+		}
+		decoded.Summary.NewFindings = len(decoded.Findings)
+		decoded.Summary.ExistingFindings = 0
+	}
+	return decoded, 0, nil
 }
 
-// postJSON sends one JSON request and returns the status and raw body.
-func (c *Client) postJSON(ctx context.Context, path string, body any) (int, []byte, error) {
+// retryAfter reads a Retry-After header in seconds, bounded, defaulting to
+// five seconds.
+func retryAfter(header http.Header) time.Duration {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	if err != nil || seconds < 0 {
+		return defaultRetryAfter
+	}
+	return min(time.Duration(seconds)*time.Second, maxRetryAfter)
+}
+
+// postJSON sends one JSON request and returns the status, headers and raw
+// body.
+func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http.Header, []byte, error) {
 	payload, err := json.Marshal(body)
 	if err != nil {
-		return 0, nil, fmt.Errorf("encode request: %w", err)
+		return 0, nil, nil, fmt.Errorf("encode request: %w", err)
 	}
 	httpRequest, err := http.NewRequestWithContext(
 		ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload),
 	)
 	if err != nil {
-		return 0, nil, fmt.Errorf("build request: %w", err)
+		return 0, nil, nil, fmt.Errorf("build request: %w", err)
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("Accept", "application/json")
@@ -123,18 +202,18 @@ func (c *Client) postJSON(ctx context.Context, path string, body any) (int, []by
 	}
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return 0, nil, fmt.Errorf("reach %s: %w", c.BaseURL, err)
+		return 0, nil, nil, fmt.Errorf("reach %s: %w", c.BaseURL, err)
 	}
 	defer response.Body.Close()
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return 0, nil, fmt.Errorf("read response: %w", err)
+		return 0, nil, nil, fmt.Errorf("read response: %w", err)
 	}
 	if len(responseBody) > maxResponseBytes {
-		return 0, nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
+		return 0, nil, nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
 	}
-	return response.StatusCode, responseBody, nil
+	return response.StatusCode, response.Header, responseBody, nil
 }
 
 func decodeError(status int, payload []byte) *Error {
