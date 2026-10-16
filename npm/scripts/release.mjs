@@ -19,7 +19,9 @@ const execFileAsync = promisify(execFile);
 const NPM_DIRECTORY = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const REPOSITORY = path.resolve(NPM_DIRECTORY, '..');
 const REGISTRY = 'https://registry.npmjs.org/';
-const VERIFY_ATTEMPTS = 61;
+// How long to wait for a published version to become readable: 15 minutes.
+// v0.0.4 took about seven, past the five this used to allow.
+const VERIFY_ATTEMPTS = 181;
 const VERIFY_INTERVAL_MS = 5000;
 const TAG_PATTERN = /^v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)*)$/;
 
