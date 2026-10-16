@@ -212,6 +212,13 @@ the request, so the service answers the same check whichever is used.
 | `2` | No new finding crossed `--fail-on`, but a check was incomplete; or the CLI or service failed |
 | `3` | The check was still running when `--timeout` ran out |
 
+An inconclusive check fails the check only when it concerns a file the
+change writes. One about other files is listed on an `Inconclusive outside
+the change` line (`inconclusiveElsewhere` in `json`, a `note` notification in
+`sarif`) and never changes the exit code. A check that timed out counts
+wherever it is. The service can place an inconclusive check only once Bifrost
+reports which files it concerns; until then every one counts as in the change.
+
 The service applies `--fail-on` and sets the status; the exit code follows it.
 New findings that cross `--fail-on` exit `1` even when some check did not
 complete.

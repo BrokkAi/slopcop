@@ -89,6 +89,10 @@ func human(response service.Response, options Options) string {
 		out.WriteString(line)
 		out.WriteString("\n")
 	}
+	if line := elsewhereLine(response); line != "" {
+		out.WriteString(line)
+		out.WriteString("\n")
+	}
 	return out.String()
 }
 
@@ -190,6 +194,26 @@ func incompleteLine(response service.Response) string {
 	return "Incomplete: " + strings.Join(named, ", ")
 }
 
+// elsewhereLine names the inconclusive checks about files the change does
+// not write, which never fail the check.
+func elsewhereLine(response service.Response) string {
+	total := response.Summary.InconclusiveElsewhere
+	if total == 0 {
+		return ""
+	}
+	named := make([]string, 0, len(response.InconclusiveElsewhere)+1)
+	for _, policy := range response.InconclusiveElsewhere {
+		named = append(named, printable(policy.PolicyID))
+	}
+	if unnamed := total - len(response.InconclusiveElsewhere); unnamed > 0 {
+		named = append(named, fmt.Sprintf("and %d more", unnamed))
+	}
+	return fmt.Sprintf(
+		"Inconclusive outside the change (never fail the check): %s",
+		strings.Join(named, ", "),
+	)
+}
+
 // printable keeps control and bidirectional-override characters from hostile
 // repository content off the terminal.
 func printable(value string) string {
@@ -210,7 +234,10 @@ type jsonReport struct {
 	Summary    service.Summary            `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
 	Incomplete []service.IncompletePolicy `json:"incomplete"`
-	Failure    string                     `json:"failure,omitempty"`
+	// InconclusiveElsewhere lists inconclusive checks about files the change
+	// does not write.
+	InconclusiveElsewhere []service.IncompletePolicy `json:"inconclusiveElsewhere"`
+	Failure               string                     `json:"failure,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
@@ -220,7 +247,9 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Summary:    response.Summary,
 		Findings:   listed(response, options),
 		Incomplete: response.Incomplete,
-		Failure:    response.Failure,
+		// A response built without the service has no list; print an empty one.
+		InconclusiveElsewhere: append([]service.IncompletePolicy{}, response.InconclusiveElsewhere...),
+		Failure:               response.Failure,
 	}, "json report")
 }
 
@@ -426,6 +455,15 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Properties: map[string]any{"slopcop.reason": policy.Reason},
 		})
 	}
+	// Inconclusive checks outside the change are notes: they never fail it.
+	for _, policy := range response.InconclusiveElsewhere {
+		notifications = append(notifications, sarifNotification{
+			Level:      "note",
+			Message:    sarifMessage{Text: fmt.Sprintf("%s was inconclusive outside the change", policy.PolicyID)},
+			Descriptor: &sarifDescriptor{ID: policy.PolicyID},
+			Properties: map[string]any{"slopcop.reason": policy.Reason, "slopcop.outsideChange": true},
+		})
+	}
 
 	return encode(w, sarifLog(sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
@@ -441,11 +479,12 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			ToolExecutionNotifications: notifications,
 		}},
 		Properties: map[string]any{
-			"slopcop.status":           response.Status,
-			"slopcop.baseCommit":       response.BaseCommit,
-			"slopcop.failOn":           response.Summary.FailOn,
-			"slopcop.newFindings":      response.Summary.NewFindings,
-			"slopcop.existingFindings": response.Summary.ExistingFindings,
+			"slopcop.status":                response.Status,
+			"slopcop.baseCommit":            response.BaseCommit,
+			"slopcop.failOn":                response.Summary.FailOn,
+			"slopcop.newFindings":           response.Summary.NewFindings,
+			"slopcop.existingFindings":      response.Summary.ExistingFindings,
+			"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 		},
 	}), "sarif report")
 }

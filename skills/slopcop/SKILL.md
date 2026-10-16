@@ -61,7 +61,9 @@ The service sets the status and the CLI follows it. A failed request prints no
 report on stdout, so exit `2` with an empty stdout is a failure, never a clean
 result. Exit `2` with a report means the check finished: its `incomplete` list
 names the checks that did not complete, and running it again usually gives the
-same answer. A pending check prints `{"status": "pending", ...}` in `json`;
+same answer. Inconclusive checks about files the change does not write are listed in
+`inconclusiveElsewhere` and never cause exit `2`. A pending check prints
+`{"status": "pending", ...}` in `json`;
 running the same check again, in any format, picks up the same analysis.
 
 Failures print the service's message, remedy, and install link verbatim. What
