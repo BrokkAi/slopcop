@@ -144,6 +144,9 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 	if decoded.Incomplete == nil {
 		decoded.Incomplete = []IncompletePolicy{}
 	}
+	if decoded.InconclusiveElsewhere == nil {
+		decoded.InconclusiveElsewhere = []IncompletePolicy{}
+	}
 	if decoded.Summary.IncompletePolicyIDs == nil {
 		decoded.Summary.IncompletePolicyIDs = []string{}
 	}

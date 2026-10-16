@@ -64,6 +64,9 @@ type Response struct {
 	Summary    Summary            `json:"summary"`
 	Findings   []Finding          `json:"findings"`
 	Incomplete []IncompletePolicy `json:"incomplete"`
+	// InconclusiveElsewhere lists inconclusive checks about files the change
+	// does not write. Like existing findings, they never change the status.
+	InconclusiveElsewhere []IncompletePolicy `json:"inconclusiveElsewhere"`
 	// Failure says why the analysis did not complete, when it failed.
 	Failure string `json:"failure,omitempty"`
 }
@@ -83,6 +86,9 @@ type Summary struct {
 	// IncompletePolicyIDs names at most 50 incomplete checks;
 	// IncompletePolicies counts them all.
 	IncompletePolicyIDs []string `json:"incompletePolicyIds"`
+	// InconclusiveElsewhere counts the inconclusive checks about files the
+	// change does not write; IncompletePolicies does not include them.
+	InconclusiveElsewhere int `json:"inconclusiveElsewhere"`
 	// OmittedFindings counts findings left out because a check found more
 	// than it may report. They never change the status.
 	OmittedFindings uint64 `json:"omittedFindings"`

@@ -272,18 +272,19 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if want := []string{"baseCommit", "findings", "incomplete", "status", "summary"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"baseCommit", "findings", "incomplete", "inconclusiveElsewhere", "status", "summary"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("keys = %v, want %v", keys, want)
 	}
 	wantSummary := map[string]any{
-		"files":               float64(3),
-		"findings":            float64(3),
-		"newFindings":         float64(3),
-		"existingFindings":    float64(0),
-		"incompletePolicies":  float64(0),
-		"incompletePolicyIds": []any{},
-		"omittedFindings":     float64(0),
-		"failOn":              "error",
+		"files":                 float64(3),
+		"findings":              float64(3),
+		"newFindings":           float64(3),
+		"existingFindings":      float64(0),
+		"incompletePolicies":    float64(0),
+		"incompletePolicyIds":   []any{},
+		"inconclusiveElsewhere": float64(0),
+		"omittedFindings":       float64(0),
+		"failOn":                "error",
 	}
 	if !reflect.DeepEqual(document["summary"], wantSummary) {
 		t.Errorf("summary = %v", document["summary"])
@@ -569,6 +570,46 @@ func TestSARIFSaysWhatDidNotComplete(t *testing.T) {
 		if run["properties"].(map[string]any)["slopcop.status"] != "incomplete" {
 			t.Errorf("%s: properties = %v", tc.name, run["properties"])
 		}
+	}
+}
+
+func TestInconclusiveChecksOutsideTheChangeAreListedNotFailed(t *testing.T) {
+	elsewhere := response(service.StatusClean, "finding", []service.Finding{})
+	elsewhere.Summary.InconclusiveElsewhere = 3
+	elsewhere.InconclusiveElsewhere = []service.IncompletePolicy{
+		{PolicyID: "acme.flow", Reason: "inconclusive"},
+		{PolicyID: "evil\x1b[2J", Reason: "inconclusive"},
+	}
+	got := render(t, elsewhere, FormatHuman)
+	want := "No new findings | Analysis complete\n" +
+		"Inconclusive outside the change (never fail the check): acme.flow, evil�[2J, and 1 more\n"
+	if got != want {
+		t.Errorf("human = %q", got)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, elsewhere, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["summary"].(map[string]any)["inconclusiveElsewhere"] != float64(3) ||
+		len(document["inconclusiveElsewhere"].([]any)) != 2 {
+		t.Errorf("json = %v", document)
+	}
+
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, elsewhere, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	invocation := run["invocations"].([]any)[0].(map[string]any)
+	notifications := invocation["toolExecutionNotifications"].([]any)
+	first := notifications[0].(map[string]any)
+	if invocation["executionSuccessful"] != true || len(notifications) != 2 || first["level"] != "note" ||
+		first["properties"].(map[string]any)["slopcop.outsideChange"] != true {
+		t.Errorf("invocation = %v", invocation)
+	}
+	if run["properties"].(map[string]any)["slopcop.inconclusiveElsewhere"] != float64(3) {
+		t.Errorf("properties = %v", run["properties"])
 	}
 }
 
