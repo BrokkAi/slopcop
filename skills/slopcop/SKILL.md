@@ -32,7 +32,8 @@ merge base with `origin/HEAD`, then `HEAD`. One request goes out per run, even
 when nothing changed: an empty patch is a real check, not a skip.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
-`--fail-on never|finding|note|warning|error` (default `finding`), `--policy
+`--fail-on never|finding|note|warning|error` (default `finding`, so any new
+finding fails the check; the service alone defaults to `warning`), `--policy
 PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--show-existing` also lists the findings that
