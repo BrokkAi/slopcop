@@ -23,44 +23,64 @@ const (
 
 const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
+// Options shape what a report lists. Rendering never changes the check, so
+// none of them is sent to the service.
+type Options struct {
+	// ShowExisting lists the findings that were already in the code, after
+	// the new ones. They are counted either way.
+	ShowExisting bool
+}
+
 // Write renders the response to w.
-func Write(w io.Writer, response service.Response, format string) error {
+func Write(w io.Writer, response service.Response, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
-		_, err := io.WriteString(w, human(response))
+		_, err := io.WriteString(w, human(response, options))
 		return err
 	case FormatJSON:
-		return writeJSON(w, response)
+		return writeJSON(w, response, options)
 	case FormatSARIF:
-		return writeSARIF(w, response)
+		return writeSARIF(w, response, options)
 	default:
 		return fmt.Errorf("unknown format %q (expected human, json, or sarif)", format)
 	}
 }
 
-// human is close to Bifrost's own human report: one block per finding, then
-// the summary line, then what was left out or did not complete.
-func human(response service.Response) string {
-	var out strings.Builder
-	if len(response.Findings) > 0 {
-		out.WriteString("Findings\n")
-		for _, finding := range response.Findings {
-			location := printable(finding.Path)
-			if finding.StartLine != nil {
-				location = fmt.Sprintf("%s:%d", location, *finding.StartLine)
-			}
-			fmt.Fprintf(
-				&out,
-				"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n\n",
-				printable(finding.Severity),
-				printable(finding.PolicyID),
-				printable(finding.Title),
-				location,
-				printable(finding.Certainty),
-			)
+// split returns the new findings, then the existing ones, each in the
+// service's order.
+func split(findings []service.Finding) (fresh, existing []service.Finding) {
+	fresh, existing = []service.Finding{}, []service.Finding{}
+	for _, finding := range findings {
+		if finding.New {
+			fresh = append(fresh, finding)
+		} else {
+			existing = append(existing, finding)
 		}
 	}
-	out.WriteString(summaryLine(response))
+	return fresh, existing
+}
+
+// listed is what a report lists: the new findings first, and the existing
+// ones after them only when asked for.
+func listed(response service.Response, options Options) []service.Finding {
+	fresh, existing := split(response.Findings)
+	if options.ShowExisting {
+		return append(fresh, existing...)
+	}
+	return fresh
+}
+
+// human is close to Bifrost's own human report: one block per new finding,
+// then the existing ones when asked for, then the summary line, then what was
+// left out or did not complete.
+func human(response service.Response, options Options) string {
+	var out strings.Builder
+	fresh, existing := split(response.Findings)
+	writeBlock(&out, "New findings", fresh)
+	if options.ShowExisting {
+		writeBlock(&out, "Already in the code (never fail the check)", existing)
+	}
+	out.WriteString(summaryLine(response, options))
 	out.WriteString("\n")
 	if notice := omittedNotice(response); notice != "" {
 		fmt.Fprintf(&out, "Omitted: %s.\n", notice)
@@ -72,18 +92,51 @@ func human(response service.Response) string {
 	return out.String()
 }
 
-// summaryLine is one line, like the first line of Bifrost's human report.
-func summaryLine(response service.Response) string {
-	count := fmt.Sprintf("%d findings", len(response.Findings))
-	if len(response.Findings) == 1 {
-		count = "1 finding"
+func writeBlock(out *strings.Builder, heading string, findings []service.Finding) {
+	if len(findings) == 0 {
+		return
+	}
+	out.WriteString(heading + "\n")
+	for _, finding := range findings {
+		location := printable(finding.Path)
+		if finding.StartLine != nil {
+			location = fmt.Sprintf("%s:%d", location, *finding.StartLine)
+		}
+		fmt.Fprintf(
+			out,
+			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n\n",
+			printable(finding.Severity),
+			printable(finding.PolicyID),
+			printable(finding.Title),
+			location,
+			printable(finding.Certainty),
+		)
+	}
+}
+
+// summaryLine is one line, like the first line of Bifrost's human report:
+// the new findings, then how many were already in the code.
+func summaryLine(response service.Response, options Options) string {
+	fresh, existing := split(response.Findings)
+	scope := "No new findings"
+	switch len(fresh) {
+	case 0:
+	case 1:
+		scope = "1 new finding"
+	default:
+		scope = fmt.Sprintf("%d new findings", len(fresh))
+	}
+	if len(fresh) > 0 {
+		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(fresh))
+	}
+	if len(existing) > 0 {
+		scope = fmt.Sprintf("%s; %d already in the code", scope, len(existing))
+		if !options.ShowExisting {
+			scope += " (--show-existing lists them)"
+		}
 	}
 	if response.Summary.OmittedFindings > 0 {
-		count = fmt.Sprintf("%s (+%d not reported)", count, response.Summary.OmittedFindings)
-	}
-	scope := count
-	if len(response.Findings) > 0 {
-		scope = fmt.Sprintf("%s across %d file(s)", count, filesWithFindings(response))
+		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
 	}
 	state := "Analysis complete"
 	switch {
@@ -98,11 +151,11 @@ func summaryLine(response service.Response) string {
 	return scope + " | " + state
 }
 
-// filesWithFindings counts files with at least one finding, not files the
-// change touches.
-func filesWithFindings(response service.Response) int {
-	paths := make(map[string]bool, len(response.Findings))
-	for _, finding := range response.Findings {
+// filesWithFindings counts files with at least one of findings, not files
+// the change touches.
+func filesWithFindings(findings []service.Finding) int {
+	paths := make(map[string]bool, len(findings))
+	for _, finding := range findings {
 		paths[finding.Path] = true
 	}
 	return len(paths)
@@ -149,7 +202,8 @@ func printable(value string) string {
 }
 
 // jsonReport is the document `--format json` prints: what an agent needs from
-// stdout.
+// stdout. Findings lists the new findings, then the existing ones only with
+// --show-existing; summary counts both either way.
 type jsonReport struct {
 	Status     string                     `json:"status"`
 	BaseCommit string                     `json:"baseCommit"`
@@ -159,15 +213,61 @@ type jsonReport struct {
 	Failure    string                     `json:"failure,omitempty"`
 }
 
-func writeJSON(w io.Writer, response service.Response) error {
+func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
 		Status:     response.Status,
 		BaseCommit: response.BaseCommit,
 		Summary:    response.Summary,
-		Findings:   response.Findings,
+		Findings:   listed(response, options),
 		Incomplete: response.Incomplete,
 		Failure:    response.Failure,
 	}, "json report")
+}
+
+// pendingReport is the document `--format json` prints for a check that was
+// still running when --timeout ran out.
+type pendingReport struct {
+	Status     string `json:"status"`
+	RetryAfter int    `json:"retryAfter"`
+	Message    string `json:"message"`
+	Remedy     string `json:"remedy"`
+}
+
+// WritePending renders a check that is still running. The human format
+// prints nothing on stdout: the message is on stderr and the exit code is 3.
+func WritePending(w io.Writer, pending service.Pending, format string) error {
+	switch format {
+	case "", FormatHuman:
+		return nil
+	case FormatJSON:
+		return encode(w, pendingReport{
+			Status:     service.StatusPending,
+			RetryAfter: pending.RetryAfter,
+			Message:    pending.Message,
+			Remedy:     pending.Remedy,
+		}, "json report")
+	case FormatSARIF:
+		return encode(w, sarifLog(sarifRun{
+			Tool:    sarifTool{Driver: sarifDriver{Name: "SlopCop", InformationURI: "https://slopcop.com", Rules: []sarifRule{}}},
+			Results: []sarifResult{},
+			Invocations: []sarifInvocation{{
+				ExecutionSuccessful: false,
+				ToolExecutionNotifications: []sarifNotification{{
+					Level:      "note",
+					Message:    sarifMessage{Text: strings.TrimSpace(pending.Message + " " + pending.Remedy)},
+					Descriptor: &sarifDescriptor{ID: "slopcop.pending"},
+					Properties: map[string]any{"slopcop.retryAfter": pending.RetryAfter},
+				}},
+			}},
+			Properties: map[string]any{"slopcop.status": service.StatusPending},
+		}), "sarif report")
+	default:
+		return fmt.Errorf("unknown format %q (expected human, json, or sarif)", format)
+	}
+}
+
+func sarifLog(run sarifRun) sarifDocument {
+	return sarifDocument{Schema: sarifSchema, Version: "2.1.0", Runs: []sarifRun{run}}
 }
 
 type sarifDocument struct {
@@ -203,6 +303,9 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifMessage    `json:"message"`
 	Locations []sarifLocation `json:"locations"`
+	// BaselineState is `new` for a finding the change touched and
+	// `unchanged` for one already in the code.
+	BaselineState string `json:"baselineState"`
 }
 
 type sarifMessage struct {
@@ -244,13 +347,14 @@ type sarifDescriptor struct {
 	ID string `json:"id"`
 }
 
-// writeSARIF prints a SARIF 2.1.0 log with one run. Findings carry no
-// baselineState: the service reports every finding the checked tree holds,
-// not only the ones the change introduced.
-func writeSARIF(w io.Writer, response service.Response) error {
+// writeSARIF prints a SARIF 2.1.0 log with one run. Each result's
+// baselineState says whether the change touched it; existing findings are
+// results only with --show-existing.
+func writeSARIF(w io.Writer, response service.Response, options Options) error {
+	findings := listed(response, options)
 	var rules []string
 	seen := make(map[string]bool)
-	for _, finding := range response.Findings {
+	for _, finding := range findings {
 		if !seen[finding.PolicyID] {
 			seen[finding.PolicyID] = true
 			rules = append(rules, finding.PolicyID)
@@ -264,8 +368,8 @@ func writeSARIF(w io.Writer, response service.Response) error {
 		driverRules = append(driverRules, sarifRule{ID: id})
 	}
 
-	results := make([]sarifResult, 0, len(response.Findings))
-	for _, finding := range response.Findings {
+	results := make([]sarifResult, 0, len(findings))
+	for _, finding := range findings {
 		physical := sarifPhysicalLocation{
 			ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.Path), URIBaseID: "SRCROOT"},
 		}
@@ -280,11 +384,12 @@ func writeSARIF(w io.Writer, response service.Response) error {
 			text = finding.PolicyID
 		}
 		results = append(results, sarifResult{
-			RuleID:    finding.PolicyID,
-			RuleIndex: ruleIndex[finding.PolicyID],
-			Level:     sarifLevel(finding.Severity),
-			Message:   sarifMessage{Text: text},
-			Locations: []sarifLocation{{PhysicalLocation: physical}},
+			RuleID:        finding.PolicyID,
+			RuleIndex:     ruleIndex[finding.PolicyID],
+			Level:         sarifLevel(finding.Severity),
+			Message:       sarifMessage{Text: text},
+			Locations:     []sarifLocation{{PhysicalLocation: physical}},
+			BaselineState: baselineState(finding),
 		})
 	}
 
@@ -322,27 +427,35 @@ func writeSARIF(w io.Writer, response service.Response) error {
 		})
 	}
 
-	return encode(w, sarifDocument{
-		Schema:  sarifSchema,
-		Version: "2.1.0",
-		Runs: []sarifRun{{
-			Tool: sarifTool{Driver: sarifDriver{
-				Name:           "SlopCop",
-				InformationURI: "https://slopcop.com",
-				Rules:          driverRules,
-			}},
-			Results: results,
-			Invocations: []sarifInvocation{{
-				ExecutionSuccessful:        response.Status != service.StatusIncomplete,
-				ToolExecutionNotifications: notifications,
-			}},
-			Properties: map[string]any{
-				"slopcop.status":     response.Status,
-				"slopcop.baseCommit": response.BaseCommit,
-				"slopcop.failOn":     response.Summary.FailOn,
-			},
+	return encode(w, sarifLog(sarifRun{
+		Tool: sarifTool{Driver: sarifDriver{
+			Name:           "SlopCop",
+			InformationURI: "https://slopcop.com",
+			Rules:          driverRules,
 		}},
-	}, "sarif report")
+		Results: results,
+		Invocations: []sarifInvocation{{
+			// New findings can answer `findings` while a check did not
+			// complete, so the execution is judged on its own.
+			ExecutionSuccessful:        response.Failure == "" && response.Summary.IncompletePolicies == 0,
+			ToolExecutionNotifications: notifications,
+		}},
+		Properties: map[string]any{
+			"slopcop.status":           response.Status,
+			"slopcop.baseCommit":       response.BaseCommit,
+			"slopcop.failOn":           response.Summary.FailOn,
+			"slopcop.newFindings":      response.Summary.NewFindings,
+			"slopcop.existingFindings": response.Summary.ExistingFindings,
+		},
+	}), "sarif report")
+}
+
+// baselineState is SARIF's word for whether the change touched a finding.
+func baselineState(finding service.Finding) string {
+	if finding.New {
+		return "new"
+	}
+	return "unchanged"
 }
 
 // sarifLevel maps Bifrost's severities. SARIF has no unrated level; `none` is

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -458,7 +459,7 @@ func TestIncompleteCheckExitsTwo(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if stdout != "0 findings | Analysis did not complete: The analysis could not be completed.\n" {
+	if stdout != "No new findings | Analysis did not complete: The analysis could not be completed.\n" {
 		t.Fatalf("stdout = %q", stdout)
 	}
 }
@@ -596,7 +597,158 @@ func TestExitCodeFollowsTheServiceStatus(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "1 finding across 1 file(s) | Analysis complete") {
+	// A service from before new findings were marked gates on every finding,
+	// so each one is listed as new.
+	if !strings.Contains(stdout, "1 new finding across 1 file(s) | Analysis complete") {
 		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+// checkRunning answers the service's check_running, as control does while the
+// analysis is still going.
+func checkRunning(w http.ResponseWriter, retryAfter string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", retryAfter)
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = w.Write([]byte(`{
+		"code": "check_running",
+		"message": "The check is still running.",
+		"remedy": "Run the same check again to wait for its result.",
+		"retryable": true
+	}`))
+}
+
+const onlyPreExisting = `{
+	"status": "clean",
+	"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+	"applied": true,
+	"summary": {"files": 1, "findings": 2, "newFindings": 0, "existingFindings": 2, "incompletePolicies": 0, "failOn": "finding"},
+	"findings": [
+		{"policyId": "p", "severity": "error", "certainty": "definite", "path": "old.go", "startLine": 3, "endLine": 3, "title": "t", "new": false},
+		{"policyId": "q", "severity": "warning", "certainty": "definite", "path": "old.go", "startLine": 9, "endLine": 9, "title": "u", "new": false}
+	],
+	"incomplete": []
+}`
+
+func TestACheckWithNoNewFindingsExitsClean(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(onlyPreExisting))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if stdout != "No new findings; 2 already in the code (--show-existing lists them) | Analysis complete\n" {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--show-existing")
+	if code != 0 || !strings.Contains(stdout, "Already in the code (never fail the check)\n  [error] p: t") {
+		t.Fatalf("exit = %d, stdout = %q", code, stdout)
+	}
+}
+
+func TestCheckWaitsWhileTheServiceIsStillRunning(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		if len(bodies) < 3 {
+			checkRunning(w, "0")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(onlyPreExisting))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if len(bodies) != 3 || bodies[0] != bodies[1] || bodies[1] != bodies[2] {
+		t.Fatalf("the same check is asked again until it answers: %d requests", len(bodies))
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil || report["status"] != "clean" {
+		t.Fatalf("stdout = %q (%v)", stdout, err)
+	}
+}
+
+func TestACheckStillRunningAtTheTimeoutIsPending(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		checkRunning(w, "5")
+	}))
+	defer server.Close()
+
+	for _, format := range []string{"human", "json", "sarif"} {
+		code, stdout, stderr := runCLI(t,
+			"check", "--root", repo, "--service", server.URL, "--format", format, "--timeout", "2s",
+		)
+		if code != 3 {
+			t.Fatalf("%s: exit = %d, want 3 (pending), stderr = %s", format, code, stderr)
+		}
+		if !strings.Contains(stderr, "The check is still running.\nRun the same check again to wait for its result.") {
+			t.Errorf("%s: stderr = %q", format, stderr)
+		}
+		switch format {
+		case "human":
+			if stdout != "" {
+				t.Errorf("human stdout = %q", stdout)
+			}
+		case "json":
+			var report map[string]any
+			if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+				t.Fatalf("json stdout = %q: %v", stdout, err)
+			}
+			if report["status"] != "pending" || report["retryAfter"] != float64(5) {
+				t.Errorf("json = %v", report)
+			}
+		case "sarif":
+			var log map[string]any
+			if err := json.Unmarshal([]byte(stdout), &log); err != nil {
+				t.Fatalf("sarif stdout = %q: %v", stdout, err)
+			}
+			properties := log["runs"].([]any)[0].(map[string]any)["properties"].(map[string]any)
+			if properties["slopcop.status"] != "pending" {
+				t.Errorf("sarif properties = %v", properties)
+			}
+		}
+	}
+}
+
+func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	var bodies []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		bodies = append(bodies, string(body))
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(onlyPreExisting))
+	}))
+	defer server.Close()
+
+	for _, args := range [][]string{
+		{"--format", "human"},
+		{"--format", "json"},
+		{"--format", "sarif", "--show-existing"},
+	} {
+		runCLI(t, append([]string{"check", "--root", repo, "--service", server.URL}, args...)...)
+	}
+	if len(bodies) != 3 || bodies[0] != bodies[1] || bodies[1] != bodies[2] {
+		t.Fatalf("each format sends the same check, so the service reuses it: %q", bodies)
 	}
 }

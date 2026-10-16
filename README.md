@@ -159,10 +159,11 @@ Flags:
 | `--root PATH` | repository to check (default `.`) |
 | `--base REV` | base commit or revision for the change |
 | `--format human\|json\|sarif` | report format (default `human`) |
-| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold (default `finding`) |
+| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
+| `--show-existing` | also list the findings that were already in the code |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
-| `--timeout DURATION` | one check request timeout (default `10m`) |
+| `--timeout DURATION` | how long to wait for the result (default `10m`) |
 | `--verbose` | print the resolved request to stderr |
 
 ### What is sent
@@ -182,21 +183,46 @@ Every check also runs the hosted catalog. Rules under
 `.slopcop/policies/**/*.rqlp` are added automatically unless
 `--no-policy-discovery` is set.
 
+### New and pre-existing findings
+
+A check fails only on findings the change introduced or touched: the service
+marks a finding new when it is in a file the change writes and its lines meet a
+line the change added, or the line beside one it removed. Findings that were
+already in the code are counted, never fail the check, and are listed only with
+`--show-existing`. A change that introduces nothing exits `0`, however many
+findings the repository already holds.
+
 ### Output and exit codes
 
 The service answers structured data; the CLI renders it. `human` prints one
-block per finding, a summary line, and any omitted or incomplete checks. `json`
-prints `status`, `baseCommit`, `summary`, `findings`, `incomplete`, and
-`failure` when the analysis did not complete. `sarif` prints a SARIF 2.1.0
-log.
+block per new finding, then the pre-existing ones with `--show-existing`, a
+summary line such as `1 new finding across 1 file(s); 72 already in the code
+(--show-existing lists them) | Analysis complete`, and any omitted or
+incomplete checks. `json` prints `status`, `baseCommit`, `summary`
+(`newFindings` and `existingFindings` count the split), `findings` (each with
+`new`), `incomplete`, and `failure` when the analysis did not complete. `sarif`
+prints a SARIF 2.1.0 log whose results carry `baselineState` `new` or
+`unchanged`. `--format` and `--show-existing` only change the rendering, never
+the request, so the service answers the same check whichever is used.
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | Check completed; nothing crossed the `--fail-on` level |
-| `1` | A finding crossed `--fail-on` |
-| `2` | The check was incomplete, or the CLI or service failed |
+| `0` | Check completed; no new finding crossed the `--fail-on` level |
+| `1` | A new finding crossed `--fail-on` |
+| `2` | No new finding crossed `--fail-on`, but a check was incomplete; or the CLI or service failed |
+| `3` | The check was still running when `--timeout` ran out |
 
 The service applies `--fail-on` and sets the status; the exit code follows it.
+New findings that cross `--fail-on` exit `1` even when some check did not
+complete.
+
+While the service answers `check_running`, the CLI waits the `Retry-After` it
+names and asks again until `--timeout` runs out; every ask attaches to the same
+running check. If it is still running then, the CLI exits `3`, prints the
+service's message and remedy on stderr, and in `json` prints
+`{"status": "pending", "retryAfter": 5, "message": …, "remedy": …}` on stdout
+(`sarif` prints a run with `slopcop.status` `pending`). Running the same check
+again picks up the same analysis.
 
 Service failures print the closed contract exactly: message, remedy, and any
 install URL. The codes, messages, and remedies are defined by the service in
@@ -225,7 +251,9 @@ The CLI calls `POST <service>/v1/check` with a bearer token:
 
 The service rejects any other field. The response carries `status`,
 `baseCommit`, `applied`, `summary`, `findings`, `incomplete`, and `failure`
-when the analysis did not complete. Non-2xx responses carry `code`, `message`,
+when the analysis did not complete. Against a service from before findings
+were marked `new`, the CLI treats every finding as new, as that service gated
+on all of them. Non-2xx responses carry `code`, `message`,
 `remedy`, `retryable`, and an optional `installUrl`.
 
 `slopcop login` uses the device flow: `POST /api/device` returns a

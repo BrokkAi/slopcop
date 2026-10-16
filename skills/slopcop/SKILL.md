@@ -35,20 +35,34 @@ Flags worth knowing: `--format human|json|sarif` (default `human`),
 `--fail-on never|finding|note|warning|error` (default `finding`), `--policy
 PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
-otherwise join automatically. `--timeout DURATION` bounds one request and
-`--verbose` prints the resolved request to stderr.
+otherwise join automatically. `--show-existing` also lists the findings that
+were already in the code. `--timeout DURATION` bounds the whole wait for a
+result (default 10 minutes) and `--verbose` prints the resolved request to
+stderr.
+
+## New and pre-existing findings
+
+A check fails only on findings the change introduced or touched. Findings that
+were already in the code are counted in `summary.existingFindings`, never
+change the exit code, and are listed only with `--show-existing`. In `json`,
+each listed finding has `new`; `summary.newFindings` counts the new ones. In
+`sarif`, `baselineState` is `new` or `unchanged`.
 
 ## Read the exit code
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | The check completed and nothing crossed `--fail-on`. |
-| `1` | A finding crossed `--fail-on`. |
-| `2` | The check was incomplete, or the CLI or service failed. |
+| `0` | The check completed and no new finding crossed `--fail-on`. |
+| `1` | A new finding crossed `--fail-on`. Fix it. |
+| `2` | No new finding crossed `--fail-on`, but some check did not complete; or the CLI or service failed. |
+| `3` | The check was still running when `--timeout` ran out. Run the same check again. |
 
 The service sets the status and the CLI follows it. A failed request prints no
 report on stdout, so exit `2` with an empty stdout is a failure, never a clean
-result.
+result. Exit `2` with a report means the check finished: its `incomplete` list
+names the checks that did not complete, and running it again usually gives the
+same answer. A pending check prints `{"status": "pending", ...}` in `json`;
+running the same check again, in any format, picks up the same analysis.
 
 Failures print the service's message, remedy, and install link verbatim. What
 the usual codes mean:
@@ -66,6 +80,10 @@ the usual codes mean:
 
 ## Act on the findings
 
-The findings are the work: fix them in the working tree and run the same check
-again. A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
+The new findings are the work: fix them in the working tree and run the same
+check again. The loop ends when the check reports no new findings: exit `0`, or
+exit `2` with a report whose `summary.newFindings` is `0` (say which checks did
+not complete). Exit `3` means wait and run it again; it is not a result. Do not
+fix pre-existing findings unless asked: they are not this change's, and they
+never stop the loop. A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
 the change, so a new rule is picked up by the next check with no extra setup.

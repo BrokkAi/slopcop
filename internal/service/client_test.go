@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCheckSendsTheContractRequest(t *testing.T) {
@@ -183,6 +184,81 @@ func TestCheckUnexpectedResponse(t *testing.T) {
 	}
 	if serviceError.Error() == "" {
 		t.Fatal("expected a printable error")
+	}
+}
+
+func TestCheckReadsTheNewFindingSplit(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "findings",
+			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+			"summary": {"files": 1, "findings": 2, "newFindings": 1, "existingFindings": 1, "failOn": "finding"},
+			"findings": [
+				{"policyId": "a", "severity": "warning", "certainty": "definite", "path": "x.go", "startLine": 1, "endLine": 1, "title": "t", "new": true},
+				{"policyId": "b", "severity": "error", "certainty": "definite", "path": "x.go", "startLine": 9, "endLine": 9, "title": "u", "new": false}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if !response.Findings[0].New || response.Findings[1].New ||
+		response.Summary.NewFindings != 1 || response.Summary.ExistingFindings != 1 {
+		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestCheckAsksAgainUntilTheCheckFinishes(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		if requests < 3 {
+			w.Header().Set("Retry-After", "7")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code": "check_running", "message": "Still running.", "remedy": "Wait.", "retryable": true}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "summary": {}}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var waits []time.Duration
+	client.wait = func(_ context.Context, delay time.Duration) error {
+		waits = append(waits, delay)
+		return nil
+	}
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil || response.Status != StatusClean {
+		t.Fatalf("Check = %+v, %v", response, err)
+	}
+	if requests != 3 || len(waits) != 2 || waits[0] != 7*time.Second {
+		t.Fatalf("requests = %d, waits = %v", requests, waits)
+	}
+
+	// When the wait would pass the deadline, the check is pending.
+	requests = 0
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err = client.Check(ctx, Request{})
+	var pending *Pending
+	if !errors.As(err, &pending) {
+		t.Fatalf("expected *Pending, got %v", err)
+	}
+	if pending.RetryAfter != 7 || pending.RemedyText() != "Still running.\nWait." || requests != 1 {
+		t.Fatalf("pending = %+v, requests = %d", pending, requests)
 	}
 }
 
