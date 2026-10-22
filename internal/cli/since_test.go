@@ -1,10 +1,14 @@
 package cli
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -86,5 +90,31 @@ func TestSinceAndLastRunLifecycle(t *testing.T) {
 				t.Errorf("--since SHA = %v", captured["sinceCommit"])
 			}
 		})
+	}
+}
+
+// An incompressible file proves the decoded pack limit runs before HTTP.
+func TestOversizedPackFailsLocally(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	content := make([]byte, maxChangeBytes+1024*1024)
+	if _, err := rand.Read(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "large.bin"), content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		_, _ = w.Write([]byte(`{"status":"clean"}`))
+	}))
+	defer server.Close()
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "maximum decoded size is 16 MiB") || called {
+		t.Fatalf("exit=%d called=%v stdout=%s stderr=%s", code, called, stdout, stderr)
+	}
+	if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/slopcop/last-run/main").Output(); err == nil {
+		t.Fatalf("oversized run advanced marker: %s", out)
 	}
 }
