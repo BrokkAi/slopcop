@@ -20,6 +20,7 @@ import (
 )
 
 const (
+	maxChangeBytes  = 16 * 1024 * 1024
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
 )
@@ -41,9 +42,17 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
-	change, err := gitx.WorkingTreePatch(repoRoot, base, selection.Files)
+	since, lastRunRef, err := gitx.ResolveSince(repoRoot, base, strings.TrimSpace(opts.since))
 	if err != nil {
 		return err
+	}
+	change, err := gitx.WorkingTreePack(repoRoot, base, since, selection.Files)
+	if err != nil {
+		return err
+	}
+
+	if len(change.Pack) > maxChangeBytes {
+		return fmt.Errorf("change packfile is %d bytes; maximum decoded size is 16 MiB (%d bytes)", len(change.Pack), maxChangeBytes)
 	}
 
 	stdout := cmd.OutOrStdout()
@@ -66,10 +75,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 
 	request := service.Request{
-		RepoURL:    repoURL,
-		BaseCommit: base,
-		Change:     base64.StdEncoding.EncodeToString(change.Patch),
-		FailOn:     failOn,
+		ContractVersion: "check-v2",
+		SinceCommit:     since,
+		ChangeCommit:    change.Commit,
+		RepoURL:         repoURL,
+		BaseCommit:      base,
+		Change:          base64.StdEncoding.EncodeToString(change.Pack),
+		FailOn:          failOn,
 	}
 	if !selection.IsEmpty() {
 		request.Selection = &selection
@@ -78,7 +90,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
 			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
-			client.BaseURL, shortSHA(base), change.Files, len(change.Patch), failOn,
+			client.BaseURL, shortSHA(base), change.Files, len(change.Pack), failOn,
 		)
 	}
 
@@ -103,6 +115,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			return silentExit{service.ExitIncomplete}
 		}
 		return err
+	}
+	if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last completed run: %v\n", err)
 	}
 	options := report.Options{ShowExisting: opts.showExisting}
 	if err := report.Write(stdout, response, format, options); err != nil {

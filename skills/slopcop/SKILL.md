@@ -5,8 +5,8 @@ description: Check a working-tree change with the slopcop CLI, which sends the c
 
 # SlopCop
 
-`slopcop` checks a change through the hosted check API. The CLI sends one git
-patch from the base commit to the working tree; the service applies it, runs
+`slopcop` checks a change through the hosted check API. The CLI sends working-tree snapshots in a git
+packfile; the service imports them, runs
 the hosted policy catalog plus the repository rules selected, and returns the
 report. There is no local analyzer, and the CLI never decides on its own that
 there is nothing to check.
@@ -29,7 +29,17 @@ slopcop --root ../repo --base HEAD~1
 
 The base commit defaults to the merge base with the branch upstream, then the
 merge base with `origin/HEAD`, then `HEAD`. One request goes out per run, even
-when nothing changed: an empty patch is a real check, not a skip.
+when nothing changed: an unchanged snapshot is still checked.
+
+`--since` accepts a commit-ish or `merge-base` (BASE). It defaults to the last
+completed run on this branch, recorded in `refs/slopcop/last-run/<branch>`,
+else BASE. Completed runs, including findings and incomplete results, advance
+that ref; pending checks and failed requests do not. Detached HEAD has no
+marker. Use `--since merge-base` for CI branch comparisons. NOW and SINCE
+snapshots each have BASE as their only parent, omitting intermediate history;
+SINCE reuses BASE when their trees match. NOW includes untracked non-ignored
+files and selected ignored policy files. The real index stays untouched.
+Decoded packs above 16 MiB fail locally.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
 `--fail-on never|finding|note|warning|error` (default `finding`, so any new

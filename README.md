@@ -9,8 +9,8 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-blue.svg)](https://go.dev/)
 
-`slopcop` sends one git patch, from the base commit to the working tree, to the
-hosted check API at <https://slopcop.com>. The service applies it, runs the
+`slopcop` sends working-tree snapshots in a git packfile to the
+hosted check API at <https://slopcop.com>. The service imports them, runs the
 hosted policy catalog plus the repository rules you selected, and returns the
 report: every finding with its severity, the file and line that triggered it,
 and the certainty behind it. The analysis is
@@ -149,7 +149,7 @@ base commit in its clone; a missing one comes back as the service's
 `base_not_found` message and remedy.
 
 Every run sends one check request, even when the working tree matches the base
-and the patch is empty. A clean result or a failure always comes from the
+and the snapshot has no changed files. A clean result or a failure always comes from the
 service.
 
 Flags:
@@ -158,6 +158,7 @@ Flags:
 | --- | --- |
 | `--root PATH` | repository to check (default `.`) |
 | `--base REV` | base commit or revision for the change |
+| `--since REV` | compare since a commit-ish or `merge-base` (default: last completed branch run, else BASE) |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
 | `--show-existing` | also list the findings that were already in the code |
@@ -168,20 +169,25 @@ Flags:
 
 ### What is sent
 
-One git patch from the base commit to the working tree. An empty change is
-sent as an empty patch, not filtered out. The patch carries committed but
-unpushed work, unstaged edits, untracked files, deletions, renames, mode
-changes, and binary content. Git-ignored files stay out, except selected
-`.slopcop/policies` rules, which must travel because the service evaluates them
-from the patched checkout.
+A git packfile contains deterministic NOW and SINCE snapshot commits, each
+anchored directly to BASE as its only parent. The pack excludes objects already
+reachable from BASE and all intermediate branch history. NOW includes committed
+but unpushed work, unstaged edits, untracked non-ignored files, deletions, modes,
+and binary content. Selected policy files travel even when ignored. The user's
+index is untouched, and even an unchanged working tree sends a snapshot.
 
-The service owns the limits on what a check accepts. When a change is too
-large or touches too many files, the service's `payload_too_large` response is
-printed verbatim; the CLI does not impose its own limits.
+`--since` accepts a commit-ish or `merge-base` (the resolved BASE). By default,
+it uses `refs/slopcop/last-run/<branch>`, else BASE. The selected tree is
+re-anchored to the current BASE; when it matches BASE's tree, BASE itself is
+reused. A completed run (including findings or incomplete analysis) advances
+the branch ref to NOW. Rejected requests, pending checks, transport errors,
+and timeouts do not advance it. Detached HEAD runs have no last-run marker.
+Use `--since merge-base` for a complete branch comparison in CI.
 
-Every check also runs the hosted catalog. Rules under
-`.slopcop/policies/**/*.rqlp` are added automatically unless
-`--no-policy-discovery` is set.
+The decoded packfile is limited to 16 MiB; larger packs fail locally before
+sending a request. Other service limits and remedies are printed verbatim.
+Rules under `.slopcop/policies/**/*.rqlp` are added automatically unless
+`--no-policy-discovery` is set. Explicit `--policy PATH` files remain supported.
 
 ### New and pre-existing findings
 
@@ -253,9 +259,12 @@ The CLI calls `POST <service>/v1/check` with a bearer token:
 
 ```json
 {
+  "contractVersion": "check-v2",
+  "sinceCommit": "<full SINCE SHA>",
+  "changeCommit": "<full NOW SHA>",
   "repoUrl": "https://github.com/owner/name",
   "baseCommit": "0123456789abcdef0123456789abcdef01234567",
-  "change": "<base64 git patch>",
+  "change": "<base64 git packfile>",
   "selection": {"files": [".slopcop/policies/rule.rqlp"]},
   "failOn": "finding"
 }
@@ -307,7 +316,7 @@ Layout:
 | --- | --- |
 | `cmd/slopcop` | process entry point |
 | `internal/cli` | cobra commands, selection, exit codes |
-| `internal/gitx` | remote canonicalization, base resolution, patch building |
+| `internal/gitx` | remote canonicalization, base resolution, snapshot pack building |
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
