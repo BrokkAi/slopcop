@@ -60,7 +60,9 @@ func newRoot(version string) *cobra.Command {
 
 Running slopcop with no subcommand runs the check. There is no local
 analyzer: the service applies the change to the base commit and returns the
-report, so a check never needs a Bifrost install.`,
+report, so a check never needs a Bifrost install.
+
+` + selectionHelp,
 		Version:       version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -86,6 +88,7 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 	command := &cobra.Command{
 		Use:   "check",
 		Short: "Check the working tree through the hosted check API",
+		Long:  selectionHelp,
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCheck(cmd, opts, *serviceURL, version)
@@ -96,23 +99,39 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 }
 
 type checkOptions struct {
-	root         string
-	base         string
-	format       string
-	failOn       string
-	policies     []string
-	noDiscovery  bool
-	verbose      bool
-	showExisting bool
-	timeout      time.Duration
+	root           string
+	base           string
+	since          string
+	rules          []string
+	skipRules      []string
+	categories     []string
+	skipCategories []string
+	format         string
+	failOn         string
+	policies       []string
+	noDiscovery    bool
+	verbose        bool
+	showExisting   bool
+	timeout        time.Duration
 }
+
+const selectionHelp = `Without --rule or --category includes, run the default rules. Otherwise run
+the union of named rules and the default rules in named categories. Then
+--skip-rule and --skip-category remove rules by ID or category. Unknown names
+are an error. Each selection flag is repeatable. Repository policy files
+selected with --policy or discovered under .slopcop/policies also join.`
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags := command.Flags()
 	flags.StringVar(&opts.root, "root", ".", "repository path to check")
 	flags.StringVar(&opts.base, "base", "", "base commit or revision (default: merge-base with the upstream branch)")
+	flags.StringVar(&opts.since, "since", "", "compare since a commit-ish or merge-base (default: last completed branch run, else BASE)")
+	flags.StringArrayVar(&opts.rules, "rule", nil, "include a rule by ID (repeatable)")
+	flags.StringArrayVar(&opts.skipRules, "skip-rule", nil, "exclude a rule by ID (repeatable)")
+	flags.StringArrayVar(&opts.categories, "category", nil, "include default rules in a category (repeatable)")
+	flags.StringArrayVar(&opts.skipCategories, "skip-category", nil, "exclude rules in a category (repeatable)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
-	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
+	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding (note or above), info, note, warning, or error")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
 	flags.StringArrayVar(&opts.policies, "policy", nil, "repository-relative .rqlp policy file to evaluate (repeatable)")
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")

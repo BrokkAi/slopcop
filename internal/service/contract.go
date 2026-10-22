@@ -26,33 +26,37 @@ const (
 // `deny_unknown_fields`, so the fields and their JSON names must match
 // CheckRequest in server/src/check.rs exactly.
 type Request struct {
+	ContractVersion string `json:"contractVersion"`
+	SinceCommit     string `json:"sinceCommit"`
+	ChangeCommit    string `json:"changeCommit"`
 	// RepoURL is the canonical https repository URL. SSH remotes must be
 	// canonicalized by the caller.
 	RepoURL string `json:"repoUrl"`
-	// BaseCommit is the full 40- or 64-character hex commit the change applies to.
+	// BaseCommit is the full 40- or 64-character hex commit the service fetches.
 	BaseCommit string `json:"baseCommit"`
-	// Change is the standard base64 encoding of one git patch.
+	// Change is the standard base64 encoding of one git packfile.
 	Change string `json:"change"`
 	// Selection is optional; an empty selection runs the hosted catalog.
 	Selection *Selection `json:"selection,omitempty"`
-	// FailOn is never, finding, note, warning, or error.
+	// FailOn is never, finding (note or above), info, note, warning, or error.
 	FailOn string `json:"failOn,omitempty"`
 }
 
-// Selection mirrors CheckSelection. File entries are repository-relative
-// .rqlp paths resolved inside the patched tree. The service currently
-// evaluates only Files, so the CLI exposes only the file selector.
+// Selection mirrors CheckSelection. Files are repository-relative .rqlp paths
+// in NOW. Includes select named rules and default rules in named categories;
+// without includes, default rules run. Skips apply after includes.
 type Selection struct {
-	Files      []string `json:"files,omitempty"`
-	Packs      []string `json:"packs,omitempty"`
-	PolicyIDs  []string `json:"policyIds,omitempty"`
-	Categories []string `json:"categories,omitempty"`
+	Files          []string `json:"files,omitempty"`
+	PolicyIDs      []string `json:"policyIds,omitempty"`
+	SkipPolicyIDs  []string `json:"skipPolicyIds,omitempty"`
+	Categories     []string `json:"categories,omitempty"`
+	SkipCategories []string `json:"skipCategories,omitempty"`
 }
 
 // IsEmpty reports whether the selection would serialize to an empty object.
 func (s Selection) IsEmpty() bool {
-	return len(s.Files) == 0 && len(s.Packs) == 0 &&
-		len(s.PolicyIDs) == 0 && len(s.Categories) == 0
+	return len(s.Files) == 0 && len(s.PolicyIDs) == 0 && len(s.SkipPolicyIDs) == 0 &&
+		len(s.Categories) == 0 && len(s.SkipCategories) == 0
 }
 
 // Response is the successful POST /v1/check body, mirrored from
