@@ -244,7 +244,7 @@ line.
 `existingFindings`, and `dismissedFindings` count the split), `findings` (each
 with `id`, `new`, and `dismissed`), `incomplete`, and `failure` when the
 analysis did not complete. `sarif` prints a SARIF 2.1.0 log whose run carries
-`properties.checkId` and whose results carry `properties.findingId` and
+`properties["slopcop.checkId"]` and whose results carry `properties["slopcop.findingId"]` and
 `baselineState` `new` or `unchanged`; a dismissed finding's result has a
 `suppressions` entry of kind `external`, justified as `reported as false
 positive`. Against a service from before checks had ids, `checkId` and `id`
@@ -310,7 +310,7 @@ slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
 
 `slopcop report` records a finding from a check as a false positive. The id is
 the finding's `Id:` line in `human`, its `id` in `json`, or its result's
-`properties.findingId` in `sarif`. A reported finding stops failing checks in
+`properties["slopcop.findingId"]` in `sarif`. A reported finding stops failing checks in
 its repository: later checks send it as dismissed, so an agent's check-and-fix
 loop can end on a finding that is wrong. Every report and its reason is
 visible to the team on the SlopCop dashboard, an owner can reinstate the

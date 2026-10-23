@@ -389,7 +389,7 @@ type sarifResult struct {
 	BaselineState string `json:"baselineState"`
 	// Suppressions marks a finding reported as a false positive.
 	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
-	// Properties carries the finding's id as findingId.
+	// Properties carries the finding's id as slopcop.findingId, like the run's other slopcop.* keys.
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
@@ -486,7 +486,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			result.Suppressions = []sarifSuppression{{Kind: "external", Justification: dismissedJustification}}
 		}
 		if finding.ID != "" {
-			result.Properties = map[string]any{"findingId": finding.ID}
+			result.Properties = map[string]any{"slopcop.findingId": finding.ID}
 		}
 		results = append(results, result)
 	}
@@ -544,7 +544,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 	}
 	if response.CheckID != "" {
-		properties["checkId"] = response.CheckID
+		properties["slopcop.checkId"] = response.CheckID
 	}
 	return encode(w, sarifLog(sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{

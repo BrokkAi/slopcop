@@ -77,7 +77,7 @@ with `--show-existing`, under "Reported as false positive" (in `sarif`, as a
 suppressed result).
 
 Every finding has an id: the `Id:` line in `human`, `id` in `json`, and
-`properties.findingId` in `sarif`. The check itself has one too (`checkId`).
+`properties["slopcop.findingId"]` in `sarif`. The check itself has one too (`checkId`).
 
 ## Read the exit code
 

@@ -888,8 +888,8 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 			}
 			run := log["runs"].([]any)[0].(map[string]any)
 			properties := run["properties"].(map[string]any)
-			if properties["checkId"] != tc.wantCheckID {
-				t.Errorf("run checkId = %v, want %v", properties["checkId"], tc.wantCheckID)
+			if properties["slopcop.checkId"] != tc.wantCheckID {
+				t.Errorf("run checkId = %v, want %v", properties["slopcop.checkId"], tc.wantCheckID)
 			}
 			if properties["slopcop.dismissedFindings"] != float64(tc.response.Summary.DismissedFindings) {
 				t.Errorf("run properties = %v", properties)
@@ -899,7 +899,7 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 				entry := raw.(map[string]any)
 				var id any
 				if bag, ok := entry["properties"].(map[string]any); ok {
-					id = bag["findingId"]
+					id = bag["slopcop.findingId"]
 				}
 				got = append(got, result{id, entry["baselineState"], entry["suppressions"]})
 			}
