@@ -464,20 +464,19 @@ func TestIncompleteCheckExitsTwo(t *testing.T) {
 func TestServiceURLPrecedence(t *testing.T) {
 	isolateUserConfig(t)
 	stored := config.Config{ServiceURL: "https://stored.example"}
-	if got := resolveServiceURL(stored, "https://flag.example"); got != "https://flag.example" {
-		t.Errorf("flag URL = %q", got)
+	check := func(source string, cfg config.Config, flag, want string, wantNamed bool) {
+		t.Helper()
+		if got, named := resolveService(cfg, flag); got != want || named != wantNamed {
+			t.Errorf("%s URL = %q, named %v; want %q, named %v", source, got, named, want, wantNamed)
+		}
 	}
+	check("flag", stored, "https://flag.example", "https://flag.example", true)
 	t.Setenv("SLOPCOP_SERVICE", "https://env.example")
-	if got := resolveServiceURL(stored, ""); got != "https://env.example" {
-		t.Errorf("env URL = %q", got)
-	}
+	check("flag over env", stored, " https://flag.example ", "https://flag.example", true)
+	check("env", stored, "", "https://env.example", true)
 	t.Setenv("SLOPCOP_SERVICE", "")
-	if got := resolveServiceURL(stored, ""); got != "https://stored.example" {
-		t.Errorf("stored URL = %q", got)
-	}
-	if got := resolveServiceURL(config.Config{}, ""); got != config.DefaultServiceURL {
-		t.Errorf("default URL = %q", got)
-	}
+	check("stored", stored, "", "https://stored.example", false)
+	check("default", config.Config{}, "", config.DefaultServiceURL, false)
 }
 
 func TestUnknownFormatFailsBeforeGitWork(t *testing.T) {

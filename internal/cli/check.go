@@ -68,7 +68,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
-	target := resolveServiceURL(cfg, serviceFlag)
+	target, named := resolveService(cfg, serviceFlag)
 	client, err := service.New(target, resolveToken(cfg), "slopcop/"+version, opts.timeout)
 	if err != nil {
 		return err
@@ -119,7 +119,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last completed run: %v\n", err)
 	}
-	options := report.Options{ShowExisting: opts.showExisting, Service: hintService(serviceFlag)}
+	// The report hint names a service named for this run, since a copied
+	// command may run without --service or $SLOPCOP_SERVICE. The one slopcop
+	// login stored needs no naming: a report finds it on its own.
+	options := report.Options{ShowExisting: opts.showExisting}
+	if named {
+		options.Service = target
+	}
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}
@@ -292,28 +298,16 @@ func dedupe(values []string) []string {
 	return out
 }
 
-func resolveServiceURL(cfg config.Config, flagValue string) string {
-	for _, candidate := range []string{
-		flagValue,
-		os.Getenv("SLOPCOP_SERVICE"),
-		cfg.ServiceURL,
-		config.DefaultServiceURL,
-	} {
+// resolveService is the service a command talks to: --service, then
+// $SLOPCOP_SERVICE, then the one slopcop login stored, then the default.
+// named says it came from --service or $SLOPCOP_SERVICE, named for this run.
+func resolveService(cfg config.Config, flagValue string) (target string, named bool) {
+	for index, candidate := range []string{flagValue, os.Getenv("SLOPCOP_SERVICE"), cfg.ServiceURL} {
 		if value := strings.TrimSpace(candidate); value != "" {
-			return value
+			return value, index < 2
 		}
 	}
-	return config.DefaultServiceURL
-}
-
-// hintService is the service the report hint names: --service, else
-// $SLOPCOP_SERVICE, since a copied command may run without either. The one
-// slopcop login stored needs no naming: a report finds it on its own.
-func hintService(flagValue string) string {
-	if value := strings.TrimSpace(flagValue); value != "" {
-		return value
-	}
-	return strings.TrimSpace(os.Getenv("SLOPCOP_SERVICE"))
+	return config.DefaultServiceURL, false
 }
 
 func resolveToken(cfg config.Config) string {

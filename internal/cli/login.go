@@ -27,7 +27,8 @@ which is what CI and agent harnesses use.`,
 			if err != nil {
 				return err
 			}
-			target := strings.TrimRight(resolveServiceURL(cfg, *serviceURL), "/")
+			target, _ := resolveService(cfg, *serviceURL)
+			target = strings.TrimRight(target, "/")
 			credential := strings.TrimSpace(token)
 			if credential == "" {
 				client, err := service.New(target, "", "slopcop/"+version, 0)

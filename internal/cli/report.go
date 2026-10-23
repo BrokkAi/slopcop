@@ -88,7 +88,8 @@ func runReport(cmd *cobra.Command, opts *reportOptions, rawID, serviceFlag, vers
 	if err != nil {
 		return err
 	}
-	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, reportTimeout)
+	target, _ := resolveService(cfg, serviceFlag)
+	client, err := service.New(target, resolveToken(cfg), "slopcop/"+version, reportTimeout)
 	if err != nil {
 		return err
 	}
