@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -914,4 +915,35 @@ func decodeChange(t *testing.T, repo string, request map[string]any) string {
 	runGit(t, repo, "cat-file", "-e", now+"^{commit}")
 	runGit(t, repo, "cat-file", "-e", request["sinceCommit"].(string)+"^{commit}")
 	return runGit(t, repo, "diff", "--binary", request["baseCommit"].(string), now)
+}
+
+// An unknown command or a stray argument is a usage error: the failure points
+// at the help of the command it was given to.
+func TestArgumentErrorsPointAtTheHelp(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+		help string
+	}{
+		{[]string{"reprot"}, `unknown command "reprot" for "slopcop"`, "slopcop"},
+		{[]string{"init", "foo"}, `unknown command "foo" for "slopcop init"`, "slopcop init"},
+		{[]string{"check", "foo"}, `unknown command "foo" for "slopcop check"`, "slopcop check"},
+		{[]string{"login", "foo"}, `unknown command "foo" for "slopcop login"`, "slopcop login"},
+		{[]string{"logout", "foo"}, `unknown command "foo" for "slopcop logout"`, "slopcop logout"},
+		{[]string{"version", "foo"}, `unknown command "foo" for "slopcop version"`, "slopcop version"},
+	}
+	// Only the error's type makes it a usage error, never its text.
+	if isUsageError(errors.New(`unknown command "reprot" for "slopcop"`)) {
+		t.Error("an error is a usage error by its text")
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			isolateUserConfig(t)
+			code, stdout, stderr := runCLI(t, tc.args...)
+			want := "slopcop: " + tc.want + "\nRun '" + tc.help + " --help' for usage.\n"
+			if code != 2 || stdout != "" || stderr != want {
+				t.Errorf("exit = %d, stdout = %q, stderr = %q, want %q", code, stdout, stderr, want)
+			}
+		})
+	}
 }

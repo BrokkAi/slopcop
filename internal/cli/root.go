@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -73,7 +72,7 @@ report, so a check never needs a Bifrost install.
 
 ` + selectionHelp,
 		Version:       version,
-		Args:          cobra.NoArgs,
+		Args:          usageArgs(cobra.NoArgs),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -101,7 +100,7 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 		Use:   "check",
 		Short: "Check the working tree through the hosted check API",
 		Long:  selectionHelp,
-		Args:  cobra.NoArgs,
+		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCheck(cmd, opts, *serviceURL, version)
 		},
@@ -155,19 +154,28 @@ func newVersionCommand(version string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the version",
-		Args:  cobra.NoArgs,
+		Args:  usageArgs(cobra.NoArgs),
 		Run: func(cmd *cobra.Command, _ []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop version %s\n", version)
 		},
 	}
 }
 
+// isUsageError reports a command used wrongly. Flag errors arrive as
+// usageError through the flag error function, and argument errors (an
+// unknown command among them) through usageArgs.
 func isUsageError(err error) bool {
 	var usage usageError
-	if errors.As(err, &usage) {
-		return true
+	return errors.As(err, &usage)
+}
+
+// usageArgs makes a cobra argument validator's error a usage error, so
+// `slopcop reprot` or `slopcop init foo` also points at the help.
+func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := validate(cmd, args); err != nil {
+			return usageError{err}
+		}
+		return nil
 	}
-	// Flag errors arrive as usageError through the flag error function;
-	// cobra's own unknown-command error is the one left to recognise.
-	return strings.HasPrefix(err.Error(), "unknown command ")
 }

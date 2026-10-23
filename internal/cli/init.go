@@ -285,7 +285,7 @@ Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill an earlier release
 installed is brought up to date; one with local changes is left alone.
 Nothing else installs the skill: this command is the only thing that writes
 it. Pass --no-skill to leave the skill install and any update of it undone.`,
-		Args: cobra.NoArgs,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stdout := cmd.OutOrStdout()
 			if noSkill {

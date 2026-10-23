@@ -21,7 +21,7 @@ func newLoginCommand(serviceURL *string, version string) *cobra.Command {
 With no flags, login starts the browser device flow: it prints a URL and a
 code, then waits for approval. Pass --token to store an existing credential,
 which is what CI and agent harnesses use.`,
-		Args: cobra.NoArgs,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
