@@ -97,7 +97,7 @@ same answer. Inconclusive checks about files the change does not write are liste
 `{"status": "pending", ...}` in `json`;
 running the same check again, in any format, picks up the same analysis.
 
-Failures print the service's message, remedy, and install link verbatim. What
+Failures print the service's message, remedy, and install or top-up link verbatim. What
 the usual codes mean:
 
 | Code | What to do |
@@ -110,6 +110,7 @@ the usual codes mean:
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop report` named a finding this login cannot see; copy the id from the latest check. |
 | `invalid_report` | The service rejected the report; give a reason of 1 to 2000 characters. |
+| `insufficient_credits` | The workspace is out of credits and its grace period has ended; only its free repository can be checked. Tell the human: a workspace owner adds credits at the printed link. Do not retry. |
 | `rate_limited` | Wait, then retry. |
 | `service_unavailable` | Retry; the service is unavailable. |
 

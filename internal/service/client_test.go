@@ -167,6 +167,42 @@ func TestCheckDecodesTheClosedErrorContract(t *testing.T) {
 	}
 }
 
+func TestCheckPrintsTheTopUpLinkWhenCreditsRanOut(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusPaymentRequired)
+		_, _ = w.Write([]byte(`{
+			"code": "insufficient_credits",
+			"message": "This workspace is out of credits.",
+			"remedy": "Add credits to keep checking this repository.",
+			"retryable": false,
+			"topUpUrl": "https://slopcop.com/credits"
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Check(context.Background(), Request{
+		RepoURL:    "https://github.com/BrokkAi/slopcop",
+		BaseCommit: "0123456789abcdef0123456789abcdef01234567",
+		Change:     "UEFDSw==",
+	})
+	var serviceError *Error
+	if !errors.As(err, &serviceError) {
+		t.Fatalf("expected *Error, got %v", err)
+	}
+	if serviceError.Body.Code != CodeInsufficientCredits || serviceError.StatusCode != http.StatusPaymentRequired {
+		t.Fatalf("error = %+v", serviceError)
+	}
+	want := "This workspace is out of credits.\nAdd credits to keep checking this repository.\nhttps://slopcop.com/credits"
+	if text := serviceError.RemedyText(); text != want {
+		t.Errorf("RemedyText() = %q, want %q", text, want)
+	}
+}
+
 func TestCheckUnexpectedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)

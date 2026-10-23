@@ -32,6 +32,10 @@ const (
 	// CodeInvalidReport answers a malformed report: an unknown kind, or an
 	// empty or oversized reason.
 	CodeInvalidReport = "invalid_report"
+	// CodeInsufficientCredits refuses a check once the workspace's credits
+	// have run out and its grace period has ended. The free repository is
+	// still checked; TopUpURL links to the page that adds credits.
+	CodeInsufficientCredits = "insufficient_credits"
 )
 
 // ErrorBody is the closed failure contract returned by the service.
@@ -41,6 +45,7 @@ type ErrorBody struct {
 	Remedy     string `json:"remedy"`
 	Retryable  bool   `json:"retryable"`
 	InstallURL string `json:"installUrl,omitempty"`
+	TopUpURL   string `json:"topUpUrl,omitempty"`
 }
 
 // Error is a non-2xx response from the check API.
@@ -63,8 +68,8 @@ func (e *Error) Error() string {
 	}
 }
 
-// RemedyText is the message, remedy, and install link an agent prints
-// verbatim, exactly the fields the service enumerated for this failure.
+// RemedyText is the message, remedy, and install or top-up link an agent
+// prints verbatim, exactly the fields the service enumerated for this failure.
 func (e *Error) RemedyText() string {
 	lines := []string{e.Error()}
 	if remedy := strings.TrimSpace(e.Body.Remedy); remedy != "" {
@@ -72,6 +77,9 @@ func (e *Error) RemedyText() string {
 	}
 	if install := strings.TrimSpace(e.Body.InstallURL); install != "" {
 		lines = append(lines, install)
+	}
+	if topUp := strings.TrimSpace(e.Body.TopUpURL); topUp != "" {
+		lines = append(lines, topUp)
 	}
 	return strings.Join(lines, "\n")
 }

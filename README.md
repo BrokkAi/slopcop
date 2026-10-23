@@ -376,7 +376,9 @@ complete. Against a service from before findings were marked `new`, the CLI
 treats every finding as new, as that service gated on all of them; against
 one from before ids and dismissals, `checkId` and each `id` are empty and no
 finding is dismissed. Non-2xx responses carry `code`, `message`, `remedy`,
-`retryable`, and an optional `installUrl`.
+`retryable`, and an optional `installUrl` or `topUpUrl`. A workspace whose
+credits ran out past its grace period answers `402 insufficient_credits` with
+a `topUpUrl`; its free repository is still checked.
 
 `slopcop report` calls `POST <service>/v1/report` with the same bearer token:
 
