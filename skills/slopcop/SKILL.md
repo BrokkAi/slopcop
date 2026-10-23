@@ -110,7 +110,7 @@ the usual codes mean:
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop report` named a finding this login cannot see; copy the id from the latest check. |
 | `invalid_report` | The service rejected the report; give a reason of 1 to 2000 characters. |
-| `insufficient_credits` | The workspace is out of credits and its grace period has ended; only its free repository can be checked. Tell the human: a workspace owner adds credits at the printed link. Do not retry. |
+| `insufficient_credits` | The workspace is out of credits and its grace period has ended; only its free repository can be checked. Tell the human: a workspace owner adds credits at the printed link. Do not retry until the human says credits were added. |
 | `rate_limited` | Wait, then retry. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
@@ -119,9 +119,10 @@ the usual codes mean:
 The new findings are the work: fix them in the working tree and run the same
 check again. The loop ends when the check reports no new findings: exit `0`, or
 exit `2` with a report whose `summary.newFindings` is `0` (say which checks did
-not complete). A finding you reported as a false positive comes back dismissed
-on the next check, not new, so it no longer keeps the loop going; tell the
-human which findings you reported and why. Exit `3` means wait and run it
+not complete). A finding you reported as a false positive is never new again: a
+later check that would flag it as new lists it as dismissed, and a rerun of
+unchanged code lists it as pre-existing, so it no longer keeps the loop going;
+tell the human which findings you reported and why. Exit `3` means wait and run it
 again; it is not a result. Do not
 fix pre-existing findings unless asked: they are not this change's, and they
 never stop the loop. A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
@@ -147,8 +148,8 @@ slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
 - Every report and its reason is visible to the team on the SlopCop dashboard.
   An owner can reinstate the finding, and false-positive rates are tracked per
   rule.
-- A reported finding stops failing checks for this repository: the next check
-  lists it as dismissed, so the check-and-fix loop can end.
+- A reported finding stops failing checks for this repository: a later check
+  lists it as dismissed rather than new, so the check-and-fix loop can end.
 - Report only new findings from the change you are checking. Do not report
   pre-existing findings you were not asked about.
 - When unsure, fix the code or ask the human instead.

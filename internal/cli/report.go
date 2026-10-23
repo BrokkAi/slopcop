@@ -40,8 +40,8 @@ func newReportCommand(serviceURL *string, version string) *cobra.Command {
 		Long: `Report a finding from a check as a false positive.
 
 The finding id is the Id line of a human report, a finding's id in json, or
-a result's properties.findingId in sarif. The reason says why the finding is
-wrong for this code, in 1 to 2000 characters; cite the code.
+a result's properties["slopcop.findingId"] in sarif. The reason says why the
+finding is wrong for this code, in 1 to 2000 characters; cite the code.
 
 A reported finding stops failing checks in its repository. The team sees
 every report and its reason on the SlopCop dashboard, an owner can reinstate

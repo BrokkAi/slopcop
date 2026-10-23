@@ -311,7 +311,7 @@ slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
 `slopcop report` records a finding from a check as a false positive. The id is
 the finding's `Id:` line in `human`, its `id` in `json`, or its result's
 `properties["slopcop.findingId"]` in `sarif`. A reported finding stops failing checks in
-its repository: later checks send it as dismissed, so an agent's check-and-fix
+its repository: a later check that would flag it as new sends it as dismissed instead, so an agent's check-and-fix
 loop can end on a finding that is wrong. Every report and its reason is
 visible to the team on the SlopCop dashboard, an owner can reinstate the
 finding, and false-positive rates are tracked per rule, so a report is for a

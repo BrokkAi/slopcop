@@ -79,7 +79,7 @@ func (e *Error) RemedyText() string {
 		lines = append(lines, install)
 	}
 	if topUp := strings.TrimSpace(e.Body.TopUpURL); topUp != "" {
-		lines = append(lines, topUp)
+		lines = append(lines, "Add credits: "+topUp)
 	}
 	return strings.Join(lines, "\n")
 }

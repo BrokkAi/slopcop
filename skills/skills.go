@@ -20,5 +20,7 @@ var Previous = map[string][]string{
 		"d33ef48f0876ffa4fc37b0de9dd452808007de40b545d604cfbefe2403e3b086", // master: new findings only
 		"66d7338f54f7463db0b63303649d27d06f2a15eb937f94ab29325768fd532c63", // master: fail-on finding
 		"d1700486a79987c6b086d7689edecf7ce437386a483b59180649544c31f64a6c", // v0.0.4
+		"7b26de8de195d6784d47465569044ec7e8b0c01ef9fb28a3225f35631d203505", // #18: --since, rules and categories
+		"acd4a6fabbcd678674efe0101c046057b3c208fa66dbe261c4d33ac9831cf66d", // #18: fail-on info
 	},
 }

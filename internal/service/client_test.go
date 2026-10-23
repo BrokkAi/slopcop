@@ -173,8 +173,8 @@ func TestCheckPrintsTheTopUpLinkWhenCreditsRanOut(t *testing.T) {
 		w.WriteHeader(http.StatusPaymentRequired)
 		_, _ = w.Write([]byte(`{
 			"code": "insufficient_credits",
-			"message": "This workspace is out of credits.",
-			"remedy": "Add credits to keep checking this repository.",
+			"message": "Your SlopCop workspace is out of credits and its grace period has ended, so checks are refused in every repository but its free one.",
+			"remedy": "Add credits on the Credits page in SlopCop, then check again.",
 			"retryable": false,
 			"topUpUrl": "https://slopcop.com/credits"
 		}`))
@@ -197,7 +197,9 @@ func TestCheckPrintsTheTopUpLinkWhenCreditsRanOut(t *testing.T) {
 	if serviceError.Body.Code != CodeInsufficientCredits || serviceError.StatusCode != http.StatusPaymentRequired {
 		t.Fatalf("error = %+v", serviceError)
 	}
-	want := "This workspace is out of credits.\nAdd credits to keep checking this repository.\nhttps://slopcop.com/credits"
+	want := "Your SlopCop workspace is out of credits and its grace period has ended, so checks are refused in every repository but its free one.\n" +
+		"Add credits on the Credits page in SlopCop, then check again.\n" +
+		"Add credits: https://slopcop.com/credits"
 	if text := serviceError.RemedyText(); text != want {
 		t.Errorf("RemedyText() = %q, want %q", text, want)
 	}
