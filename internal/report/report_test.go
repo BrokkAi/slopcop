@@ -909,3 +909,66 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 		})
 	}
 }
+
+func TestFalsePositiveSaysWhatTheReportDid(t *testing.T) {
+	answer := func(status, policy string) service.ReportResponse {
+		return service.ReportResponse{
+			ReportID: "11111111-2222-4333-8444-555555555555", FindingID: freshID, CheckID: checkID,
+			PolicyID: policy, Kind: service.ReportFalsePositive, Status: status,
+		}
+	}
+	cases := []struct {
+		name     string
+		response service.ReportResponse
+		want     string
+	}{
+		{
+			name:     "recorded",
+			response: answer(service.ReportRecorded, "bifrost.security.xss"),
+			want: "slopcop: reported finding " + freshID + " (bifrost.security.xss) as a false positive\n" +
+				"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n",
+		},
+		{
+			name:     "already reported",
+			response: answer(service.ReportAlreadyReported, "bifrost.security.xss"),
+			want: "slopcop: finding " + freshID + " (bifrost.security.xss) was already reported as a false positive\n" +
+				"It no longer fails checks in this repository, and the team sees the earlier report on the SlopCop dashboard.\n",
+		},
+		{
+			name:     "hostile rule id",
+			response: answer(service.ReportRecorded, "evil\x1b[2J"),
+			want: "slopcop: reported finding " + freshID + " (evil�[2J) as a false positive\n" +
+				"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			if err := WriteFalsePositive(&out, tc.response, FormatHuman); err != nil {
+				t.Fatalf("human: %v", err)
+			}
+			if out.String() != tc.want {
+				t.Errorf("human = %q, want %q", out.String(), tc.want)
+			}
+
+			out.Reset()
+			if err := WriteFalsePositive(&out, tc.response, FormatJSON); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			var document map[string]any
+			if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			want := map[string]any{
+				"reportId": tc.response.ReportID, "findingId": tc.response.FindingID, "checkId": tc.response.CheckID,
+				"policyId": tc.response.PolicyID, "kind": tc.response.Kind, "status": tc.response.Status,
+			}
+			if !reflect.DeepEqual(document, want) {
+				t.Errorf("json = %v, want %v", document, want)
+			}
+		})
+	}
+	if err := WriteFalsePositive(&bytes.Buffer{}, answer(service.ReportRecorded, "p"), FormatSARIF); err == nil {
+		t.Error("a report has no sarif form")
+	}
+}

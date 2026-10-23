@@ -21,9 +21,18 @@ type silentExit struct{ code int }
 
 func (e silentExit) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
+// usageError is a command used wrongly, so the failure also points at the
+// help.
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+
+func (e usageError) Unwrap() error { return e.err }
+
 // Execute runs the CLI and returns the process exit code: 0 clean, 1 a new
 // finding at or above the fail-on level, 2 incomplete or failed, 3 still
-// running when --timeout ran out.
+// running when --timeout ran out. A report exits 0 once the finding is
+// dismissed and 2 otherwise.
 func Execute(args []string, version string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -77,6 +86,7 @@ report, so a check never needs a Bifrost install.`,
 		newInitCommand(),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
+		newReportCommand(&serviceURL, version),
 		newVersionCommand(version),
 	)
 	return root
@@ -132,6 +142,10 @@ func newVersionCommand(version string) *cobra.Command {
 }
 
 func isUsageError(err error) bool {
+	var usage usageError
+	if errors.As(err, &usage) {
+		return true
+	}
 	message := err.Error()
 	return strings.Contains(message, "unknown flag") ||
 		strings.Contains(message, "unknown shorthand flag") ||

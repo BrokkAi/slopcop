@@ -609,3 +609,31 @@ func encode(w io.Writer, value any, what string) error {
 	}
 	return nil
 }
+
+// WriteFalsePositive renders the service's answer to a false-positive
+// report: in human, which finding and rule it dismissed and what that means;
+// in json, the answer itself.
+func WriteFalsePositive(w io.Writer, response service.ReportResponse, format string) error {
+	switch format {
+	case "", FormatHuman:
+		_, err := io.WriteString(w, falsePositiveText(response))
+		return err
+	case FormatJSON:
+		return encode(w, response, "report response")
+	default:
+		return fmt.Errorf("unknown format %q (expected human or json)", format)
+	}
+}
+
+func falsePositiveText(response service.ReportResponse) string {
+	finding := "finding " + printable(response.FindingID)
+	if response.PolicyID != "" {
+		finding += " (" + printable(response.PolicyID) + ")"
+	}
+	if response.Status == service.ReportAlreadyReported {
+		return "slopcop: " + finding + " was already reported as a false positive\n" +
+			"It no longer fails checks in this repository, and the team sees the earlier report on the SlopCop dashboard.\n"
+	}
+	return "slopcop: reported " + finding + " as a false positive\n" +
+		"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n"
+}

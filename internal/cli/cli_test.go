@@ -314,8 +314,8 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 			name:    "repo not indexed",
 			status:  http.StatusConflict,
 			code:    "repo_not_indexed",
-			message: "SlopCop has not indexed this repository for checks.",
-			remedy:  "Analyze the repository on SlopCop first. For a private repository, install the SlopCop GitHub App, then sign in again.",
+			message: "SlopCop cannot check this repository with this login.",
+			remedy:  "If the repository is private, install the SlopCop GitHub App on its owner with access to it, then retry; if the App is already installed there, run slopcop login again so this login can use that installation. If the remote URL is wrong, fix it first.",
 		},
 		{
 			name:    "no access",
@@ -349,20 +349,21 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("stdout = %q", stdout)
 			}
-			for _, want := range []string{test.message, test.remedy} {
-				if !strings.Contains(stderr, want) {
-					t.Errorf("stderr = %q, want %q", stderr, want)
-				}
+			// The service's remedy alone: the CLI adds no sign-in command of
+			// its own, though repo_not_indexed's remedy names one.
+			if want := test.message + "\n" + test.remedy + "\n"; stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
 			}
-			if strings.Contains(stderr, "slopcop login") {
+			if strings.Contains(stderr, "Sign in with `slopcop login`") {
 				t.Errorf("stderr = %q, must not tell a signed-in user to log in again", stderr)
 			}
 		})
 	}
 }
 
-// While SlopCop is still indexing the repository the service answers at
-// once; the CLI prints that and exits instead of waiting or asking again.
+// A service from before checks stopped waiting on indexing answers
+// indexing_in_progress at once; the CLI prints that and exits instead of
+// waiting or asking again.
 func TestIndexingInProgressExitsWithoutWaiting(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
@@ -750,5 +751,109 @@ func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
 	}
 	if len(bodies) != 3 || bodies[0] != bodies[1] || bodies[1] != bodies[2] {
 		t.Fatalf("each format sends the same check, so the service reuses it: %q", bodies)
+	}
+}
+
+// checkAnswer is a check response from a service that names checks and
+// findings.
+func checkAnswer(status string, summary string, findings ...string) string {
+	return `{
+		"status": "` + status + `",
+		"checkId": "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091",
+		"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+		"applied": true,
+		"summary": ` + summary + `,
+		"findings": [` + strings.Join(findings, ",") + `],
+		"incomplete": []
+	}`
+}
+
+const (
+	newFinding       = `{"id": "6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b", "policyId": "p", "severity": "warning", "certainty": "definite", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "t", "new": true, "dismissed": false}`
+	dismissedFinding = `{"id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "policyId": "q", "severity": "error", "certainty": "definite", "path": "demo.go", "startLine": 3, "endLine": 3, "title": "u", "new": false, "dismissed": true}`
+)
+
+func TestCheckExitCodesWithFindingIDsAndDismissals(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+		args   []string
+		exit   int
+		want   string
+	}{
+		{
+			name: "a new finding fails and says how to report it",
+			answer: checkAnswer("findings",
+				`{"files": 1, "findings": 1, "newFindings": 1, "existingFindings": 0, "dismissedFindings": 0, "incompletePolicies": 0, "failOn": "finding"}`,
+				newFinding),
+			exit: 1,
+			want: "New findings\n" +
+				"  [warning] p: t\n" +
+				"    Location: demo.go:1\n" +
+				"    Certainty: definite\n" +
+				"    Id: 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b\n" +
+				"\n" +
+				"False positive? slopcop report <id> --reason \"why\"\n" +
+				"\n" +
+				"1 new finding across 1 file(s) | Analysis complete\n",
+		},
+		{
+			name: "a dismissed finding never fails the check",
+			answer: checkAnswer("clean",
+				`{"files": 1, "findings": 1, "newFindings": 0, "existingFindings": 0, "dismissedFindings": 1, "incompletePolicies": 0, "failOn": "finding"}`,
+				dismissedFinding),
+			exit: 0,
+			want: "No new findings; 1 reported as false positive (--show-existing lists them) | Analysis complete\n",
+		},
+		{
+			name: "a dismissed finding is listed with --show-existing",
+			answer: checkAnswer("clean",
+				`{"files": 1, "findings": 1, "newFindings": 0, "existingFindings": 0, "dismissedFindings": 1, "incompletePolicies": 0, "failOn": "finding"}`,
+				dismissedFinding),
+			args: []string{"--show-existing"},
+			exit: 0,
+			want: "Reported as false positive (never fail the check)\n" +
+				"  [error] q: u\n" +
+				"    Location: demo.go:3\n" +
+				"    Certainty: definite\n" +
+				"    Id: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d\n" +
+				"\n" +
+				"No new findings; 1 reported as false positive | Analysis complete\n",
+		},
+		{
+			name: "a new finding next to a dismissed one still fails",
+			answer: checkAnswer("findings",
+				`{"files": 1, "findings": 2, "newFindings": 1, "existingFindings": 0, "dismissedFindings": 1, "incompletePolicies": 0, "failOn": "finding"}`,
+				newFinding, dismissedFinding),
+			args: []string{"--format", "json"},
+			exit: 1,
+			want: `"checkId": "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.answer))
+			}))
+			defer server.Close()
+
+			code, stdout, stderr := runCLI(t, append([]string{"check", "--root", repo, "--service", server.URL}, tc.args...)...)
+			if code != tc.exit {
+				t.Fatalf("exit = %d, want %d, stderr = %s", code, tc.exit, stderr)
+			}
+			if strings.HasPrefix(tc.want, `"`) {
+				if !strings.Contains(stdout, tc.want) {
+					t.Errorf("stdout = %q, want %q", stdout, tc.want)
+				}
+				return
+			}
+			if stdout != tc.want {
+				t.Errorf("stdout = %q, want %q", stdout, tc.want)
+			}
+		})
 	}
 }
