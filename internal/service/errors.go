@@ -62,7 +62,7 @@ func (e *Error) Error() string {
 	case e.Body.Code != "":
 		return fmt.Sprintf("the check service rejected the request (%s)", e.Body.Code)
 	case e.StatusCode > 0:
-		return fmt.Sprintf("the check service returned HTTP %d", e.StatusCode)
+		return fmt.Sprintf("the SlopCop service returned HTTP %d", e.StatusCode)
 	default:
 		return "the check service rejected the request"
 	}

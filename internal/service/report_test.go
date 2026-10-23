@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -132,7 +133,7 @@ func TestReportAnswers(t *testing.T) {
 		},
 		{
 			name: "an unexpected failure", status: 502, body: `bad gateway`,
-			wantMessage: "the check service returned HTTP 502",
+			wantMessage: "the SlopCop service returned HTTP 502",
 			wantRemedy:  "Check the service URL, then retry. Response: bad gateway",
 		},
 	}
@@ -176,5 +177,61 @@ func TestReportAnswers(t *testing.T) {
 				t.Errorf("error = %+v", serviceError)
 			}
 		})
+	}
+}
+
+// A rate-limited report says how long to wait, and a coded failure without a
+// message keeps its code rather than reading as a service from before reports.
+func TestReportFailuresKeepWhatTheServiceSaid(t *testing.T) {
+	cases := []struct {
+		name       string
+		status     int
+		retryAfter string
+		body       string
+		wantCode   string
+		wantRemedy string
+	}{
+		{name: "rate limited", status: http.StatusTooManyRequests, retryAfter: "3400",
+			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
+			wantCode: "rate_limited", wantRemedy: "Wait 56m40s, then report again."},
+		{name: "coded 404 without a message", status: http.StatusNotFound,
+			body:     `{"code":"finding_not_found","remedy":"Copy the id from the latest check."}`,
+			wantCode: "finding_not_found", wantRemedy: "Copy the id from the latest check."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.retryAfter != "" {
+					w.Header().Set("Retry-After", tc.retryAfter)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			}))
+			defer server.Close()
+			client, err := New(server.URL, "secret", "", 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.Report(context.Background(), ReportRequest{FindingID: reportedFinding, Kind: ReportFalsePositive, Reason: "x"})
+			var serviceError *Error
+			if !errors.As(err, &serviceError) {
+				t.Fatalf("error = %v", err)
+			}
+			if serviceError.Body.Code != tc.wantCode || serviceError.Body.Remedy != tc.wantRemedy {
+				t.Errorf("body = %+v", serviceError.Body)
+			}
+		})
+	}
+}
+
+// "<", ">" and "&" travel as themselves, so a reason within 2000 characters
+// stays within the service's body limit.
+func TestEncodeJSONDoesNotEscapeHTML(t *testing.T) {
+	body, err := EncodeJSON(ReportRequest{Reason: "a < b && c > d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := `"reason":"a < b && c > d"`; !json.Valid(body) || !strings.Contains(string(body), want) {
+		t.Errorf("body = %s, want it to contain %s", body, want)
 	}
 }

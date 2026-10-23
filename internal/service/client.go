@@ -176,12 +176,16 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 // comes back as *Error, so callers can print the closed code, message, and
 // remedy.
 func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportResponse, error) {
-	status, _, payload, err := c.postJSON(ctx, reportPath, request)
+	status, header, payload, err := c.postJSON(ctx, reportPath, request)
 	if err != nil {
 		return ReportResponse{}, err
 	}
 	if status < 200 || status >= 300 {
 		failure := decodeError(status, payload)
+		if seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After"))); status == http.StatusTooManyRequests && err == nil && seconds > 0 {
+			// Reports are limited per hour, so the wait can be long: say it.
+			failure.Body.Remedy = fmt.Sprintf("Wait %s, then report again.", time.Duration(seconds)*time.Second)
+		}
 		if status == http.StatusNotFound && failure.Body.Code == "" {
 			// A 404 without the closed contract is a service from before
 			// reports, not an unknown finding.
@@ -206,6 +210,19 @@ func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportRespo
 	}
 }
 
+// EncodeJSON encodes a request body as the service reads it, without HTML
+// escaping: "<" in a reason is one byte, not six, so a reason within bounds
+// stays within the service's body limit.
+func EncodeJSON(body any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(body); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
+}
+
 // retryAfter reads a Retry-After header in seconds, bounded, defaulting to
 // five seconds.
 func retryAfter(header http.Header) time.Duration {
@@ -219,7 +236,7 @@ func retryAfter(header http.Header) time.Duration {
 // postJSON sends one JSON request and returns the status, headers and raw
 // body.
 func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http.Header, []byte, error) {
-	payload, err := json.Marshal(body)
+	payload, err := EncodeJSON(body)
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("encode request: %w", err)
 	}
@@ -260,13 +277,13 @@ func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http
 
 func decodeError(status int, payload []byte) *Error {
 	var body ErrorBody
-	if err := json.Unmarshal(payload, &body); err != nil || body.Message == "" {
+	if err := json.Unmarshal(payload, &body); err != nil || (body.Message == "" && body.Code == "") {
 		excerpt := strings.TrimSpace(string(payload))
 		if len(excerpt) > 200 {
 			excerpt = excerpt[:200] + "..."
 		}
 		body = ErrorBody{
-			Message: fmt.Sprintf("the check service returned HTTP %d", status),
+			Message: fmt.Sprintf("the SlopCop service returned HTTP %d", status),
 			Remedy:  "Check the service URL, then retry.",
 		}
 		if excerpt != "" {

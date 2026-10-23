@@ -322,7 +322,6 @@ finding that is wrong, never for one that is merely hard to fix.
 | `--reason TEXT` | why the finding is wrong for this code, 1 to 2000 characters after trimming (required) |
 | `--format human\|json` | output format (default `human`) |
 | `--service URL` | the service, resolved as for a check |
-| `--root PATH` | accepted for parity with `check`; the request names only the finding |
 
 The CLI checks that the id is a UUID and the reason is in bounds before it
 sends anything, and signs in exactly as a check does. `human` says which
