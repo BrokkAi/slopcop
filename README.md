@@ -310,7 +310,9 @@ again picks up the same analysis.
 
 Service failures print the closed contract exactly: message, remedy, and any
 install or top-up URL, with control and bidirectional characters replaced so a
-response cannot drive the terminal. The codes, messages, and remedies are defined by the service in
+response cannot drive the terminal. A rate-limited (`429`) check or report adds
+how long the service asks to wait, from its `Retry-After` in seconds or as an
+HTTP date. The codes, messages, and remedies are defined by the service in
 `server/src/check.rs` of `BrokkAi/bifrost-service`; the CLI does not
 rewrite them. Most remedies name no client, so when `auth_required`,
 `auth_expired`, or `device_flow_disabled` says to sign in, the CLI adds the

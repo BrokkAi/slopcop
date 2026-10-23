@@ -129,7 +129,9 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 		return Response{}, 0, err
 	}
 	if status < 200 || status >= 300 {
-		return Response{}, retryAfter(header), decodeError(status, payload)
+		failure := decodeError(status, payload)
+		askToWait(failure, status, header)
+		return Response{}, retryAfter(header), failure
 	}
 
 	var decoded Response
@@ -191,11 +193,7 @@ func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportRespo
 	}
 	if status < 200 || status >= 300 {
 		failure := decodeError(status, payload)
-		if wait, ok := reportRetryAfter(status, header); ok {
-			// Reports are limited per hour, so the wait can be long: say it
-			// after whatever the service or a proxy said.
-			failure.Body.Remedy = strings.TrimSpace(failure.Body.Remedy + " The service asks to wait " + waitText(wait) + ".")
-		}
+		askToWait(failure, status, header)
 		if status == http.StatusNotFound && failure.Body.Code == "" {
 			// A 404 without the closed contract is a service from before
 			// reports, not an unknown finding.
@@ -220,19 +218,39 @@ func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportRespo
 	}
 }
 
-// reportRetryAfter is a rate-limited report's Retry-After, bounded to a day.
-func reportRetryAfter(status int, header http.Header) (time.Duration, bool) {
-	seconds, ok := retryAfterSeconds(header)
-	if status != http.StatusTooManyRequests || !ok || seconds == 0 {
-		return 0, false
+// maxRateLimitWait bounds the wait a rate-limited answer names.
+const maxRateLimitWait = 24 * time.Hour
+
+// askToWait says a rate-limited check's or report's Retry-After wait after
+// whatever the service or a proxy said. Reports are limited per hour, so the
+// wait can be long.
+func askToWait(failure *Error, status int, header http.Header) {
+	if status != http.StatusTooManyRequests {
+		return
 	}
-	return time.Duration(min(seconds, 24*60*60)) * time.Second, true
+	if wait, ok := retryAfterWait(header, maxRateLimitWait); ok && wait > 0 {
+		failure.Body.Remedy = strings.TrimSpace(failure.Body.Remedy + " The service asks to wait " + waitText(wait) + ".")
+	}
 }
 
-// retryAfterSeconds parses a Retry-After header given in seconds.
-func retryAfterSeconds(header http.Header) (int, bool) {
-	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	return seconds, err == nil && seconds >= 0
+// retryAfterWait reads a Retry-After header, given in seconds or as an HTTP
+// date (RFC 9110), as a wait of at most limit, in whole seconds. A date
+// already past is no wait. The seconds are bounded before they become a
+// duration, so a huge wait cannot overflow into a negative one.
+func retryAfterWait(header http.Header, limit time.Duration) (time.Duration, bool) {
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		return time.Duration(min(seconds, int64(limit/time.Second))) * time.Second, true
+	}
+	at, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	wait := min(max(time.Until(at), 0), limit)
+	return (wait + time.Second - 1).Truncate(time.Second), true
 }
 
 // waitText says a wait the way a person reads it: "45 seconds", "57 minutes",
@@ -267,15 +285,13 @@ func encodeJSON(body any) ([]byte, error) {
 	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
 }
 
-// retryAfter reads a Retry-After header in seconds, bounded, defaulting to
-// five seconds. The seconds are bounded before they become a duration, so a
-// huge wait cannot overflow into a negative one.
+// retryAfter is check_running's Retry-After wait, bounded, defaulting to
+// five seconds.
 func retryAfter(header http.Header) time.Duration {
-	seconds, ok := retryAfterSeconds(header)
-	if !ok {
-		return defaultRetryAfter
+	if wait, ok := retryAfterWait(header, maxRetryAfter); ok {
+		return wait
 	}
-	return time.Duration(min(seconds, int(maxRetryAfter/time.Second))) * time.Second
+	return defaultRetryAfter
 }
 
 // postJSON sends one JSON request and returns the status, headers and raw

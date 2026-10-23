@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 const reportedFinding = "6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b"
@@ -195,6 +196,12 @@ func TestReportFailuresKeepWhatTheServiceSaid(t *testing.T) {
 			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
 			wantCode: "rate_limited", wantRemedy: "Wait and retry. The service asks to wait 57 minutes."},
 		{name: "an absurd wait is bounded", status: http.StatusTooManyRequests, retryAfter: "99999999999",
+			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
+			wantCode: "rate_limited", wantRemedy: "Wait and retry. The service asks to wait 24 hours."},
+		{name: "an HTTP date", status: http.StatusTooManyRequests, retryAfter: time.Now().Add(2 * time.Hour).UTC().Format(http.TimeFormat),
+			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
+			wantCode: "rate_limited", wantRemedy: "Wait and retry. The service asks to wait 2 hours."},
+		{name: "a date far ahead is bounded", status: http.StatusTooManyRequests, retryAfter: "Fri, 31 Dec 9999 23:59:59 GMT",
 			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
 			wantCode: "rate_limited", wantRemedy: "Wait and retry. The service asks to wait 24 hours."},
 		{name: "a proxy's 429 keeps its excerpt", status: http.StatusTooManyRequests, retryAfter: "60",

@@ -112,7 +112,7 @@ the usual codes mean:
 | `finding_not_found` | `slopcop report` named a finding this login cannot see; copy the id from the latest check. |
 | `invalid_report` | The service rejected the report; give a reason of 1 to 2000 characters. |
 | `insufficient_credits` | The workspace is out of credits and its grace period has ended; only its free repository can be checked. Tell the human: a workspace owner adds credits at the printed link. Do not retry until the human says credits were added. |
-| `rate_limited` | Wait, then retry. |
+| `rate_limited` | Wait as long as the printed remedy says, then retry. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
 ## Act on the findings

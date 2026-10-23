@@ -206,6 +206,36 @@ func TestCheckPrintsTheTopUpLinkWhenCreditsRanOut(t *testing.T) {
 	}
 }
 
+// A rate-limited check says how long the service asks to wait, as a report
+// does, whether Retry-After is in seconds or an HTTP date.
+func TestCheckSaysHowLongARateLimitAsksToWait(t *testing.T) {
+	cases := map[string]string{
+		"45": "Wait and retry. The service asks to wait 45 seconds.",
+		time.Now().Add(2 * time.Hour).UTC().Format(http.TimeFormat): "Wait and retry. The service asks to wait 2 hours.",
+		time.Now().Add(-time.Hour).UTC().Format(http.TimeFormat):    "Wait and retry.",
+	}
+	for retryAfter, want := range cases {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", retryAfter)
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"code":"rate_limited","message":"This check was rate limited.","remedy":"Wait and retry.","retryable":true}`))
+		}))
+		client, err := New(server.URL, "secret", "", 0)
+		if err != nil {
+			t.Fatalf("New: %v", err)
+		}
+		_, err = client.Check(context.Background(), Request{})
+		server.Close()
+		var serviceError *Error
+		if !errors.As(err, &serviceError) {
+			t.Fatalf("Retry-After %q: expected *Error, got %v", retryAfter, err)
+		}
+		if serviceError.Body.Remedy != want {
+			t.Errorf("Retry-After %q: remedy = %q, want %q", retryAfter, serviceError.Body.Remedy, want)
+		}
+	}
+}
+
 func TestCheckUnexpectedResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -446,6 +476,19 @@ func TestRetryAfterBoundsAHugeWait(t *testing.T) {
 		if got := retryAfter(header); got != want {
 			t.Errorf("retryAfter(%q) = %v, want %v", value, got, want)
 		}
+	}
+	// An HTTP date is a wait until then, bounded the same way.
+	at := func(offset time.Duration) http.Header {
+		return http.Header{"Retry-After": {time.Now().Add(offset).UTC().Format(http.TimeFormat)}}
+	}
+	if got := retryAfter(at(-time.Hour)); got != 0 {
+		t.Errorf("a past date waits %v, want 0", got)
+	}
+	if got := retryAfter(at(30 * time.Second)); got < 29*time.Second || got > 30*time.Second {
+		t.Errorf("a date 30 seconds away waits %v", got)
+	}
+	if got := retryAfter(at(2 * time.Hour)); got != maxRetryAfter {
+		t.Errorf("a date 2 hours away waits %v, want %v", got, maxRetryAfter)
 	}
 }
 
