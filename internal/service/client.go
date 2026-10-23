@@ -266,13 +266,14 @@ func encodeJSON(body any) ([]byte, error) {
 }
 
 // retryAfter reads a Retry-After header in seconds, bounded, defaulting to
-// five seconds.
+// five seconds. The seconds are bounded before they become a duration, so a
+// huge wait cannot overflow into a negative one.
 func retryAfter(header http.Header) time.Duration {
 	seconds, ok := retryAfterSeconds(header)
 	if !ok {
 		return defaultRetryAfter
 	}
-	return min(time.Duration(seconds)*time.Second, maxRetryAfter)
+	return time.Duration(min(seconds, int(maxRetryAfter/time.Second))) * time.Second
 }
 
 // postJSON sends one JSON request and returns the status, headers and raw

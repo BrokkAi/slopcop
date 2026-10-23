@@ -425,3 +425,25 @@ func TestCheckDecodesIDsAndDismissedFindings(t *testing.T) {
 		})
 	}
 }
+
+func TestRetryAfterBoundsAHugeWait(t *testing.T) {
+	cases := map[string]time.Duration{
+		"":                    defaultRetryAfter,
+		"soon":                defaultRetryAfter,
+		"-1":                  defaultRetryAfter,
+		"0":                   0,
+		"7":                   7 * time.Second,
+		"3600":                maxRetryAfter,
+		"9999999999":          maxRetryAfter,
+		"9223372036854775807": maxRetryAfter,
+	}
+	for value, want := range cases {
+		header := http.Header{}
+		if value != "" {
+			header.Set("Retry-After", value)
+		}
+		if got := retryAfter(header); got != want {
+			t.Errorf("retryAfter(%q) = %v, want %v", value, got, want)
+		}
+	}
+}
