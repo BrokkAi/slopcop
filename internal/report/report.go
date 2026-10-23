@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
 	"unicode"
@@ -46,7 +47,35 @@ func hintFor(service string) string {
 	if service == "" {
 		return reportHint
 	}
-	return `False positive? slopcop --service ` + printable(service) + ` report <id> --reason "why"`
+	return `False positive? slopcop --service ` + shellWord(publicURL(service)) + ` report <id> --reason "why"`
+}
+
+// publicURL drops any credentials from a service URL, so the hint never
+// prints them to stdout or a CI log.
+func publicURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User == nil {
+		return raw
+	}
+	parsed.User = nil
+	return parsed.String()
+}
+
+// shellWord quotes s for a POSIX shell when it needs it, so the hint pastes
+// as one argument ("&" in a query string would otherwise end the command).
+func shellWord(s string) string {
+	s = printable(s)
+	safe := s != ""
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:@%+=,", r)) {
+			safe = false
+			break
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // dismissedJustification is the SARIF suppression's justification for a

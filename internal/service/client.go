@@ -190,13 +190,9 @@ func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportRespo
 	if status < 200 || status >= 300 {
 		failure := decodeError(status, payload)
 		if wait, ok := reportRetryAfter(status, header); ok {
-			// Reports are limited per hour, so the wait can be long: say it,
-			// in place of the contract's remedy or after a proxy's excerpt.
-			if failure.Body.Code != "" {
-				failure.Body.Remedy = fmt.Sprintf("Wait %s, then report again.", wait)
-			} else {
-				failure.Body.Remedy += fmt.Sprintf(" Wait %s first.", wait)
-			}
+			// Reports are limited per hour, so the wait can be long: say it
+			// after whatever the service or a proxy said.
+			failure.Body.Remedy = strings.TrimSpace(failure.Body.Remedy + " The service asks to wait " + waitText(wait) + ".")
 		}
 		if status == http.StatusNotFound && failure.Body.Code == "" {
 			// A 404 without the closed contract is a service from before
@@ -224,11 +220,36 @@ func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportRespo
 
 // reportRetryAfter is a rate-limited report's Retry-After, bounded to a day.
 func reportRetryAfter(status int, header http.Header) (time.Duration, bool) {
-	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	if status != http.StatusTooManyRequests || err != nil || seconds <= 0 {
+	seconds, ok := retryAfterSeconds(header)
+	if status != http.StatusTooManyRequests || !ok || seconds == 0 {
 		return 0, false
 	}
 	return time.Duration(min(seconds, 24*60*60)) * time.Second, true
+}
+
+// retryAfterSeconds parses a Retry-After header given in seconds.
+func retryAfterSeconds(header http.Header) (int, bool) {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	return seconds, err == nil && seconds >= 0
+}
+
+// waitText says a wait the way a person reads it: "45 seconds", "57 minutes",
+// "3 hours".
+func waitText(wait time.Duration) string {
+	unit := func(n int, one string) string {
+		if n == 1 {
+			return "1 " + one
+		}
+		return strconv.Itoa(n) + " " + one + "s"
+	}
+	switch {
+	case wait < 90*time.Second:
+		return unit(int(wait.Round(time.Second)/time.Second), "second")
+	case wait < 90*time.Minute:
+		return unit(int(wait.Round(time.Minute)/time.Minute), "minute")
+	default:
+		return unit(int(wait.Round(time.Hour)/time.Hour), "hour")
+	}
 }
 
 // encodeJSON encodes a request body as the service reads it, without HTML
@@ -247,8 +268,8 @@ func encodeJSON(body any) ([]byte, error) {
 // retryAfter reads a Retry-After header in seconds, bounded, defaulting to
 // five seconds.
 func retryAfter(header http.Header) time.Duration {
-	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	if err != nil || seconds < 0 {
+	seconds, ok := retryAfterSeconds(header)
+	if !ok {
 		return defaultRetryAfter
 	}
 	return min(time.Duration(seconds)*time.Second, maxRetryAfter)
@@ -303,18 +324,19 @@ func (c *Client) postPayload(ctx context.Context, path string, payload []byte) (
 
 func decodeError(status int, payload []byte) *Error {
 	var body ErrorBody
+	excerpt := strings.TrimSpace(string(payload))
+	if len(excerpt) > 200 {
+		excerpt = excerpt[:200] + "..."
+	}
+	fallback := "Check the service URL, then retry."
+	if excerpt != "" {
+		fallback = fmt.Sprintf("Check the service URL, then retry. Response: %s", excerpt)
+	}
 	if err := json.Unmarshal(payload, &body); err != nil || (body.Message == "" && body.Code == "") {
-		excerpt := strings.TrimSpace(string(payload))
-		if len(excerpt) > 200 {
-			excerpt = excerpt[:200] + "..."
-		}
-		body = ErrorBody{
-			Message: fmt.Sprintf("the SlopCop service returned HTTP %d", status),
-			Remedy:  "Check the service URL, then retry.",
-		}
-		if excerpt != "" {
-			body.Remedy = fmt.Sprintf("Check the service URL, then retry. Response: %s", excerpt)
-		}
+		body = ErrorBody{Message: fmt.Sprintf("the SlopCop service returned HTTP %d", status), Remedy: fallback}
+	} else if body.Remedy == "" && body.Message == "" {
+		// A code alone (from a proxy or an older service) still gets a way on.
+		body.Remedy = fallback
 	}
 	return &Error{StatusCode: status, Body: body}
 }

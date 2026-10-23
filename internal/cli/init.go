@@ -2,11 +2,11 @@ package cli
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"github.com/BrokkAi/slopcop/internal/service"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -16,6 +16,10 @@ import (
 
 	"github.com/BrokkAi/slopcop/skills"
 )
+
+// initFailed is init's exit code when a harness that had no skill could
+// not be given one.
+const initFailed = 2
 
 // skillName is the folder the skill occupies: <skills directory>/slopcop/SKILL.md.
 const skillName = "slopcop"
@@ -86,12 +90,12 @@ type skillInstall struct {
 	failed []failedSkill
 }
 
-// failedSkill is a skill directory init could not read or write. updating
-// says an earlier release's skill was there, which still works.
+// failedSkill is a skill directory init could not read or write. existing
+// says a skill was already there, which still works.
 type failedSkill struct {
 	dir      string
 	err      error
-	updating bool
+	existing bool
 }
 
 // installBundledSkill writes the bundled skill into every well-known skills
@@ -115,7 +119,8 @@ func installBundledSkill() (skillInstall, error) {
 		dir := filepath.Join(root.dir, skillName)
 		state, err := installSkillAt(root.dir, files)
 		if err != nil {
-			result.failed = append(result.failed, failedSkill{dir: dir, err: err, updating: state == skillUpdated})
+			_, statErr := os.Stat(filepath.Join(dir, skillFileName))
+			result.failed = append(result.failed, failedSkill{dir: dir, err: err, existing: statErr == nil})
 			continue
 		}
 		switch state {
@@ -199,25 +204,32 @@ func writeSkill(dir string, files []skillFile) error {
 }
 
 // writeFileAtomically replaces path through a temporary file and a rename,
-// so an interrupted write never leaves a truncated skill file.
+// so an interrupted write never leaves a truncated skill file. A symlink is
+// written through, never replaced, so a dotfile manager keeps its link (and a
+// read-only target fails, as it should). The file is created 0644 under the
+// umask, as os.WriteFile would.
 func writeFileAtomically(path string, data []byte) error {
-	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
+		return os.WriteFile(path, data, 0o644)
+	}
+	var suffix [8]byte
+	if _, err := rand.Read(suffix[:]); err != nil {
+		return err
+	}
+	temp := filepath.Join(filepath.Dir(path), "."+filepath.Base(path)+"."+hex.EncodeToString(suffix[:]))
+	file, err := os.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		return err
 	}
-	defer os.Remove(temp.Name())
-	if _, err := temp.Write(data); err != nil {
-		_ = temp.Close()
+	defer os.Remove(temp)
+	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
 		return err
 	}
-	if err := temp.Chmod(0o644); err != nil {
-		_ = temp.Close()
+	if err := file.Close(); err != nil {
 		return err
 	}
-	if err := temp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(temp.Name(), path)
+	return os.Rename(temp, path)
 }
 
 // skillFile is one file of the bundled skill, named relative to the skill
@@ -301,10 +313,10 @@ it. Pass --no-skill to leave the skill install and any update of it undone.`,
 			}
 			unusable := false
 			for _, skill := range result.failed {
-				if skill.updating {
-					// The earlier release's skill still works; say so and go on.
+				if skill.existing {
+					// The skill already there still works; say so and go on.
 					fmt.Fprintf(cmd.ErrOrStderr(),
-						"slopcop: could not update the slopcop skill at %s (%v); it may be partly updated, so run slopcop init again once it is writable\n",
+						"slopcop: could not check or update the slopcop skill at %s (%v); the skill there stays in use, so run slopcop init again once it is readable and writable\n",
 						skill.dir, skill.err)
 					continue
 				}
@@ -315,7 +327,7 @@ it. Pass --no-skill to leave the skill install and any update of it undone.`,
 				fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
 			}
 			if unusable {
-				return silentExit{service.ExitIncomplete}
+				return silentExit{initFailed}
 			}
 			return nil
 		},

@@ -180,10 +180,10 @@ const (
 	ReportAlreadyReported = "already_reported"
 )
 
-// ReportRequest is the POST /v1/report body.
 // MaxReportBodyBytes is the service's limit on a report's encoded body.
 const MaxReportBodyBytes = 8 << 10
 
+// ReportRequest is the POST /v1/report body.
 type ReportRequest struct {
 	// FindingID is the finding's UUID from a check response.
 	FindingID string `json:"findingId"`

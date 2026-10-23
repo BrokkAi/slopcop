@@ -158,4 +158,6 @@ slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
 already reported, and `2` on any failure, with the service's message and
 remedy on stderr. `--format json` prints the service's answer, whose `status`
 is `recorded` or `already_reported`. It signs in and finds the service the
-same way a check does.
+same way a check does; if you passed `--service` to the check, pass the same
+`--service` to the report, since a finding id exists only on the service that
+ran the check.

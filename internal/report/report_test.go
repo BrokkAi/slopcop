@@ -972,3 +972,18 @@ func TestFalsePositiveSaysWhatTheReportDid(t *testing.T) {
 		t.Error("a report has no sarif form")
 	}
 }
+
+// The hint pastes as one shell word and never prints credentials.
+func TestReportHintQuotesTheServiceAndDropsCredentials(t *testing.T) {
+	cases := map[string]string{
+		"":                                 `False positive? slopcop report <id> --reason "why"`,
+		"https://staging.slopcop.com":      `False positive? slopcop --service https://staging.slopcop.com report <id> --reason "why"`,
+		"https://host/api?tenant=a&x=1":    `False positive? slopcop --service 'https://host/api?tenant=a&x=1' report <id> --reason "why"`,
+		"https://user:token@host.example/": `False positive? slopcop --service https://host.example/ report <id> --reason "why"`,
+	}
+	for service, want := range cases {
+		if got := hintFor(service); got != want {
+			t.Errorf("hintFor(%q) = %s, want %s", service, got, want)
+		}
+	}
+}
