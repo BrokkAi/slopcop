@@ -37,9 +37,9 @@ finding fails the check; the service alone defaults to `warning`), `--policy
 PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--show-existing` also lists the findings that
-were already in the code. `--timeout DURATION` bounds the whole wait for a
-result (default 10 minutes) and `--verbose` prints the resolved request to
-stderr.
+were already in the code and those reported as false positives. `--timeout
+DURATION` bounds the whole wait for a result (default 10 minutes) and
+`--verbose` prints the resolved request to stderr.
 
 ## New, pre-existing, and dismissed findings
 

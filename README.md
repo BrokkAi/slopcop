@@ -21,7 +21,10 @@ of to a guess.
 There is no local analyzer and nothing to install per language: the CLI ships
 the change and prints what comes back, and it never decides on its own that
 there is nothing to check. The command is built for agents and one-shot CI: no
-prompts, one request, and the analyzer's exit contract.
+prompts, one request, and the analyzer's exit contract. When a finding is wrong
+for the code it flags, `slopcop report` records it as a false positive: the
+finding stops failing checks in that repository, and the team sees the report
+and its reason on the SlopCop dashboard.
 
 ## Install
 
@@ -110,9 +113,10 @@ harness is present, and names what it did:
 | `~/.claude/skills/slopcop/` | Claude Code, opencode |
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
 
-A skill that is already there is left alone, so local edits survive and running
-init again is safe. `slopcop init --no-skill` skips the install and any update
-of it.
+A skill an earlier release installed, untouched, is brought up to date, so an
+agent learns what the new release can do. A skill with local changes is left
+alone and init says so, so local edits survive and running init again is
+safe. `slopcop init --no-skill` skips the install and any update of it.
 
 ## Sign in
 
@@ -160,7 +164,7 @@ Flags:
 | `--base REV` | base commit or revision for the change |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
-| `--show-existing` | also list the findings that were already in the code |
+| `--show-existing` | also list the findings already in the code and those reported as false positives |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
@@ -183,7 +187,7 @@ Every check also runs the hosted catalog. Rules under
 `.slopcop/policies/**/*.rqlp` are added automatically unless
 `--no-policy-discovery` is set.
 
-### New and pre-existing findings
+### New, pre-existing, and dismissed findings
 
 A check fails only on findings the change introduced or touched: the service
 marks a finding new when it is in a file the change writes and its lines meet a
@@ -192,18 +196,48 @@ already in the code are counted, never fail the check, and are listed only with
 `--show-existing`. A change that introduces nothing exits `0`, however many
 findings the repository already holds.
 
+A finding reported as a false positive in the repository is dismissed: the
+service sends it with `new: false` and `dismissed: true`, counts it in
+`summary.dismissedFindings`, and never lets it decide the status. Like the
+pre-existing findings, dismissed ones are always counted and listed only with
+`--show-existing`.
+
 ### Output and exit codes
 
 The service answers structured data; the CLI renders it. `human` prints one
-block per new finding, then the pre-existing ones with `--show-existing`, a
-summary line such as `1 new finding across 1 file(s); 72 already in the code
-(--show-existing lists them) | Analysis complete`, and any omitted or
-incomplete checks. `json` prints `status`, `baseCommit`, `summary`
-(`newFindings` and `existingFindings` count the split), `findings` (each with
-`new`), `incomplete`, and `failure` when the analysis did not complete. `sarif`
-prints a SARIF 2.1.0 log whose results carry `baselineState` `new` or
-`unchanged`. `--format` and `--show-existing` only change the rendering, never
-the request, so the service answers the same check whichever is used.
+block per new finding, each with its `Id:` line, and after them one line on
+how to report a wrong one:
+
+```text
+New findings
+  [warning] bifrost.performance.regex-compile-in-loop: Regex compiled inside a loop
+    Location: server/domain.rs:703
+    Certainty: definite
+    Id: 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b
+
+False positive? slopcop report <id> --reason "why"
+
+1 new finding across 1 file(s); 72 already in the code; 2 reported as false positive (--show-existing lists them) | Analysis complete
+```
+
+With `--show-existing` the pre-existing findings follow under `Already in the
+code`, then the dismissed ones under `Reported as false positive`; neither
+ever fails the check. Any omitted or incomplete checks come after the summary
+line.
+
+`json` prints `status`, `checkId`, `baseCommit`, `summary` (`newFindings`,
+`existingFindings`, and `dismissedFindings` count the split), `findings` (each
+with `id`, `new`, and `dismissed`), `incomplete`, and `failure` when the
+analysis did not complete. `sarif` prints a SARIF 2.1.0 log whose run carries
+`properties.checkId` and whose results carry `properties.findingId` and
+`baselineState` `new` or `unchanged`; a dismissed finding's result has a
+`suppressions` entry of kind `external`, justified as `reported as false
+positive`. Against a service from before checks had ids, `checkId` and `id`
+are empty in `json`, absent in `sarif`, and `human` prints no `Id:` line or
+report hint.
+
+`--format` and `--show-existing` only change the rendering, never the
+request, so the service answers the same check whichever is used.
 
 | Exit | Meaning |
 | --- | --- |
@@ -239,13 +273,62 @@ again picks up the same analysis.
 Service failures print the closed contract exactly: message, remedy, and any
 install URL. The codes, messages, and remedies are defined by the service in
 `server/src/check.rs` of `BrokkAi/bifrost-service`; the CLI does not
-rewrite them. The remedies name no client, so when one says to sign in the CLI
-adds the `slopcop login` command after it. A failed request prints no report
-on stdout.
+rewrite them. Most remedies name no client, so when `auth_required`,
+`auth_expired`, or `device_flow_disabled` says to sign in, the CLI adds the
+`slopcop login` command after it. A failed request prints no report on
+stdout.
 
-While SlopCop is still indexing the repository, the service answers
-`indexing_in_progress` at once instead of running the check. The CLI prints it
-and exits `2` without waiting or retrying.
+A check never waits on SlopCop indexing the repository, and no longer needs
+the repository analyzed on SlopCop first. `repo_not_indexed` keeps its name,
+but now means this login cannot check the repository: a private one needs the
+SlopCop GitHub App installed with access to it, and a `slopcop login` that can
+use that installation. A service from before this change may still answer
+`indexing_in_progress`; the CLI prints it and exits `2` without waiting or
+retrying.
+
+## Report a false positive
+
+```console
+slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
+  --reason "parse() returns early on empty input (line 12), so the index on line 30 is never out of range"
+```
+
+`slopcop report` records a finding from a check as a false positive. The id is
+the finding's `Id:` line in `human`, its `id` in `json`, or its result's
+`properties.findingId` in `sarif`. A reported finding stops failing checks in
+its repository: later checks send it as dismissed, so an agent's check-and-fix
+loop can end on a finding that is wrong. Every report and its reason is
+visible to the team on the SlopCop dashboard, an owner can reinstate the
+finding, and false-positive rates are tracked per rule, so a report is for a
+finding that is wrong, never for one that is merely hard to fix.
+
+| Flag | Meaning |
+| --- | --- |
+| `--reason TEXT` | why the finding is wrong for this code, 1 to 2000 characters after trimming (required) |
+| `--format human\|json` | output format (default `human`) |
+| `--service URL` | the service, resolved as for a check |
+| `--root PATH` | accepted for parity with `check`; the request names only the finding |
+
+The CLI checks that the id is a UUID and the reason is in bounds before it
+sends anything, and signs in exactly as a check does. `human` says which
+finding and rule were recorded:
+
+```text
+slopcop: reported finding 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b (bifrost.correctness.index-out-of-range) as a false positive
+It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.
+```
+
+`json` prints the service's answer: `reportId`, `findingId`, `checkId`,
+`policyId`, `kind`, and `status`.
+
+| Exit | Meaning |
+| --- | --- |
+| `0` | The report was recorded (`recorded`), or the finding was already reported (`already_reported`) |
+| `2` | The finding was not reported: the id or reason was invalid, or the service refused or failed |
+
+Failures print the service's message and remedy verbatim, as for a check.
+`finding_not_found` means the id names no finding this login can see, and
+`invalid_report` that the service rejected the report body.
 
 ## API
 
@@ -262,11 +345,24 @@ The CLI calls `POST <service>/v1/check` with a bearer token:
 ```
 
 The service rejects any other field. The response carries `status`,
-`baseCommit`, `applied`, `summary`, `findings`, `incomplete`, and `failure`
-when the analysis did not complete. Against a service from before findings
-were marked `new`, the CLI treats every finding as new, as that service gated
-on all of them. Non-2xx responses carry `code`, `message`,
-`remedy`, `retryable`, and an optional `installUrl`.
+`checkId`, `baseCommit`, `applied`, `summary`, `findings` (each with `id`,
+`new`, and `dismissed`), `incomplete`, and `failure` when the analysis did not
+complete. Against a service from before findings were marked `new`, the CLI
+treats every finding as new, as that service gated on all of them; against
+one from before ids and dismissals, `checkId` and each `id` are empty and no
+finding is dismissed. Non-2xx responses carry `code`, `message`, `remedy`,
+`retryable`, and an optional `installUrl`.
+
+`slopcop report` calls `POST <service>/v1/report` with the same bearer token:
+
+```json
+{"findingId": "6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b", "kind": "false_positive", "reason": "<1-2000 characters>"}
+```
+
+A `200` answers `reportId`, `findingId`, `checkId`, `policyId`, `kind`, and
+`status` (`recorded` or `already_reported`). Failures use the same closed
+shape, with `auth_required`, `auth_expired`, `finding_not_found`,
+`invalid_report`, `rate_limited`, and `service_unavailable`.
 
 `slopcop login` uses the device flow: `POST /api/device` returns a
 `deviceCode`, `userCode`, `verificationUri`, `expiresIn`, and `interval`, and
@@ -308,8 +404,8 @@ Layout:
 | `cmd/slopcop` | process entry point |
 | `internal/cli` | cobra commands, selection, exit codes |
 | `internal/gitx` | remote canonicalization, base resolution, patch building |
-| `internal/service` | `/v1/check` client and the wire contract |
-| `internal/report` | human, JSON, and SARIF rendering from the structured response |
+| `internal/service` | `/v1/check` and `/v1/report` client and the wire contract |
+| `internal/report` | human, JSON, and SARIF rendering of checks, and of reports |
 | `internal/config` | stored service URL and token |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
