@@ -18,8 +18,6 @@ const (
 	// maxReasonLength bounds a report's reason, in characters after
 	// trimming, as the service does.
 	maxReasonLength = 2000
-	// maxReportBodyBytes is the service's limit on a report's encoded body.
-	maxReportBodyBytes = 8 << 10
 	// reportTimeout bounds one report request; a report is one row, not an
 	// analysis.
 	reportTimeout = time.Minute
@@ -28,10 +26,6 @@ const (
 type reportOptions struct {
 	reason string
 	format string
-	// root is accepted, hidden, so a report run with the same flags as the
-	// check it follows still works. The request names only the finding,
-	// whose check already names the repository.
-	root string
 }
 
 func newReportCommand(serviceURL *string, version string) *cobra.Command {
@@ -66,8 +60,6 @@ exit 2 means it was not.`,
 	flags := command.Flags()
 	flags.StringVar(&opts.reason, "reason", "", "why the finding is wrong for this code, 1 to 2000 characters (required; the team sees it)")
 	flags.StringVar(&opts.format, "format", "human", "output format: human or json")
-	flags.StringVar(&opts.root, "root", ".", "ignored: the report names only the finding")
-	_ = flags.MarkHidden("root")
 	return command
 }
 
@@ -91,11 +83,6 @@ func runReport(cmd *cobra.Command, opts *reportOptions, rawID, serviceFlag, vers
 		return err
 	}
 	request := service.ReportRequest{FindingID: findingID, Kind: service.ReportFalsePositive, Reason: reason}
-	if body, err := service.EncodeJSON(request); err != nil {
-		return fmt.Errorf("encode the report: %w", err)
-	} else if len(body) > maxReportBodyBytes {
-		return fmt.Errorf("the reason is %d bytes once encoded, over the service's %d; shorten it", len(body), maxReportBodyBytes)
-	}
 
 	cfg, err := config.Load()
 	if err != nil {

@@ -194,6 +194,12 @@ func TestReportFailuresKeepWhatTheServiceSaid(t *testing.T) {
 		{name: "rate limited", status: http.StatusTooManyRequests, retryAfter: "3400",
 			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
 			wantCode: "rate_limited", wantRemedy: "Wait 56m40s, then report again."},
+		{name: "an absurd wait is bounded", status: http.StatusTooManyRequests, retryAfter: "99999999999",
+			body:     `{"code":"rate_limited","message":"Too many reports.","remedy":"Wait and retry.","retryable":true}`,
+			wantCode: "rate_limited", wantRemedy: "Wait 24h0m0s, then report again."},
+		{name: "a proxy's 429 keeps its excerpt", status: http.StatusTooManyRequests, retryAfter: "60",
+			body:     `<html>slow down</html>`,
+			wantCode: "", wantRemedy: "Check the service URL, then retry. Response: <html>slow down</html> Wait 1m0s first."},
 		{name: "coded 404 without a message", status: http.StatusNotFound,
 			body:     `{"code":"finding_not_found","remedy":"Copy the id from the latest check."}`,
 			wantCode: "finding_not_found", wantRemedy: "Copy the id from the latest check."},
@@ -227,7 +233,7 @@ func TestReportFailuresKeepWhatTheServiceSaid(t *testing.T) {
 // "<", ">" and "&" travel as themselves, so a reason within 2000 characters
 // stays within the service's body limit.
 func TestEncodeJSONDoesNotEscapeHTML(t *testing.T) {
-	body, err := EncodeJSON(ReportRequest{Reason: "a < b && c > d"})
+	body, err := encodeJSON(ReportRequest{Reason: "a < b && c > d"})
 	if err != nil {
 		t.Fatal(err)
 	}

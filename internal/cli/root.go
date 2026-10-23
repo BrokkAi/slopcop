@@ -44,8 +44,7 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	root.SetContext(ctx)
-	command, err := root.ExecuteC()
+	command, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return 0
 	}
@@ -83,6 +82,8 @@ report, so a check never needs a Bifrost install.
 	}
 	root.SetVersionTemplate("slopcop version {{.Version}}\n")
 	root.PersistentFlags().StringVar(&serviceURL, "service", "", "SlopCop check service URL (also $SLOPCOP_SERVICE)")
+	// A bad flag or flag value is a usage error, for every subcommand.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	registerCheckFlags(root, opts)
 	root.AddCommand(
 		newCheckCommand(opts, &serviceURL, version),
@@ -166,10 +167,7 @@ func isUsageError(err error) bool {
 	if errors.As(err, &usage) {
 		return true
 	}
-	message := err.Error()
-	return strings.Contains(message, "unknown flag") ||
-		strings.Contains(message, "unknown shorthand flag") ||
-		strings.Contains(message, "unknown command") ||
-		strings.Contains(message, "unknown agent") ||
-		strings.Contains(message, "invalid argument")
+	// Flag errors arrive as usageError through the flag error function;
+	// cobra's own unknown-command error is the one left to recognise.
+	return strings.HasPrefix(err.Error(), "unknown command ")
 }

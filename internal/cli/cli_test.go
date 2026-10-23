@@ -846,8 +846,10 @@ func TestCheckExitCodesWithFindingIDsAndDismissals(t *testing.T) {
 				}
 				return
 			}
-			if stdout != tc.want {
-				t.Errorf("stdout = %q, want %q", stdout, tc.want)
+			// The check named --service, so the report hint names it too.
+			want := strings.ReplaceAll(tc.want, "slopcop report <id>", "slopcop --service "+server.URL+" report <id>")
+			if stdout != want {
+				t.Errorf("stdout = %q, want %q", stdout, want)
 			}
 		})
 	}

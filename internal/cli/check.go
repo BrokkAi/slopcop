@@ -119,7 +119,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last completed run: %v\n", err)
 	}
-	options := report.Options{ShowExisting: opts.showExisting}
+	options := report.Options{ShowExisting: opts.showExisting, Service: strings.TrimSpace(serviceFlag)}
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}

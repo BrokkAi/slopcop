@@ -84,7 +84,7 @@ func TestReportRecordsAFalsePositive(t *testing.T) {
 			// The id is accepted in either case and the reason is trimmed.
 			code, stdout, stderr := runCLI(t,
 				"report", strings.ToUpper(reportID), "--reason", "  "+reportWhy+"\n",
-				"--service", server.URL, "--format", tc.format, "--root", t.TempDir(),
+				"--service", server.URL, "--format", tc.format,
 			)
 			if code != 0 {
 				t.Fatalf("exit = %d, stderr = %s", code, stderr)
@@ -214,6 +214,8 @@ func TestReportValidatesBeforeSending(t *testing.T) {
 		{name: "no finding id", args: []string{"report", "--reason", reportWhy}, want: "report takes one finding id, got 0", usage: true},
 		{name: "two finding ids", args: []string{"report", reportID, reportID, "--reason", reportWhy}, want: "got 2 argument(s)", usage: true},
 		{name: "sarif", args: []string{"report", reportID, "--reason", reportWhy, "--format", "sarif"}, want: `unknown format "sarif" (expected human or json)`},
+		{name: "an id quoting a cobra error", args: []string{"report", "unknown command", "--reason", reportWhy}, want: "is not a finding id"},
+		{name: "a reason over the body limit once encoded", args: []string{"report", reportID, "--reason", strings.Repeat("\x01", 1400)}, want: "bytes once encoded, over the service's 8192"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -310,5 +312,14 @@ func TestReportResolvesTheTokenAndServiceLikeCheck(t *testing.T) {
 				t.Errorf("Authorization = %q, want %q", auth[0], tc.wantAuth)
 			}
 		})
+	}
+}
+
+// A flag error is a usage error, and the hint names the subcommand's help.
+func TestReportFlagErrorsPointAtItsHelp(t *testing.T) {
+	isolateUserConfig(t)
+	code, _, stderr := runCLI(t, "report", reportID, "--reason")
+	if code != 2 || !strings.Contains(stderr, "flag needs an argument") || !strings.Contains(stderr, "Run 'slopcop report --help' for usage.") {
+		t.Errorf("exit = %d, stderr = %q", code, stderr)
 	}
 }

@@ -176,15 +176,27 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 // comes back as *Error, so callers can print the closed code, message, and
 // remedy.
 func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportResponse, error) {
-	status, header, payload, err := c.postJSON(ctx, reportPath, request)
+	body, err := encodeJSON(request)
+	if err != nil {
+		return ReportResponse{}, fmt.Errorf("encode the report: %w", err)
+	}
+	if len(body) > MaxReportBodyBytes {
+		return ReportResponse{}, fmt.Errorf("the report is %d bytes once encoded, over the service's %d; shorten the reason", len(body), MaxReportBodyBytes)
+	}
+	status, header, payload, err := c.postPayload(ctx, reportPath, body)
 	if err != nil {
 		return ReportResponse{}, err
 	}
 	if status < 200 || status >= 300 {
 		failure := decodeError(status, payload)
-		if seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After"))); status == http.StatusTooManyRequests && err == nil && seconds > 0 {
-			// Reports are limited per hour, so the wait can be long: say it.
-			failure.Body.Remedy = fmt.Sprintf("Wait %s, then report again.", time.Duration(seconds)*time.Second)
+		if wait, ok := reportRetryAfter(status, header); ok {
+			// Reports are limited per hour, so the wait can be long: say it,
+			// in place of the contract's remedy or after a proxy's excerpt.
+			if failure.Body.Code != "" {
+				failure.Body.Remedy = fmt.Sprintf("Wait %s, then report again.", wait)
+			} else {
+				failure.Body.Remedy += fmt.Sprintf(" Wait %s first.", wait)
+			}
 		}
 		if status == http.StatusNotFound && failure.Body.Code == "" {
 			// A 404 without the closed contract is a service from before
@@ -210,10 +222,19 @@ func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportRespo
 	}
 }
 
-// EncodeJSON encodes a request body as the service reads it, without HTML
+// reportRetryAfter is a rate-limited report's Retry-After, bounded to a day.
+func reportRetryAfter(status int, header http.Header) (time.Duration, bool) {
+	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
+	if status != http.StatusTooManyRequests || err != nil || seconds <= 0 {
+		return 0, false
+	}
+	return time.Duration(min(seconds, 24*60*60)) * time.Second, true
+}
+
+// encodeJSON encodes a request body as the service reads it, without HTML
 // escaping: "<" in a reason is one byte, not six, so a reason within bounds
 // stays within the service's body limit.
-func EncodeJSON(body any) ([]byte, error) {
+func encodeJSON(body any) ([]byte, error) {
 	var buffer bytes.Buffer
 	encoder := json.NewEncoder(&buffer)
 	encoder.SetEscapeHTML(false)
@@ -236,10 +257,15 @@ func retryAfter(header http.Header) time.Duration {
 // postJSON sends one JSON request and returns the status, headers and raw
 // body.
 func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http.Header, []byte, error) {
-	payload, err := EncodeJSON(body)
+	payload, err := encodeJSON(body)
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("encode request: %w", err)
 	}
+	return c.postPayload(ctx, path, payload)
+}
+
+// postPayload posts an encoded JSON body.
+func (c *Client) postPayload(ctx context.Context, path string, payload []byte) (int, http.Header, []byte, error) {
 	httpRequest, err := http.NewRequestWithContext(
 		ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload),
 	)

@@ -30,11 +30,24 @@ type Options struct {
 	// the ones reported as false positives, after the new ones. They are
 	// counted either way.
 	ShowExisting bool
+	// Service is the --service the check was run with, if any, which the
+	// false-positive hint repeats.
+	Service string
 }
 
 // reportHint is the one line after the new findings that says how to report
 // one that is wrong.
 const reportHint = `False positive? slopcop report <id> --reason "why"`
+
+// hintFor is reportHint for a check run with an explicit --service, which the
+// report has to name too: a finding id exists only on the service that ran the
+// check.
+func hintFor(service string) string {
+	if service == "" {
+		return reportHint
+	}
+	return `False positive? slopcop --service ` + printable(service) + ` report <id> --reason "why"`
+}
 
 // dismissedJustification is the SARIF suppression's justification for a
 // finding reported as a false positive.
@@ -114,7 +127,7 @@ func human(response service.Response, options Options) string {
 	g := split(response.Findings)
 	writeBlock(&out, "New findings", g.fresh)
 	if reportable(g.fresh) {
-		out.WriteString(reportHint + "\n\n")
+		out.WriteString(hintFor(options.Service) + "\n\n")
 	}
 	if options.ShowExisting {
 		writeBlock(&out, "Already in the code (never fail the check)", g.existing)
@@ -383,9 +396,9 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifMessage    `json:"message"`
 	Locations []sarifLocation `json:"locations"`
-	// BaselineState is `new` for a finding the change touched and
-	// `unchanged` for one already in the code or reported as a false
-	// positive.
+	// BaselineState is `new` for a finding the change touched, a reported
+	// false positive included (its suppression says so), and `unchanged` for
+	// one already in the code.
 	BaselineState string `json:"baselineState"`
 	// Suppressions marks a finding reported as a false positive.
 	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
