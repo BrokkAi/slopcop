@@ -5,8 +5,8 @@ description: Check a working-tree change with the slopcop CLI, which sends the c
 
 # SlopCop
 
-`slopcop` checks a change through the hosted check API. The CLI sends one git
-patch from the base commit to the working tree; the service applies it, runs
+`slopcop` checks a change through the hosted check API. The CLI sends working-tree snapshots in a git
+packfile; the service imports them, runs
 the hosted policy catalog plus the repository rules selected, and returns the
 report. There is no local analyzer, and the CLI never decides on its own that
 there is nothing to check.
@@ -29,17 +29,38 @@ slopcop --root ../repo --base HEAD~1
 
 The base commit defaults to the merge base with the branch upstream, then the
 merge base with `origin/HEAD`, then `HEAD`. One request goes out per run, even
-when nothing changed: an empty patch is a real check, not a skip.
+when nothing changed: an unchanged snapshot is still checked.
+
+`--since` accepts a commit-ish or `merge-base` (BASE). It defaults to the last
+completed run on this branch, recorded in `refs/slopcop/last-run/<branch>`,
+else BASE. Completed runs, including findings and incomplete results, advance
+that ref; pending checks and failed requests do not. Detached HEAD has no
+marker. Use `--since merge-base` for CI branch comparisons. NOW and SINCE
+snapshots each have BASE as their only parent, omitting intermediate history;
+SINCE reuses BASE when their trees match. NOW includes untracked non-ignored
+files and selected ignored policy files. The real index stays untouched.
+Decoded packs above 16 MiB fail locally.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
-`--fail-on never|finding|note|warning|error` (default `finding`, so any new
-finding fails the check; the service alone defaults to `warning`), `--policy
-PATH` for a repository-relative `.rqlp` file (repeatable), and
+`--fail-on never|finding|info|note|warning|error` (default `finding`, which
+gates note or above; info is below note and appears in reports without failing
+`finding`, while `--fail-on info` gates it; the service alone defaults to
+`warning`), `--policy PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--show-existing` also lists the findings that
 were already in the code and those reported as false positives. `--timeout
 DURATION` bounds the whole wait for a result (default 10 minutes) and
 `--verbose` prints the resolved request to stderr.
+
+Without `--rule` or `--category` includes, the default rules run. Otherwise,
+the service runs the union of named rules and the default rules in named
+categories. Then `--skip-rule` and `--skip-category` remove rules by ID or
+category. Unknown names are an error. All four flags are repeatable; duplicate
+values are sent once. There is no pack selector. Explicit `--policy PATH`
+files and discovered repository policies continue to join the check.
+Do not skip a rule to get past a finding you believe is wrong: report it as a
+false positive instead (see below), so the team can see it and the rule can
+be fixed.
 
 ## New, pre-existing, and dismissed findings
 

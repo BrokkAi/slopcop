@@ -576,6 +576,8 @@ func baselineState(finding service.Finding) string {
 // its level for a result without a severity.
 func sarifLevel(severity string) string {
 	switch severity {
+	case "info":
+		return "note"
 	case "error", "warning", "note":
 		return severity
 	default:

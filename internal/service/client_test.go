@@ -43,11 +43,14 @@ func TestCheckSendsTheContractRequest(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	response, err := client.Check(context.Background(), Request{
-		RepoURL:    "https://github.com/BrokkAi/slopcop",
-		BaseCommit: "0123456789abcdef0123456789abcdef01234567",
-		Change:     "ZGlmZiAtLWdpdA==",
-		Selection:  &Selection{Files: []string{".slopcop/policies/x.rqlp"}},
-		FailOn:     "warning",
+		ContractVersion: "check-v2",
+		SinceCommit:     strings.Repeat("1", 40),
+		ChangeCommit:    strings.Repeat("2", 40),
+		RepoURL:         "https://github.com/BrokkAi/slopcop",
+		BaseCommit:      "0123456789abcdef0123456789abcdef01234567",
+		Change:          "UEFDSw==",
+		Selection:       &Selection{Files: []string{".slopcop/policies/x.rqlp"}},
+		FailOn:          "warning",
 	})
 	if err != nil {
 		t.Fatalf("Check: %v", err)
@@ -59,12 +62,12 @@ func TestCheckSendsTheContractRequest(t *testing.T) {
 		t.Fatalf("findings = %+v", response.Findings)
 	}
 
-	for _, key := range []string{"repoUrl", "baseCommit", "change", "selection", "failOn"} {
+	for _, key := range []string{"contractVersion", "sinceCommit", "changeCommit", "repoUrl", "baseCommit", "change", "selection", "failOn"} {
 		if _, ok := captured[key]; !ok {
 			t.Errorf("request is missing %q", key)
 		}
 	}
-	if len(captured) != 5 {
+	if len(captured) != 8 {
 		t.Errorf("request carries unexpected fields: %v", captured)
 	}
 }

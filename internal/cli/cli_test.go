@@ -125,9 +125,10 @@ func TestCleanTreeStillAsksTheService(t *testing.T) {
 	if captured == nil {
 		t.Fatal("service was not called for a clean tree")
 	}
-	if captured["change"] != "" {
-		t.Errorf("change = %v, want an empty patch", captured["change"])
+	if captured["sinceCommit"] != wantBase || captured["changeCommit"] == "" {
+		t.Errorf("missing snapshot commits: %v", captured)
 	}
+	decodeChange(t, repo, captured)
 	if captured["baseCommit"] != wantBase {
 		t.Errorf("baseCommit = %v, want %s", captured["baseCommit"], wantBase)
 	}
@@ -236,13 +237,7 @@ func TestCheckSendsTheChangeAndAppliesFailOn(t *testing.T) {
 	if request["baseCommit"] != wantBase {
 		t.Errorf("baseCommit = %v, want %s", request["baseCommit"], wantBase)
 	}
-	patch, err := base64.StdEncoding.DecodeString(request["change"].(string))
-	if err != nil {
-		t.Fatalf("change is not base64: %v", err)
-	}
-	if !strings.HasPrefix(string(patch), "diff --git ") {
-		t.Fatalf("change is not a git patch:\n%s", patch)
-	}
+	decodeChange(t, repo, request)
 	for _, key := range []string{"format", "headCommit", "branch"} {
 		if _, ok := request[key]; ok {
 			t.Errorf("request carries %q, which the service rejects", key)
@@ -747,7 +742,7 @@ func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
 		{"--format", "json"},
 		{"--format", "sarif", "--show-existing"},
 	} {
-		runCLI(t, append([]string{"check", "--root", repo, "--service", server.URL}, args...)...)
+		runCLI(t, append([]string{"check", "--root", repo, "--service", server.URL, "--since", "merge-base"}, args...)...)
 	}
 	if len(bodies) != 3 || bodies[0] != bodies[1] || bodies[1] != bodies[2] {
 		t.Fatalf("each format sends the same check, so the service reuses it: %q", bodies)
@@ -856,4 +851,26 @@ func TestCheckExitCodesWithFindingIDsAndDismissals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// decodeChange verifies the wire data is an importable pack and returns its
+// snapshot diff for content assertions.
+func decodeChange(t *testing.T, repo string, request map[string]any) string {
+	t.Helper()
+	pack, err := base64.StdEncoding.DecodeString(request["change"].(string))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(pack, []byte("PACK")) {
+		t.Fatal("change is not a packfile")
+	}
+	command := exec.Command("git", "-C", repo, "index-pack", "--stdin")
+	command.Stdin = bytes.NewReader(pack)
+	if out, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("index pack: %v: %s", err, out)
+	}
+	now := request["changeCommit"].(string)
+	runGit(t, repo, "cat-file", "-e", now+"^{commit}")
+	runGit(t, repo, "cat-file", "-e", request["sinceCommit"].(string)+"^{commit}")
+	return runGit(t, repo, "diff", "--binary", request["baseCommit"].(string), now)
 }
