@@ -236,6 +236,13 @@ False positive? slopcop report <id> --reason "why"
 1 new finding across 1 file(s); 72 already in the code; 2 reported as false positive (--show-existing lists them) | Analysis complete
 ```
 
+A finding id exists only on the service that ran the check, so when the check
+named its service with `--service` or `$SLOPCOP_SERVICE`, that line names it
+too, as `slopcop --service URL report <id> …` with any credentials dropped
+from the URL: the copied command still works where the variable is not set.
+A service stored by `slopcop login` is not named, since a report finds it on
+its own.
+
 With `--show-existing` the pre-existing findings follow under `Already in the
 code`, then the dismissed ones under `Reported as false positive`; neither
 ever fails the check. Any omitted or incomplete checks come after the summary

@@ -119,7 +119,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last completed run: %v\n", err)
 	}
-	options := report.Options{ShowExisting: opts.showExisting, Service: strings.TrimSpace(serviceFlag)}
+	options := report.Options{ShowExisting: opts.showExisting, Service: hintService(serviceFlag)}
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}
@@ -304,6 +304,16 @@ func resolveServiceURL(cfg config.Config, flagValue string) string {
 		}
 	}
 	return config.DefaultServiceURL
+}
+
+// hintService is the service the report hint names: --service, else
+// $SLOPCOP_SERVICE, since a copied command may run without either. The one
+// slopcop login stored needs no naming: a report finds it on its own.
+func hintService(flagValue string) string {
+	if value := strings.TrimSpace(flagValue); value != "" {
+		return value
+	}
+	return strings.TrimSpace(os.Getenv("SLOPCOP_SERVICE"))
 }
 
 func resolveToken(cfg config.Config) string {

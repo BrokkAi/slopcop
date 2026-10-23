@@ -31,8 +31,9 @@ type Options struct {
 	// the ones reported as false positives, after the new ones. They are
 	// counted either way.
 	ShowExisting bool
-	// Service is the --service the check was run with, if any, which the
-	// false-positive hint repeats.
+	// Service is the service the check named with --service or
+	// $SLOPCOP_SERVICE, if any, which the false-positive hint repeats as
+	// --service. The one login stored is left out: a report finds it too.
 	Service string
 }
 
@@ -40,9 +41,10 @@ type Options struct {
 // one that is wrong.
 const reportHint = `False positive? slopcop report <id> --reason "why"`
 
-// hintFor is reportHint for a check run with an explicit --service, which the
-// report has to name too: a finding id exists only on the service that ran the
-// check.
+// hintFor is reportHint for a check run against a named service (--service or
+// $SLOPCOP_SERVICE), which the report has to name too: a finding id exists
+// only on the service that ran the check, and a copied command may run
+// without that variable.
 func hintFor(service string) string {
 	if service == "" {
 		return reportHint

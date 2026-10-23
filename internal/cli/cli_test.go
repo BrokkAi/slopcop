@@ -855,6 +855,45 @@ func TestCheckExitCodesWithFindingIDsAndDismissals(t *testing.T) {
 	}
 }
 
+// The report hint names a service from --service or $SLOPCOP_SERVICE, which a
+// copied command may run without, but not the one login stored.
+func TestReportHintNamesAServiceTheCheckWasGiven(t *testing.T) {
+	for _, from := range []string{"flag", "environment", "login"} {
+		t.Run(from, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(checkAnswer("findings",
+					`{"files": 1, "findings": 1, "newFindings": 1, "existingFindings": 0, "dismissedFindings": 0, "incompletePolicies": 0, "failOn": "finding"}`,
+					newFinding)))
+			}))
+			defer server.Close()
+			args := []string{"check", "--root", repo}
+			hint := `False positive? slopcop --service ` + server.URL + ` report <id> --reason "why"`
+			switch from {
+			case "flag":
+				args = append(args, "--service", server.URL)
+			case "environment":
+				t.Setenv("SLOPCOP_SERVICE", server.URL)
+			case "login":
+				if _, err := config.Save(config.Config{ServiceURL: server.URL, Token: "stored"}); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+				hint = `False positive? slopcop report <id> --reason "why"`
+			}
+			code, stdout, stderr := runCLI(t, args...)
+			if code != 1 {
+				t.Fatalf("exit = %d, stderr = %s", code, stderr)
+			}
+			if !strings.Contains(stdout, hint+"\n") {
+				t.Errorf("stdout = %q, want the hint %q", stdout, hint)
+			}
+		})
+	}
+}
+
 // decodeChange verifies the wire data is an importable pack and returns its
 // snapshot diff for content assertions.
 func decodeChange(t *testing.T, repo string, request map[string]any) string {

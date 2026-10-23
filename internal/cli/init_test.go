@@ -298,7 +298,7 @@ func ptr(value string) *string { return &value }
 // skill fails TestSkillChangesUpdateThePin until the pin moves, which is the
 // moment to add the replaced digest to skills.Previous if that copy shipped,
 // so untouched installs of it still update.
-const pinnedSkillDigest = "7e35062a99e43b970a66423cfad35a96474ef7dbc3ef19ab1c525507b1ffb62b"
+const pinnedSkillDigest = "2df20bf4b3ad554fd3f81211a40ac1fd6610bffb5751d8f788f3139a7674305b"
 
 func TestSkillChangesUpdateThePin(t *testing.T) {
 	sum := sha256.Sum256([]byte(readEmbeddedSkill(t, "SKILL.md")))
