@@ -81,9 +81,9 @@ func remedyError(err error) error {
 // getting access, and appending a login command sends an already-signed-in
 // user back through the login flow for a problem login cannot fix.
 var loginHints = map[string]string{
-	"auth_required":        "Sign in with `slopcop login`.",
-	"auth_expired":         "Sign in with `slopcop login`.",
-	"device_flow_disabled": "Sign in with `slopcop login --token <token>`.",
+	service.CodeAuthRequired:       "Sign in with `slopcop login`.",
+	service.CodeAuthExpired:        "Sign in with `slopcop login`.",
+	service.CodeDeviceFlowDisabled: "Sign in with `slopcop login --token <token>`.",
 }
 
 // remedyText is the service's message and remedy, verbatim, plus the slopcop

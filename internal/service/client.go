@@ -17,10 +17,9 @@ import (
 
 const (
 	checkPath        = "/v1/check"
+	reportPath       = "/v1/report"
 	maxResponseBytes = 32 * 1024 * 1024
 	defaultTimeout   = 10 * time.Minute
-	// checkRunning is the retryable answer to a check that is still running.
-	checkRunning = "check_running"
 	// defaultRetryAfter is the wait when check_running names none, and
 	// maxRetryAfter bounds a wait the service names.
 	defaultRetryAfter = 5 * time.Second
@@ -102,7 +101,7 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 		case ctx.Err() != nil:
 			// The wait ran out mid-request; the service keeps the check.
 			return Response{}, pending
-		case !errors.As(err, &serviceError) || serviceError.Body.Code != checkRunning:
+		case !errors.As(err, &serviceError) || serviceError.Body.Code != CodeCheckRunning:
 			return Response{}, err
 		}
 		pending.RetryAfter = int((retryAfter + time.Second - 1) / time.Second)
@@ -151,20 +150,60 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 		decoded.Summary.IncompletePolicyIDs = []string{}
 	}
 	// A service from before new findings were marked gates on every finding,
-	// so every finding is one the check fails on.
+	// so every finding is one the check fails on. Such a service dismisses
+	// none, but a dismissed finding is never made new.
 	var marked struct {
 		Summary struct {
 			NewFindings *int `json:"newFindings"`
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal(payload, &marked); err == nil && marked.Summary.NewFindings == nil {
+		fresh := 0
 		for index := range decoded.Findings {
-			decoded.Findings[index].New = true
+			if !decoded.Findings[index].Dismissed {
+				decoded.Findings[index].New = true
+				fresh++
+			}
 		}
-		decoded.Summary.NewFindings = len(decoded.Findings)
+		decoded.Summary.NewFindings = fresh
 		decoded.Summary.ExistingFindings = 0
 	}
 	return decoded, 0, nil
+}
+
+// Report posts one false-positive report. The service answers 200 for a
+// report it recorded and for a finding already reported; any other answer
+// comes back as *Error, so callers can print the closed code, message, and
+// remedy.
+func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportResponse, error) {
+	status, _, payload, err := c.postJSON(ctx, reportPath, request)
+	if err != nil {
+		return ReportResponse{}, err
+	}
+	if status < 200 || status >= 300 {
+		failure := decodeError(status, payload)
+		if status == http.StatusNotFound && failure.Body.Code == "" {
+			// A 404 without the closed contract is a service from before
+			// reports, not an unknown finding.
+			failure.Body = ErrorBody{
+				Message: "This service does not accept false-positive reports (HTTP 404).",
+				Remedy:  "Check the service URL. If it is right, fix the code or ask a human instead: the finding still fails the check.",
+			}
+		}
+		return ReportResponse{}, failure
+	}
+	var decoded ReportResponse
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return ReportResponse{}, fmt.Errorf("decode report response: %w", err)
+	}
+	switch decoded.Status {
+	case ReportRecorded, ReportAlreadyReported:
+		return decoded, nil
+	case "":
+		return ReportResponse{}, fmt.Errorf("the report service returned no status")
+	default:
+		return ReportResponse{}, fmt.Errorf("the report service returned an unknown status %q", decoded.Status)
+	}
 }
 
 // retryAfter reads a Retry-After header in seconds, bounded, defaulting to

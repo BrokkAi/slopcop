@@ -44,9 +44,12 @@ func sampleFindings() []service.Finding {
 
 // response builds a completed check over a change touching three files.
 func response(status, failOn string, findings []service.Finding) service.Response {
-	fresh := 0
+	fresh, dismissedCount := 0, 0
 	for _, finding := range findings {
-		if finding.New {
+		switch {
+		case finding.Dismissed:
+			dismissedCount++
+		case finding.New:
 			fresh++
 		}
 	}
@@ -58,7 +61,8 @@ func response(status, failOn string, findings []service.Finding) service.Respons
 			Files:               3,
 			Findings:            len(findings),
 			NewFindings:         fresh,
-			ExistingFindings:    len(findings) - fresh,
+			ExistingFindings:    len(findings) - fresh - dismissedCount,
+			DismissedFindings:   dismissedCount,
 			IncompletePolicyIDs: []string{},
 			FailOn:              failOn,
 		},
@@ -272,7 +276,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if want := []string{"baseCommit", "findings", "incomplete", "inconclusiveElsewhere", "status", "summary"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"baseCommit", "checkId", "findings", "incomplete", "inconclusiveElsewhere", "status", "summary"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("keys = %v, want %v", keys, want)
 	}
 	wantSummary := map[string]any{
@@ -280,6 +284,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		"findings":              float64(3),
 		"newFindings":           float64(3),
 		"existingFindings":      float64(0),
+		"dismissedFindings":     float64(0),
 		"incompletePolicies":    float64(0),
 		"incompletePolicyIds":   []any{},
 		"inconclusiveElsewhere": float64(0),
@@ -289,7 +294,9 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 	if !reflect.DeepEqual(document["summary"], wantSummary) {
 		t.Errorf("summary = %v", document["summary"])
 	}
+	// A service from before findings had ids sends none, so the id is empty.
 	wantFinding := map[string]any{
+		"id":        "",
 		"policyId":  "bifrost.maintainability.complexity",
 		"severity":  "note",
 		"certainty": "definite",
@@ -298,6 +305,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		"endLine":   float64(1),
 		"title":     "bifrost.maintainability.complexity title",
 		"new":       true,
+		"dismissed": false,
 	}
 	if findings := document["findings"].([]any); len(findings) != 3 || !reflect.DeepEqual(findings[2], wantFinding) {
 		t.Errorf("findings = %v", document["findings"])
@@ -616,5 +624,288 @@ func TestInconclusiveChecksOutsideTheChangeAreListedNotFailed(t *testing.T) {
 func TestUnknownFormat(t *testing.T) {
 	if err := Write(&bytes.Buffer{}, response(service.StatusClean, "finding", nil), "xml", Options{}); err == nil {
 		t.Fatal("expected an error for an unknown format")
+	}
+}
+
+const (
+	checkID     = "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091"
+	freshID     = "6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b"
+	existingID  = "9e8d7c6b-5a49-4382-a716-151413121110"
+	xssID       = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee"
+	unwrapID    = "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d"
+	hintLine    = `False positive? slopcop report <id> --reason "why"` + "\n"
+	dismissedAs = "reported as false positive"
+)
+
+func identified(found service.Finding, id string) service.Finding {
+	found.ID = id
+	return found
+}
+
+// dismissed is a finding reported as a false positive, as the service sends
+// it: not new, and dismissed.
+func dismissed(path string, at int, severity, policy, id string) service.Finding {
+	found := identified(existing(path, at, severity, policy), id)
+	found.Dismissed = true
+	return found
+}
+
+// reported is a check from a service that names checks and findings: one new
+// finding, one already in the code, and two reported as false positives.
+func reported() service.Response {
+	r := response(service.StatusFindings, "finding", []service.Finding{
+		dismissed("server/domain.rs", 40, "warning", "bifrost.security.xss", xssID),
+		identified(finding("server/domain.rs", 703, "warning", "bifrost.performance.regex-compile-in-loop"), freshID),
+		identified(existing("server/main.rs", 4, "note", "acme.length"), existingID),
+		dismissed("server/main.rs", 12, "error", "acme.unwrap", unwrapID),
+	})
+	r.CheckID = checkID
+	return r
+}
+
+func TestHumanShowsIDsAndHowToReport(t *testing.T) {
+	newBlock := "New findings\n" +
+		"  [warning] bifrost.performance.regex-compile-in-loop: bifrost.performance.regex-compile-in-loop title\n" +
+		"    Location: server/domain.rs:703\n" +
+		"    Certainty: definite\n" +
+		"    Id: " + freshID + "\n" +
+		"\n" +
+		hintLine +
+		"\n"
+	cases := []struct {
+		name    string
+		options Options
+		want    string
+	}{
+		{
+			name: "default",
+			want: newBlock +
+				"1 new finding across 1 file(s); 1 already in the code; 2 reported as false positive (--show-existing lists them) | Analysis complete\n",
+		},
+		{
+			name:    "show existing",
+			options: Options{ShowExisting: true},
+			want: newBlock +
+				"Already in the code (never fail the check)\n" +
+				"  [note] acme.length: acme.length title\n" +
+				"    Location: server/main.rs:4\n" +
+				"    Certainty: definite\n" +
+				"    Id: " + existingID + "\n" +
+				"\n" +
+				"Reported as false positive (never fail the check)\n" +
+				"  [warning] bifrost.security.xss: bifrost.security.xss title\n" +
+				"    Location: server/domain.rs:40\n" +
+				"    Certainty: definite\n" +
+				"    Id: " + xssID + "\n" +
+				"\n" +
+				"  [error] acme.unwrap: acme.unwrap title\n" +
+				"    Location: server/main.rs:12\n" +
+				"    Certainty: definite\n" +
+				"    Id: " + unwrapID + "\n" +
+				"\n" +
+				"1 new finding across 1 file(s); 1 already in the code; 2 reported as false positive | Analysis complete\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := renderWith(t, reported(), FormatHuman, tc.options); got != tc.want {
+				t.Errorf("human =\n%s\nwant\n%s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHumanSummaryCountsDismissedFindings(t *testing.T) {
+	cases := []struct {
+		name     string
+		findings []service.Finding
+		options  Options
+		want     string
+	}{
+		{
+			name:     "only dismissed",
+			findings: []service.Finding{dismissed("a.go", 1, "error", "p", xssID)},
+			want:     "No new findings; 1 reported as false positive (--show-existing lists them) | Analysis complete\n",
+		},
+		{
+			name: "existing and dismissed",
+			findings: []service.Finding{
+				identified(existing("a.go", 1, "error", "p"), existingID),
+				dismissed("a.go", 2, "error", "q", xssID),
+				dismissed("a.go", 3, "error", "q", unwrapID),
+			},
+			want: "No new findings; 1 already in the code; 2 reported as false positive (--show-existing lists them) | Analysis complete\n",
+		},
+		{
+			name: "only existing, as before dismissals",
+			findings: []service.Finding{
+				identified(existing("a.go", 1, "error", "p"), existingID),
+			},
+			want: "No new findings; 1 already in the code (--show-existing lists them) | Analysis complete\n",
+		},
+		{
+			name:     "dismissed and listed",
+			findings: []service.Finding{dismissed("a.go", 1, "error", "p", xssID)},
+			options:  Options{ShowExisting: true},
+			want: "Reported as false positive (never fail the check)\n" +
+				"  [error] p: p title\n" +
+				"    Location: a.go:1\n" +
+				"    Certainty: definite\n" +
+				"    Id: " + xssID + "\n" +
+				"\n" +
+				"No new findings; 1 reported as false positive | Analysis complete\n",
+		},
+		{
+			// A dismissed finding is never new, even if a service says so.
+			name: "dismissed and marked new",
+			findings: []service.Finding{func() service.Finding {
+				found := dismissed("a.go", 1, "error", "p", xssID)
+				found.New = true
+				return found
+			}()},
+			want: "No new findings; 1 reported as false positive (--show-existing lists them) | Analysis complete\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderWith(t, response(service.StatusClean, "finding", tc.findings), FormatHuman, tc.options)
+			if got != tc.want {
+				t.Errorf("human = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestHumanHintNeedsANewFindingWithAnID(t *testing.T) {
+	cases := []struct {
+		name     string
+		findings []service.Finding
+		options  Options
+		want     bool
+	}{
+		{"a new finding with an id", []service.Finding{identified(finding("a.go", 1, "warning", "p"), freshID)}, Options{}, true},
+		{"a service from before ids", []service.Finding{finding("a.go", 1, "warning", "p")}, Options{}, false},
+		{"no new findings", []service.Finding{identified(existing("a.go", 1, "warning", "p"), existingID)}, Options{ShowExisting: true}, false},
+		{"only dismissed", []service.Finding{dismissed("a.go", 1, "warning", "p", xssID)}, Options{ShowExisting: true}, false},
+		{"clean", []service.Finding{}, Options{}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := renderWith(t, response(service.StatusFindings, "finding", tc.findings), FormatHuman, tc.options)
+			if strings.Contains(got, "False positive?") != tc.want {
+				t.Errorf("hint shown = %v, want %v:\n%s", !tc.want, tc.want, got)
+			}
+			if tc.want && strings.Count(got, hintLine) != 1 {
+				t.Errorf("want exactly one hint line:\n%s", got)
+			}
+		})
+	}
+}
+
+func TestJSONCarriesIDsAndDismissedFindings(t *testing.T) {
+	cases := []struct {
+		name    string
+		options Options
+		want    [][2]any // id and dismissed of each listed finding, in order
+	}{
+		{"default", Options{}, [][2]any{{freshID, false}}},
+		{"show existing", Options{ShowExisting: true}, [][2]any{
+			{freshID, false}, {existingID, false}, {xssID, true}, {unwrapID, true},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var document map[string]any
+			if err := json.Unmarshal([]byte(renderWith(t, reported(), FormatJSON, tc.options)), &document); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if document["checkId"] != checkID {
+				t.Errorf("checkId = %v", document["checkId"])
+			}
+			summary := document["summary"].(map[string]any)
+			if summary["findings"] != float64(4) || summary["newFindings"] != float64(1) ||
+				summary["existingFindings"] != float64(1) || summary["dismissedFindings"] != float64(2) {
+				t.Errorf("the counts are always present: %v", summary)
+			}
+			var got [][2]any
+			for _, raw := range document["findings"].([]any) {
+				found := raw.(map[string]any)
+				got = append(got, [2]any{found["id"], found["dismissed"]})
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("findings = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
+	type result struct {
+		findingID   any
+		state       any
+		suppression any
+	}
+	suppressed := []any{map[string]any{"kind": "external", "justification": dismissedAs}}
+	cases := []struct {
+		name        string
+		response    service.Response
+		options     Options
+		wantCheckID any
+		want        []result
+	}{
+		{
+			name:        "default",
+			response:    reported(),
+			wantCheckID: checkID,
+			want:        []result{{freshID, "new", nil}},
+		},
+		{
+			name:        "show existing",
+			response:    reported(),
+			options:     Options{ShowExisting: true},
+			wantCheckID: checkID,
+			want: []result{
+				{freshID, "new", nil},
+				{existingID, "unchanged", nil},
+				{xssID, "unchanged", suppressed},
+				{unwrapID, "unchanged", suppressed},
+			},
+		},
+		{
+			name:     "a service from before ids",
+			response: mixed(),
+			options:  Options{ShowExisting: true},
+			want: []result{
+				{nil, "new", nil}, {nil, "unchanged", nil}, {nil, "unchanged", nil}, {nil, "unchanged", nil},
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var log map[string]any
+			if err := json.Unmarshal([]byte(renderWith(t, tc.response, FormatSARIF, tc.options)), &log); err != nil {
+				t.Fatalf("sarif: %v", err)
+			}
+			run := log["runs"].([]any)[0].(map[string]any)
+			properties := run["properties"].(map[string]any)
+			if properties["checkId"] != tc.wantCheckID {
+				t.Errorf("run checkId = %v, want %v", properties["checkId"], tc.wantCheckID)
+			}
+			if properties["slopcop.dismissedFindings"] != float64(tc.response.Summary.DismissedFindings) {
+				t.Errorf("run properties = %v", properties)
+			}
+			var got []result
+			for _, raw := range run["results"].([]any) {
+				entry := raw.(map[string]any)
+				var id any
+				if bag, ok := entry["properties"].(map[string]any); ok {
+					id = bag["findingId"]
+				}
+				got = append(got, result{id, entry["baselineState"], entry["suppressions"]})
+			}
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("results = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

@@ -5,6 +5,35 @@ import (
 	"strings"
 )
 
+// The closed failure codes the CLI acts on or its skill and README name,
+// mirrored from server/src/check.rs. Whatever the code, the CLI prints the
+// service's message and remedy verbatim.
+const (
+	CodeAuthRequired       = "auth_required"
+	CodeAuthExpired        = "auth_expired"
+	CodeDeviceFlowDisabled = "device_flow_disabled"
+	// CodeRepoNotIndexed keeps its name for contract stability. It now means
+	// this login cannot check the repository: a private one needs the
+	// SlopCop GitHub App and a `slopcop login` that can use it.
+	CodeRepoNotIndexed = "repo_not_indexed"
+	CodeNoAccess       = "no_access"
+	// CodeIndexingInProgress comes only from a service from before checks
+	// stopped waiting on indexing. It is printed like any other failure.
+	CodeIndexingInProgress = "indexing_in_progress"
+	CodeBaseNotFound       = "base_not_found"
+	CodePayloadTooLarge    = "payload_too_large"
+	CodeRateLimited        = "rate_limited"
+	CodeServiceUnavailable = "service_unavailable"
+	// CodeCheckRunning is the retryable answer to a check still running.
+	CodeCheckRunning = "check_running"
+	// CodeFindingNotFound answers a report of a finding the service does not
+	// know, or one this login may not see.
+	CodeFindingNotFound = "finding_not_found"
+	// CodeInvalidReport answers a malformed report: an unknown kind, or an
+	// empty or oversized reason.
+	CodeInvalidReport = "invalid_report"
+)
+
 // ErrorBody is the closed failure contract returned by the service.
 type ErrorBody struct {
 	Code       string `json:"code"`
