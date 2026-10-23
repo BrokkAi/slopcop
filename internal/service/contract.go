@@ -2,7 +2,11 @@
 // control plane in server/src/check.rs.
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/BrokkAi/slopcop/internal/terminal"
+)
 
 // Check statuses and their exit codes, mirrored from CheckStatus. Pending is
 // the CLI's own: the service answered check_running until --timeout ran out.
@@ -62,7 +66,10 @@ func (s Selection) IsEmpty() bool {
 // Response is the successful POST /v1/check body, mirrored from
 // CheckResponse. The service answers structure only; the client renders it.
 type Response struct {
-	Status     string             `json:"status"`
+	Status string `json:"status"`
+	// CheckID is the service's id for this check, a UUID. A service from
+	// before checks had ids sends none, and it is empty.
+	CheckID    string             `json:"checkId"`
 	BaseCommit string             `json:"baseCommit"`
 	Applied    bool               `json:"applied"`
 	Summary    Summary            `json:"summary"`
@@ -78,14 +85,19 @@ type Response struct {
 // Summary mirrors CheckSummary.
 type Summary struct {
 	Files int `json:"files"`
-	// Findings counts every finding: NewFindings plus ExistingFindings.
+	// Findings counts every finding: NewFindings, ExistingFindings, and
+	// DismissedFindings.
 	Findings int `json:"findings"`
 	// NewFindings counts the findings the change introduced or touched. Only
 	// these decide the status.
 	NewFindings int `json:"newFindings"`
 	// ExistingFindings counts the findings that were already in the code.
 	// They never change the status.
-	ExistingFindings   int `json:"existingFindings"`
+	ExistingFindings int `json:"existingFindings"`
+	// DismissedFindings counts the findings reported as false positives in
+	// this repository. They are neither new nor existing, and never change
+	// the status.
+	DismissedFindings  int `json:"dismissedFindings"`
 	IncompletePolicies int `json:"incompletePolicies"`
 	// IncompletePolicyIDs names at most 50 incomplete checks;
 	// IncompletePolicies counts them all.
@@ -109,6 +121,9 @@ type IncompletePolicy struct {
 // Finding mirrors CheckFinding. Text fields come from the analyzed repository
 // and are hostile.
 type Finding struct {
+	// ID is the finding's UUID, which `slopcop report` names. A service from
+	// before findings had ids sends none, and it is empty.
+	ID        string `json:"id"`
 	PolicyID  string `json:"policyId"`
 	Severity  string `json:"severity"`
 	Certainty string `json:"certainty"`
@@ -118,6 +133,10 @@ type Finding struct {
 	Title     string `json:"title"`
 	// New says the change introduced or touched the finding.
 	New bool `json:"new"`
+	// Dismissed says the finding was reported as a false positive in this
+	// repository. A dismissed finding arrives with New false and never
+	// changes the status.
+	Dismissed bool `json:"dismissed"`
 }
 
 // ExitCode maps the response status to the analyzer exit contract.
@@ -148,9 +167,47 @@ const (
 	pendingRemedy  = "Run the same check again to wait for its result."
 )
 
-func (p *Pending) Error() string { return p.Message }
+func (p *Pending) Error() string { return terminal.Safe(p.Message) }
 
-// RemedyText is the message and remedy an agent prints verbatim.
+// RemedyText is the message and remedy an agent prints verbatim, kept
+// printable.
 func (p *Pending) RemedyText() string {
-	return strings.TrimSpace(p.Message + "\n" + p.Remedy)
+	return strings.TrimSpace(terminal.Safe(p.Message) + "\n" + terminal.Safe(p.Remedy))
+}
+
+// Report kinds and outcomes, mirrored from the POST /v1/report contract.
+const (
+	// ReportFalsePositive says a finding is wrong for the code it flags.
+	ReportFalsePositive = "false_positive"
+	// ReportRecorded and ReportAlreadyReported both mean the finding is
+	// dismissed: the first report recorded it, or an earlier one already had.
+	ReportRecorded        = "recorded"
+	ReportAlreadyReported = "already_reported"
+)
+
+// MaxReportBodyBytes is the service's (and its web proxy's) limit on a
+// report's encoded body, 64 KiB. A reason within its 2000 characters stays
+// under it even when every character is escaped as \uXXXX.
+const MaxReportBodyBytes = 64 << 10
+
+// ReportRequest is the POST /v1/report body.
+type ReportRequest struct {
+	// FindingID is the finding's UUID from a check response.
+	FindingID string `json:"findingId"`
+	// Kind is ReportFalsePositive.
+	Kind string `json:"kind"`
+	// Reason says why the finding is wrong, in 1 to 2000 characters. The
+	// team sees it on the SlopCop dashboard.
+	Reason string `json:"reason"`
+}
+
+// ReportResponse is the successful POST /v1/report body.
+type ReportResponse struct {
+	ReportID  string `json:"reportId"`
+	FindingID string `json:"findingId"`
+	CheckID   string `json:"checkId"`
+	PolicyID  string `json:"policyId"`
+	Kind      string `json:"kind"`
+	// Status is ReportRecorded or ReportAlreadyReported.
+	Status string `json:"status"`
 }

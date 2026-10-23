@@ -21,13 +21,14 @@ func newLoginCommand(serviceURL *string, version string) *cobra.Command {
 With no flags, login starts the browser device flow: it prints a URL and a
 code, then waits for approval. Pass --token to store an existing credential,
 which is what CI and agent harnesses use.`,
-		Args: cobra.NoArgs,
+		Args: usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
 			if err != nil {
 				return err
 			}
-			target := strings.TrimRight(resolveServiceURL(cfg, *serviceURL), "/")
+			target, _ := resolveService(cfg, *serviceURL)
+			target = strings.TrimRight(target, "/")
 			credential := strings.TrimSpace(token)
 			if credential == "" {
 				client, err := service.New(target, "", "slopcop/"+version, 0)
@@ -77,13 +78,13 @@ func remedyError(err error) error {
 // loginHints name the slopcop command for remedies that are actually to sign
 // in. The service's remedies do not name a client, so the client adds its own.
 // Repo-state failures (repo_not_indexed, no_access) keep the service's remedy
-// alone: those say "sign in again" only as a step after installing the App or
-// getting access, and appending a login command sends an already-signed-in
+// alone: repo_not_indexed's names slopcop login only as a step after
+// installing the App, and appending a login command sends an already-signed-in
 // user back through the login flow for a problem login cannot fix.
 var loginHints = map[string]string{
-	"auth_required":        "Sign in with `slopcop login`.",
-	"auth_expired":         "Sign in with `slopcop login`.",
-	"device_flow_disabled": "Sign in with `slopcop login --token <token>`.",
+	service.CodeAuthRequired:       "Sign in with `slopcop login`.",
+	service.CodeAuthExpired:        "Sign in with `slopcop login`.",
+	service.CodeDeviceFlowDisabled: "Sign in with `slopcop login --token <token>`.",
 }
 
 // remedyText is the service's message and remedy, verbatim, plus the slopcop

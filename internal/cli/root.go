@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -21,9 +20,18 @@ type silentExit struct{ code int }
 
 func (e silentExit) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
+// usageError is a command used wrongly, so the failure also points at the
+// help.
+type usageError struct{ err error }
+
+func (e usageError) Error() string { return e.err.Error() }
+
+func (e usageError) Unwrap() error { return e.err }
+
 // Execute runs the CLI and returns the process exit code: 0 clean, 1 a new
 // finding at or above the fail-on level, 2 incomplete or failed, 3 still
-// running when --timeout ran out.
+// running when --timeout ran out. A report exits 0 once the finding is
+// dismissed and 2 otherwise.
 func Execute(args []string, version string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -35,7 +43,7 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	err := root.ExecuteContext(ctx)
+	command, err := root.ExecuteContextC(ctx)
 	if err == nil {
 		return 0
 	}
@@ -45,7 +53,7 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	}
 	fmt.Fprintf(stderr, "slopcop: %v\n", err)
 	if isUsageError(err) {
-		fmt.Fprintln(stderr, "Run 'slopcop --help' for usage.")
+		fmt.Fprintf(stderr, "Run '%s --help' for usage.\n", command.CommandPath())
 	}
 	return 2
 }
@@ -64,7 +72,7 @@ report, so a check never needs a Bifrost install.
 
 ` + selectionHelp,
 		Version:       version,
-		Args:          cobra.NoArgs,
+		Args:          usageArgs(cobra.NoArgs),
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -73,12 +81,15 @@ report, so a check never needs a Bifrost install.
 	}
 	root.SetVersionTemplate("slopcop version {{.Version}}\n")
 	root.PersistentFlags().StringVar(&serviceURL, "service", "", "SlopCop check service URL (also $SLOPCOP_SERVICE)")
+	// A bad flag or flag value is a usage error, for every subcommand.
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return usageError{err} })
 	registerCheckFlags(root, opts)
 	root.AddCommand(
 		newCheckCommand(opts, &serviceURL, version),
 		newInitCommand(),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
+		newReportCommand(&serviceURL, version),
 		newVersionCommand(version),
 	)
 	return root
@@ -89,7 +100,7 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 		Use:   "check",
 		Short: "Check the working tree through the hosted check API",
 		Long:  selectionHelp,
-		Args:  cobra.NoArgs,
+		Args:  usageArgs(cobra.NoArgs),
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCheck(cmd, opts, *serviceURL, version)
 		},
@@ -132,7 +143,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringArrayVar(&opts.skipCategories, "skip-category", nil, "exclude rules in a category (repeatable)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
 	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding (note or above), info, note, warning, or error")
-	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
+	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings already in the code and those reported as false positives (they never fail the check)")
 	flags.StringArrayVar(&opts.policies, "policy", nil, "repository-relative .rqlp policy file to evaluate (repeatable)")
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")
 	flags.BoolVar(&opts.verbose, "verbose", false, "print the resolved request to stderr")
@@ -143,18 +154,28 @@ func newVersionCommand(version string) *cobra.Command {
 	return &cobra.Command{
 		Use:   "version",
 		Short: "Print the version",
-		Args:  cobra.NoArgs,
+		Args:  usageArgs(cobra.NoArgs),
 		Run: func(cmd *cobra.Command, _ []string) {
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop version %s\n", version)
 		},
 	}
 }
 
+// isUsageError reports a command used wrongly. Flag errors arrive as
+// usageError through the flag error function, and argument errors (an
+// unknown command among them) through usageArgs.
 func isUsageError(err error) bool {
-	message := err.Error()
-	return strings.Contains(message, "unknown flag") ||
-		strings.Contains(message, "unknown shorthand flag") ||
-		strings.Contains(message, "unknown command") ||
-		strings.Contains(message, "unknown agent") ||
-		strings.Contains(message, "invalid argument")
+	var usage usageError
+	return errors.As(err, &usage)
+}
+
+// usageArgs makes a cobra argument validator's error a usage error, so
+// `slopcop reprot` or `slopcop init foo` also points at the help.
+func usageArgs(validate cobra.PositionalArgs) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if err := validate(cmd, args); err != nil {
+			return usageError{err}
+		}
+		return nil
+	}
 }

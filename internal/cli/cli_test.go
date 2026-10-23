@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -309,15 +310,15 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 			name:    "repo not indexed",
 			status:  http.StatusConflict,
 			code:    "repo_not_indexed",
-			message: "SlopCop has not indexed this repository for checks.",
-			remedy:  "Analyze the repository on SlopCop first. For a private repository, install the SlopCop GitHub App, then sign in again.",
+			message: "SlopCop cannot check this repository with this login.",
+			remedy:  "A private repository needs the SlopCop GitHub App: install it on the repository's owner with access to the repository, run slopcop login so this login can use that installation, then retry. If the remote URL is wrong, fix it first.",
 		},
 		{
 			name:    "no access",
 			status:  http.StatusForbidden,
 			code:    "no_access",
 			message: "Your account does not have access to this repository.",
-			remedy:  "Ask a repository administrator for access, then sign in again.",
+			remedy:  "Ask a repository administrator for read access, then retry.",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -344,20 +345,21 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 			if stdout != "" {
 				t.Fatalf("stdout = %q", stdout)
 			}
-			for _, want := range []string{test.message, test.remedy} {
-				if !strings.Contains(stderr, want) {
-					t.Errorf("stderr = %q, want %q", stderr, want)
-				}
+			// The service's remedy alone: the CLI adds no sign-in command of
+			// its own, though repo_not_indexed's remedy names one.
+			if want := test.message + "\n" + test.remedy + "\n"; stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
 			}
-			if strings.Contains(stderr, "slopcop login") {
+			if strings.Contains(stderr, "Sign in with `slopcop login`") {
 				t.Errorf("stderr = %q, must not tell a signed-in user to log in again", stderr)
 			}
 		})
 	}
 }
 
-// While SlopCop is still indexing the repository the service answers at
-// once; the CLI prints that and exits instead of waiting or asking again.
+// A service from before checks stopped waiting on indexing answers
+// indexing_in_progress at once; the CLI prints that and exits instead of
+// waiting or asking again.
 func TestIndexingInProgressExitsWithoutWaiting(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
@@ -462,20 +464,19 @@ func TestIncompleteCheckExitsTwo(t *testing.T) {
 func TestServiceURLPrecedence(t *testing.T) {
 	isolateUserConfig(t)
 	stored := config.Config{ServiceURL: "https://stored.example"}
-	if got := resolveServiceURL(stored, "https://flag.example"); got != "https://flag.example" {
-		t.Errorf("flag URL = %q", got)
+	check := func(source string, cfg config.Config, flag, want string, wantNamed bool) {
+		t.Helper()
+		if got, named := resolveService(cfg, flag); got != want || named != wantNamed {
+			t.Errorf("%s URL = %q, named %v; want %q, named %v", source, got, named, want, wantNamed)
+		}
 	}
+	check("flag", stored, "https://flag.example", "https://flag.example", true)
 	t.Setenv("SLOPCOP_SERVICE", "https://env.example")
-	if got := resolveServiceURL(stored, ""); got != "https://env.example" {
-		t.Errorf("env URL = %q", got)
-	}
+	check("flag over env", stored, " https://flag.example ", "https://flag.example", true)
+	check("env", stored, "", "https://env.example", true)
 	t.Setenv("SLOPCOP_SERVICE", "")
-	if got := resolveServiceURL(stored, ""); got != "https://stored.example" {
-		t.Errorf("stored URL = %q", got)
-	}
-	if got := resolveServiceURL(config.Config{}, ""); got != config.DefaultServiceURL {
-		t.Errorf("default URL = %q", got)
-	}
+	check("stored", stored, "", "https://stored.example", false)
+	check("default", config.Config{}, "", config.DefaultServiceURL, false)
 }
 
 func TestUnknownFormatFailsBeforeGitWork(t *testing.T) {
@@ -748,6 +749,151 @@ func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
 	}
 }
 
+// checkAnswer is a check response from a service that names checks and
+// findings.
+func checkAnswer(status string, summary string, findings ...string) string {
+	return `{
+		"status": "` + status + `",
+		"checkId": "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091",
+		"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+		"applied": true,
+		"summary": ` + summary + `,
+		"findings": [` + strings.Join(findings, ",") + `],
+		"incomplete": []
+	}`
+}
+
+const (
+	newFinding       = `{"id": "6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b", "policyId": "p", "severity": "warning", "certainty": "definite", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "t", "new": true, "dismissed": false}`
+	dismissedFinding = `{"id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "policyId": "q", "severity": "error", "certainty": "definite", "path": "demo.go", "startLine": 3, "endLine": 3, "title": "u", "new": false, "dismissed": true}`
+)
+
+func TestCheckExitCodesWithFindingIDsAndDismissals(t *testing.T) {
+	cases := []struct {
+		name   string
+		answer string
+		args   []string
+		exit   int
+		want   string
+	}{
+		{
+			name: "a new finding fails and says how to report it",
+			answer: checkAnswer("findings",
+				`{"files": 1, "findings": 1, "newFindings": 1, "existingFindings": 0, "dismissedFindings": 0, "incompletePolicies": 0, "failOn": "finding"}`,
+				newFinding),
+			exit: 1,
+			want: "New findings\n" +
+				"  [warning] p: t\n" +
+				"    Location: demo.go:1\n" +
+				"    Certainty: definite\n" +
+				"    Id: 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b\n" +
+				"\n" +
+				"False positive? slopcop report <id> --reason \"why\"\n" +
+				"\n" +
+				"1 new finding across 1 file(s) | Analysis complete\n",
+		},
+		{
+			name: "a dismissed finding never fails the check",
+			answer: checkAnswer("clean",
+				`{"files": 1, "findings": 1, "newFindings": 0, "existingFindings": 0, "dismissedFindings": 1, "incompletePolicies": 0, "failOn": "finding"}`,
+				dismissedFinding),
+			exit: 0,
+			want: "No new findings; 1 reported as false positive (--show-existing lists them) | Analysis complete\n",
+		},
+		{
+			name: "a dismissed finding is listed with --show-existing",
+			answer: checkAnswer("clean",
+				`{"files": 1, "findings": 1, "newFindings": 0, "existingFindings": 0, "dismissedFindings": 1, "incompletePolicies": 0, "failOn": "finding"}`,
+				dismissedFinding),
+			args: []string{"--show-existing"},
+			exit: 0,
+			want: "Reported as false positive (never fail the check)\n" +
+				"  [error] q: u\n" +
+				"    Location: demo.go:3\n" +
+				"    Certainty: definite\n" +
+				"    Id: 0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d\n" +
+				"\n" +
+				"No new findings; 1 reported as false positive | Analysis complete\n",
+		},
+		{
+			name: "a new finding next to a dismissed one still fails",
+			answer: checkAnswer("findings",
+				`{"files": 1, "findings": 2, "newFindings": 1, "existingFindings": 0, "dismissedFindings": 1, "incompletePolicies": 0, "failOn": "finding"}`,
+				newFinding, dismissedFinding),
+			args: []string{"--format", "json"},
+			exit: 1,
+			want: `"checkId": "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(tc.answer))
+			}))
+			defer server.Close()
+
+			code, stdout, stderr := runCLI(t, append([]string{"check", "--root", repo, "--service", server.URL}, tc.args...)...)
+			if code != tc.exit {
+				t.Fatalf("exit = %d, want %d, stderr = %s", code, tc.exit, stderr)
+			}
+			if strings.HasPrefix(tc.want, `"`) {
+				if !strings.Contains(stdout, tc.want) {
+					t.Errorf("stdout = %q, want %q", stdout, tc.want)
+				}
+				return
+			}
+			// The check named --service, so the report hint names it too.
+			want := strings.ReplaceAll(tc.want, "slopcop report <id>", "slopcop --service "+server.URL+" report <id>")
+			if stdout != want {
+				t.Errorf("stdout = %q, want %q", stdout, want)
+			}
+		})
+	}
+}
+
+// The report hint names a service from --service or $SLOPCOP_SERVICE, which a
+// copied command may run without, but not the one login stored.
+func TestReportHintNamesAServiceTheCheckWasGiven(t *testing.T) {
+	for _, from := range []string{"flag", "environment", "login"} {
+		t.Run(from, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = w.Write([]byte(checkAnswer("findings",
+					`{"files": 1, "findings": 1, "newFindings": 1, "existingFindings": 0, "dismissedFindings": 0, "incompletePolicies": 0, "failOn": "finding"}`,
+					newFinding)))
+			}))
+			defer server.Close()
+			args := []string{"check", "--root", repo}
+			hint := `False positive? slopcop --service ` + server.URL + ` report <id> --reason "why"`
+			switch from {
+			case "flag":
+				args = append(args, "--service", server.URL)
+			case "environment":
+				t.Setenv("SLOPCOP_SERVICE", server.URL)
+			case "login":
+				if _, err := config.Save(config.Config{ServiceURL: server.URL, Token: "stored"}); err != nil {
+					t.Fatalf("Save: %v", err)
+				}
+				hint = `False positive? slopcop report <id> --reason "why"`
+			}
+			code, stdout, stderr := runCLI(t, args...)
+			if code != 1 {
+				t.Fatalf("exit = %d, stderr = %s", code, stderr)
+			}
+			if !strings.Contains(stdout, hint+"\n") {
+				t.Errorf("stdout = %q, want the hint %q", stdout, hint)
+			}
+		})
+	}
+}
+
 // decodeChange verifies the wire data is an importable pack and returns its
 // snapshot diff for content assertions.
 func decodeChange(t *testing.T, repo string, request map[string]any) string {
@@ -768,4 +914,35 @@ func decodeChange(t *testing.T, repo string, request map[string]any) string {
 	runGit(t, repo, "cat-file", "-e", now+"^{commit}")
 	runGit(t, repo, "cat-file", "-e", request["sinceCommit"].(string)+"^{commit}")
 	return runGit(t, repo, "diff", "--binary", request["baseCommit"].(string), now)
+}
+
+// An unknown command or a stray argument is a usage error: the failure points
+// at the help of the command it was given to.
+func TestArgumentErrorsPointAtTheHelp(t *testing.T) {
+	cases := []struct {
+		args []string
+		want string
+		help string
+	}{
+		{[]string{"reprot"}, `unknown command "reprot" for "slopcop"`, "slopcop"},
+		{[]string{"init", "foo"}, `unknown command "foo" for "slopcop init"`, "slopcop init"},
+		{[]string{"check", "foo"}, `unknown command "foo" for "slopcop check"`, "slopcop check"},
+		{[]string{"login", "foo"}, `unknown command "foo" for "slopcop login"`, "slopcop login"},
+		{[]string{"logout", "foo"}, `unknown command "foo" for "slopcop logout"`, "slopcop logout"},
+		{[]string{"version", "foo"}, `unknown command "foo" for "slopcop version"`, "slopcop version"},
+	}
+	// Only the error's type makes it a usage error, never its text.
+	if isUsageError(errors.New(`unknown command "reprot" for "slopcop"`)) {
+		t.Error("an error is a usage error by its text")
+	}
+	for _, tc := range cases {
+		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
+			isolateUserConfig(t)
+			code, stdout, stderr := runCLI(t, tc.args...)
+			want := "slopcop: " + tc.want + "\nRun '" + tc.help + " --help' for usage.\n"
+			if code != 2 || stdout != "" || stderr != want {
+				t.Errorf("exit = %d, stdout = %q, stderr = %q, want %q", code, stdout, stderr, want)
+			}
+		})
+	}
 }

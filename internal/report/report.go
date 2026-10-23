@@ -7,11 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/BrokkAi/slopcop/internal/service"
+	"github.com/BrokkAi/slopcop/internal/terminal"
 )
 
 // Formats the CLI accepts.
@@ -26,10 +27,62 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 // Options shape what a report lists. Rendering never changes the check, so
 // none of them is sent to the service.
 type Options struct {
-	// ShowExisting lists the findings that were already in the code, after
-	// the new ones. They are counted either way.
+	// ShowExisting lists the findings that were already in the code, then
+	// the ones reported as false positives, after the new ones. They are
+	// counted either way, and SARIF carries the reported ones either way.
 	ShowExisting bool
+	// Service is the service the check named with --service or
+	// $SLOPCOP_SERVICE, if any, which the false-positive hint repeats as
+	// --service. The one login stored is left out: a report finds it too.
+	Service string
 }
+
+// reportHint is the one line after the new findings that says how to report
+// one that is wrong.
+const reportHint = `False positive? slopcop report <id> --reason "why"`
+
+// hintFor is reportHint for a check run against a named service (--service or
+// $SLOPCOP_SERVICE), which the report has to name too: a finding id exists
+// only on the service that ran the check, and a copied command may run
+// without that variable.
+func hintFor(service string) string {
+	if service == "" {
+		return reportHint
+	}
+	return `False positive? slopcop --service ` + shellWord(publicURL(service)) + ` report <id> --reason "why"`
+}
+
+// publicURL drops any credentials from a service URL, so the hint never
+// prints them to stdout or a CI log.
+func publicURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.User == nil {
+		return raw
+	}
+	parsed.User = nil
+	return parsed.String()
+}
+
+// shellWord quotes s for a POSIX shell when it needs it, so the hint pastes
+// as one argument ("&" in a query string would otherwise end the command).
+func shellWord(s string) string {
+	s = terminal.Safe(s)
+	safe := s != ""
+	for _, r := range s {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:@%+=,", r)) {
+			safe = false
+			break
+		}
+	}
+	if safe {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// dismissedJustification is the SARIF suppression's justification for a
+// finding reported as a false positive.
+const dismissedJustification = "reported as false positive"
 
 // Write renders the response to w.
 func Write(w io.Writer, response service.Response, format string, options Options) error {
@@ -46,39 +99,70 @@ func Write(w io.Writer, response service.Response, format string, options Option
 	}
 }
 
-// split returns the new findings, then the existing ones, each in the
-// service's order.
-func split(findings []service.Finding) (fresh, existing []service.Finding) {
-	fresh, existing = []service.Finding{}, []service.Finding{}
+// groups are a response's findings by what they mean for the check, each in
+// the service's order.
+type groups struct {
+	// fresh are the findings the change introduced or touched; only these
+	// can fail the check.
+	fresh []service.Finding
+	// existing were already in the code.
+	existing []service.Finding
+	// dismissed were reported as false positives in this repository. The
+	// service sends them with new false; a dismissed finding is never fresh,
+	// whatever else it says.
+	dismissed []service.Finding
+}
+
+func split(findings []service.Finding) groups {
+	g := groups{fresh: []service.Finding{}, existing: []service.Finding{}, dismissed: []service.Finding{}}
 	for _, finding := range findings {
-		if finding.New {
-			fresh = append(fresh, finding)
-		} else {
-			existing = append(existing, finding)
+		switch {
+		case finding.Dismissed:
+			g.dismissed = append(g.dismissed, finding)
+		case finding.New:
+			g.fresh = append(g.fresh, finding)
+		default:
+			g.existing = append(g.existing, finding)
 		}
 	}
-	return fresh, existing
+	return g
 }
 
-// listed is what a report lists: the new findings first, and the existing
-// ones after them only when asked for.
+// listed is what a report lists: the new findings first, then the existing
+// ones and the dismissed ones only when asked for.
 func listed(response service.Response, options Options) []service.Finding {
-	fresh, existing := split(response.Findings)
+	g := split(response.Findings)
 	if options.ShowExisting {
-		return append(fresh, existing...)
+		return append(append(g.fresh, g.existing...), g.dismissed...)
 	}
-	return fresh
+	return g.fresh
 }
 
-// human is close to Bifrost's own human report: one block per new finding,
-// then the existing ones when asked for, then the summary line, then what was
+// reportable reports whether any of findings carries an id to report it by.
+// A service from before findings had ids sends none.
+func reportable(findings []service.Finding) bool {
+	for _, finding := range findings {
+		if finding.ID != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// human is close to Bifrost's own human report: one block per new finding
+// and the line that says how to report one that is wrong, then the existing
+// and dismissed ones when asked for, then the summary line, then what was
 // left out or did not complete.
 func human(response service.Response, options Options) string {
 	var out strings.Builder
-	fresh, existing := split(response.Findings)
-	writeBlock(&out, "New findings", fresh)
+	g := split(response.Findings)
+	writeBlock(&out, "New findings", g.fresh)
+	if reportable(g.fresh) {
+		out.WriteString(hintFor(options.Service) + "\n\n")
+	}
 	if options.ShowExisting {
-		writeBlock(&out, "Already in the code (never fail the check)", existing)
+		writeBlock(&out, "Already in the code (never fail the check)", g.existing)
+		writeBlock(&out, "Reported as false positive (never fail the check)", g.dismissed)
 	}
 	out.WriteString(summaryLine(response, options))
 	out.WriteString("\n")
@@ -102,42 +186,53 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 	}
 	out.WriteString(heading + "\n")
 	for _, finding := range findings {
-		location := printable(finding.Path)
+		location := terminal.Safe(finding.Path)
 		if finding.StartLine != nil {
 			location = fmt.Sprintf("%s:%d", location, *finding.StartLine)
 		}
 		fmt.Fprintf(
 			out,
-			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n\n",
-			printable(finding.Severity),
-			printable(finding.PolicyID),
-			printable(finding.Title),
+			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n",
+			terminal.Safe(finding.Severity),
+			terminal.Safe(finding.PolicyID),
+			terminal.Safe(finding.Title),
 			location,
-			printable(finding.Certainty),
+			terminal.Safe(finding.Certainty),
 		)
+		if finding.ID != "" {
+			fmt.Fprintf(out, "    Id: %s\n", terminal.Safe(finding.ID))
+		}
+		out.WriteString("\n")
 	}
 }
 
 // summaryLine is one line, like the first line of Bifrost's human report:
-// the new findings, then how many were already in the code.
+// the new findings, then how many were already in the code and how many were
+// reported as false positives.
 func summaryLine(response service.Response, options Options) string {
-	fresh, existing := split(response.Findings)
+	g := split(response.Findings)
 	scope := "No new findings"
-	switch len(fresh) {
+	switch len(g.fresh) {
 	case 0:
 	case 1:
 		scope = "1 new finding"
 	default:
-		scope = fmt.Sprintf("%d new findings", len(fresh))
+		scope = fmt.Sprintf("%d new findings", len(g.fresh))
 	}
-	if len(fresh) > 0 {
-		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(fresh))
+	if len(g.fresh) > 0 {
+		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(g.fresh))
 	}
-	if len(existing) > 0 {
-		scope = fmt.Sprintf("%s; %d already in the code", scope, len(existing))
-		if !options.ShowExisting {
-			scope += " (--show-existing lists them)"
-		}
+	if len(g.existing) > 0 {
+		scope = fmt.Sprintf("%s; %d already in the code", scope, len(g.existing))
+	}
+	// The service's count, as json and sarif carry it: a dismissed finding
+	// left out of the list is still counted.
+	dismissed := response.Summary.DismissedFindings
+	if dismissed > 0 {
+		scope = fmt.Sprintf("%s; %d reported as false positive", scope, dismissed)
+	}
+	if len(g.existing)+dismissed > 0 && !options.ShowExisting {
+		scope += " (--show-existing lists them)"
 	}
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
@@ -145,7 +240,7 @@ func summaryLine(response service.Response, options Options) string {
 	state := "Analysis complete"
 	switch {
 	case response.Failure != "":
-		state = "Analysis did not complete: " + printable(response.Failure)
+		state = "Analysis did not complete: " + terminal.Safe(response.Failure)
 	case response.Summary.IncompletePolicies > 0:
 		state = fmt.Sprintf(
 			"Analysis incomplete: %d check(s) did not complete",
@@ -186,7 +281,7 @@ func incompleteLine(response service.Response) string {
 	}
 	named := make([]string, 0, len(response.Incomplete)+1)
 	for _, policy := range response.Incomplete {
-		named = append(named, fmt.Sprintf("%s (%s)", printable(policy.PolicyID), printable(policy.Reason)))
+		named = append(named, fmt.Sprintf("%s (%s)", terminal.Safe(policy.PolicyID), terminal.Safe(policy.Reason)))
 	}
 	if unnamed := response.Summary.IncompletePolicies - len(response.Incomplete); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
@@ -203,7 +298,7 @@ func elsewhereLine(response service.Response) string {
 	}
 	named := make([]string, 0, len(response.InconclusiveElsewhere)+1)
 	for _, policy := range response.InconclusiveElsewhere {
-		named = append(named, printable(policy.PolicyID))
+		named = append(named, terminal.Safe(policy.PolicyID))
 	}
 	if unnamed := total - len(response.InconclusiveElsewhere); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
@@ -214,22 +309,13 @@ func elsewhereLine(response service.Response) string {
 	)
 }
 
-// printable keeps control and bidirectional-override characters from hostile
-// repository content off the terminal.
-func printable(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || (r >= '‪' && r <= '‮') || (r >= '⁦' && r <= '⁩') {
-			return unicode.ReplacementChar
-		}
-		return r
-	}, value)
-}
-
 // jsonReport is the document `--format json` prints: what an agent needs from
-// stdout. Findings lists the new findings, then the existing ones only with
-// --show-existing; summary counts both either way.
+// stdout. Findings lists the new findings, then the existing and dismissed
+// ones only with --show-existing; summary counts all three either way.
 type jsonReport struct {
-	Status     string                     `json:"status"`
+	Status string `json:"status"`
+	// CheckID is empty against a service from before checks had ids.
+	CheckID    string                     `json:"checkId"`
 	BaseCommit string                     `json:"baseCommit"`
 	Summary    service.Summary            `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
@@ -243,6 +329,7 @@ type jsonReport struct {
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
 		Status:     response.Status,
+		CheckID:    response.CheckID,
 		BaseCommit: response.BaseCommit,
 		Summary:    response.Summary,
 		Findings:   listed(response, options),
@@ -332,9 +419,19 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifMessage    `json:"message"`
 	Locations []sarifLocation `json:"locations"`
-	// BaselineState is `new` for a finding the change touched and
-	// `unchanged` for one already in the code.
+	// BaselineState is `new` for a finding that fails the check and
+	// `unchanged` for one already in the code or reported as a false
+	// positive, so it agrees with the exit code.
 	BaselineState string `json:"baselineState"`
+	// Suppressions marks a finding reported as a false positive.
+	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
+	// Properties carries the finding's id as slopcop.findingId, like the run's other slopcop.* keys.
+	Properties map[string]any `json:"properties,omitempty"`
+}
+
+type sarifSuppression struct {
+	Kind          string `json:"kind"`
+	Justification string `json:"justification"`
 }
 
 type sarifMessage struct {
@@ -377,10 +474,10 @@ type sarifDescriptor struct {
 }
 
 // writeSARIF prints a SARIF 2.1.0 log with one run. Each result's
-// baselineState says whether the change touched it; existing findings are
-// results only with --show-existing.
+// baselineState says whether it fails the check, and a dismissed one is
+// suppressed. Existing findings are results only with --show-existing.
 func writeSARIF(w io.Writer, response service.Response, options Options) error {
-	findings := listed(response, options)
+	findings := sarifFindings(response, options)
 	var rules []string
 	seen := make(map[string]bool)
 	for _, finding := range findings {
@@ -412,14 +509,21 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		if text == "" {
 			text = finding.PolicyID
 		}
-		results = append(results, sarifResult{
+		result := sarifResult{
 			RuleID:        finding.PolicyID,
 			RuleIndex:     ruleIndex[finding.PolicyID],
 			Level:         sarifLevel(finding.Severity),
 			Message:       sarifMessage{Text: text},
 			Locations:     []sarifLocation{{PhysicalLocation: physical}},
 			BaselineState: baselineState(finding),
-		})
+		}
+		if finding.Dismissed {
+			result.Suppressions = []sarifSuppression{{Kind: "external", Justification: dismissedJustification}}
+		}
+		if finding.ID != "" {
+			result.Properties = map[string]any{"slopcop.findingId": finding.ID}
+		}
+		results = append(results, result)
 	}
 
 	// The overall notice, findings left out, then one per named check, so a
@@ -465,6 +569,18 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		})
 	}
 
+	properties := map[string]any{
+		"slopcop.status":                response.Status,
+		"slopcop.baseCommit":            response.BaseCommit,
+		"slopcop.failOn":                response.Summary.FailOn,
+		"slopcop.newFindings":           response.Summary.NewFindings,
+		"slopcop.existingFindings":      response.Summary.ExistingFindings,
+		"slopcop.dismissedFindings":     response.Summary.DismissedFindings,
+		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
+	}
+	if response.CheckID != "" {
+		properties["slopcop.checkId"] = response.CheckID
+	}
 	return encode(w, sarifLog(sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
 			Name:           "SlopCop",
@@ -478,20 +594,29 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			ExecutionSuccessful:        response.Failure == "" && response.Summary.IncompletePolicies == 0,
 			ToolExecutionNotifications: notifications,
 		}},
-		Properties: map[string]any{
-			"slopcop.status":                response.Status,
-			"slopcop.baseCommit":            response.BaseCommit,
-			"slopcop.failOn":                response.Summary.FailOn,
-			"slopcop.newFindings":           response.Summary.NewFindings,
-			"slopcop.existingFindings":      response.Summary.ExistingFindings,
-			"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
-		},
+		Properties: properties,
 	}), "sarif report")
 }
 
-// baselineState is SARIF's word for whether the change touched a finding.
+// sarifFindings are a SARIF log's results: the new findings, the existing
+// ones with --show-existing, then the dismissed ones whatever the options.
+// Code scanning closes an alert whose result disappears as fixed, so a
+// reported finding stays a result, marked suppressed, rather than vanish.
+func sarifFindings(response service.Response, options Options) []service.Finding {
+	g := split(response.Findings)
+	findings := g.fresh
+	if options.ShowExisting {
+		findings = append(findings, g.existing...)
+	}
+	return append(findings, g.dismissed...)
+}
+
+// baselineState is SARIF's word for whether a finding fails the check: `new`
+// for a new finding, `unchanged` for one already in the code or dismissed.
+// A dismissed finding never fails the check, so a gate on `new` agrees with
+// the exit code; its suppression says it was reported.
 func baselineState(finding service.Finding) string {
-	if finding.New {
+	if finding.New && !finding.Dismissed {
 		return "new"
 	}
 	return "unchanged"
@@ -535,4 +660,32 @@ func encode(w io.Writer, value any, what string) error {
 		return fmt.Errorf("encode %s: %w", what, err)
 	}
 	return nil
+}
+
+// WriteFalsePositive renders the service's answer to a false-positive
+// report: in human, which finding and rule it dismissed and what that means;
+// in json, the answer itself.
+func WriteFalsePositive(w io.Writer, response service.ReportResponse, format string) error {
+	switch format {
+	case "", FormatHuman:
+		_, err := io.WriteString(w, falsePositiveText(response))
+		return err
+	case FormatJSON:
+		return encode(w, response, "report response")
+	default:
+		return fmt.Errorf("unknown format %q (expected human or json)", format)
+	}
+}
+
+func falsePositiveText(response service.ReportResponse) string {
+	finding := "finding " + terminal.Safe(response.FindingID)
+	if response.PolicyID != "" {
+		finding += " (" + terminal.Safe(response.PolicyID) + ")"
+	}
+	if response.Status == service.ReportAlreadyReported {
+		return "slopcop: " + finding + " was already reported as a false positive\n" +
+			"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the earlier report on the SlopCop dashboard.\n"
+	}
+	return "slopcop: reported " + finding + " as a false positive\n" +
+		"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the report and its reason on the SlopCop dashboard.\n"
 }

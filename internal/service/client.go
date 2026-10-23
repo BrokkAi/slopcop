@@ -13,14 +13,15 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/BrokkAi/slopcop/internal/terminal"
 )
 
 const (
 	checkPath        = "/v1/check"
+	reportPath       = "/v1/report"
 	maxResponseBytes = 32 * 1024 * 1024
 	defaultTimeout   = 10 * time.Minute
-	// checkRunning is the retryable answer to a check that is still running.
-	checkRunning = "check_running"
 	// defaultRetryAfter is the wait when check_running names none, and
 	// maxRetryAfter bounds a wait the service names.
 	defaultRetryAfter = 5 * time.Second
@@ -102,7 +103,7 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 		case ctx.Err() != nil:
 			// The wait ran out mid-request; the service keeps the check.
 			return Response{}, pending
-		case !errors.As(err, &serviceError) || serviceError.Body.Code != checkRunning:
+		case !errors.As(err, &serviceError) || serviceError.Body.Code != CodeCheckRunning:
 			return Response{}, err
 		}
 		pending.RetryAfter = int((retryAfter + time.Second - 1) / time.Second)
@@ -128,7 +129,9 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 		return Response{}, 0, err
 	}
 	if status < 200 || status >= 300 {
-		return Response{}, retryAfter(header), decodeError(status, payload)
+		failure := decodeError(status, payload)
+		askToWait(failure, status, header)
+		return Response{}, retryAfter(header), failure
 	}
 
 	var decoded Response
@@ -151,39 +154,158 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 		decoded.Summary.IncompletePolicyIDs = []string{}
 	}
 	// A service from before new findings were marked gates on every finding,
-	// so every finding is one the check fails on.
+	// so every finding is one the check fails on. Such a service dismisses
+	// none, but a dismissed finding is never made new.
 	var marked struct {
 		Summary struct {
 			NewFindings *int `json:"newFindings"`
 		} `json:"summary"`
 	}
 	if err := json.Unmarshal(payload, &marked); err == nil && marked.Summary.NewFindings == nil {
+		fresh := 0
 		for index := range decoded.Findings {
-			decoded.Findings[index].New = true
+			if !decoded.Findings[index].Dismissed {
+				decoded.Findings[index].New = true
+				fresh++
+			}
 		}
-		decoded.Summary.NewFindings = len(decoded.Findings)
+		decoded.Summary.NewFindings = fresh
 		decoded.Summary.ExistingFindings = 0
 	}
 	return decoded, 0, nil
 }
 
-// retryAfter reads a Retry-After header in seconds, bounded, defaulting to
+// Report posts one false-positive report. The service answers 200 for a
+// report it recorded and for a finding already reported; any other answer
+// comes back as *Error, so callers can print the closed code, message, and
+// remedy.
+func (c *Client) Report(ctx context.Context, request ReportRequest) (ReportResponse, error) {
+	body, err := encodeJSON(request)
+	if err != nil {
+		return ReportResponse{}, fmt.Errorf("encode the report: %w", err)
+	}
+	if len(body) > MaxReportBodyBytes {
+		return ReportResponse{}, fmt.Errorf("the report is %d bytes once encoded, over the service's %d; shorten the reason", len(body), MaxReportBodyBytes)
+	}
+	status, header, payload, err := c.postPayload(ctx, reportPath, body)
+	if err != nil {
+		return ReportResponse{}, err
+	}
+	if status < 200 || status >= 300 {
+		failure := decodeError(status, payload)
+		askToWait(failure, status, header)
+		if status == http.StatusNotFound && failure.Body.Code == "" {
+			// A 404 without the closed contract is a service from before
+			// reports, not an unknown finding.
+			failure.Body = ErrorBody{
+				Message: "This service does not accept false-positive reports (HTTP 404).",
+				Remedy:  "Check the service URL. If it is right, fix the code or ask a human instead: the finding still fails the check.",
+			}
+		}
+		return ReportResponse{}, failure
+	}
+	var decoded ReportResponse
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return ReportResponse{}, fmt.Errorf("decode report response: %w", err)
+	}
+	switch decoded.Status {
+	case ReportRecorded, ReportAlreadyReported:
+		return decoded, nil
+	case "":
+		return ReportResponse{}, fmt.Errorf("the report service returned no status")
+	default:
+		return ReportResponse{}, fmt.Errorf("the report service returned an unknown status %q", decoded.Status)
+	}
+}
+
+// maxRateLimitWait bounds the wait a rate-limited answer names.
+const maxRateLimitWait = 24 * time.Hour
+
+// askToWait says a rate-limited check's or report's Retry-After wait after
+// whatever the service or a proxy said. Reports are limited per hour, so the
+// wait can be long.
+func askToWait(failure *Error, status int, header http.Header) {
+	if status != http.StatusTooManyRequests {
+		return
+	}
+	if wait, ok := retryAfterWait(header, maxRateLimitWait); ok && wait > 0 {
+		failure.Body.Remedy = strings.TrimSpace(failure.Body.Remedy + " The service asks to wait " + waitText(wait) + ".")
+	}
+}
+
+// retryAfterWait reads a Retry-After header, given in seconds or as an HTTP
+// date (RFC 9110), as a wait of at most limit, in whole seconds. A date
+// already past is no wait. The seconds are bounded before they become a
+// duration, so a huge wait cannot overflow into a negative one.
+func retryAfterWait(header http.Header, limit time.Duration) (time.Duration, bool) {
+	value := strings.TrimSpace(header.Get("Retry-After"))
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
+		if seconds < 0 {
+			return 0, false
+		}
+		return time.Duration(min(seconds, int64(limit/time.Second))) * time.Second, true
+	}
+	at, err := http.ParseTime(value)
+	if err != nil {
+		return 0, false
+	}
+	wait := min(max(time.Until(at), 0), limit)
+	return (wait + time.Second - 1).Truncate(time.Second), true
+}
+
+// waitText says a wait the way a person reads it: "45 seconds", "57 minutes",
+// "3 hours".
+func waitText(wait time.Duration) string {
+	unit := func(n int, one string) string {
+		if n == 1 {
+			return "1 " + one
+		}
+		return strconv.Itoa(n) + " " + one + "s"
+	}
+	switch {
+	case wait < 90*time.Second:
+		return unit(int(wait.Round(time.Second)/time.Second), "second")
+	case wait < 90*time.Minute:
+		return unit(int(wait.Round(time.Minute)/time.Minute), "minute")
+	default:
+		return unit(int(wait.Round(time.Hour)/time.Hour), "hour")
+	}
+}
+
+// encodeJSON encodes a request body as the service reads it, without HTML
+// escaping: "<" in a reason is one byte, not six, so a reason within bounds
+// stays within the service's body limit.
+func encodeJSON(body any) ([]byte, error) {
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+	encoder.SetEscapeHTML(false)
+	if err := encoder.Encode(body); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buffer.Bytes(), []byte("\n")), nil
+}
+
+// retryAfter is check_running's Retry-After wait, bounded, defaulting to
 // five seconds.
 func retryAfter(header http.Header) time.Duration {
-	seconds, err := strconv.Atoi(strings.TrimSpace(header.Get("Retry-After")))
-	if err != nil || seconds < 0 {
-		return defaultRetryAfter
+	if wait, ok := retryAfterWait(header, maxRetryAfter); ok {
+		return wait
 	}
-	return min(time.Duration(seconds)*time.Second, maxRetryAfter)
+	return defaultRetryAfter
 }
 
 // postJSON sends one JSON request and returns the status, headers and raw
 // body.
 func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http.Header, []byte, error) {
-	payload, err := json.Marshal(body)
+	payload, err := encodeJSON(body)
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("encode request: %w", err)
 	}
+	return c.postPayload(ctx, path, payload)
+}
+
+// postPayload posts an encoded JSON body.
+func (c *Client) postPayload(ctx context.Context, path string, payload []byte) (int, http.Header, []byte, error) {
 	httpRequest, err := http.NewRequestWithContext(
 		ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload),
 	)
@@ -219,20 +341,74 @@ func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http
 	return response.StatusCode, response.Header, responseBody, nil
 }
 
+// maxExcerptRunes bounds the excerpt a failure without the closed contract
+// quotes from the response, and maxExcerptBytes the start of the response it
+// is taken from, so a large body is never copied whole.
+const (
+	maxExcerptRunes = 200
+	maxExcerptBytes = 4 << 10
+)
+
+// codeRemedies are the service's remedies for the closed codes of a check or
+// a report, for a body that names a code but says nothing else (a proxy, or
+// an older service). Each is server/src/check.rs's or check_reports.rs's
+// text, kept in step with it. The CLI adds the slopcop command to the ones
+// that are to sign in.
+var codeRemedies = map[string]string{
+	CodeAuthRequired:        "Sign in, then retry.",
+	CodeAuthExpired:         "Sign in again.",
+	CodeRepoNotIndexed:      "A private repository needs the SlopCop GitHub App: install it on the repository's owner with access to the repository, run slopcop login so this login can use that installation, then retry. If the remote URL is wrong, fix it first.",
+	CodeNoAccess:            "Ask a repository administrator for read access, then retry.",
+	CodeBaseNotFound:        "Push the base commit, or rebase onto the upstream branch and retry.",
+	CodePayloadTooLarge:     "Check a smaller change.",
+	CodeRateLimited:         "Wait and retry.",
+	CodeServiceUnavailable:  "Wait a moment and retry.",
+	CodeFindingNotFound:     "Report a finding id from a check this login's workspace ran, as the check printed it.",
+	CodeInvalidReport:       "Send the finding id, kind false_positive, and a reason of 1 to 2,000 characters.",
+	CodeInsufficientCredits: "Add credits on the Credits page in SlopCop, then check again.",
+}
+
 func decodeError(status int, payload []byte) *Error {
 	var body ErrorBody
-	if err := json.Unmarshal(payload, &body); err != nil || body.Message == "" {
-		excerpt := strings.TrimSpace(string(payload))
-		if len(excerpt) > 200 {
-			excerpt = excerpt[:200] + "..."
-		}
-		body = ErrorBody{
-			Message: fmt.Sprintf("the check service returned HTTP %d", status),
-			Remedy:  "Check the service URL, then retry.",
-		}
-		if excerpt != "" {
-			body.Remedy = fmt.Sprintf("Check the service URL, then retry. Response: %s", excerpt)
+	if err := json.Unmarshal(payload, &body); err != nil || (body.Message == "" && body.Code == "") {
+		body = ErrorBody{Message: fmt.Sprintf("the SlopCop service returned HTTP %d", status), Remedy: genericRemedy(payload)}
+	} else if body.Remedy == "" && body.Message == "" {
+		// A code alone still gets a way on: the service's remedy for a code
+		// it knows, the generic one otherwise.
+		if remedy, ok := codeRemedies[body.Code]; ok {
+			body.Remedy = remedy
+		} else {
+			body.Remedy = genericRemedy(payload)
 		}
 	}
 	return &Error{StatusCode: status, Body: body}
+}
+
+// genericRemedy is the remedy for a failure the closed contract does not
+// explain, quoting the start of the response.
+func genericRemedy(payload []byte) string {
+	remedy := "Check the service URL, then retry."
+	if excerpt := responseExcerpt(payload); excerpt != "" {
+		remedy += " Response: " + excerpt
+	}
+	return remedy
+}
+
+// responseExcerpt is the start of a response body on one line, cut on a
+// character boundary, with control and bidirectional characters (ANSI
+// escapes, overrides) kept off the terminal. Only the first maxExcerptBytes
+// of the body are read.
+func responseExcerpt(payload []byte) string {
+	cut := len(payload) > maxExcerptBytes
+	if cut {
+		payload = payload[:maxExcerptBytes]
+	}
+	excerpt := strings.Join(strings.Fields(string(payload)), " ")
+	if runes := []rune(excerpt); len(runes) > maxExcerptRunes {
+		excerpt, cut = string(runes[:maxExcerptRunes]), true
+	}
+	if cut && excerpt != "" {
+		excerpt += "..."
+	}
+	return terminal.Safe(excerpt)
 }
