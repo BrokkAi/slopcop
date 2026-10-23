@@ -119,6 +119,16 @@ agent learns what the new release can do. A skill with local changes is left
 alone and init says so, so local edits survive and running init again is
 safe. `slopcop init --no-skill` skips the install and any update of it.
 
+Each file is written to a temporary file, synced, and renamed into place, so
+an interrupted init never leaves a truncated skill. A skill file that is a
+symlink (a dotfile manager's, say) is resolved and its target replaced the
+same way, so the link stays a link. Init goes on past a directory it cannot
+read or write and names it. It exits `2` when a harness is left without a
+working skill: none could be installed, or the one there cannot be read (so
+the harness cannot read it either). An earlier release's skill it cannot
+update, such as a read-only file or a link into a read-only directory, stays
+in use, so init only warns and exits `0`.
+
 ## Sign in
 
 ```console

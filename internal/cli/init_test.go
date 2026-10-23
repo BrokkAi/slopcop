@@ -236,11 +236,7 @@ func TestBundledSkillIsDiscoverable(t *testing.T) {
 // agent learns what this release can do; a file the earlier release did not
 // ship is added.
 func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
-	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
-	sum := sha256.Sum256([]byte(earlier))
-	previous := skills.Previous["SKILL.md"]
-	skills.Previous["SKILL.md"] = append(append([]string{}, previous...), hex.EncodeToString(sum[:]))
-	t.Cleanup(func() { skills.Previous["SKILL.md"] = previous })
+	earlier := earlierSkill(t)
 
 	cases := []struct {
 		name string
@@ -357,11 +353,7 @@ func TestInitGoesOnWhenAnEarlierSkillCannotBeUpdated(t *testing.T) {
 	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
 		t.Skip("needs Unix permissions that bind this user")
 	}
-	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
-	sum := sha256.Sum256([]byte(earlier))
-	previous := skills.Previous["SKILL.md"]
-	skills.Previous["SKILL.md"] = append(append([]string{}, previous...), hex.EncodeToString(sum[:]))
-	t.Cleanup(func() { skills.Previous["SKILL.md"] = previous })
+	earlier := earlierSkill(t)
 
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".agents"))
@@ -388,7 +380,8 @@ func TestInitGoesOnWhenAnEarlierSkillCannotBeUpdated(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stderr, "could not check or update the slopcop skill at "+locked) {
+	if !strings.Contains(stderr, "could not update the slopcop skill at "+locked) ||
+		!strings.Contains(stderr, "stays in use") {
 		t.Errorf("stderr = %q, want the locked skill named", stderr)
 	}
 	if readSkillFile(t, filepath.Join(locked, "SKILL.md")) != earlier {
@@ -400,8 +393,8 @@ func TestInitGoesOnWhenAnEarlierSkillCannotBeUpdated(t *testing.T) {
 	}
 }
 
-// An unreadable skill in one harness is reported and stays in use; the other
-// harnesses are still installed and reported, and init succeeds.
+// An unreadable skill in one harness is a failure, since the harness cannot
+// read it either; the other harnesses are still installed and reported.
 func TestInitReportsEveryHarnessWhenOneCannotBeRead(t *testing.T) {
 	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
 		t.Skip("needs Unix permissions that bind this user")
@@ -419,11 +412,12 @@ func TestInitReportsEveryHarnessWhenOneCannotBeRead(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(unreadable, "SKILL.md"), 0o644) })
 
 	code, stdout, stderr := runCLI(t, "init")
-	if code != 0 {
-		t.Errorf("exit = %d, want 0", code)
+	if code != initFailed {
+		t.Errorf("exit = %d, want %d", code, initFailed)
 	}
-	if !strings.Contains(stderr, "could not check or update the slopcop skill at "+unreadable) {
-		t.Errorf("stderr = %q, want the unreadable skill named", stderr)
+	if !strings.Contains(stderr, "could not read the slopcop skill at "+unreadable) ||
+		strings.Contains(stderr, "stays in use") {
+		t.Errorf("stderr = %q, want the unreadable skill named as a failure", stderr)
 	}
 	for _, harness := range []string{".agents", ".codex"} {
 		dir := filepath.Join(home, harness, "skills", "slopcop")
@@ -439,11 +433,7 @@ func TestInitWritesThroughASymlinkedSkill(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlinks need privileges on Windows")
 	}
-	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
-	sum := sha256.Sum256([]byte(earlier))
-	previous := skills.Previous["SKILL.md"]
-	skills.Previous["SKILL.md"] = append(append([]string{}, previous...), hex.EncodeToString(sum[:]))
-	t.Cleanup(func() { skills.Previous["SKILL.md"] = previous })
+	earlier := earlierSkill(t)
 
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
@@ -455,6 +445,10 @@ func TestInitWritesThroughASymlinkedSkill(t *testing.T) {
 	if err := os.Symlink(filepath.Join(dotfiles, "SKILL.md"), link); err != nil {
 		t.Fatal(err)
 	}
+	before, err := os.Stat(filepath.Join(dotfiles, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	if code, stdout, stderr := runCLI(t, "init"); code != 0 || !strings.Contains(stdout, "updated") {
 		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
@@ -464,5 +458,104 @@ func TestInitWritesThroughASymlinkedSkill(t *testing.T) {
 	}
 	if readSkillFile(t, filepath.Join(dotfiles, "SKILL.md")) != readEmbeddedSkill(t, "SKILL.md") {
 		t.Error("the link's target was not updated")
+	}
+	after, err := os.Stat(filepath.Join(dotfiles, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if os.SameFile(before, after) {
+		t.Error("the link's target was rewritten in place, not replaced atomically")
+	}
+}
+
+// earlierSkill makes an earlier release's SKILL.md for the test, which init
+// brings up to date.
+func earlierSkill(t *testing.T) string {
+	t.Helper()
+	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
+	sum := sha256.Sum256([]byte(earlier))
+	previous := skills.Previous["SKILL.md"]
+	skills.Previous["SKILL.md"] = append(append([]string{}, previous...), hex.EncodeToString(sum[:]))
+	t.Cleanup(func() { skills.Previous["SKILL.md"] = previous })
+	return earlier
+}
+
+// A symlinked skill whose target directory is read-only cannot be updated:
+// that is reported, and the earlier skill stays in use.
+func TestInitReportsASymlinkedSkillItCannotUpdate(t *testing.T) {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("needs Unix symlinks and permissions that bind this user")
+	}
+	earlier := earlierSkill(t)
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	store := t.TempDir()
+	writeFile(t, store, "SKILL.md", earlier)
+	if err := os.Chmod(store, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(store, 0o755) })
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeFile(t, dir, "agents/openai.yaml", readEmbeddedSkill(t, "agents/openai.yaml"))
+	link := filepath.Join(dir, "SKILL.md")
+	if err := os.Symlink(filepath.Join(store, "SKILL.md"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := runCLI(t, "init")
+	if code != 0 || !strings.Contains(stderr, "could not update the slopcop skill at "+dir) {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("SKILL.md is no longer a symlink: %v", err)
+	}
+	if readSkillFile(t, link) != earlier {
+		t.Error("the read-only target changed")
+	}
+}
+
+// A read-only skill file in a writable directory is left as it is, and that
+// is reported; the earlier skill stays in use.
+func TestInitLeavesAReadOnlySkillFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs Unix permissions")
+	}
+	earlier := earlierSkill(t)
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeFile(t, dir, "SKILL.md", earlier)
+	writeFile(t, dir, "agents/openai.yaml", readEmbeddedSkill(t, "agents/openai.yaml"))
+	path := filepath.Join(dir, "SKILL.md")
+	if err := os.Chmod(path, 0o444); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := runCLI(t, "init")
+	if code != 0 || !strings.Contains(stderr, "could not update the slopcop skill at "+dir) ||
+		!strings.Contains(stderr, "read-only") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if readSkillFile(t, path) != earlier {
+		t.Error("the read-only SKILL.md was replaced")
+	}
+}
+
+// A fresh install that fails part way exits 2, even though it wrote SKILL.md
+// before failing: there was no skill before, so the harness has no working
+// one.
+func TestInitFailsAFreshInstallThatFailsPartWay(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	// A file where the agents directory goes fails the second file only.
+	writeFile(t, dir, "agents", "not a directory\n")
+
+	code, _, stderr := runCLI(t, "init")
+	if code != initFailed || !strings.Contains(stderr, "could not install the slopcop skill at "+dir) {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Fatalf("SKILL.md was not written before the failure, so this test proves nothing: %v", err)
 	}
 }

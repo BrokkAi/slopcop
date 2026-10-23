@@ -17,8 +17,8 @@ import (
 	"github.com/BrokkAi/slopcop/skills"
 )
 
-// initFailed is init's exit code when a harness that had no skill could
-// not be given one.
+// initFailed is init's exit code when a harness is left without a usable
+// skill: none could be installed, or the one there could not be read.
 const initFailed = 2
 
 // skillName is the folder the skill occupies: <skills directory>/slopcop/SKILL.md.
@@ -90,12 +90,12 @@ type skillInstall struct {
 	failed []failedSkill
 }
 
-// failedSkill is a skill directory init could not read or write. existing
-// says a skill was already there, which still works.
+// failedSkill is a skill directory init could not read or write. state is
+// what installSkillAt was doing there when it failed.
 type failedSkill struct {
-	dir      string
-	err      error
-	existing bool
+	dir   string
+	err   error
+	state skillState
 }
 
 // installBundledSkill writes the bundled skill into every well-known skills
@@ -119,8 +119,7 @@ func installBundledSkill() (skillInstall, error) {
 		dir := filepath.Join(root.dir, skillName)
 		state, err := installSkillAt(root.dir, files)
 		if err != nil {
-			_, statErr := os.Stat(filepath.Join(dir, skillFileName))
-			result.failed = append(result.failed, failedSkill{dir: dir, err: err, existing: statErr == nil})
+			result.failed = append(result.failed, failedSkill{dir: dir, err: err, state: state})
 			continue
 		}
 		switch state {
@@ -139,6 +138,10 @@ func installBundledSkill() (skillInstall, error) {
 
 // installSkillAt writes the bundled skill into a skills directory when no
 // skill is there, or when the one there is an earlier release's, untouched.
+// With a failure, the state says what was there before anything was
+// written: skillInstalled for no skill, skillUpdated for an earlier
+// release's readable skill, which a harness still reads, and skillUnknown
+// for a skill that could not be read.
 func installSkillAt(root string, files []skillFile) (skillState, error) {
 	dir := filepath.Join(root, skillName)
 	if _, err := os.Stat(filepath.Join(dir, skillFileName)); errors.Is(err, fs.ErrNotExist) {
@@ -203,14 +206,26 @@ func writeSkill(dir string, files []skillFile) error {
 	return nil
 }
 
-// writeFileAtomically replaces path through a temporary file and a rename,
-// so an interrupted write never leaves a truncated skill file. A symlink is
-// written through, never replaced, so a dotfile manager keeps its link (and a
-// read-only target fails, as it should). The file is created 0644 under the
-// umask, as os.WriteFile would.
+// errReadOnly is a skill file without its owner's write bit, which init
+// leaves as it is.
+var errReadOnly = errors.New("the file is read-only")
+
+// writeFileAtomically replaces path through a synced temporary file and a
+// rename, so an interrupted write never leaves a truncated skill file. A
+// symlink is resolved and its target replaced the same way, so a dotfile
+// manager keeps its link (and a read-only target directory fails, as it
+// should). A file without its owner's write bit is read-only and is not
+// replaced. The file is created 0644 under the umask, as os.WriteFile would.
 func writeFileAtomically(path string, data []byte) error {
 	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		return os.WriteFile(path, data, 0o644)
+		resolved, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			return err
+		}
+		path = resolved
+	}
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o200 == 0 {
+		return errReadOnly
 	}
 	var suffix [8]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
@@ -223,6 +238,10 @@ func writeFileAtomically(path string, data []byte) error {
 	}
 	defer os.Remove(temp)
 	if _, err := file.Write(data); err != nil {
+		_ = file.Close()
+		return err
+	}
+	if err := file.Sync(); err != nil {
 		_ = file.Close()
 		return err
 	}
@@ -313,15 +332,22 @@ it. Pass --no-skill to leave the skill install and any update of it undone.`,
 			}
 			unusable := false
 			for _, skill := range result.failed {
-				if skill.existing {
-					// The skill already there still works; say so and go on.
+				switch skill.state {
+				case skillUpdated:
+					// The earlier release's skill is still there and
+					// readable, so a harness still uses it: say so and go on.
 					fmt.Fprintf(cmd.ErrOrStderr(),
-						"slopcop: could not check or update the slopcop skill at %s (%v); the skill there stays in use, so run slopcop init again once it is readable and writable\n",
+						"slopcop: could not update the slopcop skill at %s (%v); the earlier release's skill there stays in use, so run slopcop init again once it is writable\n",
 						skill.dir, skill.err)
-					continue
+				case skillInstalled:
+					unusable = true
+					fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not install the slopcop skill at %s: %v\n", skill.dir, skill.err)
+				default:
+					unusable = true
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"slopcop: could not read the slopcop skill at %s, so an agent harness cannot either: %v\n",
+						skill.dir, skill.err)
 				}
-				unusable = true
-				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not install the slopcop skill at %s: %v\n", skill.dir, skill.err)
 			}
 			if len(result.installed)+len(result.updated)+len(result.present)+len(result.edited)+len(result.failed) == 0 {
 				fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
