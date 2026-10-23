@@ -77,6 +77,15 @@ type skillInstall struct {
 	// edited are the directories whose skill has local changes, which is
 	// left as it is.
 	edited []string
+	// unwritable are the directories whose earlier release's skill could not
+	// be replaced (a read-only file, say), with why; the rest still go ahead.
+	unwritable []unwritableSkill
+}
+
+// unwritableSkill is a skill directory init could not update, and why.
+type unwritableSkill struct {
+	dir string
+	err error
 }
 
 // installBundledSkill writes the bundled skill into every well-known skills
@@ -99,6 +108,10 @@ func installBundledSkill() (skillInstall, error) {
 		}
 		dir := filepath.Join(root.dir, skillName)
 		state, err := installSkillAt(root.dir, files)
+		if err != nil && state == skillUpdated {
+			result.unwritable = append(result.unwritable, unwritableSkill{dir: dir, err: err})
+			continue
+		}
 		if err != nil {
 			return result, err
 		}
@@ -134,8 +147,9 @@ func installSkillAt(root string, files []skillFile) (skillState, error) {
 
 // installedSkillState compares the skill in dir with the bundled one. It is
 // current when every file matches this release's, an earlier release's when
-// each file matches this release's or an earlier one's (a file the earlier
-// release did not ship is missing), and edited otherwise.
+// each file matches this release's or an earlier one's, and edited otherwise.
+// Every release shipped every file, so a missing one was deleted: a local
+// change.
 func installedSkillState(dir string, files []skillFile) (skillState, error) {
 	state := skillCurrent
 	for _, file := range files {
@@ -143,7 +157,7 @@ func installedSkillState(dir string, files []skillFile) (skillState, error) {
 		data, err := os.ReadFile(path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			state = skillUpdated
+			return skillEdited, nil
 		case err != nil:
 			return 0, fmt.Errorf("read %s: %w", path, err)
 		case bytes.Equal(data, file.data):
@@ -257,10 +271,16 @@ it. Pass --no-skill to leave the skill install and any update of it undone.`,
 			}
 			for _, dir := range result.edited {
 				fmt.Fprintf(stdout,
-					"slopcop: the slopcop skill at %s has local changes, so it was left alone; "+
-						"delete it and run slopcop init again for this release's skill\n", dir)
+					"slopcop: the slopcop skill at %s differs from this release's (local changes, "+
+						"or a newer slopcop wrote it), so it was left alone; to use this release's "+
+						"skill, delete it and run slopcop init again\n", dir)
 			}
-			if len(result.installed)+len(result.updated)+len(result.present)+len(result.edited) == 0 {
+			for _, skill := range result.unwritable {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"slopcop: could not update the slopcop skill at %s, so it was left as it was: %v\n",
+					skill.dir, skill.err)
+			}
+			if len(result.installed)+len(result.updated)+len(result.present)+len(result.edited)+len(result.unwritable) == 0 {
 				fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
 			}
 			return nil

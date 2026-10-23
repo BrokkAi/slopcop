@@ -138,7 +138,7 @@ func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "has local changes, so it was left alone") {
+	if !strings.Contains(stdout, "local changes, or a newer slopcop wrote it), so it was left alone") {
 		t.Errorf("stdout = %q", stdout)
 	}
 	if got := readSkillFile(t, path); got != "mine\n" {
@@ -232,8 +232,8 @@ func TestBundledSkillIsDiscoverable(t *testing.T) {
 }
 
 // An untouched skill from an earlier release is brought up to date, so an
-// agent learns what this release can do; a file the earlier release did not
-// ship is added.
+// agent learns what this release can do; every release shipped every file, so
+// a missing one is a local change.
 func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
 	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
 	sum := sha256.Sum256([]byte(earlier))
@@ -248,7 +248,7 @@ func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
 		want     string
 	}{
 		{name: "every file installed", metadata: ptr(readEmbeddedSkill(t, "agents/openai.yaml")), want: "updated"},
-		{name: "a file the earlier release lacked", want: "updated"},
+		{name: "a deleted file", want: "local changes"},
 		{name: "edited metadata", metadata: ptr("mine\n"), want: "local changes"},
 	}
 	for _, tc := range cases {
@@ -334,5 +334,54 @@ func TestBundledSkillTeachesFalsePositiveReports(t *testing.T) {
 		if strings.Contains(content, gone) {
 			t.Errorf("the bundled skill still says %q", gone)
 		}
+	}
+}
+
+// A skill init cannot rewrite (a read-only directory, say) is reported and
+// left as it was; the other harnesses still get theirs, and init succeeds.
+func TestInitGoesOnWhenAnEarlierSkillCannotBeUpdated(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes through read-only permissions")
+	}
+	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
+	sum := sha256.Sum256([]byte(earlier))
+	previous := skills.Previous["SKILL.md"]
+	skills.Previous["SKILL.md"] = append(append([]string{}, previous...), hex.EncodeToString(sum[:]))
+	t.Cleanup(func() { skills.Previous["SKILL.md"] = previous })
+
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".agents"))
+	makeHarness(t, filepath.Join(home, ".claude"))
+	locked := filepath.Join(home, ".agents", "skills", "slopcop")
+	writeFile(t, locked, "SKILL.md", earlier)
+	writeFile(t, locked, "agents/openai.yaml", readEmbeddedSkill(t, "agents/openai.yaml"))
+	for path, mode := range map[string]os.FileMode{
+		filepath.Join(locked, "SKILL.md"):              0o444,
+		filepath.Join(locked, "agents", "openai.yaml"): 0o444,
+		filepath.Join(locked, "agents"):                0o555,
+		locked:                                         0o555,
+	} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		_ = os.Chmod(locked, 0o755)
+		_ = os.Chmod(filepath.Join(locked, "agents"), 0o755)
+	})
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stderr, "could not update the slopcop skill at "+locked) {
+		t.Errorf("stderr = %q, want the locked skill named", stderr)
+	}
+	if readSkillFile(t, filepath.Join(locked, "SKILL.md")) != earlier {
+		t.Error("the locked skill changed")
+	}
+	claude := filepath.Join(home, ".claude", "skills", "slopcop")
+	if !strings.Contains(stdout, "installed the slopcop skill at "+claude) {
+		t.Errorf("stdout = %q, want the other harness installed", stdout)
 	}
 }
