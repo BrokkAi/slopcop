@@ -2,7 +2,11 @@
 // control plane in server/src/check.rs.
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/BrokkAi/slopcop/internal/terminal"
+)
 
 // Check statuses and their exit codes, mirrored from CheckStatus. Pending is
 // the CLI's own: the service answered check_running until --timeout ran out.
@@ -163,11 +167,12 @@ const (
 	pendingRemedy  = "Run the same check again to wait for its result."
 )
 
-func (p *Pending) Error() string { return p.Message }
+func (p *Pending) Error() string { return terminal.Safe(p.Message) }
 
-// RemedyText is the message and remedy an agent prints verbatim.
+// RemedyText is the message and remedy an agent prints verbatim, kept
+// printable.
 func (p *Pending) RemedyText() string {
-	return strings.TrimSpace(p.Message + "\n" + p.Remedy)
+	return strings.TrimSpace(terminal.Safe(p.Message) + "\n" + terminal.Safe(p.Remedy))
 }
 
 // Report kinds and outcomes, mirrored from the POST /v1/report contract.

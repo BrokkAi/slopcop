@@ -3,11 +3,14 @@ package service
 import (
 	"fmt"
 	"strings"
+
+	"github.com/BrokkAi/slopcop/internal/terminal"
 )
 
 // The closed failure codes the CLI acts on or its skill and README name,
 // mirrored from server/src/check.rs. Whatever the code, the CLI prints the
-// service's message and remedy verbatim.
+// service's message and remedy verbatim, but for control and bidirectional
+// characters, which never reach the terminal.
 const (
 	CodeAuthRequired       = "auth_required"
 	CodeAuthExpired        = "auth_expired"
@@ -54,11 +57,12 @@ type Error struct {
 	Body       ErrorBody
 }
 
-// Error returns the service's message when the response carried the contract.
+// Error returns the service's message when the response carried the
+// contract, kept printable.
 func (e *Error) Error() string {
 	switch {
 	case e.Body.Message != "":
-		return e.Body.Message
+		return terminal.Safe(e.Body.Message)
 	case e.Body.Code != "":
 		return fmt.Sprintf("the SlopCop service rejected the request (%s)", e.Body.Code)
 	case e.StatusCode > 0:
@@ -69,17 +73,18 @@ func (e *Error) Error() string {
 }
 
 // RemedyText is the message, remedy, and install or top-up link an agent
-// prints verbatim, exactly the fields the service enumerated for this failure.
+// prints verbatim, exactly the fields the service enumerated for this
+// failure. Each is kept printable, so a response cannot drive the terminal.
 func (e *Error) RemedyText() string {
 	lines := []string{e.Error()}
 	if remedy := strings.TrimSpace(e.Body.Remedy); remedy != "" {
-		lines = append(lines, remedy)
+		lines = append(lines, terminal.Safe(remedy))
 	}
 	if install := strings.TrimSpace(e.Body.InstallURL); install != "" {
-		lines = append(lines, install)
+		lines = append(lines, terminal.Safe(install))
 	}
 	if topUp := strings.TrimSpace(e.Body.TopUpURL); topUp != "" {
-		lines = append(lines, "Add credits: "+topUp)
+		lines = append(lines, "Add credits: "+terminal.Safe(topUp))
 	}
 	return strings.Join(lines, "\n")
 }

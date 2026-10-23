@@ -486,3 +486,23 @@ func TestDecodeErrorExcerptsAndCodeRemedies(t *testing.T) {
 		})
 	}
 }
+
+// Every field a failure prints is kept printable, not only the excerpt: a
+// hostile message, remedy or link cannot drive the terminal.
+func TestRemedyTextKeepsEveryFieldPrintable(t *testing.T) {
+	failure := &Error{StatusCode: http.StatusPaymentRequired, Body: ErrorBody{
+		Code:       CodeInsufficientCredits,
+		Message:    "out\x1b[2J of credits",
+		Remedy:     "add\x07 credits‮",
+		InstallURL: "https://install.example/\x1b]8;;x\x07",
+		TopUpURL:   "https://top-up.example/\r⁦",
+	}}
+	want := "out�[2J of credits\nadd� credits�\nhttps://install.example/�]8;;x�\nAdd credits: https://top-up.example/��"
+	if got := failure.RemedyText(); got != want {
+		t.Errorf("RemedyText = %q, want %q", got, want)
+	}
+	pending := &Pending{Message: "still\x1b[2J running", Remedy: "run\x07 again"}
+	if got, want := pending.RemedyText(), "still�[2J running\nrun� again"; got != want {
+		t.Errorf("Pending.RemedyText = %q, want %q", got, want)
+	}
+}
