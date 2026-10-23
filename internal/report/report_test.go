@@ -776,6 +776,19 @@ func TestHumanSummaryCountsDismissedFindings(t *testing.T) {
 	}
 }
 
+// The human summary counts dismissed findings as the service does, as json
+// and sarif say it, even when some were left out of the list.
+func TestHumanSummaryTakesTheServicesDismissedCount(t *testing.T) {
+	omitted := response(service.StatusClean, "finding", []service.Finding{dismissed("a.go", 1, "error", "p", xssID)})
+	omitted.Summary.DismissedFindings = 3
+	omitted.Summary.Findings = 3
+	omitted.Summary.OmittedFindings = 2
+	want := "No new findings; 3 reported as false positive (--show-existing lists them); +2 not reported | Analysis complete\n"
+	if got := renderWith(t, omitted, FormatHuman, Options{}); !strings.HasPrefix(got, want) {
+		t.Errorf("human = %q, want it to start %q", got, want)
+	}
+}
+
 func TestHumanHintNeedsANewFindingWithAnID(t *testing.T) {
 	cases := []struct {
 		name     string

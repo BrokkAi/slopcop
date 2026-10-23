@@ -225,10 +225,13 @@ func summaryLine(response service.Response, options Options) string {
 	if len(g.existing) > 0 {
 		scope = fmt.Sprintf("%s; %d already in the code", scope, len(g.existing))
 	}
-	if len(g.dismissed) > 0 {
-		scope = fmt.Sprintf("%s; %d reported as false positive", scope, len(g.dismissed))
+	// The service's count, as json and sarif carry it: a dismissed finding
+	// left out of the list is still counted.
+	dismissed := response.Summary.DismissedFindings
+	if dismissed > 0 {
+		scope = fmt.Sprintf("%s; %d reported as false positive", scope, dismissed)
 	}
-	if len(g.existing)+len(g.dismissed) > 0 && !options.ShowExisting {
+	if len(g.existing)+dismissed > 0 && !options.ShowExisting {
 		scope += " (--show-existing lists them)"
 	}
 	if response.Summary.OmittedFindings > 0 {
