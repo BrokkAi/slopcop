@@ -10,9 +10,9 @@ import (
 	"net/url"
 	"sort"
 	"strings"
-	"unicode"
 
 	"github.com/BrokkAi/slopcop/internal/service"
+	"github.com/BrokkAi/slopcop/internal/terminal"
 )
 
 // Formats the CLI accepts.
@@ -64,7 +64,7 @@ func publicURL(raw string) string {
 // shellWord quotes s for a POSIX shell when it needs it, so the hint pastes
 // as one argument ("&" in a query string would otherwise end the command).
 func shellWord(s string) string {
-	s = printable(s)
+	s = terminal.Safe(s)
 	safe := s != ""
 	for _, r := range s {
 		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || strings.ContainsRune("-_./:@%+=,", r)) {
@@ -184,21 +184,21 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 	}
 	out.WriteString(heading + "\n")
 	for _, finding := range findings {
-		location := printable(finding.Path)
+		location := terminal.Safe(finding.Path)
 		if finding.StartLine != nil {
 			location = fmt.Sprintf("%s:%d", location, *finding.StartLine)
 		}
 		fmt.Fprintf(
 			out,
 			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n",
-			printable(finding.Severity),
-			printable(finding.PolicyID),
-			printable(finding.Title),
+			terminal.Safe(finding.Severity),
+			terminal.Safe(finding.PolicyID),
+			terminal.Safe(finding.Title),
 			location,
-			printable(finding.Certainty),
+			terminal.Safe(finding.Certainty),
 		)
 		if finding.ID != "" {
-			fmt.Fprintf(out, "    Id: %s\n", printable(finding.ID))
+			fmt.Fprintf(out, "    Id: %s\n", terminal.Safe(finding.ID))
 		}
 		out.WriteString("\n")
 	}
@@ -235,7 +235,7 @@ func summaryLine(response service.Response, options Options) string {
 	state := "Analysis complete"
 	switch {
 	case response.Failure != "":
-		state = "Analysis did not complete: " + printable(response.Failure)
+		state = "Analysis did not complete: " + terminal.Safe(response.Failure)
 	case response.Summary.IncompletePolicies > 0:
 		state = fmt.Sprintf(
 			"Analysis incomplete: %d check(s) did not complete",
@@ -276,7 +276,7 @@ func incompleteLine(response service.Response) string {
 	}
 	named := make([]string, 0, len(response.Incomplete)+1)
 	for _, policy := range response.Incomplete {
-		named = append(named, fmt.Sprintf("%s (%s)", printable(policy.PolicyID), printable(policy.Reason)))
+		named = append(named, fmt.Sprintf("%s (%s)", terminal.Safe(policy.PolicyID), terminal.Safe(policy.Reason)))
 	}
 	if unnamed := response.Summary.IncompletePolicies - len(response.Incomplete); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
@@ -293,7 +293,7 @@ func elsewhereLine(response service.Response) string {
 	}
 	named := make([]string, 0, len(response.InconclusiveElsewhere)+1)
 	for _, policy := range response.InconclusiveElsewhere {
-		named = append(named, printable(policy.PolicyID))
+		named = append(named, terminal.Safe(policy.PolicyID))
 	}
 	if unnamed := total - len(response.InconclusiveElsewhere); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
@@ -302,17 +302,6 @@ func elsewhereLine(response service.Response) string {
 		"Inconclusive outside the change (never fail the check): %s",
 		strings.Join(named, ", "),
 	)
-}
-
-// printable keeps control and bidirectional-override characters from hostile
-// repository content off the terminal.
-func printable(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) || (r >= '‪' && r <= '‮') || (r >= '⁦' && r <= '⁩') {
-			return unicode.ReplacementChar
-		}
-		return r
-	}, value)
 }
 
 // jsonReport is the document `--format json` prints: what an agent needs from
@@ -671,9 +660,9 @@ func WriteFalsePositive(w io.Writer, response service.ReportResponse, format str
 }
 
 func falsePositiveText(response service.ReportResponse) string {
-	finding := "finding " + printable(response.FindingID)
+	finding := "finding " + terminal.Safe(response.FindingID)
 	if response.PolicyID != "" {
-		finding += " (" + printable(response.PolicyID) + ")"
+		finding += " (" + terminal.Safe(response.PolicyID) + ")"
 	}
 	if response.Status == service.ReportAlreadyReported {
 		return "slopcop: " + finding + " was already reported as a false positive\n" +

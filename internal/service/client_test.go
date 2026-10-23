@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestCheckSendsTheContractRequest(t *testing.T) {
@@ -445,5 +446,43 @@ func TestRetryAfterBoundsAHugeWait(t *testing.T) {
 		if got := retryAfter(header); got != want {
 			t.Errorf("retryAfter(%q) = %v, want %v", value, got, want)
 		}
+	}
+}
+
+// A failure without the closed contract quotes the response on one line, cut
+// on a character boundary and without control or bidi characters; a code
+// alone gets the service's remedy for it.
+func TestDecodeErrorExcerptsAndCodeRemedies(t *testing.T) {
+	const generic = "Check the service URL, then retry."
+	cases := []struct {
+		name        string
+		payload     string
+		wantMessage string
+		wantRemedy  string
+	}{
+		{name: "empty", payload: "", wantMessage: "the SlopCop service returned HTTP 502", wantRemedy: generic},
+		{name: "html on several lines", payload: "<html>\n  <body>bad\tgateway</body>\n</html>\n",
+			wantMessage: "the SlopCop service returned HTTP 502", wantRemedy: generic + " Response: <html> <body>bad gateway</body> </html>"},
+		{name: "terminal escapes and bidi overrides", payload: "\x1b]0;owned\x07\x1b[2Jtext‮gnp.exe⁦",
+			wantMessage: "the SlopCop service returned HTTP 502", wantRemedy: generic + " Response: �]0;owned��[2Jtext�gnp.exe�"},
+		{name: "long multibyte text", payload: strings.Repeat("é", 300),
+			wantMessage: "the SlopCop service returned HTTP 502", wantRemedy: generic + " Response: " + strings.Repeat("é", 200) + "..."},
+		{name: "sign-in code alone", payload: `{"code":"auth_required"}`, wantRemedy: "Sign in, then retry."},
+		{name: "expired code alone", payload: `{"code":"auth_expired"}`, wantRemedy: "Sign in again."},
+		{name: "rate-limited code alone", payload: `{"code":"rate_limited"}`, wantRemedy: "Wait and retry."},
+		{name: "unknown code alone", payload: `{"code":"teapot"}`, wantRemedy: generic + ` Response: {"code":"teapot"}`},
+		{name: "a code and a message keep the service's text", payload: `{"code":"rate_limited","message":"Slow down."}`,
+			wantMessage: "Slow down."},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			failure := decodeError(http.StatusBadGateway, []byte(tc.payload))
+			if failure.Body.Message != tc.wantMessage || failure.Body.Remedy != tc.wantRemedy {
+				t.Errorf("body = %+v, want message %q, remedy %q", failure.Body, tc.wantMessage, tc.wantRemedy)
+			}
+			if !utf8.ValidString(failure.RemedyText()) {
+				t.Errorf("RemedyText is not valid UTF-8: %q", failure.RemedyText())
+			}
+		})
 	}
 }

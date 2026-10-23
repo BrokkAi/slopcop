@@ -434,6 +434,7 @@ Layout:
 | `internal/service` | `/v1/check` and `/v1/report` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering of checks, and of reports |
 | `internal/config` | stored service URL and token |
+| `internal/terminal` | keeps hostile text off the terminal |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |

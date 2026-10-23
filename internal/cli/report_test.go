@@ -183,6 +183,18 @@ func TestReportPrintsTheServiceFailure(t *testing.T) {
 		}
 	})
 
+	// A code alone, from a proxy or an older service, gets the remedy for
+	// that code, not one that blames the service URL.
+	t.Run("a sign-in code alone", func(t *testing.T) {
+		isolateUserConfig(t)
+		server := newReportService(t, http.StatusUnauthorized, `{"code":"auth_required"}`)
+		code, stdout, stderr := runCLI(t, "report", reportID, "--reason", reportWhy, "--service", server.URL)
+		want := "the SlopCop service rejected the request (auth_required)\nSign in, then retry.\nSign in with `slopcop login`.\n"
+		if code != 2 || stdout != "" || stderr != want {
+			t.Errorf("exit = %d, stdout = %q, stderr = %q, want %q", code, stdout, stderr, want)
+		}
+	})
+
 	t.Run("an unknown status", func(t *testing.T) {
 		isolateUserConfig(t)
 		server := newReportService(t, http.StatusOK, reportAnswer("queued"))
