@@ -29,7 +29,7 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 type Options struct {
 	// ShowExisting lists the findings that were already in the code, then
 	// the ones reported as false positives, after the new ones. They are
-	// counted either way.
+	// counted either way, and SARIF carries the reported ones either way.
 	ShowExisting bool
 	// Service is the service the check named with --service or
 	// $SLOPCOP_SERVICE, if any, which the false-positive hint repeats as
@@ -416,9 +416,9 @@ type sarifResult struct {
 	Level     string          `json:"level"`
 	Message   sarifMessage    `json:"message"`
 	Locations []sarifLocation `json:"locations"`
-	// BaselineState is `new` for a finding the change touched, a reported
-	// false positive included (its suppression says so), and `unchanged` for
-	// one already in the code.
+	// BaselineState is `new` for a finding that fails the check and
+	// `unchanged` for one already in the code or reported as a false
+	// positive, so it agrees with the exit code.
 	BaselineState string `json:"baselineState"`
 	// Suppressions marks a finding reported as a false positive.
 	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
@@ -471,11 +471,10 @@ type sarifDescriptor struct {
 }
 
 // writeSARIF prints a SARIF 2.1.0 log with one run. Each result's
-// baselineState says whether the change touched it, and a dismissed one is
-// suppressed; existing and dismissed findings are results only with
-// --show-existing.
+// baselineState says whether it fails the check, and a dismissed one is
+// suppressed. Existing findings are results only with --show-existing.
 func writeSARIF(w io.Writer, response service.Response, options Options) error {
-	findings := listed(response, options)
+	findings := sarifFindings(response, options)
 	var rules []string
 	seen := make(map[string]bool)
 	for _, finding := range findings {
@@ -596,11 +595,25 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	}), "sarif report")
 }
 
-// baselineState is SARIF's word for whether the change touched a finding. The
-// service dismisses only a finding the change touched, so a dismissed one is
-// new to the change too; its suppression says it was reported.
+// sarifFindings are a SARIF log's results: the new findings, the existing
+// ones with --show-existing, then the dismissed ones whatever the options.
+// Code scanning closes an alert whose result disappears as fixed, so a
+// reported finding stays a result, marked suppressed, rather than vanish.
+func sarifFindings(response service.Response, options Options) []service.Finding {
+	g := split(response.Findings)
+	findings := g.fresh
+	if options.ShowExisting {
+		findings = append(findings, g.existing...)
+	}
+	return append(findings, g.dismissed...)
+}
+
+// baselineState is SARIF's word for whether a finding fails the check: `new`
+// for a new finding, `unchanged` for one already in the code or dismissed.
+// A dismissed finding never fails the check, so a gate on `new` agrees with
+// the exit code; its suppression says it was reported.
 func baselineState(finding service.Finding) string {
-	if finding.New || finding.Dismissed {
+	if finding.New && !finding.Dismissed {
 		return "new"
 	}
 	return "unchanged"

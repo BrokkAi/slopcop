@@ -68,13 +68,14 @@ A check fails only on findings the change introduced or touched. Findings that
 were already in the code are counted in `summary.existingFindings`, never
 change the exit code, and are listed only with `--show-existing`. In `json`,
 each listed finding has `new`; `summary.newFindings` counts the new ones. In
-`sarif`, `baselineState` is `new` or `unchanged`.
+`sarif`, `baselineState` is `new` for a finding that fails the check and
+`unchanged` otherwise, a dismissed one included.
 
 A finding someone reported as a false positive in this repository is
 dismissed: it comes back with `new: false` and `dismissed: true`, is counted in
 `summary.dismissedFindings`, never changes the exit code, and is listed only
-with `--show-existing`, under "Reported as false positive" (in `sarif`, as a
-suppressed result).
+with `--show-existing`, under "Reported as false positive". `sarif` always
+carries it, as a suppressed result.
 
 Every finding has an id: the `Id:` line in `human`, `id` in `json`, and
 `properties["slopcop.findingId"]` in `sarif`. The check itself has one too (`checkId`).

@@ -854,10 +854,17 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 		want        []result
 	}{
 		{
+			// A reported finding stays a result, suppressed, so code
+			// scanning never reads it as fixed; it is unchanged, since it
+			// never fails the check.
 			name:        "default",
 			response:    reported(),
 			wantCheckID: checkID,
-			want:        []result{{freshID, "new", nil}},
+			want: []result{
+				{freshID, "new", nil},
+				{xssID, "unchanged", suppressed},
+				{unwrapID, "unchanged", suppressed},
+			},
 		},
 		{
 			name:        "show existing",
@@ -867,8 +874,22 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 			want: []result{
 				{freshID, "new", nil},
 				{existingID, "unchanged", nil},
-				{xssID, "new", suppressed},
-				{unwrapID, "new", suppressed},
+				{xssID, "unchanged", suppressed},
+				{unwrapID, "unchanged", suppressed},
+			},
+		},
+		{
+			name: "a dismissed finding a service also marked new",
+			response: func() service.Response {
+				r := reported()
+				r.Findings[0].New = true
+				return r
+			}(),
+			wantCheckID: checkID,
+			want: []result{
+				{freshID, "new", nil},
+				{xssID, "unchanged", suppressed},
+				{unwrapID, "unchanged", suppressed},
 			},
 		},
 		{
@@ -894,9 +915,13 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 			if properties["slopcop.dismissedFindings"] != float64(tc.response.Summary.DismissedFindings) {
 				t.Errorf("run properties = %v", properties)
 			}
+			rules := run["tool"].(map[string]any)["driver"].(map[string]any)["rules"].([]any)
 			var got []result
 			for _, raw := range run["results"].([]any) {
 				entry := raw.(map[string]any)
+				if rule := rules[int(entry["ruleIndex"].(float64))].(map[string]any); rule["id"] != entry["ruleId"] {
+					t.Errorf("ruleIndex does not point at the rule: %v", entry)
+				}
 				var id any
 				if bag, ok := entry["properties"].(map[string]any); ok {
 					id = bag["slopcop.findingId"]

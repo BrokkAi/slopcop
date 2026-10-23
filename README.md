@@ -216,7 +216,8 @@ A finding reported as a false positive in the repository is dismissed: the
 service sends it with `new: false` and `dismissed: true`, counts it in
 `summary.dismissedFindings`, and never lets it decide the status. Like the
 pre-existing findings, dismissed ones are always counted and listed only with
-`--show-existing`.
+`--show-existing`, except in `sarif`, which always carries them as suppressed
+results (see below).
 
 ### Output and exit codes
 
@@ -253,9 +254,13 @@ line.
 with `id`, `new`, and `dismissed`), `incomplete`, and `failure` when the
 analysis did not complete. `sarif` prints a SARIF 2.1.0 log whose run carries
 `properties["slopcop.checkId"]` and whose results carry `properties["slopcop.findingId"]` and
-`baselineState` `new` or `unchanged`; a dismissed finding's result has a
-`suppressions` entry of kind `external`, justified as `reported as false
-positive`. Against a service from before checks had ids, `checkId` and `id`
+`baselineState`: `new` for a new finding, `unchanged` for one already in the
+code or reported as a false positive, so a gate on `baselineState == "new"`
+agrees with the exit code. Pre-existing findings are results only with
+`--show-existing`, but a dismissed finding is always one, with a
+`suppressions` entry of kind `external` justified as `reported as false
+positive`, so code scanning shows a reported finding as suppressed rather
+than closing it as fixed. Against a service from before checks had ids, `checkId` and `id`
 are empty in `json`, absent in `sarif`, and `human` prints no `Id:` line or
 report hint.
 
