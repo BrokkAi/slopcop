@@ -180,8 +180,10 @@ const (
 	ReportAlreadyReported = "already_reported"
 )
 
-// MaxReportBodyBytes is the service's limit on a report's encoded body.
-const MaxReportBodyBytes = 8 << 10
+// MaxReportBodyBytes is the service's (and its web proxy's) limit on a
+// report's encoded body, 64 KiB. A reason within its 2000 characters stays
+// under it even when every character is escaped as \uXXXX.
+const MaxReportBodyBytes = 64 << 10
 
 // ReportRequest is the POST /v1/report body.
 type ReportRequest struct {

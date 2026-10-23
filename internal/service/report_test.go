@@ -241,3 +241,22 @@ func TestEncodeJSONDoesNotEscapeHTML(t *testing.T) {
 		t.Errorf("body = %s, want it to contain %s", body, want)
 	}
 }
+
+// A body over the service's limit is refused before it is sent.
+func TestReportRefusesABodyOverTheLimit(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer server.Close()
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Report(context.Background(), ReportRequest{
+		FindingID: reportedFinding,
+		Kind:      ReportFalsePositive,
+		Reason:    strings.Repeat("\x01", MaxReportBodyBytes/6+1),
+	})
+	if err == nil || !strings.Contains(err.Error(), "over the service's 65536") || requests != 0 {
+		t.Fatalf("err = %v, requests = %d", err, requests)
+	}
+}

@@ -215,7 +215,6 @@ func TestReportValidatesBeforeSending(t *testing.T) {
 		{name: "two finding ids", args: []string{"report", reportID, reportID, "--reason", reportWhy}, want: "got 2 argument(s)", usage: true},
 		{name: "sarif", args: []string{"report", reportID, "--reason", reportWhy, "--format", "sarif"}, want: `unknown format "sarif" (expected human or json)`},
 		{name: "an id quoting a cobra error", args: []string{"report", "unknown command", "--reason", reportWhy}, want: "is not a finding id"},
-		{name: "a reason over the body limit once encoded", args: []string{"report", reportID, "--reason", strings.Repeat("\x01", 1400)}, want: "bytes once encoded, over the service's 8192"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -240,18 +239,24 @@ func TestReportValidatesBeforeSending(t *testing.T) {
 		})
 	}
 
-	t.Run("a reason of 2000 characters", func(t *testing.T) {
-		isolateUserConfig(t)
-		server := newReportService(t, http.StatusOK, reportAnswer("recorded"))
-		reason := strings.Repeat("é", 2000)
-		code, _, stderr := runCLI(t, "report", reportID, "--reason", reason, "--service", server.URL)
-		if code != 0 {
-			t.Fatalf("exit = %d, stderr = %s", code, stderr)
-		}
-		if len(server.requests) != 1 || server.requests[0]["reason"] != reason {
-			t.Errorf("requests = %d", len(server.requests))
-		}
-	})
+	// The longest reason once encoded, 2000 characters each escaped as
+	// \uXXXX, is still within the body limit.
+	for name, reason := range map[string]string{
+		"a reason of 2000 characters":                 strings.Repeat("é", 2000),
+		"a reason of 2000 characters escaped in json": "x" + strings.Repeat("\x01", 1999),
+	} {
+		t.Run(name, func(t *testing.T) {
+			isolateUserConfig(t)
+			server := newReportService(t, http.StatusOK, reportAnswer("recorded"))
+			code, _, stderr := runCLI(t, "report", reportID, "--reason", reason, "--service", server.URL)
+			if code != 0 {
+				t.Fatalf("exit = %d, stderr = %s", code, stderr)
+			}
+			if len(server.requests) != 1 || server.requests[0]["reason"] != reason {
+				t.Errorf("requests = %d", len(server.requests))
+			}
+		})
+	}
 }
 
 // A report signs in and finds the service exactly as a check does.
