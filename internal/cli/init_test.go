@@ -288,21 +288,43 @@ func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
 
 func ptr(value string) *string { return &value }
 
-// The digests of earlier releases are SHA-256 hex, of files the skill still
-// ships, and never this release's own copy.
-// pinnedSkillDigest is the SHA-256 of this release's SKILL.md. Changing the
-// skill fails TestSkillChangesUpdateThePin until the pin moves, which is the
-// moment to add the replaced digest to skills.Previous if that copy shipped,
-// so untouched installs of it still update.
-const pinnedSkillDigest = "67f6409a28fa86db3f333e8f59f2d11f3f8f641969f561611650220e671f34a0"
+// pinnedSkillDigests are the SHA-256 of this release's copy of every bundled
+// skill file, by its slash-separated path inside the skill folder. Changing,
+// adding or removing a file fails TestSkillChangesUpdateThePin until its pin
+// moves, which is the moment to add the replaced digest to skills.Previous if
+// that copy shipped, so untouched installs of it still update.
+var pinnedSkillDigests = map[string]string{
+	"SKILL.md":           "67f6409a28fa86db3f333e8f59f2d11f3f8f641969f561611650220e671f34a0",
+	"agents/openai.yaml": "2b3ebe4e9299ac6c1eed486258fb9789338fb904622773a462ec3f227c180765",
+}
 
 func TestSkillChangesUpdateThePin(t *testing.T) {
-	sum := sha256.Sum256([]byte(readEmbeddedSkill(t, "SKILL.md")))
-	if got := hex.EncodeToString(sum[:]); got != pinnedSkillDigest {
-		t.Errorf("SKILL.md is now %s, pinned %s: if the pinned copy shipped in a release, add it to skills.Previous; then move the pin", got, pinnedSkillDigest)
+	const instructions = "if the pinned copy shipped in a release, add it to skills.Previous; then move the pin"
+	files, err := bundledSkillFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bundled := make(map[string]bool, len(files))
+	for _, file := range files {
+		name := filepath.ToSlash(file.relative)
+		bundled[name] = true
+		sum := sha256.Sum256(file.data)
+		got := hex.EncodeToString(sum[:])
+		if pinned, ok := pinnedSkillDigests[name]; !ok {
+			t.Errorf("%s is %s and has no pin: add it to pinnedSkillDigests", name, got)
+		} else if got != pinned {
+			t.Errorf("%s is now %s, pinned %s: %s", name, got, pinned, instructions)
+		}
+	}
+	for name := range pinnedSkillDigests {
+		if !bundled[name] {
+			t.Errorf("%s is pinned but no longer bundled: %s", name, instructions)
+		}
 	}
 }
 
+// The digests of earlier releases are SHA-256 hex, of files the skill still
+// ships, and never this release's own copy.
 func TestPreviousSkillDigestsAreWellFormed(t *testing.T) {
 	for name, digests := range skills.Previous {
 		data, err := skills.Files.ReadFile("slopcop/" + name)
