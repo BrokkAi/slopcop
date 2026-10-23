@@ -311,14 +311,14 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 			status:  http.StatusConflict,
 			code:    "repo_not_indexed",
 			message: "SlopCop cannot check this repository with this login.",
-			remedy:  "If the repository is private, install the SlopCop GitHub App on its owner with access to it, then retry; if the App is already installed there, run slopcop login again so this login can use that installation. If the remote URL is wrong, fix it first.",
+			remedy:  "A private repository needs the SlopCop GitHub App: install it on the repository's owner with access to the repository, run slopcop login so this login can use that installation, then retry. If the remote URL is wrong, fix it first.",
 		},
 		{
 			name:    "no access",
 			status:  http.StatusForbidden,
 			code:    "no_access",
 			message: "Your account does not have access to this repository.",
-			remedy:  "Ask a repository administrator for access, then sign in again.",
+			remedy:  "Ask a repository administrator for read access, then retry.",
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {

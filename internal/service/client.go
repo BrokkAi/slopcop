@@ -13,7 +13,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/BrokkAi/slopcop/internal/terminal"
 )
@@ -327,16 +326,21 @@ func (c *Client) postPayload(ctx context.Context, path string, payload []byte) (
 }
 
 // maxExcerptRunes bounds the excerpt a failure without the closed contract
-// quotes from the response.
-const maxExcerptRunes = 200
+// quotes from the response, and maxExcerptBytes the start of the response it
+// is taken from, so a large body is never copied whole.
+const (
+	maxExcerptRunes = 200
+	maxExcerptBytes = 4 << 10
+)
 
-// codeRemedies are the service's remedies for the closed codes, for a body
-// that names a code but says nothing else (a proxy, or an older service).
-// The CLI adds the slopcop command to the ones that are to sign in.
+// codeRemedies are the service's remedies for the closed codes of a check or
+// a report, for a body that names a code but says nothing else (a proxy, or
+// an older service). Each is server/src/check.rs's or check_reports.rs's
+// text, kept in step with it. The CLI adds the slopcop command to the ones
+// that are to sign in.
 var codeRemedies = map[string]string{
 	CodeAuthRequired:        "Sign in, then retry.",
 	CodeAuthExpired:         "Sign in again.",
-	CodeDeviceFlowDisabled:  "Use a token login instead.",
 	CodeRepoNotIndexed:      "A private repository needs the SlopCop GitHub App: install it on the repository's owner with access to the repository, run slopcop login so this login can use that installation, then retry. If the remote URL is wrong, fix it first.",
 	CodeNoAccess:            "Ask a repository administrator for read access, then retry.",
 	CodeBaseNotFound:        "Push the base commit, or rebase onto the upstream branch and retry.",
@@ -350,31 +354,45 @@ var codeRemedies = map[string]string{
 
 func decodeError(status int, payload []byte) *Error {
 	var body ErrorBody
-	fallback := "Check the service URL, then retry."
-	if excerpt := responseExcerpt(payload); excerpt != "" {
-		fallback += " Response: " + excerpt
-	}
 	if err := json.Unmarshal(payload, &body); err != nil || (body.Message == "" && body.Code == "") {
-		body = ErrorBody{Message: fmt.Sprintf("the SlopCop service returned HTTP %d", status), Remedy: fallback}
+		body = ErrorBody{Message: fmt.Sprintf("the SlopCop service returned HTTP %d", status), Remedy: genericRemedy(payload)}
 	} else if body.Remedy == "" && body.Message == "" {
 		// A code alone still gets a way on: the service's remedy for a code
 		// it knows, the generic one otherwise.
 		if remedy, ok := codeRemedies[body.Code]; ok {
 			body.Remedy = remedy
 		} else {
-			body.Remedy = fallback
+			body.Remedy = genericRemedy(payload)
 		}
 	}
 	return &Error{StatusCode: status, Body: body}
 }
 
+// genericRemedy is the remedy for a failure the closed contract does not
+// explain, quoting the start of the response.
+func genericRemedy(payload []byte) string {
+	remedy := "Check the service URL, then retry."
+	if excerpt := responseExcerpt(payload); excerpt != "" {
+		remedy += " Response: " + excerpt
+	}
+	return remedy
+}
+
 // responseExcerpt is the start of a response body on one line, cut on a
 // character boundary, with control and bidirectional characters (ANSI
-// escapes, overrides) kept off the terminal.
+// escapes, overrides) kept off the terminal. Only the first maxExcerptBytes
+// of the body are read.
 func responseExcerpt(payload []byte) string {
+	cut := len(payload) > maxExcerptBytes
+	if cut {
+		payload = payload[:maxExcerptBytes]
+	}
 	excerpt := strings.Join(strings.Fields(string(payload)), " ")
-	if utf8.RuneCountInString(excerpt) > maxExcerptRunes {
-		excerpt = string([]rune(excerpt)[:maxExcerptRunes]) + "..."
+	if runes := []rune(excerpt); len(runes) > maxExcerptRunes {
+		excerpt, cut = string(runes[:maxExcerptRunes]), true
+	}
+	if cut && excerpt != "" {
+		excerpt += "..."
 	}
 	return terminal.Safe(excerpt)
 }

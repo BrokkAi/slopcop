@@ -77,8 +77,8 @@ func remedyError(err error) error {
 // loginHints name the slopcop command for remedies that are actually to sign
 // in. The service's remedies do not name a client, so the client adds its own.
 // Repo-state failures (repo_not_indexed, no_access) keep the service's remedy
-// alone: those say "sign in again" only as a step after installing the App or
-// getting access, and appending a login command sends an already-signed-in
+// alone: repo_not_indexed's names slopcop login only as a step after
+// installing the App, and appending a login command sends an already-signed-in
 // user back through the login flow for a problem login cannot fix.
 var loginHints = map[string]string{
 	service.CodeAuthRequired:       "Sign in with `slopcop login`.",
