@@ -148,7 +148,7 @@ slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
 - Every report and its reason is visible to the team on the SlopCop dashboard.
   An owner can reinstate the finding, and false-positive rates are tracked per
   rule.
-- A reported finding stops failing checks for this repository: a later check
+- A reported finding stops failing this repository's checks in your workspace: a later check
   lists it as dismissed rather than new, so the check-and-fix loop can end.
 - Report only new findings from the change you are checking. Do not report
   pre-existing findings you were not asked about.

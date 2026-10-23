@@ -44,7 +44,8 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
-	err := root.ExecuteContext(ctx)
+	root.SetContext(ctx)
+	command, err := root.ExecuteC()
 	if err == nil {
 		return 0
 	}
@@ -54,7 +55,7 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	}
 	fmt.Fprintf(stderr, "slopcop: %v\n", err)
 	if isUsageError(err) {
-		fmt.Fprintln(stderr, "Run 'slopcop --help' for usage.")
+		fmt.Fprintf(stderr, "Run '%s --help' for usage.\n", command.CommandPath())
 	}
 	return 2
 }

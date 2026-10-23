@@ -563,10 +563,11 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	}), "sarif report")
 }
 
-// baselineState is SARIF's word for whether the change touched a finding. A
-// dismissed finding was already seen by the check it was reported from.
+// baselineState is SARIF's word for whether the change touched a finding. The
+// service dismisses only a finding the change touched, so a dismissed one is
+// new to the change too; its suppression says it was reported.
 func baselineState(finding service.Finding) string {
-	if finding.New && !finding.Dismissed {
+	if finding.New || finding.Dismissed {
 		return "new"
 	}
 	return "unchanged"
@@ -634,8 +635,8 @@ func falsePositiveText(response service.ReportResponse) string {
 	}
 	if response.Status == service.ReportAlreadyReported {
 		return "slopcop: " + finding + " was already reported as a false positive\n" +
-			"It no longer fails checks in this repository, and the team sees the earlier report on the SlopCop dashboard.\n"
+			"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the earlier report on the SlopCop dashboard.\n"
 	}
 	return "slopcop: reported " + finding + " as a false positive\n" +
-		"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n"
+		"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the report and its reason on the SlopCop dashboard.\n"
 }

@@ -23,7 +23,8 @@ the change and prints what comes back, and it never decides on its own that
 there is nothing to check. The command is built for agents and one-shot CI: no
 prompts, one request, and the analyzer's exit contract. When a finding is wrong
 for the code it flags, `slopcop report` records it as a false positive: the
-finding stops failing checks in that repository, and the team sees the report
+finding stops failing that repository's checks in the same workspace (or with
+the same operator token), and the team sees the report
 and its reason on the SlopCop dashboard.
 
 ## Install
@@ -310,8 +311,8 @@ slopcop report 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b \
 
 `slopcop report` records a finding from a check as a false positive. The id is
 the finding's `Id:` line in `human`, its `id` in `json`, or its result's
-`properties["slopcop.findingId"]` in `sarif`. A reported finding stops failing checks in
-its repository: a later check that would flag it as new sends it as dismissed instead, so an agent's check-and-fix
+`properties["slopcop.findingId"]` in `sarif`. A reported finding stops failing checks of
+its repository in the same workspace (or with the same operator token): a later check that would flag it as new sends it as dismissed instead, so an agent's check-and-fix
 loop can end on a finding that is wrong. Every report and its reason is
 visible to the team on the SlopCop dashboard, an owner can reinstate the
 finding, and false-positive rates are tracked per rule, so a report is for a
@@ -329,7 +330,7 @@ finding and rule were recorded:
 
 ```text
 slopcop: reported finding 6f1c2a9e-3b4d-4e5f-8a7b-0c1d2e3f4a5b (bifrost.correctness.index-out-of-range) as a false positive
-It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.
+It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the report and its reason on the SlopCop dashboard.
 ```
 
 `json` prints the service's answer: `reportId`, `findingId`, `checkId`,

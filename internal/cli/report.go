@@ -45,7 +45,8 @@ The finding id is the Id line of a human report, a finding's id in json, or
 a result's properties["slopcop.findingId"] in sarif. The reason says why the
 finding is wrong for this code, in 1 to 2000 characters; cite the code.
 
-A reported finding stops failing checks in its repository. The team sees
+A reported finding stops failing checks of its repository in the same
+workspace (or with the same operator token). The team sees
 every report and its reason on the SlopCop dashboard, an owner can reinstate
 the finding, and false-positive rates are tracked per rule. Report only a
 finding you are confident is wrong, never one that is merely hard to fix.

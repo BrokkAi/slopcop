@@ -65,12 +65,12 @@ func TestReportRecordsAFalsePositive(t *testing.T) {
 		{
 			name: "recorded", status: "recorded", format: "human",
 			want: "slopcop: reported finding " + reportID + " (bifrost.security.xss) as a false positive\n" +
-				"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n",
+				"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the report and its reason on the SlopCop dashboard.\n",
 		},
 		{
 			name: "already reported", status: "already_reported", format: "human",
 			want: "slopcop: finding " + reportID + " (bifrost.security.xss) was already reported as a false positive\n" +
-				"It no longer fails checks in this repository, and the team sees the earlier report on the SlopCop dashboard.\n",
+				"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the earlier report on the SlopCop dashboard.\n",
 		},
 		{name: "recorded json", status: "recorded", format: "json"},
 		{name: "already reported json", status: "already_reported", format: "json"},
@@ -232,7 +232,7 @@ func TestReportValidatesBeforeSending(t *testing.T) {
 			if !strings.Contains(stderr, tc.want) {
 				t.Errorf("stderr = %q, want %q", stderr, tc.want)
 			}
-			if strings.Contains(stderr, "slopcop --help") != tc.usage {
+			if strings.Contains(stderr, "slopcop report --help") != tc.usage {
 				t.Errorf("stderr = %q, usage hint wanted: %v", stderr, tc.usage)
 			}
 		})

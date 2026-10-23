@@ -867,8 +867,8 @@ func TestSARIFCarriesIDsAndSuppressesDismissedFindings(t *testing.T) {
 			want: []result{
 				{freshID, "new", nil},
 				{existingID, "unchanged", nil},
-				{xssID, "unchanged", suppressed},
-				{unwrapID, "unchanged", suppressed},
+				{xssID, "new", suppressed},
+				{unwrapID, "new", suppressed},
 			},
 		},
 		{
@@ -926,19 +926,19 @@ func TestFalsePositiveSaysWhatTheReportDid(t *testing.T) {
 			name:     "recorded",
 			response: answer(service.ReportRecorded, "bifrost.security.xss"),
 			want: "slopcop: reported finding " + freshID + " (bifrost.security.xss) as a false positive\n" +
-				"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n",
+				"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the report and its reason on the SlopCop dashboard.\n",
 		},
 		{
 			name:     "already reported",
 			response: answer(service.ReportAlreadyReported, "bifrost.security.xss"),
 			want: "slopcop: finding " + freshID + " (bifrost.security.xss) was already reported as a false positive\n" +
-				"It no longer fails checks in this repository, and the team sees the earlier report on the SlopCop dashboard.\n",
+				"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the earlier report on the SlopCop dashboard.\n",
 		},
 		{
 			name:     "hostile rule id",
 			response: answer(service.ReportRecorded, "evil\x1b[2J"),
 			want: "slopcop: reported finding " + freshID + " (evil�[2J) as a false positive\n" +
-				"It no longer fails checks in this repository, and the team sees the report and its reason on the SlopCop dashboard.\n",
+				"It no longer fails checks of this repository in the same workspace (or with the same operator token), and the team sees the report and its reason on the SlopCop dashboard.\n",
 		},
 	}
 	for _, tc := range cases {
