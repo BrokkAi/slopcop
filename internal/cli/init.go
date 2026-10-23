@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"github.com/BrokkAi/slopcop/internal/service"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -56,8 +57,11 @@ func skillRoots() ([]skillRoot, error) {
 type skillState int
 
 const (
+	// skillUnknown: the directory could not be read or written; it goes with
+	// an error.
+	skillUnknown skillState = iota
 	// skillInstalled: no skill was there, and the bundled one was written.
-	skillInstalled skillState = iota
+	skillInstalled
 	// skillUpdated: an earlier release's untouched skill was replaced.
 	skillUpdated
 	// skillCurrent: this release's skill was already there.
@@ -77,15 +81,17 @@ type skillInstall struct {
 	// edited are the directories whose skill has local changes, which is
 	// left as it is.
 	edited []string
-	// unwritable are the directories whose earlier release's skill could not
-	// be replaced (a read-only file, say), with why; the rest still go ahead.
-	unwritable []unwritableSkill
+	// failed are the directories init could not read or write, with why;
+	// the other directories still go ahead.
+	failed []failedSkill
 }
 
-// unwritableSkill is a skill directory init could not update, and why.
-type unwritableSkill struct {
-	dir string
-	err error
+// failedSkill is a skill directory init could not read or write. updating
+// says an earlier release's skill was there, which still works.
+type failedSkill struct {
+	dir      string
+	err      error
+	updating bool
 }
 
 // installBundledSkill writes the bundled skill into every well-known skills
@@ -108,12 +114,9 @@ func installBundledSkill() (skillInstall, error) {
 		}
 		dir := filepath.Join(root.dir, skillName)
 		state, err := installSkillAt(root.dir, files)
-		if err != nil && state == skillUpdated {
-			result.unwritable = append(result.unwritable, unwritableSkill{dir: dir, err: err})
-			continue
-		}
 		if err != nil {
-			return result, err
+			result.failed = append(result.failed, failedSkill{dir: dir, err: err, updating: state == skillUpdated})
+			continue
 		}
 		switch state {
 		case skillInstalled:
@@ -136,7 +139,7 @@ func installSkillAt(root string, files []skillFile) (skillState, error) {
 	if _, err := os.Stat(filepath.Join(dir, skillFileName)); errors.Is(err, fs.ErrNotExist) {
 		return skillInstalled, writeSkill(dir, files)
 	} else if err != nil {
-		return 0, fmt.Errorf("stat %s: %w", dir, err)
+		return skillUnknown, fmt.Errorf("stat %s: %w", dir, err)
 	}
 	state, err := installedSkillState(dir, files)
 	if err != nil || state != skillUpdated {
@@ -147,9 +150,8 @@ func installSkillAt(root string, files []skillFile) (skillState, error) {
 
 // installedSkillState compares the skill in dir with the bundled one. It is
 // current when every file matches this release's, an earlier release's when
-// each file matches this release's or an earlier one's, and edited otherwise.
-// Every release shipped every file, so a missing one was deleted: a local
-// change.
+// each file matches this release's or an earlier one's (a file the earlier
+// release did not ship is missing), and edited otherwise.
 func installedSkillState(dir string, files []skillFile) (skillState, error) {
 	state := skillCurrent
 	for _, file := range files {
@@ -157,9 +159,9 @@ func installedSkillState(dir string, files []skillFile) (skillState, error) {
 		data, err := os.ReadFile(path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
-			return skillEdited, nil
+			state = skillUpdated
 		case err != nil:
-			return 0, fmt.Errorf("read %s: %w", path, err)
+			return skillUnknown, fmt.Errorf("read %s: %w", path, err)
 		case bytes.Equal(data, file.data):
 		case shippedBefore(file.relative, data):
 			state = skillUpdated
@@ -189,11 +191,33 @@ func writeSkill(dir string, files []skillFile) error {
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 			return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 		}
-		if err := os.WriteFile(path, file.data, 0o644); err != nil {
+		if err := writeFileAtomically(path, file.data); err != nil {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
 	return nil
+}
+
+// writeFileAtomically replaces path through a temporary file and a rename,
+// so an interrupted write never leaves a truncated skill file.
+func writeFileAtomically(path string, data []byte) error {
+	temp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(temp.Name())
+	if _, err := temp.Write(data); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Chmod(0o644); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(temp.Name(), path)
 }
 
 // skillFile is one file of the bundled skill, named relative to the skill
@@ -275,13 +299,23 @@ it. Pass --no-skill to leave the skill install and any update of it undone.`,
 						"or a newer slopcop wrote it), so it was left alone; to use this release's "+
 						"skill, delete it and run slopcop init again\n", dir)
 			}
-			for _, skill := range result.unwritable {
-				fmt.Fprintf(cmd.ErrOrStderr(),
-					"slopcop: could not update the slopcop skill at %s, so it was left as it was: %v\n",
-					skill.dir, skill.err)
+			unusable := false
+			for _, skill := range result.failed {
+				if skill.updating {
+					// The earlier release's skill still works; say so and go on.
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"slopcop: could not update the slopcop skill at %s (%v); it may be partly updated, so run slopcop init again once it is writable\n",
+						skill.dir, skill.err)
+					continue
+				}
+				unusable = true
+				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not install the slopcop skill at %s: %v\n", skill.dir, skill.err)
 			}
-			if len(result.installed)+len(result.updated)+len(result.present)+len(result.edited)+len(result.unwritable) == 0 {
+			if len(result.installed)+len(result.updated)+len(result.present)+len(result.edited)+len(result.failed) == 0 {
 				fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
+			}
+			if unusable {
+				return silentExit{service.ExitIncomplete}
 			}
 			return nil
 		},

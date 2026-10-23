@@ -232,8 +232,8 @@ func TestBundledSkillIsDiscoverable(t *testing.T) {
 }
 
 // An untouched skill from an earlier release is brought up to date, so an
-// agent learns what this release can do; every release shipped every file, so
-// a missing one is a local change.
+// agent learns what this release can do; a file the earlier release did not
+// ship is added.
 func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
 	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
 	sum := sha256.Sum256([]byte(earlier))
@@ -248,7 +248,7 @@ func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
 		want     string
 	}{
 		{name: "every file installed", metadata: ptr(readEmbeddedSkill(t, "agents/openai.yaml")), want: "updated"},
-		{name: "a deleted file", want: "local changes"},
+		{name: "a file the earlier release lacked", want: "updated"},
 		{name: "edited metadata", metadata: ptr("mine\n"), want: "local changes"},
 	}
 	for _, tc := range cases {
@@ -383,5 +383,38 @@ func TestInitGoesOnWhenAnEarlierSkillCannotBeUpdated(t *testing.T) {
 	claude := filepath.Join(home, ".claude", "skills", "slopcop")
 	if !strings.Contains(stdout, "installed the slopcop skill at "+claude) {
 		t.Errorf("stdout = %q, want the other harness installed", stdout)
+	}
+}
+
+// An unreadable skill in one harness fails that harness only: the others are
+// still installed or updated and reported, and init exits 2.
+func TestInitReportsEveryHarnessWhenOneCannotBeRead(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root reads through permissions")
+	}
+	home := isolateAgentHome(t)
+	t.Setenv("CODEX_HOME", "")
+	for _, harness := range []string{".agents", ".claude", ".codex"} {
+		makeHarness(t, filepath.Join(home, harness))
+	}
+	unreadable := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeFile(t, unreadable, "SKILL.md", "mine\n")
+	if err := os.Chmod(filepath.Join(unreadable, "SKILL.md"), 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(unreadable, "SKILL.md"), 0o644) })
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 2 {
+		t.Errorf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(stderr, "could not install the slopcop skill at "+unreadable) {
+		t.Errorf("stderr = %q, want the unreadable skill named", stderr)
+	}
+	for _, harness := range []string{".agents", ".codex"} {
+		dir := filepath.Join(home, harness, "skills", "slopcop")
+		if !strings.Contains(stdout, "installed the slopcop skill at "+dir) {
+			t.Errorf("stdout = %q, want %s installed", stdout, dir)
+		}
 	}
 }
