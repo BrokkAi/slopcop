@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io/fs"
 	"os"
@@ -120,7 +122,7 @@ func TestInitInstallsForEveryHarnessFound(t *testing.T) {
 	}
 }
 
-// A skill that is already there stays as it is, so local edits survive.
+// A skill with local changes stays as it is, so local edits survive.
 func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".agents"))
@@ -136,7 +138,7 @@ func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "already") {
+	if !strings.Contains(stdout, "has local changes, so it was left alone") {
 		t.Errorf("stdout = %q", stdout)
 	}
 	if got := readSkillFile(t, path); got != "mine\n" {
@@ -225,6 +227,112 @@ func TestBundledSkillIsDiscoverable(t *testing.T) {
 	for _, want := range []string{"name: slopcop", "description: "} {
 		if !strings.Contains(frontmatter, want) {
 			t.Errorf("frontmatter %q lacks %q", frontmatter, want)
+		}
+	}
+}
+
+// An untouched skill from an earlier release is brought up to date, so an
+// agent learns what this release can do; a file the earlier release did not
+// ship is added.
+func TestInitUpdatesAnUntouchedEarlierSkill(t *testing.T) {
+	const earlier = "---\nname: slopcop\ndescription: an earlier release\n---\n"
+	sum := sha256.Sum256([]byte(earlier))
+	previous := skills.Previous["SKILL.md"]
+	skills.Previous["SKILL.md"] = append(append([]string{}, previous...), hex.EncodeToString(sum[:]))
+	t.Cleanup(func() { skills.Previous["SKILL.md"] = previous })
+
+	cases := []struct {
+		name string
+		// metadata is the installed agents/openai.yaml, or nothing.
+		metadata *string
+		want     string
+	}{
+		{name: "every file installed", metadata: ptr(readEmbeddedSkill(t, "agents/openai.yaml")), want: "updated"},
+		{name: "a file the earlier release lacked", want: "updated"},
+		{name: "edited metadata", metadata: ptr("mine\n"), want: "local changes"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := isolateAgentHome(t)
+			makeHarness(t, filepath.Join(home, ".claude"))
+			dir := filepath.Join(home, ".claude", "skills", "slopcop")
+			writeFile(t, dir, "SKILL.md", earlier)
+			if tc.metadata != nil {
+				writeFile(t, dir, "agents/openai.yaml", *tc.metadata)
+			}
+
+			code, stdout, stderr := runCLI(t, "init")
+			if code != 0 {
+				t.Fatalf("exit = %d, stderr = %s", code, stderr)
+			}
+			if !strings.Contains(stdout, tc.want) || !strings.Contains(stdout, dir) {
+				t.Errorf("stdout = %q, want %q about %s", stdout, tc.want, dir)
+			}
+			got := readSkillFile(t, filepath.Join(dir, "SKILL.md"))
+			if tc.want == "updated" {
+				if got != readEmbeddedSkill(t, "SKILL.md") {
+					t.Error("the earlier SKILL.md was not replaced with this release's")
+				}
+				if readSkillFile(t, filepath.Join(dir, "agents", "openai.yaml")) != readEmbeddedSkill(t, "agents/openai.yaml") {
+					t.Error("the harness metadata is not this release's")
+				}
+				code, stdout, _ = runCLI(t, "init")
+				if code != 0 || !strings.Contains(stdout, "already") {
+					t.Errorf("a second init = %d, %q; want the skill already up to date", code, stdout)
+				}
+				return
+			}
+			if got != earlier {
+				t.Errorf("a skill with local changes was rewritten: %q", got)
+			}
+		})
+	}
+}
+
+func ptr(value string) *string { return &value }
+
+// The digests of earlier releases are SHA-256 hex, of files the skill still
+// ships, and never this release's own copy.
+func TestPreviousSkillDigestsAreWellFormed(t *testing.T) {
+	for name, digests := range skills.Previous {
+		data, err := skills.Files.ReadFile("slopcop/" + name)
+		if err != nil {
+			t.Errorf("skills.Previous names %s, which the skill does not ship: %v", name, err)
+			continue
+		}
+		sum := sha256.Sum256(data)
+		current := hex.EncodeToString(sum[:])
+		for _, digest := range digests {
+			if decoded, err := hex.DecodeString(digest); err != nil || len(decoded) != sha256.Size || strings.ToLower(digest) != digest {
+				t.Errorf("%s: %q is not a lowercase SHA-256 hex digest", name, digest)
+			}
+			if digest == current {
+				t.Errorf("%s: %s is this release's copy, not an earlier one", name, digest)
+			}
+		}
+	}
+}
+
+// The skill init installs teaches an agent to report a false positive and
+// carries the current error codes.
+func TestBundledSkillTeachesFalsePositiveReports(t *testing.T) {
+	content := readEmbeddedSkill(t, "SKILL.md")
+	for _, want := range []string{
+		"## Report a false positive",
+		"slopcop report ",
+		"--reason",
+		"`summary.dismissedFindings`",
+		"`finding_not_found`",
+		"`invalid_report`",
+		"When unsure, fix the code or ask the human instead.",
+	} {
+		if !strings.Contains(content, want) {
+			t.Errorf("the bundled skill lacks %q", want)
+		}
+	}
+	for _, gone := range []string{"indexing_in_progress", "Analyze the repository on SlopCop first"} {
+		if strings.Contains(content, gone) {
+			t.Errorf("the bundled skill still says %q", gone)
 		}
 	}
 }
