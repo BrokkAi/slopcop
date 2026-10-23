@@ -214,18 +214,24 @@ var errReadOnly = errors.New("the file is read-only")
 // rename, so an interrupted write never leaves a truncated skill file. A
 // symlink is resolved and its target replaced the same way, so a dotfile
 // manager keeps its link (and a read-only target directory fails, as it
-// should). A file without its owner's write bit is read-only and is not
-// replaced. The file is created 0644 under the umask, as os.WriteFile would.
+// should). A file whose content already matches is left as it is, and one
+// without its owner's write bit is read-only and is not replaced. A replaced
+// file keeps its permission bits; a new one is created 0644 under the umask,
+// as os.WriteFile would.
 func writeFileAtomically(path string, data []byte) error {
-	if info, err := os.Lstat(path); err == nil && info.Mode()&fs.ModeSymlink != 0 {
-		resolved, err := filepath.EvalSymlinks(path)
-		if err != nil {
-			return err
-		}
-		path = resolved
+	path, err := linkTarget(path)
+	if err != nil {
+		return err
 	}
-	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() && info.Mode().Perm()&0o200 == 0 {
-		return errReadOnly
+	var keep fs.FileMode
+	if info, err := os.Lstat(path); err == nil && info.Mode().IsRegular() {
+		if current, err := os.ReadFile(path); err == nil && bytes.Equal(current, data) {
+			return nil
+		}
+		if info.Mode().Perm()&0o200 == 0 {
+			return errReadOnly
+		}
+		keep = info.Mode().Perm()
 	}
 	var suffix [8]byte
 	if _, err := rand.Read(suffix[:]); err != nil {
@@ -237,6 +243,13 @@ func writeFileAtomically(path string, data []byte) error {
 		return err
 	}
 	defer os.Remove(temp)
+	if keep != 0 {
+		// Chmod, unlike the create, is not cut by the umask.
+		if err := file.Chmod(keep); err != nil {
+			_ = file.Close()
+			return err
+		}
+	}
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		return err
@@ -249,6 +262,42 @@ func writeFileAtomically(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(temp, path)
+}
+
+// linkTarget is the file a write to path lands in: path itself, or the
+// target of the symlink at path. A dangling link, which a dotfile manager
+// may set up before its target exists, names its target relative to the
+// link's directory, and the target is created there when its directory
+// exists.
+func linkTarget(path string) (string, error) {
+	info, err := os.Lstat(path)
+	if err != nil || info.Mode()&fs.ModeSymlink == 0 {
+		return path, nil
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return "", err
+	}
+	target, err := os.Readlink(path)
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(target) {
+		dir, err := filepath.EvalSymlinks(filepath.Dir(path))
+		if err != nil {
+			return "", err
+		}
+		target = filepath.Join(dir, target)
+	}
+	if !isDirectory(filepath.Dir(target)) {
+		return "", fmt.Errorf("it links to %s, whose directory %s does not exist", target, filepath.Dir(target))
+	}
+	// The target may be a dangling link in turn; a loop of links already
+	// failed EvalSymlinks above.
+	return linkTarget(target)
 }
 
 // skillFile is one file of the bundled skill, named relative to the skill

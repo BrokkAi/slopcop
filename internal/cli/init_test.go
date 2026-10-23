@@ -559,3 +559,96 @@ func TestInitFailsAFreshInstallThatFailsPartWay(t *testing.T) {
 		t.Fatalf("SKILL.md was not written before the failure, so this test proves nothing: %v", err)
 	}
 }
+
+// A fresh install through a dangling symlink (a dotfile manager's link set up
+// before its target exists) creates the target where the link points,
+// relative to the link's directory, and the link stays a link.
+func TestInitCreatesTheTargetOfADanglingSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dotfiles := filepath.Join(home, "dotfiles")
+	makeHarness(t, dotfiles)
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	makeHarness(t, dir)
+	link := filepath.Join(dir, "SKILL.md")
+	relative, err := filepath.Rel(dir, filepath.Join(dotfiles, "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(relative, link); err != nil {
+		t.Fatal(err)
+	}
+
+	if code, stdout, stderr := runCLI(t, "init"); code != 0 || !strings.Contains(stdout, "installed the slopcop skill at "+dir) {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("SKILL.md is no longer a symlink: %v", err)
+	}
+	if readSkillFile(t, filepath.Join(dotfiles, "SKILL.md")) != readEmbeddedSkill(t, "SKILL.md") {
+		t.Error("the link's target was not created with the bundled skill")
+	}
+}
+
+// A dangling symlink whose target directory does not exist cannot be written
+// through: a fresh install says why and exits 2.
+func TestInitFailsADanglingSymlinkWithoutItsDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need privileges on Windows")
+	}
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	makeHarness(t, dir)
+	missing := filepath.Join(home, "dotfiles", "slopcop")
+	if err := os.Symlink(filepath.Join(missing, "SKILL.md"), filepath.Join(dir, "SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr := runCLI(t, "init")
+	if code != initFailed || !strings.Contains(stderr, "could not install the slopcop skill at "+dir) ||
+		!strings.Contains(stderr, "whose directory "+missing+" does not exist") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if _, err := os.Stat(missing); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("init created %s: %v", missing, err)
+	}
+}
+
+// An update keeps a replaced file's permission bits, and leaves a file that
+// already matches as it is.
+func TestInitKeepsAReplacedFilesModeAndLeavesMatchingFiles(t *testing.T) {
+	earlier := earlierSkill(t)
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeFile(t, dir, "SKILL.md", earlier)
+	writeFile(t, dir, "agents/openai.yaml", readEmbeddedSkill(t, "agents/openai.yaml"))
+	skill := filepath.Join(dir, "SKILL.md")
+	metadata := filepath.Join(dir, "agents", "openai.yaml")
+	if err := os.Chmod(skill, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(metadata)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if code, stdout, stderr := runCLI(t, "init"); code != 0 || !strings.Contains(stdout, "updated") {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	if readSkillFile(t, skill) != readEmbeddedSkill(t, "SKILL.md") {
+		t.Fatal("the earlier SKILL.md was not replaced")
+	}
+	if runtime.GOOS != "windows" {
+		if info, err := os.Stat(skill); err != nil || info.Mode().Perm() != 0o600 {
+			t.Errorf("SKILL.md mode = %v, %v; want 0600 kept", info.Mode().Perm(), err)
+		}
+	}
+	if after, err := os.Stat(metadata); err != nil || !os.SameFile(before, after) {
+		t.Errorf("the matching agents/openai.yaml was rewritten: %v", err)
+	}
+}
