@@ -71,6 +71,8 @@ const (
 	// skillCurrent: this release's skill was already there.
 	skillCurrent
 	// skillEdited: a skill with local changes was there and is left alone.
+	// With an error, a file besides SKILL.md could not be read, so the skill
+	// is left alone the same way.
 	skillEdited
 )
 
@@ -140,8 +142,9 @@ func installBundledSkill() (skillInstall, error) {
 // skill is there, or when the one there is an earlier release's, untouched.
 // With a failure, the state says what was there before anything was
 // written: skillInstalled for no skill, skillUpdated for an earlier
-// release's readable skill, which a harness still reads, and skillUnknown
-// for a skill that could not be read.
+// release's readable skill, which a harness still reads, skillEdited for a
+// skill with a file besides SKILL.md that could not be read, which is left
+// alone, and skillUnknown for a SKILL.md that could not be read.
 func installSkillAt(root string, files []skillFile) (skillState, error) {
 	dir := filepath.Join(root, skillName)
 	if _, err := os.Stat(filepath.Join(dir, skillFileName)); errors.Is(err, fs.ErrNotExist) {
@@ -159,23 +162,33 @@ func installSkillAt(root string, files []skillFile) (skillState, error) {
 // installedSkillState compares the skill in dir with the bundled one. It is
 // current when every file matches this release's, an earlier release's when
 // each file matches this release's or an earlier one's (a file the earlier
-// release did not ship is missing), and edited otherwise.
+// release did not ship is missing), and edited otherwise. A SKILL.md that
+// cannot be read is an error, since a harness cannot read it either; any
+// other file that cannot be read makes the skill edited, with the error.
 func installedSkillState(dir string, files []skillFile) (skillState, error) {
 	state := skillCurrent
+	var unreadable error
 	for _, file := range files {
 		path := filepath.Join(dir, file.relative)
 		data, err := os.ReadFile(path)
 		switch {
 		case errors.Is(err, fs.ErrNotExist):
 			state = skillUpdated
-		case err != nil:
+		case err != nil && file.relative == skillFileName:
 			return skillUnknown, fmt.Errorf("read %s: %w", path, err)
+		case err != nil:
+			if unreadable == nil {
+				unreadable = fmt.Errorf("read %s: %w", path, err)
+			}
 		case bytes.Equal(data, file.data):
 		case shippedBefore(file.relative, data):
 			state = skillUpdated
 		default:
 			return skillEdited, nil
 		}
+	}
+	if unreadable != nil {
+		return skillEdited, unreadable
 	}
 	return state, nil
 }
@@ -383,10 +396,17 @@ it. Pass --no-skill to leave the skill install and any update of it undone.`,
 			for _, skill := range result.failed {
 				switch skill.state {
 				case skillUpdated:
-					// The earlier release's skill is still there and
-					// readable, so a harness still uses it: say so and go on.
+					// A skill a harness can read is still there, the
+					// earlier release's or partly this one's: say so and go
+					// on.
 					fmt.Fprintf(cmd.ErrOrStderr(),
-						"slopcop: could not update the slopcop skill at %s (%v); the earlier release's skill there stays in use, so run slopcop init again once it is writable\n",
+						"slopcop: could not update the slopcop skill at %s (%v); it may be partly updated, so run slopcop init again once it is writable\n",
+						skill.dir, skill.err)
+				case skillEdited:
+					// SKILL.md is readable, so a harness still reads the
+					// skill: leave it alone, as with local changes.
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"slopcop: could not read all of the slopcop skill at %s (%v), so it was left alone; its SKILL.md is readable, so an agent harness can still use it\n",
 						skill.dir, skill.err)
 				case skillInstalled:
 					unusable = true

@@ -381,7 +381,7 @@ func TestInitGoesOnWhenAnEarlierSkillCannotBeUpdated(t *testing.T) {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
 	if !strings.Contains(stderr, "could not update the slopcop skill at "+locked) ||
-		!strings.Contains(stderr, "stays in use") {
+		!strings.Contains(stderr, "run slopcop init again once it is writable") {
 		t.Errorf("stderr = %q, want the locked skill named", stderr)
 	}
 	if readSkillFile(t, filepath.Join(locked, "SKILL.md")) != earlier {
@@ -416,7 +416,7 @@ func TestInitReportsEveryHarnessWhenOneCannotBeRead(t *testing.T) {
 		t.Errorf("exit = %d, want %d", code, initFailed)
 	}
 	if !strings.Contains(stderr, "could not read the slopcop skill at "+unreadable) ||
-		strings.Contains(stderr, "stays in use") {
+		strings.Contains(stderr, "partly updated") {
 		t.Errorf("stderr = %q, want the unreadable skill named as a failure", stderr)
 	}
 	for _, harness := range []string{".agents", ".codex"} {
@@ -650,5 +650,61 @@ func TestInitKeepsAReplacedFilesModeAndLeavesMatchingFiles(t *testing.T) {
 	}
 	if after, err := os.Stat(metadata); err != nil || !os.SameFile(before, after) {
 		t.Errorf("the matching agents/openai.yaml was rewritten: %v", err)
+	}
+}
+
+// A file besides SKILL.md that cannot be read leaves the skill alone, as local
+// changes do: SKILL.md is readable, so a harness still uses the skill, and
+// init warns and exits 0.
+func TestInitLeavesASkillWithAnUnreadableFileBesidesSkillMD(t *testing.T) {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("needs Unix permissions that bind this user")
+	}
+	earlier := earlierSkill(t)
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeFile(t, dir, "SKILL.md", earlier)
+	writeFile(t, dir, "agents/openai.yaml", readEmbeddedSkill(t, "agents/openai.yaml"))
+	metadata := filepath.Join(dir, "agents", "openai.yaml")
+	if err := os.Chmod(metadata, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(metadata, 0o644) })
+
+	code, _, stderr := runCLI(t, "init")
+	if code != 0 || !strings.Contains(stderr, "could not read all of the slopcop skill at "+dir) ||
+		!strings.Contains(stderr, "left alone") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if readSkillFile(t, filepath.Join(dir, "SKILL.md")) != earlier {
+		t.Error("the skill was changed, not left alone")
+	}
+}
+
+// An update that fails after replacing SKILL.md says the skill may be partly
+// updated, not that the earlier one stays in use, and exits 0.
+func TestInitSaysAFailedUpdateMayBePartlyDone(t *testing.T) {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("needs Unix permissions that bind this user")
+	}
+	earlier := earlierSkill(t)
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeFile(t, dir, "SKILL.md", earlier)
+	agents := filepath.Join(dir, "agents")
+	if err := os.Mkdir(agents, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(agents, 0o755) })
+
+	code, _, stderr := runCLI(t, "init")
+	if code != 0 || !strings.Contains(stderr, "could not update the slopcop skill at "+dir) ||
+		!strings.Contains(stderr, "it may be partly updated, so run slopcop init again once it is writable") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if readSkillFile(t, filepath.Join(dir, "SKILL.md")) != readEmbeddedSkill(t, "SKILL.md") {
+		t.Fatal("SKILL.md was not replaced before the failure, so this test proves nothing")
 	}
 }

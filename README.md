@@ -124,12 +124,14 @@ an interrupted init never leaves a truncated skill; a replaced file keeps its
 permissions, and one that already matches is not rewritten. A skill file that
 is a symlink (a dotfile manager's, say) is resolved and its target replaced
 the same way, so the link stays a link. A link whose target does not exist yet
-gets it created where it points, if that directory exists. Init goes on past a directory it cannot
-read or write and names it. It exits `2` when a harness is left without a
-working skill: none could be installed, or the one there cannot be read (so
-the harness cannot read it either). An earlier release's skill it cannot
-update, such as a read-only file or a link into a read-only directory, stays
-in use, so init only warns and exits `0`.
+gets it created where it points, if that directory exists. Init goes on past a
+directory it cannot read or write and names it. It exits `2` when a harness is left without a
+working skill: none could be installed, or its `SKILL.md` cannot be read (so
+the harness cannot read it either). A skill with another file init cannot
+read is left alone, as one with local changes is, and init warns and exits
+`0`. So does an earlier release's skill it cannot update, such as a read-only
+file or a link into a read-only directory: a harness can still read it, though
+it may be partly updated, so init says to run it again once it is writable.
 
 ## Sign in
 
