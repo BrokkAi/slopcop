@@ -120,3 +120,42 @@ jobs:
           "$RUNNER_TEMP/venv/bin/python" -m pip install --quiet --no-index --find-links pypi-dist brokk-slopcop
           "$RUNNER_TEMP/venv/bin/slopcop" version
           "$RUNNER_TEMP/venv/bin/python" -m brokk_slopcop version
+
+  # The one check the master ruleset requires, so auto-merge waits for all of
+  # CI. Add new jobs to `needs` and to the list below instead of to the ruleset.
+  required:
+    name: Required
+    if: ${{ always() }}
+    needs:
+      - check
+      - release
+      - npm
+      - pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify every job succeeded
+        env:
+          CHECK_RESULT: ${{ needs.check.result }}
+          RELEASE_RESULT: ${{ needs.release.result }}
+          NPM_RESULT: ${{ needs.npm.result }}
+          PYPI_RESULT: ${{ needs.pypi.result }}
+        run: |
+          failures=0
+          check() {
+            printf '| %s | %s |\n' "$1" "$2" >> "$GITHUB_STEP_SUMMARY"
+            if [ "$2" = success ]; then return; fi
+            echo "$1 finished as $2" >&2
+            failures=1
+          }
+          {
+            echo "## Required"
+            echo
+            echo '| Job | Result |'
+            echo '| --- | --- |'
+          } >> "$GITHUB_STEP_SUMMARY"
+          check 'check' "$CHECK_RESULT"
+          check 'release config' "$RELEASE_RESULT"
+          check 'npm package' "$NPM_RESULT"
+          check 'PyPI wheels' "$PYPI_RESULT"
+          exit "$failures"
