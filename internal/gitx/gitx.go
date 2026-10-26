@@ -1,5 +1,5 @@
 // Package gitx runs the git commands the CLI needs: repository discovery,
-// remote canonicalization, base resolution, and working-tree snapshots and packfiles.
+// remote canonicalization, base resolution, and working-tree patch building.
 package gitx
 
 import (
@@ -21,12 +21,7 @@ func Run(root string, args ...string) (string, error) {
 // RunBytes executes git in root with an optional environment and returns raw
 // stdout. Failures include git's own stderr so the caller can print it.
 func RunBytes(root string, env []string, args ...string) ([]byte, error) {
-	return runBytesInput(root, env, nil, args...)
-}
-
-func runBytesInput(root string, env []string, input []byte, args ...string) ([]byte, error) {
 	command := exec.Command("git", append([]string{"-C", root}, args...)...)
-	command.Stdin = bytes.NewReader(input)
 	if env != nil {
 		command.Env = env
 	}

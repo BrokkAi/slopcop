@@ -95,7 +95,7 @@ func readFile(t *testing.T, root, name string) string {
 	return string(data)
 }
 
-func TestWorkingTreePackRoundTripsTheWorkingTree(t *testing.T) {
+func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	root := initRepo(t)
 	symlinks := symlinkError() == nil
 	if !symlinks {
@@ -116,7 +116,7 @@ func TestWorkingTreePackRoundTripsTheWorkingTree(t *testing.T) {
 	base := git(t, root, "rev-parse", "HEAD")
 
 	writeFile(t, root, "src/a.txt", "two\n")
-	// Stage one content, then change the file again: the snapshot must ship the
+	// Stage one content, then change the file again: the patch has to ship the
 	// worktree state, not the index.
 	git(t, root, "add", "src/a.txt")
 	writeFile(t, root, "src/a.txt", "three\n")
@@ -147,14 +147,14 @@ func TestWorkingTreePackRoundTripsTheWorkingTree(t *testing.T) {
 	writeFile(t, root, ".slopcop/policies/local.rqlp", "(policy :id \"local\")\n")
 
 	statusBefore := git(t, root, "status", "--porcelain")
-	change, err := WorkingTreePack(root, base, base, []string{".slopcop/policies/local.rqlp"})
+	change, err := WorkingTreePatch(root, base, []string{".slopcop/policies/local.rqlp"})
 	if err != nil {
-		t.Fatalf("WorkingTreePack: %v", err)
+		t.Fatalf("WorkingTreePatch: %v", err)
 	}
 	if change.Files == 0 {
 		t.Fatal("expected changed files")
 	}
-	patch := git(t, root, "-c", "core.quotePath=false", "diff", "--binary", "--no-ext-diff", "-M", base, change.Commit)
+	patch := string(change.Patch)
 	required := []string{
 		"diff --git a/src/a.txt b/src/a.txt",
 		"diff --git a/src/del.txt b/src/del.txt",
@@ -177,18 +177,17 @@ func TestWorkingTreePackRoundTripsTheWorkingTree(t *testing.T) {
 		t.Error("patch must not carry files an ignore rule excludes")
 	}
 	if after := git(t, root, "status", "--porcelain"); after != statusBefore {
-		t.Errorf("working tree changed while building the snapshot:\n%s\nvs\n%s", statusBefore, after)
+		t.Errorf("working tree changed while building the patch:\n%s\nvs\n%s", statusBefore, after)
 	}
 
 	clone := filepath.Join(t.TempDir(), "clone")
 	cloneFixture(t, root, clone, "--no-hardlinks")
 	git(t, clone, "checkout", "-q", base)
-	apply := exec.Command("git", "-C", clone, "index-pack", "--stdin")
-	apply.Stdin = bytes.NewReader(change.Pack)
+	apply := exec.Command("git", "-C", clone, "apply", "--binary", "-")
+	apply.Stdin = bytes.NewReader(change.Patch)
 	if out, err := apply.CombinedOutput(); err != nil {
-		t.Fatalf("index pack: %v\n%s", err, out)
+		t.Fatalf("apply patch: %v\n%s", err, out)
 	}
-	git(t, clone, "checkout", "-q", change.Commit)
 	if got := readFile(t, clone, "src/a.txt"); got != "three\n" {
 		t.Errorf("src/a.txt = %q", got)
 	}
@@ -216,7 +215,7 @@ func TestWorkingTreePackRoundTripsTheWorkingTree(t *testing.T) {
 	compareWorkTreeToClone(t, root, clone, base, []string{".slopcop/policies/local.rqlp"})
 }
 
-// compareWorkTreeToClone checks the snapshot clone against the source worktree
+// compareWorkTreeToClone checks the applied clone against the source worktree
 // for every tracked and untracked non-ignored file, plus deletions and the
 // selected policy file. This is the "send the source as it is" contract.
 func compareWorkTreeToClone(t *testing.T, root, clone, base string, extra []string) {
@@ -300,7 +299,7 @@ func gitNUL(t *testing.T, dir string, args ...string) []string {
 // Git for Windows defaults to core.filemode=false and core.symlinks=false, so
 // the filesystem cannot say a file is executable or a link: the committed
 // mode has to survive unless the user changed it.
-func TestWorkingTreePackKeepsModesTheFilesystemCannotExpress(t *testing.T) {
+func TestWorkingTreePatchKeepsModesTheFilesystemCannotExpress(t *testing.T) {
 	root := initRepo(t)
 	git(t, root, "config", "core.filemode", "false")
 	git(t, root, "config", "core.symlinks", "false")
@@ -313,42 +312,42 @@ func TestWorkingTreePackKeepsModesTheFilesystemCannotExpress(t *testing.T) {
 	git(t, root, "commit", "-qm", "base")
 	base := git(t, root, "rev-parse", "HEAD")
 
-	change, err := WorkingTreePack(root, base, base, nil)
+	change, err := WorkingTreePatch(root, base, nil)
 	if err != nil {
-		t.Fatalf("WorkingTreePack: %v", err)
+		t.Fatalf("WorkingTreePatch: %v", err)
 	}
 	if change.Files != 0 {
-		t.Fatalf("unchanged tree reports %d files", change.Files)
+		t.Fatalf("unchanged tree produced a patch:\n%s", change.Patch)
 	}
 
 	writeFile(t, root, "run.sh", "#!/bin/sh\necho changed\n")
-	change, err = WorkingTreePack(root, base, base, nil)
+	change, err = WorkingTreePatch(root, base, nil)
 	if err != nil {
-		t.Fatalf("WorkingTreePack: %v", err)
+		t.Fatalf("WorkingTreePatch: %v", err)
 	}
-	patch := git(t, root, "-c", "core.quotePath=false", "diff", "--binary", "--no-ext-diff", "-M", base, change.Commit)
+	patch := string(change.Patch)
 	if change.Files != 1 || !strings.Contains(patch, "index ") || strings.Contains(patch, "mode") {
 		t.Fatalf("an edit to an executable must carry content only:\n%s", patch)
 	}
 }
 
-func TestWorkingTreePackReportsNoFilesForCleanTree(t *testing.T) {
+func TestWorkingTreePatchEmptyForCleanTree(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, root, "src/a.txt", "one\n")
 	git(t, root, "add", "-A")
 	git(t, root, "commit", "-qm", "base")
 	base := git(t, root, "rev-parse", "HEAD")
 
-	change, err := WorkingTreePack(root, base, base, nil)
+	change, err := WorkingTreePatch(root, base, nil)
 	if err != nil {
-		t.Fatalf("WorkingTreePack: %v", err)
+		t.Fatalf("WorkingTreePatch: %v", err)
 	}
-	if change.Files != 0 || len(change.Pack) == 0 {
-		t.Fatalf("clean tree produced %d files and %d bytes", change.Files, len(change.Pack))
+	if change.Files != 0 || len(change.Patch) != 0 {
+		t.Fatalf("clean tree produced %d files and %d bytes", change.Files, len(change.Patch))
 	}
 }
 
-func TestUpstreamBaseAndPackIncludeUnpushedWork(t *testing.T) {
+func TestUpstreamBaseAndPatchIncludeUnpushedWork(t *testing.T) {
 	origin := filepath.Join(t.TempDir(), "origin.git")
 	if out, err := exec.Command("git", "init", "-q", "--bare", "-b", "main", origin).CombinedOutput(); err != nil {
 		t.Fatalf("init bare: %v\n%s", err, out)
@@ -378,11 +377,11 @@ func TestUpstreamBaseAndPackIncludeUnpushedWork(t *testing.T) {
 	if base != pushed {
 		t.Fatalf("base = %s, want %s", base, pushed)
 	}
-	change, err := WorkingTreePack(work, base, base, nil)
+	change, err := WorkingTreePatch(work, base, nil)
 	if err != nil {
-		t.Fatalf("WorkingTreePack: %v", err)
+		t.Fatalf("WorkingTreePatch: %v", err)
 	}
-	patch := git(t, work, "diff", "--binary", "--no-ext-diff", "-M", base, change.Commit)
+	patch := string(change.Patch)
 	for _, required := range []string{"src/committed.txt", "src/dirty.txt"} {
 		if !strings.Contains(patch, required) {
 			t.Errorf("patch is missing %q", required)
@@ -415,235 +414,5 @@ func TestCanonicalRepoURL(t *testing.T) {
 		if got, err := CanonicalRepoURL(raw); err == nil {
 			t.Errorf("CanonicalRepoURL(%q) = %q, want an error", raw, got)
 		}
-	}
-}
-
-func TestSnapshotDeterminismAndPackAgainstShallowBase(t *testing.T) {
-	root := initRepo(t)
-	writeFile(t, root, "old", "ancestor\n")
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "ancestor")
-	writeFile(t, root, "base", "base\n")
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "base")
-	base := git(t, root, "rev-parse", "HEAD")
-	// The receiving clone has precisely the base at depth 1.
-	clone := filepath.Join(t.TempDir(), "receiver")
-	cloneFixture(t, "file:///"+strings.TrimPrefix(filepath.ToSlash(root), "/"), clone, "--depth=1", "--no-local")
-	writeFile(t, root, "since", "last run\n")
-	since, err := WorkingTreePack(root, base, base, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Remove(filepath.Join(root, "since")); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, root, "committed", "unpushed\n")
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "unpushed")
-	writeFile(t, root, "now", "this run\n")
-	git(t, root, "config", "commit.gpgSign", "true")
-	first, err := WorkingTreePack(root, base, since.Commit, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("GIT_AUTHOR_NAME", "different")
-	t.Setenv("GIT_AUTHOR_DATE", "2026-10-21T00:00:00 +0000")
-	second, err := WorkingTreePack(root, base, since.Commit, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if first.Commit != second.Commit {
-		t.Fatalf("snapshot is not deterministic: %s vs %s", first.Commit, second.Commit)
-	}
-	command := exec.Command("git", "-C", clone, "index-pack", "--stdin")
-	command.Stdin = bytes.NewReader(first.Pack)
-	out, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("index pack in shallow clone: %v: %s", err, out)
-	}
-	git(t, clone, "cat-file", "-e", first.Commit+"^{commit}")
-	git(t, clone, "cat-file", "-e", since.Commit+"^{commit}")
-	packHash := strings.Fields(string(out))
-	if len(packHash) == 0 {
-		t.Fatalf("no pack hash: %q", out)
-	}
-	index := filepath.Join(clone, ".git", "objects", "pack", "pack-"+packHash[len(packHash)-1]+".idx")
-	objects := git(t, clone, "verify-pack", "-v", index)
-	for _, line := range strings.Split(git(t, root, "rev-list", "--objects", base), "\n") {
-		id := strings.Fields(line)[0]
-		if strings.Contains(objects, id+" ") {
-			t.Errorf("pack redundantly contains BASE object %s", id)
-		}
-	}
-}
-
-func TestResolveSince(t *testing.T) {
-	root := initRepo(t)
-	writeFile(t, root, "base", "base")
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "base")
-	base := git(t, root, "rev-parse", "HEAD")
-	ref := "refs/slopcop/last-run/main"
-	check := func(rev, want, wantRef string) {
-		t.Helper()
-		got, gotRef, err := ResolveSince(root, base, rev)
-		if err != nil || got != want || gotRef != wantRef {
-			t.Fatalf("ResolveSince(%q) = %s, %s, %v; want %s, %s", rev, got, gotRef, err, want, wantRef)
-		}
-	}
-	check("", base, ref)
-	writeFile(t, root, "now", "new")
-	snapshot, err := WorkingTreePack(root, base, base, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := RecordLastRun(root, ref, snapshot.Commit); err != nil {
-		t.Fatal(err)
-	}
-	check("", snapshot.Commit, ref)
-	check("merge-base", base, ref)
-	check("HEAD", base, ref)
-	if _, _, err := ResolveSince(root, base, "missing-commit"); err == nil {
-		t.Fatal("invalid revision accepted")
-	}
-	// A dangling marker must fall back to BASE.
-	if err := os.WriteFile(filepath.Join(root, ".git", filepath.FromSlash(ref)), []byte(strings.Repeat("a", 40)+"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	check("", base, ref)
-	git(t, root, "checkout", "--detach", "-q", "HEAD")
-	check("", base, "")
-	check("merge-base", base, "")
-	if err := RecordLastRun(root, "", snapshot.Commit); err != nil {
-		t.Fatal(err)
-	}
-}
-
-// Only the two snapshots should cross the wire, regardless of branch history.
-func TestPackExcludesIntermediateBranchHistory(t *testing.T) {
-	root := initRepo(t)
-	writeFile(t, root, "large.txt", strings.Repeat("base\n", 20000))
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "base")
-	base := git(t, root, "rev-parse", "HEAD")
-	clone := filepath.Join(t.TempDir(), "receiver")
-	cloneFixture(t, "file:///"+strings.TrimPrefix(filepath.ToSlash(root), "/"), clone, "--depth=1", "--no-local")
-	var commits, blobs []string
-	for _, content := range []string{"first", "second", "third"} {
-		writeFile(t, root, "large.txt", strings.Repeat(content+"\n", 20000))
-		git(t, root, "add", "-A")
-		git(t, root, "commit", "-qm", content)
-		commits = append(commits, git(t, root, "rev-parse", "HEAD"))
-		blobs = append(blobs, git(t, root, "rev-parse", "HEAD:large.txt"))
-	}
-	writeFile(t, root, "large.txt", strings.Repeat("dirty\n", 20000))
-	since, _, err := ResolveSince(root, base, commits[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	change, err := WorkingTreePack(root, base, since, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if since == commits[1] {
-		t.Fatal("SINCE was not wrapped")
-	}
-	for _, commit := range []string{change.Commit, since} {
-		if parent := git(t, root, "rev-parse", commit+"^"); parent != base {
-			t.Errorf("%s parent = %s, want BASE %s", commit, parent, base)
-		}
-	}
-	if tree := git(t, root, "rev-parse", since+"^{tree}"); tree != git(t, root, "rev-parse", commits[1]+"^{tree}") {
-		t.Fatal("wrapping SINCE changed its tree")
-	}
-	command := exec.Command("git", "-C", clone, "index-pack", "--stdin")
-	command.Stdin = bytes.NewReader(change.Pack)
-	out, err := command.CombinedOutput()
-	if err != nil {
-		t.Fatalf("index pack: %v: %s", err, out)
-	}
-	// Missing batch entries are reported per line (git itself still exits 0).
-	missing := append(append([]string{}, commits...), blobs[0], blobs[2])
-	ids := append(append([]string{}, missing...), change.Commit, since)
-	checked, err := runBytesInput(clone, nil, []byte(strings.Join(ids, "\n")+"\n"), "cat-file", "--batch-check")
-	if err != nil {
-		t.Fatal(err)
-	}
-	lines := strings.Split(strings.TrimSpace(string(checked)), "\n")
-	if len(lines) != len(ids) {
-		t.Fatalf("batch-check: %s", checked)
-	}
-	for i, id := range ids {
-		if i < len(missing) {
-			if lines[i] != id+" missing" {
-				t.Errorf("intermediate object was shipped: %s", lines[i])
-			}
-		} else if !strings.HasPrefix(lines[i], id+" commit ") {
-			t.Errorf("snapshot missing: %s", lines[i])
-		}
-	}
-	packHash := strings.Fields(string(out))
-	index := filepath.Join(clone, ".git", "objects", "pack", "pack-"+packHash[len(packHash)-1]+".idx")
-	count := 0
-	for _, line := range strings.Split(git(t, clone, "verify-pack", "-v", index), "\n") {
-		fields := strings.Fields(line)
-		if len(fields) > 1 && fields[1] == "commit" {
-			count++
-			if fields[0] != change.Commit && fields[0] != since {
-				t.Errorf("unexpected packed commit %s", fields[0])
-			}
-		}
-	}
-	if count != 2 {
-		t.Fatalf("pack has %d commits, want exactly NOW and SINCE", count)
-	}
-}
-
-func TestResolveSinceReanchorsLastRunWhenBaseMoves(t *testing.T) {
-	root := initRepo(t)
-	writeFile(t, root, "file", "base")
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "base")
-	oldBase := git(t, root, "rev-parse", "HEAD")
-	writeFile(t, root, "file", "last run")
-	last, err := WorkingTreePack(root, oldBase, oldBase, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ref := "refs/slopcop/last-run/main"
-	if err := RecordLastRun(root, ref, last.Commit); err != nil {
-		t.Fatal(err)
-	}
-	writeFile(t, root, "file", "new base")
-	git(t, root, "add", "-A")
-	git(t, root, "commit", "-qm", "new base")
-	base := git(t, root, "rev-parse", "HEAD")
-	since, gotRef, err := ResolveSince(root, base, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if gotRef != ref || since == last.Commit {
-		t.Fatalf("last run not rewrapped: %s, %s", since, gotRef)
-	}
-	if got := git(t, root, "rev-parse", since+"^"); got != base {
-		t.Fatalf("SINCE parent = %s", got)
-	}
-	if got := git(t, root, "rev-parse", since+"^{tree}"); got != git(t, root, "rev-parse", last.Commit+"^{tree}") {
-		t.Fatal("SINCE tree changed")
-	}
-	explicit, _, err := ResolveSince(root, base, last.Commit)
-	if err != nil || explicit != since {
-		t.Fatalf("explicit wrapping differs: %s, %v", explicit, err)
-	}
-	repeated, _, err := ResolveSince(root, base, since)
-	if err != nil || repeated != since {
-		t.Fatalf("wrapping not deterministic: %s, %v", repeated, err)
-	}
-	git(t, root, "commit", "--allow-empty", "-qm", "same tree")
-	equalTree := git(t, root, "rev-parse", "HEAD")
-	got, _, err := ResolveSince(root, base, equalTree)
-	if err != nil || got != base {
-		t.Fatalf("BASE-equivalent tree = %s, %v", got, err)
 	}
 }

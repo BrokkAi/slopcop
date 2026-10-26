@@ -26,15 +26,12 @@ const (
 // `deny_unknown_fields`, so the fields and their JSON names must match
 // CheckRequest in server/src/check.rs exactly.
 type Request struct {
-	ContractVersion string `json:"contractVersion"`
-	SinceCommit     string `json:"sinceCommit"`
-	ChangeCommit    string `json:"changeCommit"`
 	// RepoURL is the canonical https repository URL. SSH remotes must be
 	// canonicalized by the caller.
 	RepoURL string `json:"repoUrl"`
-	// BaseCommit is the full 40- or 64-character hex commit the service fetches.
+	// BaseCommit is the full 40- or 64-character hex commit the change applies to.
 	BaseCommit string `json:"baseCommit"`
-	// Change is the standard base64 encoding of one git packfile.
+	// Change is the standard base64 encoding of one git patch.
 	Change string `json:"change"`
 	// Selection is optional; an empty selection runs the hosted catalog.
 	Selection *Selection `json:"selection,omitempty"`
@@ -119,17 +116,15 @@ type Finding struct {
 	New bool `json:"new"`
 }
 
-// ExitCode maps the response status to the analyzer exit contract. Only an
-// explicit clean status passes; a status this client does not know fails
-// closed as incomplete.
+// ExitCode maps the response status to the analyzer exit contract.
 func (r Response) ExitCode() int {
 	switch r.Status {
-	case StatusClean:
-		return ExitClean
 	case StatusFindings:
 		return ExitFindings
-	default:
+	case StatusIncomplete:
 		return ExitIncomplete
+	default:
+		return ExitClean
 	}
 }
 

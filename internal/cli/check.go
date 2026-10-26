@@ -20,7 +20,6 @@ import (
 )
 
 const (
-	maxChangeBytes  = 16 * 1024 * 1024
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
 )
@@ -42,17 +41,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
-	since, lastRunRef, err := gitx.ResolveSince(repoRoot, base, strings.TrimSpace(opts.since))
+	change, err := gitx.WorkingTreePatch(repoRoot, base, selection.Files)
 	if err != nil {
 		return err
-	}
-	change, err := gitx.WorkingTreePack(repoRoot, base, since, selection.Files)
-	if err != nil {
-		return err
-	}
-
-	if len(change.Pack) > maxChangeBytes {
-		return fmt.Errorf("change packfile is %d bytes; maximum decoded size is 16 MiB (%d bytes)", len(change.Pack), maxChangeBytes)
 	}
 
 	stdout := cmd.OutOrStdout()
@@ -75,13 +66,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 
 	request := service.Request{
-		ContractVersion: "check-v2",
-		SinceCommit:     since,
-		ChangeCommit:    change.Commit,
-		RepoURL:         repoURL,
-		BaseCommit:      base,
-		Change:          base64.StdEncoding.EncodeToString(change.Pack),
-		FailOn:          failOn,
+		RepoURL:    repoURL,
+		BaseCommit: base,
+		Change:     base64.StdEncoding.EncodeToString(change.Patch),
+		FailOn:     failOn,
 	}
 	if !selection.IsEmpty() {
 		request.Selection = &selection
@@ -90,7 +78,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
 			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
-			client.BaseURL, shortSHA(base), change.Files, len(change.Pack), failOn,
+			client.BaseURL, shortSHA(base), change.Files, len(change.Patch), failOn,
 		)
 	}
 
@@ -116,33 +104,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}
 		return err
 	}
-	// Only a full default check that passed with no new finding moves the
-	// default --since forward. Advancing on findings, even ones --fail-on let
-	// pass, or after a narrower check (an explicit --since, fewer policies)
-	// would make the next default run read unfixed or unchecked code as
-	// existing, so it would pass without anything being fixed or reported.
-	if advancesLastRun(opts, response) {
-		if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
-			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last passing run: %v\n", err)
-		}
-	}
 	options := report.Options{ShowExisting: opts.showExisting}
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}
 	return silentExit{response.ExitCode()}
-}
-
-func advancesLastRun(opts *checkOptions, response service.Response) bool {
-	if response.Status != service.StatusClean || response.Summary.NewFindings != 0 {
-		return false
-	}
-	for _, finding := range response.Findings {
-		if finding.New {
-			return false
-		}
-	}
-	return strings.TrimSpace(opts.since) == "" && len(opts.policies) == 0 && !opts.noDiscovery
 }
 
 func resolveEnums(opts *checkOptions) (string, string, error) {
