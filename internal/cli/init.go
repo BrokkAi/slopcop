@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -98,16 +99,66 @@ func installSkillAt(root string, files []skillFile) (bool, error) {
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return false, fmt.Errorf("stat %s: %w", dir, err)
 	}
+	if err := writeSkill(dir, files); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// writeSkill writes the bundled skill files into dir.
+func writeSkill(dir string, files []skillFile) error {
 	for _, file := range files {
 		path := filepath.Join(dir, file.relative)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-			return false, fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+			return fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 		}
 		if err := os.WriteFile(path, file.data, 0o644); err != nil {
-			return false, fmt.Errorf("write %s: %w", path, err)
+			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
-	return true, nil
+	return nil
+}
+
+// syncBundledSkill writes the bundled skill into every well-known skills
+// directory whose harness is installed here, wherever it is missing or
+// differs from the bundled one, so agents follow the instructions of the
+// version that runs. It returns the directories it wrote.
+func syncBundledSkill() ([]string, error) {
+	files, err := bundledSkillFiles()
+	if err != nil {
+		return nil, err
+	}
+	roots, err := skillRoots()
+	if err != nil {
+		return nil, err
+	}
+	var updated []string
+	for _, root := range roots {
+		if !isDirectory(root.marker) {
+			continue
+		}
+		dir := filepath.Join(root.dir, skillName)
+		if skillMatches(dir, files) {
+			continue
+		}
+		if err := writeSkill(dir, files); err != nil {
+			return updated, err
+		}
+		updated = append(updated, dir)
+	}
+	return updated, nil
+}
+
+// skillMatches reports whether every bundled file is in dir with the bundled
+// content.
+func skillMatches(dir string, files []skillFile) bool {
+	for _, file := range files {
+		data, err := os.ReadFile(filepath.Join(dir, file.relative))
+		if err != nil || !bytes.Equal(data, file.data) {
+			return false
+		}
+	}
+	return true
 }
 
 // skillFile is one file of the bundled skill, named relative to the skill
@@ -160,8 +211,8 @@ knows how to run slopcop.
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
 Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
-there is left alone. Nothing else installs the skill: this command is the only
-thing that writes it. Pass --no-skill to leave the skill install and any
+there is left alone. Every check also installs the skill, and rewrites one
+that differs from the bundled skill. Pass --no-skill to leave the skill install and any
 update of it undone.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

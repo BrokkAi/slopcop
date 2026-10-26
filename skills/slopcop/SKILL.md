@@ -78,7 +78,6 @@ the usual codes mean:
 | `device_flow_disabled` | This deployment has no browser login; use `slopcop login --token`. |
 | `repo_not_indexed` | Analyze the repository on SlopCop first; a private one needs the SlopCop GitHub App. |
 | `no_access` | The account needs access to the repository. |
-| `indexing_in_progress` | SlopCop is still indexing; wait, then run the check again. |
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
