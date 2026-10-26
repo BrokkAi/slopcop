@@ -142,7 +142,9 @@ func advancesLastRun(opts *checkOptions, response service.Response) bool {
 			return false
 		}
 	}
-	return strings.TrimSpace(opts.since) == "" && len(opts.policies) == 0 && !opts.noDiscovery
+	return strings.TrimSpace(opts.since) == "" && len(opts.policies) == 0 && !opts.noDiscovery &&
+		len(opts.rules) == 0 && len(opts.skipRules) == 0 &&
+		len(opts.categories) == 0 && len(opts.skipCategories) == 0
 }
 
 func resolveEnums(opts *checkOptions) (string, string, error) {
@@ -160,10 +162,10 @@ func resolveEnums(opts *checkOptions) (string, string, error) {
 		failOn = failOnFinding
 	}
 	switch failOn {
-	case "never", failOnFinding, "note", "warning", "error":
+	case "never", failOnFinding, "info", "note", "warning", "error":
 	default:
 		return "", "", fmt.Errorf(
-			"unknown fail-on level %q (expected never, finding, note, warning, or error)",
+			"unknown fail-on level %q (expected never, finding, info, note, warning, or error)",
 			opts.failOn,
 		)
 	}
@@ -215,6 +217,10 @@ func resolveSelection(root string, opts *checkOptions) (service.Selection, error
 		files = append(files, relative)
 	}
 	selection.Files = dedupe(files)
+	selection.PolicyIDs = dedupe(opts.rules)
+	selection.SkipPolicyIDs = dedupe(opts.skipRules)
+	selection.Categories = dedupe(opts.categories)
+	selection.SkipCategories = dedupe(opts.skipCategories)
 	return selection, nil
 }
 

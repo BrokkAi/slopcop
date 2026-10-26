@@ -518,6 +518,29 @@ func TestSARIFMarksTheBaselineState(t *testing.T) {
 	}
 }
 
+// SARIF has no info or unrated level. Both read as `none`, so a consumer
+// gating on `note` or above never fails on info, as `--fail-on finding` does
+// not; the original severity stays in `slopcop.severity`.
+func TestSARIFKeepsInfoBelowNote(t *testing.T) {
+	for severity, level := range map[string]string{
+		"error": "error", "warning": "warning", "note": "note", "info": "none", "unrated": "none",
+	} {
+		if got := sarifLevel(severity); got != level {
+			t.Errorf("sarifLevel(%q) = %q, want %q", severity, got, level)
+		}
+	}
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, mixed(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	for _, result := range log["runs"].([]any)[0].(map[string]any)["results"].([]any) {
+		properties, _ := result.(map[string]any)["properties"].(map[string]any)
+		if severity, ok := properties["slopcop.severity"].(string); !ok || severity == "" {
+			t.Errorf("result without slopcop.severity: %v", result)
+		}
+	}
+}
+
 func TestSARIFSaysWhatDidNotComplete(t *testing.T) {
 	partial := withIncomplete(
 		response(service.StatusClean, "finding", []service.Finding{}),

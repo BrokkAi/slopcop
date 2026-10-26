@@ -38,24 +38,26 @@ type Request struct {
 	Change string `json:"change"`
 	// Selection is optional; an empty selection runs the hosted catalog.
 	Selection *Selection `json:"selection,omitempty"`
-	// FailOn is never, finding, note, warning, or error.
+	// FailOn is never, finding (unrated, or note and above), info, note, warning,
+	// or error.
 	FailOn string `json:"failOn,omitempty"`
 }
 
-// Selection mirrors CheckSelection. File entries are repository-relative
-// .rqlp paths resolved inside the patched tree. The service currently
-// evaluates only Files, so the CLI exposes only the file selector.
+// Selection mirrors CheckSelection. Files are repository-relative .rqlp paths
+// in NOW. Includes select named rules and default rules in named categories;
+// without includes, default rules run. Skips apply after includes.
 type Selection struct {
-	Files      []string `json:"files,omitempty"`
-	Packs      []string `json:"packs,omitempty"`
-	PolicyIDs  []string `json:"policyIds,omitempty"`
-	Categories []string `json:"categories,omitempty"`
+	Files          []string `json:"files,omitempty"`
+	PolicyIDs      []string `json:"policyIds,omitempty"`
+	SkipPolicyIDs  []string `json:"skipPolicyIds,omitempty"`
+	Categories     []string `json:"categories,omitempty"`
+	SkipCategories []string `json:"skipCategories,omitempty"`
 }
 
 // IsEmpty reports whether the selection would serialize to an empty object.
 func (s Selection) IsEmpty() bool {
-	return len(s.Files) == 0 && len(s.Packs) == 0 &&
-		len(s.PolicyIDs) == 0 && len(s.Categories) == 0
+	return len(s.Files) == 0 && len(s.PolicyIDs) == 0 && len(s.SkipPolicyIDs) == 0 &&
+		len(s.Categories) == 0 && len(s.SkipCategories) == 0
 }
 
 // Response is the successful POST /v1/check body, mirrored from

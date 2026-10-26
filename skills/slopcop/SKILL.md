@@ -33,8 +33,8 @@ when nothing changed: an unchanged snapshot is still checked.
 
 `--since` accepts a commit-ish or `merge-base` (BASE). It defaults to the last
 passing run on this branch, recorded in `refs/slopcop/last-run/<branch>`,
-else BASE. Only a full default run (no `--since`, `--policy` or
-`--no-policy-discovery`) that passes with no new finding advances that ref; a
+else BASE. Only a full default run (no `--since`, `--policy`,
+`--no-policy-discovery`, `--rule`, `--category` or skip) that passes with no new finding advances that ref; a
 run with findings or incomplete results does not, so rerunning without a fix
 fails again. Detached HEAD has no
 marker. Use `--since merge-base` for CI branch comparisons. NOW and SINCE
@@ -44,14 +44,23 @@ files and selected ignored policy files. The real index stays untouched.
 Decoded packs above 16 MiB fail locally.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
-`--fail-on never|finding|note|warning|error` (default `finding`, so any new
-finding fails the check; the service alone defaults to `warning`), `--policy
-PATH` for a repository-relative `.rqlp` file (repeatable), and
+`--fail-on never|finding|info|note|warning|error` (default `finding`, which
+gates unrated findings and note or above; info is below note and appears in reports without failing
+`finding`, while `--fail-on info` gates it; the service alone defaults to
+`warning`), `--policy PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--show-existing` also lists the findings that
 were already in the code. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
 stderr.
+
+Without `--rule` or `--category` includes, the default rules run. Otherwise,
+the service runs the union of named rules and the default rules in named
+categories. Then `--skip-rule` and `--skip-category` remove rules by ID or
+category. Unknown names are an error. All four flags are repeatable; duplicate
+values are sent once. There is no pack selector. Selection and skips apply to
+the built-in rules only: explicit `--policy PATH` files and discovered
+repository policies always run as well, and a skip cannot remove them.
 
 ## New and pre-existing findings
 

@@ -335,6 +335,9 @@ type sarifResult struct {
 	// BaselineState is `new` for a finding the change touched and
 	// `unchanged` for one already in the code.
 	BaselineState string `json:"baselineState"`
+	// Properties carries `slopcop.severity`, the finding's own severity,
+	// which the SARIF level cannot always express.
+	Properties map[string]any `json:"properties,omitempty"`
 }
 
 type sarifMessage struct {
@@ -419,6 +422,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Message:       sarifMessage{Text: text},
 			Locations:     []sarifLocation{{PhysicalLocation: physical}},
 			BaselineState: baselineState(finding),
+			Properties:    map[string]any{"slopcop.severity": finding.Severity},
 		})
 	}
 
@@ -497,8 +501,10 @@ func baselineState(finding service.Finding) string {
 	return "unchanged"
 }
 
-// sarifLevel maps Bifrost's severities. SARIF has no unrated level; `none` is
-// its level for a result without a severity.
+// sarifLevel maps Bifrost's severities. SARIF has no unrated or info level;
+// both are `none`, so a SARIF consumer gating on `note` or above never fails
+// on info, which `--fail-on finding` ignores too. The result's `severity`
+// property keeps the original.
 func sarifLevel(severity string) string {
 	switch severity {
 	case "error", "warning", "note":
