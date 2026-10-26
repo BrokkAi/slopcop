@@ -8,81 +8,140 @@ import (
 	"strings"
 )
 
-// WorkingChange is the patch one check ships.
+// WorkingChange carries the snapshot and its self-contained transfer pack.
 type WorkingChange struct {
-	// Patch is the complete git patch from the base commit to the working tree.
-	Patch []byte
-	// Files counts the patch's diff headers.
-	Files int
+	Pack   []byte
+	Commit string
+	Files  int
 }
 
-// WorkingTreePatch builds one git patch that carries the complete change from
-// base to the current working tree: committed, uncommitted, and untracked
-// files, plus deletions, renames, modes, and binary content.
-//
-// The patch is built through a temporary index, so the user's index and
-// worktree are never modified. Untracked files join through
-// `--intent-to-add`; files an ignore rule excludes stay out, except the
-// selected policy files, which the service evaluates from the patched
-// checkout and therefore must receive even when ignored locally.
-func WorkingTreePatch(root, base string, policyFiles []string) (WorkingChange, error) {
+// WorkingTreePack snapshots the working tree using a temporary index. Ignored
+// files stay out except selected policy files. The real index is untouched.
+// Even a clean tree gets a snapshot commit, with fixed identity and timestamps
+// so identical trees and BASE parents produce identical commit IDs. Both
+// comparison snapshots are parented by BASE to exclude branch history.
+func WorkingTreePack(root, base, since string, policyFiles []string) (WorkingChange, error) {
 	var change WorkingChange
 	dir, err := os.MkdirTemp("", "slopcop-index-")
 	if err != nil {
 		return change, fmt.Errorf("create temporary index: %w", err)
 	}
 	defer os.RemoveAll(dir)
-
 	env := withEnv(os.Environ(), "GIT_INDEX_FILE", filepath.Join(dir, "index"))
-	// Seed the index from HEAD so git can keep the committed mode where the
-	// filesystem cannot express it: with core.filemode=false or
-	// core.symlinks=false (Git for Windows' defaults), a path with no index
-	// entry reads as 100644, which would ship every executable and symlink as
-	// a mode change.
-	if _, err := RunBytes(root, env, "read-tree", "HEAD"); err != nil {
+	// Preserve committed executable and symlink modes on filesystems that
+	// cannot express them (core.filemode=false or core.symlinks=false).
+	head, err := HeadCommit(root)
+	if err != nil {
 		return change, err
 	}
-	if _, err := RunBytes(root, env, "add", "--intent-to-add", "--all", "--", "."); err != nil {
+	if _, err = RunBytes(root, env, "read-tree", head); err != nil {
 		return change, err
 	}
-
+	if _, err = RunBytes(root, env, "add", "--all", "--", "."); err != nil {
+		return change, err
+	}
 	for _, file := range policyFiles {
 		if _, err := os.Lstat(filepath.Join(root, filepath.FromSlash(file))); err != nil {
 			return change, fmt.Errorf("selected policy file not found: %s", file)
 		}
 	}
 	for _, chunk := range chunks(policyFiles, 256) {
-		args := append(
-			[]string{"--literal-pathspecs", "add", "--intent-to-add", "--force", "--"},
-			chunk...,
-		)
-		if _, err := RunBytes(root, env, args...); err != nil {
+		args := append([]string{"--literal-pathspecs", "add", "--force", "--"}, chunk...)
+		if _, err = RunBytes(root, env, args...); err != nil {
 			return change, err
 		}
 	}
-
-	patch, err := RunBytes(root, env,
-		"-c", "core.quotePath=false",
-		"diff", "--no-color", "--no-ext-diff", "--no-textconv", "--binary",
-		"--full-index", "--ignore-submodules=none",
-		"--src-prefix=a/", "--dst-prefix=b/", base,
-	)
+	tree, err := RunBytes(root, env, "write-tree")
 	if err != nil {
 		return change, err
 	}
-	change.Files = countDiffHeaders(patch)
-	change.Patch = patch
-	return change, nil
+	change.Commit, err = snapshotCommit(root, strings.TrimSpace(string(tree)), base, env)
+	if err != nil {
+		return change, err
+	}
+	files, err := RunBytes(root, env, "diff", "--name-only", "-z", "--no-ext-diff", base, change.Commit, "--")
+	if err != nil {
+		return change, err
+	}
+	change.Files = bytes.Count(files, []byte{0})
+	// No --thin: deltas must never depend on objects outside this pack.
+	change.Pack, err = runBytesInput(root, env, []byte(change.Commit+"\n"+since+"\n^"+base+"\n"),
+		"pack-objects", "--revs", "--stdout", "--no-reuse-delta")
+	return change, err
 }
 
-func countDiffHeaders(patch []byte) int {
-	count := 0
-	for _, line := range bytes.Split(patch, []byte("\n")) {
-		if bytes.HasPrefix(line, []byte("diff --git ")) {
-			count++
-		}
+// snapshotCommit anchors a tree directly to BASE, without carrying its original
+// history. Fixed metadata makes wrapping an existing snapshot idempotent.
+func snapshotCommit(root, tree, base string, env []string) (string, error) {
+	if env == nil {
+		env = os.Environ()
 	}
-	return count
+	for key, value := range map[string]string{
+		"GIT_AUTHOR_NAME": "SlopCop", "GIT_COMMITTER_NAME": "SlopCop",
+		"GIT_AUTHOR_EMAIL": "snapshot@slopcop.com", "GIT_COMMITTER_EMAIL": "snapshot@slopcop.com",
+		"GIT_AUTHOR_DATE": "2000-01-01T00:00:00 +0000", "GIT_COMMITTER_DATE": "2000-01-01T00:00:00 +0000",
+	} {
+		env = withEnv(env, key, value)
+	}
+	commit, err := RunBytes(root, env, "-c", "commit.gpgSign=false", "commit-tree", tree, "-p", base, "-m", "slopcop snapshot")
+	return strings.TrimSpace(string(commit)), err
+}
+
+func snapshotSince(root, base, commit string) (string, error) {
+	tree, err := Run(root, "rev-parse", "--verify", commit+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	baseTree, err := Run(root, "rev-parse", "--verify", base+"^{tree}")
+	if err != nil {
+		return "", err
+	}
+	if tree == baseTree {
+		return base, nil
+	}
+	return snapshotCommit(root, tree, base, nil)
+}
+
+// ResolveSince returns the comparison commit and the branch ref to advance
+// after a passing run. Non-base trees are wrapped in deterministic commits
+// parented by the current BASE. Detached HEADs have no last-run ref.
+func ResolveSince(root, base, rev string) (commit, ref string, err error) {
+	// The full refname, not --short, which turns `feat` into `heads/feat`
+	// once a tag `feat` exists and so would lose the marker.
+	head, headErr := Run(root, "symbolic-ref", "--quiet", "HEAD")
+	if branch, ok := strings.CutPrefix(head, "refs/heads/"); headErr == nil && ok && branch != "" {
+		ref = "refs/slopcop/last-run/" + branch
+	}
+	switch rev {
+	case "merge-base":
+		return base, ref, nil
+	case "":
+		if ref != "" {
+			if last, resolveErr := ResolveCommit(root, ref); resolveErr == nil {
+				if _, existsErr := Run(root, "cat-file", "-e", last+"^{commit}"); existsErr == nil {
+					commit, err = snapshotSince(root, base, last)
+					return commit, ref, err
+				}
+			}
+		}
+		return base, ref, nil
+	default:
+		commit, err = ResolveCommit(root, rev)
+		if err != nil {
+			return "", ref, err
+		}
+		commit, err = snapshotSince(root, base, commit)
+		return commit, ref, err
+	}
+}
+
+// RecordLastRun advances the captured branch's marker, skipping detached HEAD.
+func RecordLastRun(root, ref, commit string) error {
+	if ref == "" {
+		return nil
+	}
+	_, err := Run(root, "update-ref", ref, commit)
+	return err
 }
 
 func chunks(values []string, size int) [][]string {
