@@ -108,13 +108,18 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 		}
 		fmt.Fprintf(
 			out,
-			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n\n",
+			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n",
 			printable(finding.Severity),
 			printable(finding.PolicyID),
 			printable(finding.Title),
 			location,
 			printable(finding.Certainty),
 		)
+		// The id is what `slopcop ignore` takes; older services send none.
+		if finding.ID != "" {
+			fmt.Fprintf(out, "    ID: %s\n", printable(finding.ID))
+		}
+		out.WriteString("\n")
 	}
 }
 
@@ -335,6 +340,9 @@ type sarifResult struct {
 	// BaselineState is `new` for a finding the change touched and
 	// `unchanged` for one already in the code.
 	BaselineState string `json:"baselineState"`
+	// Properties carries the finding id `slopcop ignore` takes, when the
+	// service sent one.
+	Properties map[string]any `json:"properties,omitempty"`
 }
 
 type sarifMessage struct {
@@ -412,14 +420,18 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		if text == "" {
 			text = finding.PolicyID
 		}
-		results = append(results, sarifResult{
+		result := sarifResult{
 			RuleID:        finding.PolicyID,
 			RuleIndex:     ruleIndex[finding.PolicyID],
 			Level:         sarifLevel(finding.Severity),
 			Message:       sarifMessage{Text: text},
 			Locations:     []sarifLocation{{PhysicalLocation: physical}},
 			BaselineState: baselineState(finding),
-		})
+		}
+		if finding.ID != "" {
+			result.Properties = map[string]any{"slopcop.findingId": finding.ID}
+		}
+		results = append(results, result)
 	}
 
 	// The overall notice, findings left out, then one per named check, so a

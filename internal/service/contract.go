@@ -105,6 +105,9 @@ type IncompletePolicy struct {
 // Finding mirrors CheckFinding. Text fields come from the analyzed repository
 // and are hostile.
 type Finding struct {
+	// ID names this finding for `slopcop ignore`. A service from before
+	// findings could be ignored omits it.
+	ID        string `json:"id,omitempty"`
 	PolicyID  string `json:"policyId"`
 	Severity  string `json:"severity"`
 	Certainty string `json:"certainty"`

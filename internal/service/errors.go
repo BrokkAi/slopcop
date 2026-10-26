@@ -14,6 +14,15 @@ type ErrorBody struct {
 	InstallURL string `json:"installUrl,omitempty"`
 }
 
+// knownErrors fills in the message and remedy of a closed code the service
+// answered without them, so the caller still prints a useful failure.
+var knownErrors = map[string]ErrorBody{
+	"finding_not_found": {
+		Message: "SlopCop has no such finding for this login.",
+		Remedy:  "Use a finding id from a check you ran with this login.",
+	},
+}
+
 // Error is a non-2xx response from the check API.
 type Error struct {
 	StatusCode int
