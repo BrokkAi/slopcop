@@ -17,6 +17,7 @@ import (
 
 const (
 	checkPath        = "/v1/check"
+	ignorePath       = "/v1/ignore"
 	maxResponseBytes = 32 * 1024 * 1024
 	defaultTimeout   = 10 * time.Minute
 	// checkRunning is the retryable answer to a check that is still running.
@@ -219,9 +220,47 @@ func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http
 	return response.StatusCode, response.Header, responseBody, nil
 }
 
+// IgnoreRequest is the POST /v1/ignore body.
+type IgnoreRequest struct {
+	FindingID string `json:"findingId"`
+}
+
+// IgnoreResponse is the successful POST /v1/ignore body.
+type IgnoreResponse struct {
+	FindingID string `json:"findingId"`
+	Status    string `json:"status"`
+}
+
+// Ignore asks the service to stop reporting one finding in its repository.
+// Ignoring a finding twice succeeds. Service failures come back as *Error.
+func (c *Client) Ignore(ctx context.Context, findingID string) (IgnoreResponse, error) {
+	status, _, payload, err := c.postJSON(ctx, ignorePath, IgnoreRequest{FindingID: findingID})
+	if err != nil {
+		return IgnoreResponse{}, err
+	}
+	if status < 200 || status >= 300 {
+		return IgnoreResponse{}, decodeError(status, payload)
+	}
+	var decoded IgnoreResponse
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return IgnoreResponse{}, fmt.Errorf("decode ignore response: %w", err)
+	}
+	if decoded.FindingID == "" {
+		decoded.FindingID = findingID
+	}
+	return decoded, nil
+}
+
 func decodeError(status int, payload []byte) *Error {
 	var body ErrorBody
-	if err := json.Unmarshal(payload, &body); err != nil || body.Message == "" {
+	err := json.Unmarshal(payload, &body)
+	if known, ok := knownErrors[body.Code]; err == nil && ok && body.Message == "" {
+		body.Message = known.Message
+		if body.Remedy == "" {
+			body.Remedy = known.Remedy
+		}
+	}
+	if err != nil || body.Message == "" {
 		excerpt := strings.TrimSpace(string(payload))
 		if len(excerpt) > 200 {
 			excerpt = excerpt[:200] + "..."

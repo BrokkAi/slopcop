@@ -192,17 +192,35 @@ already in the code are counted, never fail the check, and are listed only with
 `--show-existing`. A change that introduces nothing exits `0`, however many
 findings the repository already holds.
 
+### Ignore a false positive
+
+Each finding a check reports carries an `id`. When a finding is a false
+positive, ignore it:
+
+```console
+slopcop ignore 0f8fad5b-d9cb-469f-a165-70867728950e
+```
+
+That finding is not reported again for this repository. Ignoring covers that
+one finding, its rule plus its place in the code, in its repository for your
+workspace; the rule keeps reporting everything else. Ignoring a finding twice
+is fine. `ignore` uses the same login and service URL as a check, exits `0`
+with a one-line confirmation, and otherwise exits `2` with the service's
+message and remedy; `finding_not_found` means the id is unknown or comes from a
+check outside your workspace.
+
 ### Output and exit codes
 
 The service answers structured data; the CLI renders it. `human` prints one
-block per new finding, then the pre-existing ones with `--show-existing`, a
+block per new finding, with an `ID:` line when the service names one, then the
+pre-existing ones with `--show-existing`, a
 summary line such as `1 new finding across 1 file(s); 72 already in the code
 (--show-existing lists them) | Analysis complete`, and any omitted or
 incomplete checks. `json` prints `status`, `baseCommit`, `summary`
 (`newFindings` and `existingFindings` count the split), `findings` (each with
-`new`), `incomplete`, and `failure` when the analysis did not complete. `sarif`
-prints a SARIF 2.1.0 log whose results carry `baselineState` `new` or
-`unchanged`. `--format` and `--show-existing` only change the rendering, never
+`new` and its `id`), `incomplete`, and `failure` when the analysis did not
+complete. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
+`new` or `unchanged` and the finding id in `properties["slopcop.findingId"]`. `--format` and `--show-existing` only change the rendering, never
 the request, so the service answers the same check whichever is used.
 
 | Exit | Meaning |
@@ -267,6 +285,14 @@ when the analysis did not complete. Against a service from before findings
 were marked `new`, the CLI treats every finding as new, as that service gated
 on all of them. Non-2xx responses carry `code`, `message`,
 `remedy`, `retryable`, and an optional `installUrl`.
+
+Each finding in the response carries an `id`; a service from before findings
+could be ignored omits it.
+
+`slopcop ignore <id>` calls `POST <service>/v1/ignore` with the same bearer
+token and `{"findingId": "<id>"}`, and gets back
+`{"findingId": "<id>", "status": "ignored"}`. Failures use the same closed
+contract, including `finding_not_found`.
 
 `slopcop login` uses the device flow: `POST /api/device` returns a
 `deviceCode`, `userCode`, `verificationUri`, `expiresIn`, and `interval`, and

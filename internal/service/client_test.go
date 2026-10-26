@@ -274,3 +274,54 @@ func TestNewValidatesTheServiceURL(t *testing.T) {
 		}
 	}
 }
+
+func TestIgnoreFillsInAnUnexplainedFindingNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/ignore" {
+			t.Errorf("path = %s", r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code": "finding_not_found", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Ignore(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e")
+	var serviceError *Error
+	if !errors.As(err, &serviceError) {
+		t.Fatalf("expected *Error, got %v", err)
+	}
+	want := "SlopCop has no such finding for this login.\nUse a finding id from a check you ran with this login."
+	if serviceError.Body.Code != "finding_not_found" || serviceError.RemedyText() != want {
+		t.Errorf("error = %+v", serviceError)
+	}
+}
+
+func TestCheckReadsTheFindingID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status": "findings",
+			"summary": {"newFindings": 2},
+			"findings": [
+				{"id": "0f8fad5b-d9cb-469f-a165-70867728950e", "policyId": "a", "new": true},
+				{"policyId": "b", "new": true}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if response.Findings[0].ID != "0f8fad5b-d9cb-469f-a165-70867728950e" || response.Findings[1].ID != "" {
+		t.Errorf("findings = %+v", response.Findings)
+	}
+}

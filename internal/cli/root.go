@@ -74,6 +74,7 @@ report, so a check never needs a Bifrost install.`,
 	registerCheckFlags(root, opts)
 	root.AddCommand(
 		newCheckCommand(opts, &serviceURL, version),
+		newIgnoreCommand(&serviceURL, version),
 		newInitCommand(),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),

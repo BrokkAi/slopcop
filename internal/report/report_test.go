@@ -618,3 +618,55 @@ func TestUnknownFormat(t *testing.T) {
 		t.Fatal("expected an error for an unknown format")
 	}
 }
+
+func TestEveryFormatCarriesTheFindingID(t *testing.T) {
+	const id = "0f8fad5b-d9cb-469f-a165-70867728950e"
+	identified := finding("cli.py", 2, "warning", "acme.eval")
+	identified.ID = id
+	unidentified := finding("cli.py", 5, "warning", "acme.eval")
+	check := response(service.StatusFindings, "finding", []service.Finding{identified, unidentified})
+
+	want := "New findings\n" +
+		"  [warning] acme.eval: acme.eval title\n" +
+		"    Location: cli.py:2\n" +
+		"    Certainty: definite\n" +
+		"    ID: " + id + "\n" +
+		"\n" +
+		"  [warning] acme.eval: acme.eval title\n" +
+		"    Location: cli.py:5\n" +
+		"    Certainty: definite\n" +
+		"\n" +
+		"2 new findings across 1 file(s) | Analysis complete\n"
+	if got := render(t, check, FormatHuman); got != want {
+		t.Errorf("human = %q", got)
+	}
+
+	var document struct {
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(render(t, check, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document.Findings[0]["id"] != id {
+		t.Errorf("json id = %v", document.Findings[0]["id"])
+	}
+	if _, ok := document.Findings[1]["id"]; ok {
+		t.Errorf("json invented an id: %v", document.Findings[1])
+	}
+
+	var log struct {
+		Runs []struct {
+			Results []map[string]any `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, check, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	results := log.Runs[0].Results
+	if properties, _ := results[0]["properties"].(map[string]any); properties["slopcop.findingId"] != id {
+		t.Errorf("sarif properties = %v", results[0]["properties"])
+	}
+	if _, ok := results[1]["properties"]; ok {
+		t.Errorf("sarif invented an id: %v", results[1])
+	}
+}

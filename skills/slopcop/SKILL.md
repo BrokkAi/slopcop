@@ -47,7 +47,9 @@ A check fails only on findings the change introduced or touched. Findings that
 were already in the code are counted in `summary.existingFindings`, never
 change the exit code, and are listed only with `--show-existing`. In `json`,
 each listed finding has `new`; `summary.newFindings` counts the new ones. In
-`sarif`, `baselineState` is `new` or `unchanged`.
+`sarif`, `baselineState` is `new` or `unchanged`. Each finding also carries its
+`id`: an `ID:` line in `human`, `id` in `json`, and
+`properties["slopcop.findingId"]` in `sarif`.
 
 ## Read the exit code
 
@@ -79,6 +81,7 @@ the usual codes mean:
 | `indexing_in_progress` | SlopCop is still indexing; wait, then run the check again. |
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
+| `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
 ## Act on the findings
@@ -88,5 +91,10 @@ check again. The loop ends when the check reports no new findings: exit `0`, or
 exit `2` with a report whose `summary.newFindings` is `0` (say which checks did
 not complete). Exit `3` means wait and run it again; it is not a result. Do not
 fix pre-existing findings unless asked: they are not this change's, and they
-never stop the loop. A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
+never stop the loop.
+
+When a finding is a false positive, run `slopcop ignore <id>` with its id.
+That finding is not reported again for this repository.
+
+A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
 the change, so a new rule is picked up by the next check with no extra setup.
