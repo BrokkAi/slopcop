@@ -2,14 +2,11 @@ package cli
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/spf13/cobra"
 
 	"github.com/BrokkAi/slopcop/skills"
 )
@@ -48,61 +45,6 @@ func skillRoots() ([]skillRoot, error) {
 		{marker: claude, dir: filepath.Join(claude, "skills")},
 		{marker: codexHome, dir: filepath.Join(codexHome, "skills")},
 	}, nil
-}
-
-// skillInstall is what one install pass did, as skill directories.
-type skillInstall struct {
-	// installed are the directories that received the bundled skill.
-	installed []string
-	// present are the directories that already held a skill, which is left as
-	// it is.
-	present []string
-}
-
-// installBundledSkill writes the bundled skill into every well-known skills
-// directory whose harness is installed here. A skill that is already in place
-// is never rewritten, so local edits survive.
-func installBundledSkill() (skillInstall, error) {
-	var result skillInstall
-	files, err := bundledSkillFiles()
-	if err != nil {
-		return result, err
-	}
-	roots, err := skillRoots()
-	if err != nil {
-		return result, err
-	}
-	for _, root := range roots {
-		if !isDirectory(root.marker) {
-			continue
-		}
-		dir := filepath.Join(root.dir, skillName)
-		written, err := installSkillAt(root.dir, files)
-		if err != nil {
-			return result, err
-		}
-		if written {
-			result.installed = append(result.installed, dir)
-			continue
-		}
-		result.present = append(result.present, dir)
-	}
-	return result, nil
-}
-
-// installSkillAt writes the bundled skill into a skills directory unless a
-// skill is already there. The boolean reports whether it wrote.
-func installSkillAt(root string, files []skillFile) (bool, error) {
-	dir := filepath.Join(root, skillName)
-	if _, err := os.Stat(filepath.Join(dir, skillFileName)); err == nil {
-		return false, nil
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return false, fmt.Errorf("stat %s: %w", dir, err)
-	}
-	if err := writeSkill(dir, files); err != nil {
-		return false, err
-	}
-	return true, nil
 }
 
 // writeSkill writes the bundled skill files into dir.
@@ -198,45 +140,4 @@ func bundledSkillFiles() ([]skillFile, error) {
 func isDirectory(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
-}
-
-func newInitCommand() *cobra.Command {
-	var noSkill bool
-	command := &cobra.Command{
-		Use:   "init",
-		Short: "Install the bundled agent skill",
-		Long: `Install the agent skill that ships inside this binary, so a coding agent
-knows how to run slopcop.
-
-The skill goes into every well-known skills directory whose harness is
-installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
-Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
-there is left alone. Every check also installs the skill, and rewrites one
-that differs from the bundled skill. Pass --no-skill to leave the skill install and any
-update of it undone.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			stdout := cmd.OutOrStdout()
-			if noSkill {
-				fmt.Fprintln(stdout, "slopcop: left the slopcop skill alone (--no-skill)")
-				return nil
-			}
-			result, err := installBundledSkill()
-			if err != nil {
-				return err
-			}
-			for _, dir := range result.installed {
-				fmt.Fprintf(stdout, "slopcop: installed the slopcop skill at %s\n", dir)
-			}
-			for _, dir := range result.present {
-				fmt.Fprintf(stdout, "slopcop: the slopcop skill is already at %s\n", dir)
-			}
-			if len(result.installed) == 0 && len(result.present) == 0 {
-				fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
-			}
-			return nil
-		},
-	}
-	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")
-	return command
 }

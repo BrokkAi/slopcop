@@ -52,9 +52,9 @@ func readEmbeddedSkill(t *testing.T, name string) string {
 	return string(data)
 }
 
-// Only init and a check write the skill: running another command leaves the
+// Only a check writes the skill: running another command leaves the
 // filesystem alone.
-func TestOnlyInitAndCheckInstallTheSkill(t *testing.T) {
+func TestOnlyACheckInstallsTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	agents := filepath.Join(home, ".agents")
 	makeHarness(t, agents)
@@ -65,60 +65,6 @@ func TestOnlyInitAndCheckInstallTheSkill(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(agents, "skills")); !errors.Is(err, fs.ErrNotExist) {
 		t.Fatalf("a plain run wrote %s, want nothing", filepath.Join(agents, "skills"))
-	}
-
-	code, stdout, stderr := runCLI(t, "init")
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	dir := filepath.Join(agents, "skills", "slopcop")
-	if !strings.Contains(stdout, dir) {
-		t.Errorf("stdout = %q, want it to name %s", stdout, dir)
-	}
-	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
-		t.Error("the installed SKILL.md does not match the bundled one")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "agents", "openai.yaml")); err != nil {
-		t.Errorf("harness metadata was not installed: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".claude")); err == nil {
-		t.Error("a harness that is not installed here got a skills directory")
-	}
-}
-
-func TestInitInstallsForEveryHarnessFound(t *testing.T) {
-	home := isolateAgentHome(t)
-	makeHarness(t, filepath.Join(home, ".agents"))
-	makeHarness(t, filepath.Join(home, ".claude"))
-	makeHarness(t, filepath.Join(home, ".codex"))
-
-	want := []string{
-		filepath.Join(home, ".agents", "skills", "slopcop"),
-		filepath.Join(home, ".claude", "skills", "slopcop"),
-		filepath.Join(home, ".codex", "skills", "slopcop"),
-	}
-	code, stdout, stderr := runCLI(t, "init")
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	for _, dir := range want {
-		if !strings.Contains(stdout, dir) {
-			t.Errorf("stdout = %q, want it to name %s", stdout, dir)
-		}
-		if _, err := os.Stat(filepath.Join(dir, "SKILL.md")); err != nil {
-			t.Errorf("no skill at %s: %v", dir, err)
-		}
-	}
-
-	code, stdout, stderr = runCLI(t, "init")
-	if code != 0 {
-		t.Fatalf("second exit = %d, stderr = %s", code, stderr)
-	}
-	if strings.Contains(stdout, "installed") {
-		t.Errorf("the second run installed something again: %q", stdout)
-	}
-	if !strings.Contains(stdout, "already") {
-		t.Errorf("stdout = %q, want it to report the skill as already there", stdout)
 	}
 }
 
@@ -165,80 +111,6 @@ func TestEveryCheckInstallsTheBundledSkill(t *testing.T) {
 	_, _, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL)
 	if strings.Contains(stderr, "skill") {
 		t.Errorf("stderr = %q, want nothing about a skill that is current", stderr)
-	}
-}
-
-// init leaves a skill that is already there as it is.
-func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
-	home := isolateAgentHome(t)
-	makeHarness(t, filepath.Join(home, ".agents"))
-	path := filepath.Join(home, ".agents", "skills", "slopcop", "SKILL.md")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	code, stdout, stderr := runCLI(t, "init")
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	if !strings.Contains(stdout, "already") {
-		t.Errorf("stdout = %q", stdout)
-	}
-	if got := readSkillFile(t, path); got != "mine\n" {
-		t.Errorf("SKILL.md = %q, want the local file untouched", got)
-	}
-}
-
-func TestInitWithoutAHarnessInstallsNothing(t *testing.T) {
-	home := isolateAgentHome(t)
-
-	code, stdout, stderr := runCLI(t, "init")
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	if !strings.Contains(stdout, "nothing to install") {
-		t.Errorf("stdout = %q", stdout)
-	}
-	for _, dir := range []string{".agents", ".claude", ".codex"} {
-		if _, err := os.Stat(filepath.Join(home, dir)); err == nil {
-			t.Errorf("init created %s for a harness that is not installed", dir)
-		}
-	}
-}
-
-// --no-skill leaves the skill alone, whether it is installed or not.
-func TestInitNoSkillWritesNothing(t *testing.T) {
-	home := isolateAgentHome(t)
-	agents := filepath.Join(home, ".agents")
-	makeHarness(t, agents)
-
-	code, stdout, stderr := runCLI(t, "init", "--no-skill")
-	if code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	if !strings.Contains(stdout, "--no-skill") {
-		t.Errorf("stdout = %q, want it to say the skill step was skipped", stdout)
-	}
-	if _, err := os.Stat(filepath.Join(agents, "skills")); !errors.Is(err, fs.ErrNotExist) {
-		t.Fatalf("--no-skill wrote %s", filepath.Join(agents, "skills"))
-	}
-
-	// An installed skill is left as it is, and stays untouched.
-	if code, _, stderr := runCLI(t, "init"); code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	path := filepath.Join(agents, "skills", "slopcop", "SKILL.md")
-	if err := os.WriteFile(path, []byte("mine\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, stderr := runCLI(t, "init", "--no-skill"); code != 0 {
-		t.Fatalf("exit = %d, stderr = %s", code, stderr)
-	}
-	if got := readSkillFile(t, path); got != "mine\n" {
-		t.Errorf("SKILL.md = %q, want --no-skill to leave it alone", got)
 	}
 }
 

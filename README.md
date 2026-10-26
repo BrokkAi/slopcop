@@ -101,21 +101,16 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop. `slopcop init` installs it into each well-known skills directory whose
-harness is present, and names what it did:
+slopcop. Every check installs it into each well-known skills directory whose
+harness is present, and rewrites one that differs from the skill bundled into
+the binary, so an agent follows the instructions of the slopcop version it
+runs. Local edits to an installed skill do not survive a check.
 
 | Location | Harness |
 | --- | --- |
 | `~/.agents/skills/slopcop/` | Codex, opencode |
 | `~/.claude/skills/slopcop/` | Claude Code, opencode |
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
-
-A skill that is already there is left alone by init, so running it again is
-safe. Every check also installs the skill in those directories, rewriting one
-that differs from the skill bundled into the binary, so an agent follows the
-instructions of the slopcop version it runs; local edits to an installed skill
-do not survive a check. `slopcop init --no-skill` skips the install and any
-update of it.
 
 ## Sign in
 
