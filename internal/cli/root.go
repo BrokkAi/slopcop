@@ -118,8 +118,9 @@ type checkOptions struct {
 const selectionHelp = `Without --rule or --category includes, run the default rules. Otherwise run
 the union of named rules and the default rules in named categories. Then
 --skip-rule and --skip-category remove rules by ID or category. Unknown names
-are an error. Each selection flag is repeatable. Repository policy files
-selected with --policy or discovered under .slopcop/policies also join.`
+are an error. Each selection flag is repeatable. Selection and skips apply to
+the built-in rules only: repository policy files selected with --policy or
+discovered under .slopcop/policies always run as well.`
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags := command.Flags()
@@ -131,7 +132,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringArrayVar(&opts.categories, "category", nil, "include default rules in a category (repeatable)")
 	flags.StringArrayVar(&opts.skipCategories, "skip-category", nil, "exclude rules in a category (repeatable)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
-	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding (note or above), info, note, warning, or error")
+	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding (unrated, or note and above), info, note, warning, or error")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
 	flags.StringArrayVar(&opts.policies, "policy", nil, "repository-relative .rqlp policy file to evaluate (repeatable)")
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")

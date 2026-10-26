@@ -38,7 +38,8 @@ type Request struct {
 	Change string `json:"change"`
 	// Selection is optional; an empty selection runs the hosted catalog.
 	Selection *Selection `json:"selection,omitempty"`
-	// FailOn is never, finding (note or above), info, note, warning, or error.
+	// FailOn is never, finding (unrated, or note and above), info, note, warning,
+	// or error.
 	FailOn string `json:"failOn,omitempty"`
 }
 

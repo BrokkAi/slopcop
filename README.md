@@ -196,8 +196,9 @@ Without `--rule` or `--category` includes, the default rules run. Otherwise,
 the service runs the union of named rules and the default rules in named
 categories. Then `--skip-rule` and `--skip-category` remove rules by ID or
 category. Unknown names are an error. All four flags are repeatable; duplicate
-values are sent once. There is no pack selector. Explicit `--policy PATH`
-files and discovered repository policies continue to join the check.
+values are sent once. There is no pack selector. Selection and skips apply to
+the built-in rules only: explicit `--policy PATH` files and discovered
+repository policies always run as well, and a skip cannot remove them.
 
 ### New and pre-existing findings
 
@@ -236,10 +237,10 @@ wherever it is. The service can place an inconclusive check only once Bifrost
 reports which files it concerns; until then every one counts as in the change.
 
 The service applies `--fail-on` and sets the status; the exit code follows it.
-The CLI always sends `--fail-on`, defaulting to `finding` (note or above).
-Severity order is info, note, warning, error. Info findings appear in human
-and JSON reports but do not fail `--fail-on finding`; `--fail-on info` gates
-them too. `never` disables finding failures. The service's own default for a
+The CLI always sends `--fail-on`, defaulting to `finding`, which gates unrated
+findings and note or above. Severity order is unrated, info, note, warning,
+error. Info findings appear in every report format but do not fail
+`--fail-on finding`; `--fail-on info` gates them too. `never` disables finding failures. The service's own default for a
 request without `failOn` is `warning`.
 New findings that cross `--fail-on` exit `1` even when some check did not
 complete.
