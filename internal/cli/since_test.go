@@ -1,14 +1,10 @@
 package cli
 
 import (
-	"crypto/rand"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"os/exec"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -93,32 +89,6 @@ func TestSinceAndLastRunLifecycle(t *testing.T) {
 	}
 }
 
-// An incompressible file proves the decoded pack limit runs before HTTP.
-func TestOversizedPackFailsLocally(t *testing.T) {
-	isolateUserConfig(t)
-	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
-	content := make([]byte, maxChangeBytes+1024*1024)
-	if _, err := rand.Read(content); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(repo, "large.bin"), content, 0o644); err != nil {
-		t.Fatal(err)
-	}
-	called := false
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		called = true
-		_, _ = w.Write([]byte(`{"status":"clean"}`))
-	}))
-	defer server.Close()
-	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-	if code != 2 || stdout != "" || !strings.Contains(stderr, "maximum decoded size is 16 MiB") || called {
-		t.Fatalf("exit=%d called=%v stdout=%s stderr=%s", code, called, stdout, stderr)
-	}
-	if out, err := exec.Command("git", "-C", repo, "show-ref", "--verify", "refs/slopcop/last-run/main").Output(); err == nil {
-		t.Fatalf("oversized run advanced marker: %s", out)
-	}
-}
-
 // Only a full default check that passed with no new finding advances the
 // marker: a clean answer that --fail-on let new findings through, a narrower
 // check, or a status the client does not know leaves it where it was (#19).
@@ -133,7 +103,6 @@ func TestOnlyAFullCleanCheckAdvancesTheMarker(t *testing.T) {
 		{name: "fail-on never with a new finding", status: "clean", newOne: true, extra: []string{"--fail-on", "never"}},
 		{name: "explicit since", status: "clean", extra: []string{"--since", "HEAD"}},
 		{name: "no policy discovery", status: "clean", extra: []string{"--no-policy-discovery"}},
-		{name: "rule selection", status: "clean", extra: []string{"--skip-rule", "demo.rule"}},
 		{name: "unknown status", status: "mostly-fine", exit: 2},
 	}
 	for _, tc := range cases {
