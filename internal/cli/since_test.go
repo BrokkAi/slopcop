@@ -88,3 +88,62 @@ func TestSinceAndLastRunLifecycle(t *testing.T) {
 		})
 	}
 }
+
+// Only a full default check that passed with no new finding advances the
+// marker: a clean answer that --fail-on let new findings through, a narrower
+// check, or a status the client does not know leaves it where it was (#19).
+func TestOnlyAFullCleanCheckAdvancesTheMarker(t *testing.T) {
+	cases := []struct {
+		name   string
+		status string
+		newOne bool
+		extra  []string
+		exit   int
+	}{
+		{name: "fail-on never with a new finding", status: "clean", newOne: true, extra: []string{"--fail-on", "never"}},
+		{name: "explicit since", status: "clean", extra: []string{"--since", "HEAD"}},
+		{name: "no policy discovery", status: "clean", extra: []string{"--no-policy-discovery"}},
+		{name: "unknown status", status: "mostly-fine", exit: 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "new.go", "package demo\nfunc Added() {}\n")
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				newFindings := 0
+				findings := []any{}
+				if tc.newOne {
+					newFindings = 1
+					findings = append(findings, map[string]any{"policyId": "demo.rule", "severity": "warning", "title": "t", "path": "new.go", "startLine": 2, "new": true})
+				}
+				_ = json.NewEncoder(w).Encode(map[string]any{"status": tc.status, "summary": map[string]any{"newFindings": newFindings}, "findings": findings, "incomplete": []any{}})
+			}))
+			defer server.Close()
+			args := append([]string{"check", "--root", repo, "--service", server.URL}, tc.extra...)
+			if code, _, stderr := runCLI(t, args...); code != tc.exit {
+				t.Fatalf("exit = %d, want %d: %s", code, tc.exit, stderr)
+			}
+			if out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "refs/slopcop/last-run/main").Output(); err == nil {
+				t.Fatalf("marker advanced: %s", out)
+			}
+		})
+	}
+}
+
+// A tag named like the branch must not change the marker's name.
+func TestMarkerKeyIgnoresATagNamedLikeTheBranch(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	runGit(t, repo, "tag", "main")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "clean", "summary": map[string]any{}, "findings": []any{}, "incomplete": []any{}})
+	}))
+	defer server.Close()
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 0 {
+		t.Fatalf("exit = %d: %s", code, stderr)
+	}
+	if _, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", "refs/slopcop/last-run/main").Output(); err != nil {
+		t.Fatalf("marker not recorded under the branch name: %v", err)
+	}
+}

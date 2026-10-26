@@ -119,15 +119,17 @@ type Finding struct {
 	New bool `json:"new"`
 }
 
-// ExitCode maps the response status to the analyzer exit contract.
+// ExitCode maps the response status to the analyzer exit contract. Only an
+// explicit clean status passes; a status this client does not know fails
+// closed as incomplete.
 func (r Response) ExitCode() int {
 	switch r.Status {
+	case StatusClean:
+		return ExitClean
 	case StatusFindings:
 		return ExitFindings
-	case StatusIncomplete:
-		return ExitIncomplete
 	default:
-		return ExitClean
+		return ExitIncomplete
 	}
 }
 
