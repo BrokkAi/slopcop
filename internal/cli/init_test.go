@@ -52,8 +52,8 @@ func readEmbeddedSkill(t *testing.T, name string) string {
 	return string(data)
 }
 
-// Only init, login and a check write the skill: running another command leaves
-// filesystem alone.
+// Only init, login and a check write the skill: running another command
+// leaves the filesystem alone.
 func TestOnlyInitLoginAndCheckInstallTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	agents := filepath.Join(home, ".agents")
