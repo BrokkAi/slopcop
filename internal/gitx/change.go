@@ -106,10 +106,8 @@ func snapshotSince(root, base, commit string) (string, error) {
 // after a passing run. Non-base trees are wrapped in deterministic commits
 // parented by the current BASE. Detached HEADs have no last-run ref.
 func ResolveSince(root, base, rev string) (commit, ref string, err error) {
-	// The full refname, not --short, which turns `feat` into `heads/feat`
-	// once a tag `feat` exists and so would lose the marker.
-	head, headErr := Run(root, "symbolic-ref", "--quiet", "HEAD")
-	if branch, ok := strings.CutPrefix(head, "refs/heads/"); headErr == nil && ok && branch != "" {
+	branch, branchErr := Run(root, "symbolic-ref", "--quiet", "--short", "HEAD")
+	if branchErr == nil {
 		ref = "refs/slopcop/last-run/" + branch
 	}
 	switch rev {

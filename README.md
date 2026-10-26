@@ -181,10 +181,8 @@ index is untouched, and even an unchanged working tree sends a snapshot.
 `--since` accepts a commit-ish or `merge-base` (the resolved BASE). By default,
 it uses `refs/slopcop/last-run/<branch>`, else BASE. The selected tree is
 re-anchored to the current BASE; when it matches BASE's tree, BASE itself is
-reused. Only a full default run that passes with no new finding advances the
-branch ref to NOW: one without `--since`, `--policy`,
-`--no-policy-discovery` or any rule or category selection. A run with findings (even ones `--fail-on` lets
-pass) or incomplete analysis leaves it where it was, so rerunning without a
+reused. Only a passing run advances the branch ref to NOW. A run with
+findings or incomplete analysis leaves it where it was, so rerunning without a
 fix reports the same findings again. Rejected requests, pending checks,
 transport errors, and timeouts do not advance it either. Detached HEAD runs have no last-run marker.
 Use `--since merge-base` for a complete branch comparison in CI.
