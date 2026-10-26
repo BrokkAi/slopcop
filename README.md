@@ -111,11 +111,11 @@ harness is present, and names what it did:
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
 
 A skill that is already there is left alone by init, so running it again is
-safe. Every check also installs the skill in those directories, rewriting one
-that differs from the skill bundled into the binary, so an agent follows the
-instructions of the slopcop version it runs; local edits to an installed skill
-do not survive a check. `slopcop init --no-skill` skips the install and any
-update of it.
+safe. `slopcop login` and every check also install the skill in those
+directories, rewriting one that differs from the skill bundled into the binary,
+so an agent follows the instructions of the slopcop version it runs; local
+edits to an installed skill do not survive them. `slopcop init --no-skill`
+skips the install and any update of it.
 
 ## Sign in
 

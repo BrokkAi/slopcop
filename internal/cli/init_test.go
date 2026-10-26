@@ -52,9 +52,9 @@ func readEmbeddedSkill(t *testing.T, name string) string {
 	return string(data)
 }
 
-// Only init and a check write the skill: running another command leaves the
-// filesystem alone.
-func TestOnlyInitAndCheckInstallTheSkill(t *testing.T) {
+// Only init, login and a check write the skill: running another command
+// leaves the filesystem alone.
+func TestOnlyInitLoginAndCheckInstallTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	agents := filepath.Join(home, ".agents")
 	makeHarness(t, agents)
@@ -165,6 +165,27 @@ func TestEveryCheckInstallsTheBundledSkill(t *testing.T) {
 	_, _, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL)
 	if strings.Contains(stderr, "skill") {
 		t.Errorf("stderr = %q, want nothing about a skill that is current", stderr)
+	}
+}
+
+// Signing in installs the bundled skill, so a user who only signs in and
+// leaves the rest to an agent still has it.
+func TestLoginInstallsTheBundledSkill(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+
+	code, stdout, stderr := runCLI(t,
+		"login", "--service", "http://127.0.0.1:9999", "--token", "secret",
+	)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	if !strings.Contains(stdout, "installed the slopcop skill at "+dir) {
+		t.Errorf("stdout = %q, want it to name %s", stdout, dir)
+	}
+	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
+		t.Error("the installed SKILL.md does not match the bundled one")
 	}
 }
 
