@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -149,6 +150,19 @@ func syncBundledSkill() ([]string, error) {
 	return updated, nil
 }
 
+// syncSkillAndReport runs syncBundledSkill and names each directory it wrote
+// on out. A failed install is reported on errOut and never fails the command
+// that asked for it.
+func syncSkillAndReport(out, errOut io.Writer) {
+	updated, err := syncBundledSkill()
+	for _, dir := range updated {
+		fmt.Fprintf(out, "slopcop: installed the slopcop skill at %s\n", dir)
+	}
+	if err != nil {
+		fmt.Fprintf(errOut, "slopcop: could not install the slopcop skill: %v\n", err)
+	}
+}
+
 // skillMatches reports whether every bundled file is in dir with the bundled
 // content.
 func skillMatches(dir string, files []skillFile) bool {
@@ -211,8 +225,8 @@ knows how to run slopcop.
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
 Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
-there is left alone. Every check also installs the skill, and rewrites one
-that differs from the bundled skill. Pass --no-skill to leave the skill install and any
+there is left alone. Login and every check also install the skill, and
+rewrite one that differs from the bundled skill. Pass --no-skill to leave the skill install and any
 update of it undone.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
