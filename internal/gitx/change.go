@@ -103,7 +103,7 @@ func snapshotSince(root, base, commit string) (string, error) {
 }
 
 // ResolveSince returns the comparison commit and the branch ref to advance
-// after a completed run. Non-base trees are wrapped in deterministic commits
+// after a passing run. Non-base trees are wrapped in deterministic commits
 // parented by the current BASE. Detached HEADs have no last-run ref.
 func ResolveSince(root, base, rev string) (commit, ref string, err error) {
 	branch, branchErr := Run(root, "symbolic-ref", "--quiet", "--short", "HEAD")

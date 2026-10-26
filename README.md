@@ -158,7 +158,7 @@ Flags:
 | --- | --- |
 | `--root PATH` | repository to check (default `.`) |
 | `--base REV` | base commit or revision for the change |
-| `--since REV` | compare since a commit-ish or `merge-base` (default: last completed branch run, else BASE) |
+| `--since REV` | compare since a commit-ish or `merge-base` (default: last passing branch run, else BASE) |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
 | `--show-existing` | also list the findings that were already in the code |
@@ -179,9 +179,10 @@ index is untouched, and even an unchanged working tree sends a snapshot.
 `--since` accepts a commit-ish or `merge-base` (the resolved BASE). By default,
 it uses `refs/slopcop/last-run/<branch>`, else BASE. The selected tree is
 re-anchored to the current BASE; when it matches BASE's tree, BASE itself is
-reused. A completed run (including findings or incomplete analysis) advances
-the branch ref to NOW. Rejected requests, pending checks, transport errors,
-and timeouts do not advance it. Detached HEAD runs have no last-run marker.
+reused. Only a passing run advances the branch ref to NOW. A run with
+findings or incomplete analysis leaves it where it was, so rerunning without a
+fix reports the same findings again. Rejected requests, pending checks,
+transport errors, and timeouts do not advance it either. Detached HEAD runs have no last-run marker.
 Use `--since merge-base` for a complete branch comparison in CI.
 
 The decoded packfile is limited to 16 MiB; larger packs fail locally before

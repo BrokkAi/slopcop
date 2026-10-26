@@ -32,9 +32,9 @@ merge base with `origin/HEAD`, then `HEAD`. One request goes out per run, even
 when nothing changed: an unchanged snapshot is still checked.
 
 `--since` accepts a commit-ish or `merge-base` (BASE). It defaults to the last
-completed run on this branch, recorded in `refs/slopcop/last-run/<branch>`,
-else BASE. Completed runs, including findings and incomplete results, advance
-that ref; pending checks and failed requests do not. Detached HEAD has no
+passing run on this branch, recorded in `refs/slopcop/last-run/<branch>`,
+else BASE. Only a passing run advances that ref; a run with findings or
+incomplete results does not, so rerunning without a fix fails again. Detached HEAD has no
 marker. Use `--since merge-base` for CI branch comparisons. NOW and SINCE
 snapshots each have BASE as their only parent, omitting intermediate history;
 SINCE reuses BASE when their trees match. NOW includes untracked non-ignored

@@ -59,10 +59,10 @@ func TestSinceAndLastRunLifecycle(t *testing.T) {
 			if captured["sinceCommit"] != base {
 				t.Errorf("first since = %v, want %s", captured["sinceCommit"], base)
 			}
-			completed := result == "clean" || result == "findings" || result == "incomplete"
+			passed := result == "clean"
 			ref := "refs/slopcop/last-run/main"
 			out, err := exec.Command("git", "-C", repo, "rev-parse", "--verify", ref).Output()
-			if !completed {
+			if !passed {
 				if err == nil {
 					t.Fatalf("last-run ref updated for %s: %s", result, out)
 				}
@@ -70,7 +70,7 @@ func TestSinceAndLastRunLifecycle(t *testing.T) {
 			}
 			now := captured["changeCommit"].(string)
 			if err != nil || runGit(t, repo, "rev-parse", ref) != now {
-				t.Fatalf("completed run did not update ref: %v", err)
+				t.Fatalf("passing run did not update ref: %v", err)
 			}
 			writeFile(t, repo, "new.go", "package demo\nfunc Changed() {}\n")
 			runCLI(t, args...)

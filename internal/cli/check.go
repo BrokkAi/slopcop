@@ -116,8 +116,14 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}
 		return err
 	}
-	if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last completed run: %v\n", err)
+	// Only a passing check moves the default --since forward. Advancing on
+	// findings would make an unchanged rerun compare against the failing
+	// tree, so the same findings would read as existing and the check would
+	// pass without anything being fixed or reported.
+	if response.ExitCode() == service.ExitClean {
+		if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last passing run: %v\n", err)
+		}
 	}
 	options := report.Options{ShowExisting: opts.showExisting}
 	if err := report.Write(stdout, response, format, options); err != nil {
