@@ -361,9 +361,9 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 	}
 }
 
-// While SlopCop is still indexing the repository the service answers at
-// once; the CLI prints that and exits instead of waiting or asking again.
-func TestIndexingInProgressExitsWithoutWaiting(t *testing.T) {
+// A refusal the service marks not retryable is printed once; the CLI exits
+// instead of waiting or asking again.
+func TestNonRetryableRefusalExitsWithoutWaiting(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
@@ -373,9 +373,9 @@ func TestIndexingInProgressExitsWithoutWaiting(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusConflict)
 		_, _ = w.Write([]byte(`{
-			"code": "indexing_in_progress",
-			"message": "Indexing in progress: SlopCop is still indexing this repository.",
-			"remedy": "Run the check again once SlopCop has finished indexing the repository.",
+			"code": "repo_renamed",
+			"message": "This repository was renamed on GitHub.",
+			"remedy": "Point the git remote at the repository's new URL (git remote set-url origin <new url>), then retry.",
 			"retryable": false
 		}`))
 	}))
@@ -394,8 +394,8 @@ func TestIndexingInProgressExitsWithoutWaiting(t *testing.T) {
 		t.Fatalf("stdout = %q, want no report", stdout)
 	}
 	for _, want := range []string{
-		"Indexing in progress: SlopCop is still indexing this repository.",
-		"Run the check again once SlopCop has finished indexing the repository.",
+		"This repository was renamed on GitHub.",
+		"Point the git remote at the repository's new URL (git remote set-url origin <new url>), then retry.",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want %q", stderr, want)

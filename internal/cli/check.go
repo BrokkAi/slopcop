@@ -29,6 +29,15 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
+	// The installed skill follows the binary that runs. A failed install
+	// never fails the check.
+	updated, err := syncBundledSkill()
+	for _, dir := range updated {
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: installed the slopcop skill at %s\n", dir)
+	}
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not install the slopcop skill: %v\n", err)
+	}
 	repoRoot, err := gitx.Toplevel(opts.root)
 	if err != nil {
 		return err

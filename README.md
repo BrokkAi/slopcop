@@ -110,9 +110,12 @@ harness is present, and names what it did:
 | `~/.claude/skills/slopcop/` | Claude Code, opencode |
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
 
-A skill that is already there is left alone, so local edits survive and running
-init again is safe. `slopcop init --no-skill` skips the install and any update
-of it.
+A skill that is already there is left alone by init, so running it again is
+safe. Every check also installs the skill in those directories, rewriting one
+that differs from the skill bundled into the binary, so an agent follows the
+instructions of the slopcop version it runs; local edits to an installed skill
+do not survive a check. `slopcop init --no-skill` skips the install and any
+update of it.
 
 ## Sign in
 
@@ -260,10 +263,6 @@ install URL. The codes, messages, and remedies are defined by the service in
 rewrite them. The remedies name no client, so when one says to sign in the CLI
 adds the `slopcop login` command after it. A failed request prints no report
 on stdout.
-
-While SlopCop is still indexing the repository, the service answers
-`indexing_in_progress` at once instead of running the check. The CLI prints it
-and exits `2` without waiting or retrying.
 
 ## API
 

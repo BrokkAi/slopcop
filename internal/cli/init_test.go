@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"io/fs"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -50,9 +52,9 @@ func readEmbeddedSkill(t *testing.T, name string) string {
 	return string(data)
 }
 
-// init is the only thing that writes the skill: running another command leaves
-// the filesystem alone.
-func TestOnlyInitInstallsTheSkill(t *testing.T) {
+// Only init and a check write the skill: running another command leaves the
+// filesystem alone.
+func TestOnlyInitAndCheckInstallTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	agents := filepath.Join(home, ".agents")
 	makeHarness(t, agents)
@@ -120,7 +122,53 @@ func TestInitInstallsForEveryHarnessFound(t *testing.T) {
 	}
 }
 
-// A skill that is already there stays as it is, so local edits survive.
+// Every check installs the bundled skill where it is missing and rewrites
+// one that differs, so an agent follows the version that runs. A check that
+// finds the skill current writes nothing and says nothing about it.
+func TestEveryCheckInstallsTheBundledSkill(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".agents"))
+	makeHarness(t, filepath.Join(home, ".claude"))
+	stale := filepath.Join(home, ".claude", "skills", "slopcop", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(stale), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(stale, []byte("an older skill\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code": "repo_renamed", "message": "renamed", "remedy": "fix the remote", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	_, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	want := readEmbeddedSkill(t, "SKILL.md")
+	for _, dir := range []string{
+		filepath.Join(home, ".agents", "skills", "slopcop"),
+		filepath.Join(home, ".claude", "skills", "slopcop"),
+	} {
+		if !strings.Contains(stderr, "installed the slopcop skill at "+dir) {
+			t.Errorf("stderr = %q, want it to name %s", stderr, dir)
+		}
+		if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != want {
+			t.Errorf("%s does not hold the bundled SKILL.md", dir)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".codex")); err == nil {
+		t.Error("a harness that is not installed here got a skills directory")
+	}
+
+	_, _, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if strings.Contains(stderr, "skill") {
+		t.Errorf("stderr = %q, want nothing about a skill that is current", stderr)
+	}
+}
+
+// init leaves a skill that is already there as it is.
 func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".agents"))
