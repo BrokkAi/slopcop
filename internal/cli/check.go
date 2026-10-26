@@ -116,11 +116,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}
 		return err
 	}
-	// Only a passing check moves the default --since forward. Advancing on
-	// findings would make an unchanged rerun compare against the failing
-	// tree, so the same findings would read as existing and the check would
-	// pass without anything being fixed or reported.
-	if response.ExitCode() == service.ExitClean {
+	// Only a full default check that passed with no new finding moves the
+	// default --since forward. Advancing on findings, even ones --fail-on let
+	// pass, or after a narrower check (an explicit --since, fewer policies)
+	// would make the next default run read unfixed or unchecked code as
+	// existing, so it would pass without anything being fixed or reported.
+	if advancesLastRun(opts, response) {
 		if err := gitx.RecordLastRun(repoRoot, lastRunRef, change.Commit); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record last passing run: %v\n", err)
 		}
@@ -130,6 +131,20 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return err
 	}
 	return silentExit{response.ExitCode()}
+}
+
+func advancesLastRun(opts *checkOptions, response service.Response) bool {
+	if response.Status != service.StatusClean || response.Summary.NewFindings != 0 {
+		return false
+	}
+	for _, finding := range response.Findings {
+		if finding.New {
+			return false
+		}
+	}
+	return strings.TrimSpace(opts.since) == "" && len(opts.policies) == 0 && !opts.noDiscovery &&
+		len(opts.rules) == 0 && len(opts.skipRules) == 0 &&
+		len(opts.categories) == 0 && len(opts.skipCategories) == 0
 }
 
 func resolveEnums(opts *checkOptions) (string, string, error) {
