@@ -33,8 +33,10 @@ when nothing changed: an unchanged snapshot is still checked.
 
 `--since` accepts a commit-ish or `merge-base` (BASE). It defaults to the last
 passing run on this branch, recorded in `refs/slopcop/last-run/<branch>`,
-else BASE. Only a passing run advances that ref; a run with findings or
-incomplete results does not, so rerunning without a fix fails again. Detached HEAD has no
+else BASE. Only a full default run (no `--since`, `--policy`,
+`--no-policy-discovery`, `--rule`, `--category` or skip) that passes with no new finding advances that ref; a
+run with findings or incomplete results does not, so rerunning without a fix
+fails again. Detached HEAD has no
 marker. Use `--since merge-base` for CI branch comparisons. NOW and SINCE
 snapshots each have BASE as their only parent, omitting intermediate history;
 SINCE reuses BASE when their trees match. NOW includes untracked non-ignored
