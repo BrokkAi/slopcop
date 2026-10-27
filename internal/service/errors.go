@@ -12,6 +12,8 @@ type ErrorBody struct {
 	Remedy     string `json:"remedy"`
 	Retryable  bool   `json:"retryable"`
 	InstallURL string `json:"installUrl,omitempty"`
+	// TopUpURL is where to add credits, for a workspace out of credits.
+	TopUpURL string `json:"topUpUrl,omitempty"`
 }
 
 // knownErrors fills in the message and remedy of a closed code the service
@@ -43,8 +45,8 @@ func (e *Error) Error() string {
 	}
 }
 
-// RemedyText is the message, remedy, and install link an agent prints
-// verbatim, exactly the fields the service enumerated for this failure.
+// RemedyText is the message, remedy, and install or top-up link an agent
+// prints verbatim, exactly the fields the service enumerated for this failure.
 func (e *Error) RemedyText() string {
 	lines := []string{e.Error()}
 	if remedy := strings.TrimSpace(e.Body.Remedy); remedy != "" {
@@ -52,6 +54,9 @@ func (e *Error) RemedyText() string {
 	}
 	if install := strings.TrimSpace(e.Body.InstallURL); install != "" {
 		lines = append(lines, install)
+	}
+	if topUp := strings.TrimSpace(e.Body.TopUpURL); topUp != "" {
+		lines = append(lines, topUp)
 	}
 	return strings.Join(lines, "\n")
 }

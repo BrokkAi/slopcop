@@ -69,7 +69,7 @@ same answer. Inconclusive checks about files the change does not write are liste
 `{"status": "pending", ...}` in `json`;
 running the same check again, in any format, picks up the same analysis.
 
-Failures print the service's message, remedy, and install link verbatim. What
+Failures print the service's message, remedy, and install or top-up link verbatim. What
 the usual codes mean:
 
 | Code | What to do |
@@ -81,6 +81,7 @@ the usual codes mean:
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
+| `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
 ## What a result claims
