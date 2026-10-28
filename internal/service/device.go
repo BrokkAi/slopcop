@@ -49,7 +49,7 @@ func (c *Client) StartDevice(ctx context.Context) (DeviceStart, error) {
 
 // AwaitDeviceToken polls until the browser approves the code. The notify
 // callback, when set, receives one line whenever the service asks the client
-// to slow down.
+// to slow down or answers a retryable failure.
 func (c *Client) AwaitDeviceToken(
 	ctx context.Context,
 	start DeviceStart,
@@ -66,7 +66,7 @@ func (c *Client) AwaitDeviceToken(
 	deadline := time.Now().Add(expires)
 
 	for {
-		token, err := c.pollDeviceToken(ctx, start, &interval, notify)
+		token, pause, err := c.pollDeviceToken(ctx, start, &interval, notify)
 		if err != nil {
 			return "", err
 		}
@@ -76,26 +76,29 @@ func (c *Client) AwaitDeviceToken(
 		if !time.Now().Before(deadline) {
 			return "", errors.New("this login code expired; run `slopcop login` again")
 		}
-		if err := c.sleep(ctx, interval); err != nil {
+		if err := c.sleep(ctx, max(interval, pause)); err != nil {
 			return "", err
 		}
 	}
 }
 
+// pollDeviceToken asks once for the token. With no token and no error, the
+// login is still waiting; pause is how long the service asked to wait, beyond
+// the interval, before asking again.
 func (c *Client) pollDeviceToken(
 	ctx context.Context,
 	start DeviceStart,
 	interval *time.Duration,
 	notify func(string),
-) (string, error) {
-	status, _, payload, err := c.postJSON(ctx, deviceTokenPath, map[string]any{
+) (token string, pause time.Duration, err error) {
+	status, header, payload, err := c.postJSON(ctx, deviceTokenPath, map[string]any{
 		"deviceCode": start.DeviceCode,
 	})
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	if status == 202 {
-		return "", nil
+		return "", 0, nil
 	}
 	if status >= 200 && status < 300 {
 		var body struct {
@@ -104,16 +107,16 @@ func (c *Client) pollDeviceToken(
 			Code   string `json:"code"`
 		}
 		if err := json.Unmarshal(payload, &body); err != nil {
-			return "", fmt.Errorf("decode token response: %w", err)
+			return "", 0, fmt.Errorf("decode token response: %w", err)
 		}
 		if body.Token != "" {
-			return body.Token, nil
+			return body.Token, 0, nil
 		}
 		if body.Status == "authorized" {
-			return "", errors.New("the login service authorized the code without returning a token")
+			return "", 0, errors.New("the login service authorized the code without returning a token")
 		}
 		if body.Status == "pending" || body.Code == "" {
-			return "", nil
+			return "", 0, nil
 		}
 		payload, _ = json.Marshal(map[string]any{"code": body.Code})
 	}
@@ -121,7 +124,7 @@ func (c *Client) pollDeviceToken(
 	failure := deviceFailure(status, payload, start)
 	switch failure.Body.Code {
 	case "authorization_pending":
-		return "", nil
+		return "", 0, nil
 	case "slow_down":
 		*interval += slowDownStep
 		if notify != nil {
@@ -130,20 +133,34 @@ func (c *Client) pollDeviceToken(
 				int(interval.Seconds()),
 			))
 		}
-		return "", nil
-	default:
-		return "", failure
+		return "", 0, nil
 	}
+	// A failure the service marks retryable, such as a brief outage or too
+	// many polls, leaves the code valid: wait as long as it asks, then poll
+	// again until the code expires.
+	if failure.Body.Retryable {
+		pause = retryAfter(header)
+		if notify != nil {
+			notify(fmt.Sprintf(
+				"slopcop: %s; polling again in %ds",
+				strings.TrimSuffix(failure.Body.Message, "."),
+				int(max(*interval, pause).Seconds()),
+			))
+		}
+		return "", pause, nil
+	}
+	return "", 0, failure
 }
 
 // deviceFailure maps the device-flow closed codes to the CLI error surface.
 // The service may send the full error body or just a code, so both are read.
 func deviceFailure(status int, payload []byte, start DeviceStart) *Error {
 	var body struct {
-		Code    string `json:"code"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
-		Remedy  string `json:"remedy"`
+		Code      string `json:"code"`
+		Status    string `json:"status"`
+		Message   string `json:"message"`
+		Remedy    string `json:"remedy"`
+		Retryable bool   `json:"retryable"`
 	}
 	_ = json.Unmarshal(payload, &body)
 	code := body.Code
@@ -154,6 +171,7 @@ func deviceFailure(status int, payload []byte, start DeviceStart) *Error {
 	failure.Body.Code = code
 	failure.Body.Message = strings.TrimSpace(body.Message)
 	failure.Body.Remedy = strings.TrimSpace(body.Remedy)
+	failure.Body.Retryable = body.Retryable
 	switch code {
 	case "authorization_pending":
 		failure.Body.Message = "This login has not been approved yet."

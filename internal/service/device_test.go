@@ -122,6 +122,79 @@ func TestAwaitDeviceTokenSlowDownRaisesInterval(t *testing.T) {
 	}
 }
 
+// A retryable failure, such as a brief outage or too many polls, leaves the
+// login code valid: polling waits as long as the service asks, never less
+// than the interval, and goes on until the code is approved.
+func TestAwaitDeviceTokenWaitsOutRetryableFailures(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		switch calls {
+		case 1:
+			w.Header().Set("Retry-After", "9")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code": "service_unavailable", "message": "SlopCop is unavailable right now.", "remedy": "Retry shortly.", "retryable": true}`))
+		case 2:
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"code": "rate_limited", "message": "Too many requests.", "remedy": "Wait, then retry.", "retryable": true}`))
+		default:
+			_, _ = w.Write([]byte(`{"status": "authorized", "token": "issued-token"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var delays []time.Duration
+	client.wait = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+	var notices []string
+	token, err := client.AwaitDeviceToken(context.Background(), DeviceStart{
+		DeviceCode: "device-1",
+		Interval:   5,
+		ExpiresIn:  600,
+	}, func(line string) { notices = append(notices, line) })
+	if err != nil || token != "issued-token" {
+		t.Fatalf("token = %q, err = %v", token, err)
+	}
+	if len(delays) != 2 || delays[0] != 9*time.Second || delays[1] != 5*time.Second {
+		t.Fatalf("delays = %v, want 9s then the 5s interval", delays)
+	}
+	if len(notices) != 2 || notices[0] != "slopcop: SlopCop is unavailable right now; polling again in 9s" {
+		t.Fatalf("notices = %q", notices)
+	}
+}
+
+// A failure the service does not mark retryable still ends the login.
+func TestAwaitDeviceTokenStopsOnANonRetryableFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "invalid_request", "message": "Bad request.", "remedy": "Fix it.", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.wait = func(context.Context, time.Duration) error {
+		t.Fatal("waited after a failure that is not retryable")
+		return nil
+	}
+	var serviceError *Error
+	_, err = client.AwaitDeviceToken(context.Background(), DeviceStart{DeviceCode: "device-1", Interval: 5, ExpiresIn: 600}, nil)
+	if !errors.As(err, &serviceError) || serviceError.Body.Code != "invalid_request" {
+		t.Fatalf("err = %v, want invalid_request", err)
+	}
+}
+
 func TestAwaitDeviceTokenClosedCodes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
