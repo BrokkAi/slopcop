@@ -300,6 +300,36 @@ func TestCheckPrintsTheServiceRemedy(t *testing.T) {
 	}
 }
 
+// A disabled repository names whoami: the workspace that disabled it is the
+// login's, which may not be the one the person expects.
+func TestCheckOfADisabledRepositoryPointsAtWhoami(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{
+			"code": "repository_disabled",
+			"message": "This repository is disabled in your SlopCop workspace, so it isn't scanned.",
+			"remedy": "Enable it on the Repositories page in SlopCop, then retry.",
+			"retryable": false
+		}`))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 2 || stdout != "" {
+		t.Fatalf("exit = %d, stdout = %q", code, stdout)
+	}
+	want := "This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
+		"Enable it on the Repositories page in SlopCop, then retry.\n" +
+		"`slopcop whoami` shows which workspace this login checks in.\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+}
+
 // A repo-state failure must not carry the login hint: the user is signed in,
 // and the service's remedy already names the real next step.
 func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
