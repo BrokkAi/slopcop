@@ -227,8 +227,8 @@ func TestHumanSaysWhyTheAnalysisDidNotComplete(t *testing.T) {
 func TestOmittedFindingsAreSaidInEveryFormat(t *testing.T) {
 	cut := response(service.StatusFindings, "warning", sampleFindings())
 	cut.Summary.OmittedFindings = 45
-	notice := "45 more finding(s) were not reported because a check found more than it " +
-		"may report; the most severe are listed"
+	notice := "45 more new finding(s) were not reported because the change has more than " +
+		"a check may report; the most severe are listed"
 
 	got := render(t, cut, FormatHuman)
 	want := "\n3 new findings across 2 file(s); +45 not reported | Analysis complete\n" +

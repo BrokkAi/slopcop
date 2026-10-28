@@ -142,9 +142,11 @@ Other bounds in the report:
 - `inconclusiveElsewhere`: inconclusive checks about files the change does not
   write. They never change the status. Mention them, but they are not this
   change's.
-- `summary.omittedFindings`: a check found more than it may report, and only
-  the most severe are listed. The list is not everything; fix those and run
-  again to see the rest.
+- `summary.omittedFindings`: new findings left out because the change has more
+  than one check may report. A check keeps new findings first, so these are
+  always findings the change introduced or touched, and only the most severe
+  are listed. Fix those and run again to see the rest. Findings already in
+  the code that were left out are counted in `existingFindings`, not here.
 - `summary.existingFindings`: findings already in the code, counted but not
   listed (see above).
 - `failure`: the analysis as a whole did not complete, and the report makes no

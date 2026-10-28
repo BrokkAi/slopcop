@@ -170,14 +170,17 @@ func filesWithFindings(findings []service.Finding) int {
 }
 
 // omittedNotice says what the omitted findings mean, for each format to say.
+// The service counts only new findings here: a check keeps the findings the
+// change introduced or touched first, and counts the ones that were already
+// in the code in `existingFindings` instead.
 func omittedNotice(response service.Response) string {
 	omitted := response.Summary.OmittedFindings
 	if omitted == 0 {
 		return ""
 	}
 	return fmt.Sprintf(
-		"%d more finding(s) were not reported because a check found more than "+
-			"it may report; the most severe are listed",
+		"%d more new finding(s) were not reported because the change has more "+
+			"than a check may report; the most severe are listed",
 		omitted,
 	)
 }
