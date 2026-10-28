@@ -1,0 +1,2 @@
+{"parentUuid":null,"isSidechain":true,"agentId":"a1","message":{"model":"claude-haiku-5-5","id":"msg_s1","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_sub_write","name":"Write","input":{"file_path":"{{repo}}/a.go","content":"package a"}}]},"type":"assistant","uuid":"s1","effort":"low","sessionId":"S"}
+{"parentUuid":"s1","isSidechain":true,"agentId":"a1","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_sub_write","type":"tool_result","content":"ok"}]},"sessionId":"S"}

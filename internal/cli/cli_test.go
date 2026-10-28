@@ -65,6 +65,11 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
 	t.Setenv("CODEX_HOME", "")
+	// A test run inside an agent must not attribute its checks to that
+	// agent's session.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("AI_AGENT", "")
 	// Fail rather than let a test touch the real credential or skill install
 	// if either location ever depends on something not isolated above.
 	configPath, err := config.Path()
@@ -248,6 +253,9 @@ func TestCheckSendsTheChangeAndAppliesFailOn(t *testing.T) {
 		if _, ok := request[key]; ok {
 			t.Errorf("request carries %q, which the service rejects", key)
 		}
+	}
+	if _, ok := request["attribution"]; ok {
+		t.Errorf("a check outside any agent session carries attribution: %v", request["attribution"])
 	}
 	selection, _ := request["selection"].(map[string]any)
 	files, _ := selection["files"].([]any)

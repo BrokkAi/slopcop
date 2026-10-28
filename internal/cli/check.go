@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/attribution"
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/report"
@@ -61,6 +62,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
 			client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn,
 		)
+		if attributed := request.Attribution; attributed != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: attribution %s session %s\n", attributed.Harness, attributed.SessionID)
+			for _, model := range attributed.Models {
+				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop:   %s effort %s wrote %s\n",
+					model.Model, valueOr(model.Effort, "unknown"), strings.Join(model.Files, ", "))
+			}
+		}
 	}
 
 	// --timeout bounds the whole wait for a result: the client asks again
@@ -157,6 +165,7 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
+	request.Attribution = attribution.Detect(repoRoot)
 	return preparedCheck{client: client, request: request, files: change.Files, bytes: len(change.Patch)}, nil
 }
 
@@ -341,6 +350,13 @@ func resolveToken(cfg config.Config) string {
 		return token
 	}
 	return strings.TrimSpace(cfg.Token)
+}
+
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func shortSHA(value string) string {

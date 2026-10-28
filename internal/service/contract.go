@@ -40,6 +40,29 @@ type Request struct {
 	Selection *Selection `json:"selection,omitempty"`
 	// FailOn is never, finding, note, warning, or error.
 	FailOn string `json:"failOn,omitempty"`
+	// Attribution is optional and advisory: the service validates each field
+	// on its own and drops what fails, so it never refuses a check.
+	Attribution *Attribution `json:"attribution,omitempty"`
+}
+
+// Attribution mirrors the check request's attribution: which agent harness
+// and models wrote the change. All of it is asserted by the client.
+type Attribution struct {
+	Harness        string `json:"harness,omitempty"`
+	HarnessVersion string `json:"harnessVersion,omitempty"`
+	// SessionID is the harness's own opaque session id.
+	SessionID string            `json:"sessionId,omitempty"`
+	Models    []AttributedModel `json:"models,omitempty"`
+}
+
+// AttributedModel is one model, at one effort level, and the
+// repository-relative files it wrote. The service keeps only the files the
+// change writes, and ties a finding to the model whose files hold its path.
+type AttributedModel struct {
+	Model  string   `json:"model"`
+	Effort string   `json:"effort,omitempty"`
+	Source string   `json:"source,omitempty"`
+	Files  []string `json:"files,omitempty"`
 }
 
 // Selection mirrors CheckSelection. File entries are repository-relative
