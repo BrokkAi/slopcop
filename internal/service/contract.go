@@ -90,9 +90,6 @@ type Response struct {
 	Summary    Summary            `json:"summary"`
 	Findings   []Finding          `json:"findings"`
 	Incomplete []IncompletePolicy `json:"incomplete"`
-	// InconclusiveElsewhere lists inconclusive checks about files the change
-	// does not write. Like existing findings, they never change the status.
-	InconclusiveElsewhere []IncompletePolicy `json:"inconclusiveElsewhere"`
 	// Failure says why the analysis did not complete, when it failed.
 	Failure string `json:"failure,omitempty"`
 }
@@ -113,8 +110,14 @@ type Summary struct {
 	// IncompletePolicyIDs names at most 50 incomplete checks;
 	// IncompletePolicies counts them all.
 	IncompletePolicyIDs []string `json:"incompletePolicyIds"`
-	// InconclusiveElsewhere counts the inconclusive checks about files the
-	// change does not write; IncompletePolicies does not include them.
+	// Inconclusive counts the checks that ran and could not prove there is
+	// nothing more to find. That is the norm for static analysis, not a
+	// fault: they never change the status, IncompletePolicies does not
+	// include them, and there is nothing to do about them.
+	Inconclusive int `json:"inconclusive"`
+	// InconclusiveElsewhere counts the Inconclusive checks about files the
+	// change does not write. A service from before Inconclusive counted only
+	// these, and IncompletePolicies counted the rest.
 	InconclusiveElsewhere int `json:"inconclusiveElsewhere"`
 	// OmittedFindings counts new findings left out because a check found
 	// more than it may report. A check keeps new findings first, so this is
@@ -126,7 +129,8 @@ type Summary struct {
 }
 
 // IncompletePolicy mirrors IncompletePolicy: a check that did not complete
-// and why (timed_out, inconclusive, base_comparison_failed, or other).
+// and why (timed_out, unreliable, base_comparison_failed, or other; a service
+// from before unreliable says inconclusive).
 type IncompletePolicy struct {
 	PolicyID string `json:"policyId"`
 	Reason   string `json:"reason"`

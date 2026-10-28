@@ -292,12 +292,12 @@ interrupted check prints no report. Interrupted before it was sent, nothing
 reached the service; after, a service that received it keeps running it, and
 running the same check again picks up its result.
 
-An inconclusive check fails the check only when it concerns a file the
-change writes. One about other files is listed on an `Inconclusive outside
-the change` line (`inconclusiveElsewhere` in `json`, a `note` notification in
-`sarif`) and never changes the exit code. A check that timed out counts
-wherever it is. The service can place an inconclusive check only once Bifrost
-reports which files it concerns; until then every one counts as in the change.
+An inconclusive check, one that ran but could not prove there is nothing
+more to find, never changes the exit code and is not named in any format.
+Complete proof is rare in static analysis, typically at a library boundary,
+so this is the norm rather than a gap. `summary.inconclusive` counts them in
+`json`, as does `slopcop.inconclusive` in `sarif`. A check that timed out or
+that Bifrost judged unreliable is incomplete and counts wherever it is.
 
 The service applies `--fail-on` and sets the status; the exit code follows it.
 The CLI always sends `--fail-on`, defaulting to `finding`: a check fails only

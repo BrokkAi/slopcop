@@ -282,7 +282,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if want := []string{"baseCommit", "findings", "incomplete", "inconclusiveElsewhere", "status", "summary"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"baseCommit", "findings", "incomplete", "status", "summary"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("keys = %v, want %v", keys, want)
 	}
 	wantSummary := map[string]any{
@@ -292,6 +292,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		"existingFindings":      float64(0),
 		"incompletePolicies":    float64(0),
 		"incompletePolicyIds":   []any{},
+		"inconclusive":          float64(0),
 		"inconclusiveElsewhere": float64(0),
 		"omittedFindings":       float64(0),
 		"failOn":                "error",
@@ -583,42 +584,32 @@ func TestSARIFSaysWhatDidNotComplete(t *testing.T) {
 	}
 }
 
-func TestInconclusiveChecksOutsideTheChangeAreListedNotFailed(t *testing.T) {
-	elsewhere := response(service.StatusClean, "finding", []service.Finding{})
-	elsewhere.Summary.InconclusiveElsewhere = 3
-	elsewhere.InconclusiveElsewhere = []service.IncompletePolicy{
-		{PolicyID: "acme.flow", Reason: "inconclusive"},
-		{PolicyID: "evil\x1b[2J", Reason: "inconclusive"},
-	}
-	got := render(t, elsewhere, FormatHuman)
-	want := "No new findings | Analysis complete\n" +
-		"Inconclusive outside the change (never fail the check): acme.flow, evil�[2J, and 1 more\n"
-	if got != want {
-		t.Errorf("human = %q", got)
+func TestInconclusiveChecksAreCountedNotNamed(t *testing.T) {
+	unproven := response(service.StatusClean, "finding", []service.Finding{})
+	unproven.Summary.Inconclusive = 6
+	unproven.Summary.InconclusiveElsewhere = 2
+	if got, want := render(t, unproven, FormatHuman), "No new findings | Analysis complete\n"; got != want {
+		t.Errorf("human = %q, want %q", got, want)
 	}
 
 	var document map[string]any
-	if err := json.Unmarshal([]byte(render(t, elsewhere, FormatJSON)), &document); err != nil {
+	if err := json.Unmarshal([]byte(render(t, unproven, FormatJSON)), &document); err != nil {
 		t.Fatalf("json: %v", err)
 	}
-	if document["summary"].(map[string]any)["inconclusiveElsewhere"] != float64(3) ||
-		len(document["inconclusiveElsewhere"].([]any)) != 2 {
+	if document["summary"].(map[string]any)["inconclusive"] != float64(6) {
 		t.Errorf("json = %v", document)
 	}
 
 	var log map[string]any
-	if err := json.Unmarshal([]byte(render(t, elsewhere, FormatSARIF)), &log); err != nil {
+	if err := json.Unmarshal([]byte(render(t, unproven, FormatSARIF)), &log); err != nil {
 		t.Fatalf("sarif: %v", err)
 	}
 	run := log["runs"].([]any)[0].(map[string]any)
 	invocation := run["invocations"].([]any)[0].(map[string]any)
-	notifications := invocation["toolExecutionNotifications"].([]any)
-	first := notifications[0].(map[string]any)
-	if invocation["executionSuccessful"] != true || len(notifications) != 2 || first["level"] != "note" ||
-		first["properties"].(map[string]any)["slopcop.outsideChange"] != true {
+	if invocation["executionSuccessful"] != true || invocation["toolExecutionNotifications"] != nil {
 		t.Errorf("invocation = %v", invocation)
 	}
-	if run["properties"].(map[string]any)["slopcop.inconclusiveElsewhere"] != float64(3) {
+	if run["properties"].(map[string]any)["slopcop.inconclusive"] != float64(6) {
 		t.Errorf("properties = %v", run["properties"])
 	}
 }
