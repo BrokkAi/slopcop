@@ -157,7 +157,7 @@ func TestHumanListsNewFindingsAndCountsTheRest(t *testing.T) {
 		"    Location: server/domain.rs:703\n" +
 		"    Certainty: definite\n" +
 		"\n" +
-		"1 new finding across 1 file(s); 3 already in the code (--show-existing lists them) | Analysis complete\n"
+		"1 new finding across 1 file(s); 3 already in the code | Analysis complete\n"
 	if got != want {
 		t.Errorf("default = %q", got)
 	}
@@ -178,8 +178,18 @@ func TestHumanListsNewFindingsAndCountsTheRest(t *testing.T) {
 	}
 
 	onlyExisting := response(service.StatusClean, "finding", []service.Finding{existing("a.go", 1, "error", "p")})
-	if got := render(t, onlyExisting, FormatHuman); got != "No new findings; 1 already in the code (--show-existing lists them) | Analysis complete\n" {
+	if got := render(t, onlyExisting, FormatHuman); got != "No new findings; 1 already in the code | Analysis complete\n" {
 		t.Errorf("only existing = %q", got)
+	}
+
+	// The service lists only new findings and counts the rest in the summary;
+	// the summary line still says how many were already there.
+	counted := response(service.StatusFindings, "finding", []service.Finding{
+		finding("server/domain.rs", 703, "warning", "bifrost.performance.regex-compile-in-loop"),
+	})
+	counted.Summary.ExistingFindings = 72
+	if got := render(t, counted, FormatHuman); !strings.HasSuffix(got, "\n1 new finding across 1 file(s); 72 already in the code | Analysis complete\n") {
+		t.Errorf("counted existing = %q", got)
 	}
 }
 

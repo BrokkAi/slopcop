@@ -23,7 +23,7 @@ func (e silentExit) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
 // Execute runs the CLI and returns the process exit code: 0 clean, 1 a new
 // finding at or above the fail-on level, 2 incomplete or failed, 3 still
-// running when --timeout ran out.
+// running when --timeout ran out, 130 interrupted before the check answered.
 func Execute(args []string, version string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -115,6 +115,12 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
 	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
+	// The service stopped listing findings outside the changed lines; it
+	// counts them in summary.existingFindings, which every format prints.
+	// The flag stays, hidden, so scripts that pass it keep working. Cobra's
+	// own deprecation notice goes to stdout, where it would break --format
+	// json, so runCheck says it on stderr instead.
+	_ = flags.MarkHidden("show-existing")
 	flags.StringArrayVar(&opts.policies, "policy", nil, "repository-relative .rqlp policy file to evaluate (repeatable)")
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")
 	flags.BoolVar(&opts.verbose, "verbose", false, "print the resolved request to stderr")

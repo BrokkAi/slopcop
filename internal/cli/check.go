@@ -22,12 +22,20 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
+	// interruptedText is printed when Ctrl-C or SIGTERM stops a check: the
+	// service keeps the check, so asking again picks up its result.
+	interruptedText = "slopcop: interrupted before the check answered. The service keeps running it; run the same check again to pick up its result."
+	// showExistingNotice is printed on stderr when --show-existing is passed.
+	showExistingNotice = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
 
 func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version string) error {
 	format, failOn, err := resolveEnums(opts)
 	if err != nil {
 		return err
+	}
+	if opts.showExisting {
+		fmt.Fprintln(cmd.ErrOrStderr(), showExistingNotice)
 	}
 	// The installed skill follows the binary that runs.
 	syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr())
@@ -91,6 +99,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	defer cancel()
 	response, err := client.Check(ctx, request)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
+			return silentExit{service.ExitInterrupted}
+		}
 		var pending *service.Pending
 		if errors.As(err, &pending) {
 			fmt.Fprintln(cmd.ErrOrStderr(), pending.RemedyText())

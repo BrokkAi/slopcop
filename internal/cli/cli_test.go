@@ -604,6 +604,67 @@ func TestExitCodeFollowsTheServiceStatus(t *testing.T) {
 	}
 }
 
+// --show-existing still parses, so scripts that pass it keep working, but the
+// service no longer lists findings outside the change: the flag is hidden and
+// says so on stderr, never on stdout, where it would break the JSON report.
+func TestShowExistingIsDeprecatedOnStderr(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "clean",
+			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+			"applied": true,
+			"summary": {"files": 1, "findings": 0, "newFindings": 0, "existingFindings": 4, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [],
+			"incomplete": []
+		}`))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t,
+		"check", "--root", repo, "--service", server.URL, "--format", "json", "--show-existing",
+	)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	var report map[string]any
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("stdout is not the JSON report: %q: %v", stdout, err)
+	}
+	if !strings.Contains(stderr, "--show-existing is deprecated") {
+		t.Errorf("stderr = %q", stderr)
+	}
+	if _, help, _ := runCLI(t, "check", "--help"); strings.Contains(help, "show-existing") {
+		t.Errorf("--help still lists --show-existing:\n%s", help)
+	}
+}
+
+// A status this client does not know may mean anything but clean, so it
+// fails the check instead of passing it.
+func TestAnUnknownStatusNeverPassesTheCheck(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "abandoned",
+			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+			"applied": true,
+			"summary": {"files": 1, "findings": 0, "newFindings": 0, "existingFindings": 0, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [],
+			"incomplete": []
+		}`))
+	}))
+	defer server.Close()
+
+	code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2; stderr = %s", code, stderr)
+	}
+}
+
 // checkRunning answers the service's check_running, as control does while the
 // analysis is still going.
 func checkRunning(w http.ResponseWriter, retryAfter string) {
@@ -644,7 +705,7 @@ func TestACheckWithNoNewFindingsExitsClean(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if stdout != "No new findings; 2 already in the code (--show-existing lists them) | Analysis complete\n" {
+	if stdout != "No new findings; 2 already in the code | Analysis complete\n" {
 		t.Fatalf("stdout = %q", stdout)
 	}
 	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--show-existing")
@@ -680,6 +741,34 @@ func TestCheckWaitsWhileTheServiceIsStillRunning(t *testing.T) {
 	var report map[string]any
 	if err := json.Unmarshal([]byte(stdout), &report); err != nil || report["status"] != "clean" {
 		t.Fatalf("stdout = %q (%v)", stdout, err)
+	}
+}
+
+// An interrupt is not a timeout: nothing was waited for, so it prints no
+// pending report and exits 130, the shell's code for Ctrl-C, not 3.
+func TestAnInterruptedCheckIsNotPending(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		cancel() // the signal arrives while the service is still working
+		checkRunning(w, "5")
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := execute(ctx, []string{"check", "--root", repo, "--service", server.URL, "--format", "json"},
+		"test", &stdout, &stderr)
+	if code != 130 {
+		t.Fatalf("exit = %d, want 130, stderr = %s", code, stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Errorf("stdout = %q, want no report", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "interrupted before the check answered") {
+		t.Errorf("stderr = %q", stderr.String())
 	}
 }
 

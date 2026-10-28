@@ -80,7 +80,7 @@ func human(response service.Response, options Options) string {
 	if options.ShowExisting {
 		writeBlock(&out, "Already in the code (never fail the check)", existing)
 	}
-	out.WriteString(summaryLine(response, options))
+	out.WriteString(summaryLine(response))
 	out.WriteString("\n")
 	if notice := omittedNotice(response); notice != "" {
 		fmt.Fprintf(&out, "Omitted: %s.\n", notice)
@@ -125,7 +125,7 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 
 // summaryLine is one line, like the first line of Bifrost's human report:
 // the new findings, then how many were already in the code.
-func summaryLine(response service.Response, options Options) string {
+func summaryLine(response service.Response) string {
 	fresh, existing := split(response.Findings)
 	scope := "No new findings"
 	switch len(fresh) {
@@ -138,11 +138,10 @@ func summaryLine(response service.Response, options Options) string {
 	if len(fresh) > 0 {
 		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(fresh))
 	}
-	if len(existing) > 0 {
-		scope = fmt.Sprintf("%s; %d already in the code", scope, len(existing))
-		if !options.ShowExisting {
-			scope += " (--show-existing lists them)"
-		}
+	// The service lists only the findings the change introduced or touched
+	// and counts the rest; a service from before that also listed them.
+	if count := max(response.Summary.ExistingFindings, len(existing)); count > 0 {
+		scope = fmt.Sprintf("%s; %d already in the code", scope, count)
 	}
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
