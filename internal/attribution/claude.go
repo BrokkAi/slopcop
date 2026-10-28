@@ -1,10 +1,8 @@
 package attribution
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,8 +24,8 @@ var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{1,128}$`)
 // claude-code_2-1-312_agent in the agent's commands.
 var agentVersionPattern = regexp.MustCompile(`^claude-code_([0-9]+(?:-[0-9]+)*)_`)
 
-// fileEditTools are the tools that write a file, and so name its author.
-var fileEditTools = map[string]bool{
+// claudeEditTools are the tools that write a file, and so name its author.
+var claudeEditTools = map[string]bool{
 	"Write":        true,
 	"Edit":         true,
 	"MultiEdit":    true,
@@ -103,44 +101,36 @@ var (
 // succeeded, in transcript order. Lines that name no tool call are skipped
 // before they are decoded, and a line that does not parse is skipped.
 func claudeEdits(path string) []fileEdit {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	reader := bufio.NewReader(io.LimitReader(file, maxTranscriptBytes))
 	type call struct {
 		edit fileEdit
 		id   string
 	}
 	var calls []call
 	succeeded := map[string]bool{}
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 && (bytes.Contains(line, toolUseMarker) || bytes.Contains(line, toolResultMarker)) {
-			var entry claudeEntry
-			var blocks []claudeBlock
-			if json.Unmarshal(line, &entry) == nil && json.Unmarshal(entry.Message.Content, &blocks) == nil {
-				for _, block := range blocks {
-					switch {
-					case entry.Type == "assistant" && block.Type == "tool_use" && fileEditTools[block.Name]:
-						target := block.Input.FilePath
-						if target == "" {
-							target = block.Input.NotebookPath
-						}
-						if target != "" && block.ID != "" {
-							calls = append(calls, call{fileEdit{entry.Message.Model, entry.Effort, target}, block.ID})
-						}
-					case entry.Type == "user" && block.Type == "tool_result" && !block.IsError:
-						succeeded[block.ToolUseID] = true
-					}
+	readRecord(path, func(line []byte) {
+		if !bytes.Contains(line, toolUseMarker) && !bytes.Contains(line, toolResultMarker) {
+			return
+		}
+		var entry claudeEntry
+		var blocks []claudeBlock
+		if json.Unmarshal(line, &entry) != nil || json.Unmarshal(entry.Message.Content, &blocks) != nil {
+			return
+		}
+		for _, block := range blocks {
+			switch {
+			case entry.Type == "assistant" && block.Type == "tool_use" && claudeEditTools[block.Name]:
+				target := block.Input.FilePath
+				if target == "" {
+					target = block.Input.NotebookPath
 				}
+				if target != "" && block.ID != "" {
+					calls = append(calls, call{fileEdit{entry.Message.Model, entry.Effort, target}, block.ID})
+				}
+			case entry.Type == "user" && block.Type == "tool_result" && !block.IsError:
+				succeeded[block.ToolUseID] = true
 			}
 		}
-		if err != nil {
-			break
-		}
-	}
+	})
 	var edits []fileEdit
 	for _, call := range calls {
 		// A model Claude Code made up for its own messages names no model.

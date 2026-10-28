@@ -199,3 +199,22 @@ func TestNestedHarnessesPickTheSessionWrittenLast(t *testing.T) {
 		}
 	}
 }
+
+func TestReadRecordSkipsOnlyLinesOverTheBound(t *testing.T) {
+	saved := maxLineBytes
+	maxLineBytes = 100 << 10
+	t.Cleanup(func() { maxLineBytes = saved })
+	// Lines longer than the reader's buffer are joined; a line over the bound
+	// is skipped without ending the read; the last line needs no newline.
+	long := strings.Repeat("a", 90<<10)
+	tooLong := strings.Repeat("b", 200<<10)
+	path := filepath.Join(t.TempDir(), "record.jsonl")
+	if err := os.WriteFile(path, []byte("first\n"+long+"\n"+tooLong+"\nlast"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	readRecord(path, func(line []byte) { lines = append(lines, strings.TrimSuffix(string(line), "\n")) })
+	if want := []string{"first", long, "last"}; !reflect.DeepEqual(lines, want) {
+		t.Fatalf("read %d lines, want first, the 90 KiB line and last", len(lines))
+	}
+}

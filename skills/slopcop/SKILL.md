@@ -9,7 +9,9 @@ description: Check a working-tree change with the slopcop CLI, which sends the c
 patch from the base commit to the working tree; the service applies it, runs
 the hosted policy catalog plus the repository rules selected, and returns the
 report. There is no local analyzer, and the CLI never decides on its own that
-there is nothing to check.
+there is nothing to check. Run from a Claude Code or Codex session, a check
+also sends which models wrote each changed file, read from the session's own
+record; `--verbose` prints it.
 
 ## Sign in
 

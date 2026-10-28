@@ -1,10 +1,8 @@
 package attribution
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,46 +116,38 @@ func codexDefaultEfforts(codexHome string) map[string]string {
 // wrote, each with the model and effort of its turn. A move writes its
 // destination; a delete writes nothing.
 func codexEdits(path string) []fileEdit {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil
-	}
-	defer file.Close()
-	reader := bufio.NewReader(io.LimitReader(file, maxTranscriptBytes))
 	type change struct{ turn, path string }
 	turns := map[string]modelKey{}
 	var changes []change
-	for {
-		line, err := reader.ReadBytes('\n')
-		if len(line) > 0 && (bytes.Contains(line, turnContextMarker) || bytes.Contains(line, fileChangeMarker)) {
-			var entry codexLine
-			if json.Unmarshal(line, &entry) == nil {
-				payload := entry.Payload
+	readRecord(path, func(line []byte) {
+		if !bytes.Contains(line, turnContextMarker) && !bytes.Contains(line, fileChangeMarker) {
+			return
+		}
+		var entry codexLine
+		if json.Unmarshal(line, &entry) != nil {
+			return
+		}
+		payload := entry.Payload
+		switch {
+		case entry.Type == "turn_context" && payload.TurnID != "":
+			effort := payload.CollaborationMode.Settings.ReasoningEffort
+			if effort == "" {
+				effort = payload.Effort
+			}
+			turns[payload.TurnID] = modelKey{payload.Model, effort}
+		case entry.Type == "event_msg" && payload.Type == "item_completed" &&
+			payload.Item.Type == "FileChange" && payload.Item.Status == "completed":
+			for target, changed := range payload.Item.Changes {
 				switch {
-				case entry.Type == "turn_context" && payload.TurnID != "":
-					effort := payload.CollaborationMode.Settings.ReasoningEffort
-					if effort == "" {
-						effort = payload.Effort
-					}
-					turns[payload.TurnID] = modelKey{payload.Model, effort}
-				case entry.Type == "event_msg" && payload.Type == "item_completed" &&
-					payload.Item.Type == "FileChange" && payload.Item.Status == "completed":
-					for target, changed := range payload.Item.Changes {
-						switch {
-						case changed.Type == "delete":
-						case changed.MovePath != "":
-							changes = append(changes, change{payload.TurnID, changed.MovePath})
-						default:
-							changes = append(changes, change{payload.TurnID, target})
-						}
-					}
+				case changed.Type == "delete":
+				case changed.MovePath != "":
+					changes = append(changes, change{payload.TurnID, changed.MovePath})
+				default:
+					changes = append(changes, change{payload.TurnID, target})
 				}
 			}
 		}
-		if err != nil {
-			break
-		}
-	}
+	})
 	var edits []fileEdit
 	for _, change := range changes {
 		if turn, ok := turns[change.turn]; ok && turn.model != "" {

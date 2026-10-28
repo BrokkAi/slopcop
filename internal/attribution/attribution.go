@@ -8,6 +8,9 @@
 package attribution
 
 import (
+	"bufio"
+	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -58,6 +61,43 @@ func lastWritten(paths []string) time.Time {
 		}
 	}
 	return latest
+}
+
+// maxLineBytes bounds one session record line held in memory. A longer line
+// is skipped. A variable so tests can lower it.
+var maxLineBytes = 64 << 20
+
+// readRecord opens one session record, bounded by maxTranscriptBytes, and
+// calls each for every line of at most maxLineBytes.
+func readRecord(path string, each func(line []byte)) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	reader := bufio.NewReaderSize(io.LimitReader(file, maxTranscriptBytes), 64<<10)
+	var line []byte
+	tooLong := false
+	for {
+		chunk, err := reader.ReadSlice('\n')
+		if !tooLong {
+			if len(line)+len(chunk) > maxLineBytes {
+				tooLong, line = true, nil
+			} else {
+				line = append(line, chunk...)
+			}
+		}
+		if errors.Is(err, bufio.ErrBufferFull) {
+			continue
+		}
+		if !tooLong && len(line) > 0 {
+			each(line)
+		}
+		line, tooLong = line[:0], false
+		if err != nil {
+			return
+		}
+	}
 }
 
 type modelKey struct{ model, effort string }

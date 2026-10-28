@@ -23,6 +23,7 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
+	invalidChange   = "invalid_change"
 	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
 	// was sent: a service that received it keeps it, so asking again picks up
 	// its result.
@@ -77,6 +78,16 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
 	defer cancel()
 	response, err := client.Check(ctx, request)
+	// A service from before attribution rejects the unknown field as
+	// invalid_change; the check itself must still run.
+	var rejected *service.Error
+	if request.Attribution != nil && errors.As(err, &rejected) && rejected.Body.Code == invalidChange {
+		if opts.verbose {
+			fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: the service refused the attribution; sending the check without it")
+		}
+		request.Attribution = nil
+		response, err = client.Check(ctx, request)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
