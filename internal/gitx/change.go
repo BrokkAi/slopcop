@@ -42,6 +42,9 @@ func WorkingTreePatch(root, base string, policyFiles []string) (WorkingChange, e
 	if _, err := RunBytes(root, env, "read-tree", "HEAD"); err != nil {
 		return change, err
 	}
+	if err := keepSkippedPaths(root, env); err != nil {
+		return change, err
+	}
 	if _, err := RunBytes(root, env, "add", "--intent-to-add", "--all", "--", "."); err != nil {
 		return change, err
 	}
@@ -73,6 +76,49 @@ func WorkingTreePatch(root, base string, policyFiles []string) (WorkingChange, e
 	change.Files = countDiffHeaders(patch)
 	change.Patch = patch
 	return change, nil
+}
+
+// keepSkippedPaths copies the user's skip-worktree bits into the temporary
+// index. A sparse checkout leaves every file outside its cone off the disk
+// and marks it so; without the bit, git would read each of those files as
+// deleted and the patch would delete them. With it, the patch agrees with
+// `git status`. Only paths HEAD seeded are marked, since update-index refuses
+// a path the index does not hold.
+func keepSkippedPaths(root string, env []string) error {
+	// The user's own index, as `git status` reads it.
+	tagged, err := RunBytes(root, nil, "ls-files", "-t", "-z")
+	if err != nil {
+		return err
+	}
+	var skipped [][]byte
+	for _, entry := range bytes.Split(tagged, []byte{0}) {
+		if path, ok := bytes.CutPrefix(entry, []byte("S ")); ok {
+			skipped = append(skipped, path)
+		}
+	}
+	if len(skipped) == 0 {
+		return nil
+	}
+	seeded, err := RunBytes(root, env, "ls-files", "-z")
+	if err != nil {
+		return err
+	}
+	inIndex := make(map[string]bool)
+	for _, path := range bytes.Split(seeded, []byte{0}) {
+		inIndex[string(path)] = true
+	}
+	var marked bytes.Buffer
+	for _, path := range skipped {
+		if inIndex[string(path)] {
+			marked.Write(path)
+			marked.WriteByte(0)
+		}
+	}
+	if marked.Len() == 0 {
+		return nil
+	}
+	_, err = RunInput(root, env, marked.Bytes(), "update-index", "-z", "--skip-worktree", "--stdin")
+	return err
 }
 
 func countDiffHeaders(patch []byte) int {

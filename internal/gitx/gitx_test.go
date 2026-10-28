@@ -331,6 +331,52 @@ func TestWorkingTreePatchKeepsModesTheFilesystemCannotExpress(t *testing.T) {
 	}
 }
 
+// A sparse checkout leaves the files outside its cone off the disk. The patch
+// carries the change as `git status` sees it, never those files as deletions,
+// with either index format; committed work outside the cone still travels.
+func TestWorkingTreePatchLeavesOutWhatASparseCheckoutSkips(t *testing.T) {
+	for _, sparseIndex := range []bool{false, true} {
+		name := "full index"
+		if sparseIndex {
+			name = "sparse index"
+		}
+		t.Run(name, func(t *testing.T) {
+			root := initRepo(t)
+			writeFile(t, root, "in/a.txt", "one\n")
+			writeFile(t, root, "out/b.txt", "two\n")
+			writeFile(t, root, "out/c.txt", "three\n")
+			git(t, root, "add", "-A")
+			git(t, root, "commit", "-qm", "base")
+			base := git(t, root, "rev-parse", "HEAD")
+			writeFile(t, root, "out/b.txt", "two, committed\n")
+			git(t, root, "commit", "-qam", "outside the cone")
+			args := []string{"sparse-checkout", "set"}
+			if sparseIndex {
+				args = append(args, "--sparse-index")
+			}
+			git(t, root, append(args, "in")...)
+			if _, err := os.Stat(filepath.Join(root, "out", "c.txt")); !os.IsNotExist(err) {
+				t.Fatalf("the sparse checkout left out/c.txt on disk: %v", err)
+			}
+			writeFile(t, root, "in/a.txt", "one, edited\n")
+
+			change, err := WorkingTreePatch(root, base, nil)
+			if err != nil {
+				t.Fatalf("WorkingTreePatch: %v", err)
+			}
+			patch := string(change.Patch)
+			if change.Files != 2 ||
+				!strings.Contains(patch, "diff --git a/in/a.txt b/in/a.txt\n") ||
+				!strings.Contains(patch, "diff --git a/out/b.txt b/out/b.txt\n") {
+				t.Fatalf("want in/a.txt and out/b.txt only, got %d file(s):\n%s", change.Files, patch)
+			}
+			if strings.Contains(patch, "deleted file") {
+				t.Fatalf("the patch deletes a file the sparse checkout skips:\n%s", patch)
+			}
+		})
+	}
+}
+
 func TestWorkingTreePatchEmptyForCleanTree(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, root, "src/a.txt", "one\n")
