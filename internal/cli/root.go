@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 // silentExit ends the process with a specific exit code and no extra message;
@@ -25,9 +27,39 @@ func (e silentExit) Error() string { return fmt.Sprintf("exit %d", e.code) }
 // finding at or above the fail-on level, 2 incomplete or failed, 3 still
 // running when --timeout ran out, 130 interrupted before the check answered.
 func Execute(args []string, version string) int {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(signals)
+	go func() {
+		select {
+		case received := <-signals:
+			// A second signal gets the default behavior and ends the
+			// process at once.
+			signal.Stop(signals)
+			cancel(interrupt{received})
+		case <-ctx.Done():
+		}
+	}()
 	return execute(ctx, args, version, os.Stdout, os.Stderr)
+}
+
+// interrupt is the cause of a context that a signal canceled.
+type interrupt struct{ signal os.Signal }
+
+func (i interrupt) Error() string { return "interrupted by " + i.signal.String() }
+
+// interruptCode is the exit code for a command a signal stopped: the shell's
+// 128 plus the signal number, so 130 for Ctrl-C and 143 for SIGTERM.
+func interruptCode(ctx context.Context) int {
+	var cause interrupt
+	if errors.As(context.Cause(ctx), &cause) {
+		if number, ok := cause.signal.(syscall.Signal); ok {
+			return 128 + int(number)
+		}
+	}
+	return service.ExitInterrupted
 }
 
 func execute(ctx context.Context, args []string, version string, stdout, stderr io.Writer) int {

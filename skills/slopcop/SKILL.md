@@ -58,7 +58,7 @@ Each finding also carries its
 | `1` | A new finding crossed `--fail-on`. Fix it. |
 | `2` | No new finding crossed `--fail-on`, but some check did not complete; or the CLI or service failed. |
 | `3` | The check was still running when `--timeout` ran out. Run the same check again. |
-| `130` | The check was interrupted before it answered. It printed no report; run the same check again. |
+| `130`, `143` | The check was interrupted (Ctrl-C or SIGTERM) before it answered. It printed no report; run the same check again. |
 
 The service sets the status and the CLI follows it. A failed request prints no
 report on stdout, so exit `2` with an empty stdout is a failure, never a clean

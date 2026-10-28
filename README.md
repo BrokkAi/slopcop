@@ -194,8 +194,9 @@ already in the code are counted (`summary.existingFindings`, and `N already in
 the code` in the human summary), never fail the check, and are not listed. A
 change that introduces nothing exits `0`, however many findings the repository
 already holds. `--show-existing` is deprecated and hidden: the service no longer
-sends those findings, so it lists nothing, and it stays only so that scripts
-passing it keep running.
+sends those findings, so against it the flag lists nothing (a service from
+before that still gets them listed), and it stays so that scripts passing it
+keep running.
 
 ### Ignore a false positive
 
@@ -234,12 +235,13 @@ whichever is used.
 | `1` | A new finding crossed `--fail-on` |
 | `2` | No new finding crossed `--fail-on`, but a check was incomplete; or the CLI or service failed |
 | `3` | The check was still running when `--timeout` ran out |
-| `130` | Interrupted (Ctrl-C or SIGTERM) before the check answered |
+| `130`, `143` | Interrupted before the check answered: `130` for Ctrl-C, `143` for SIGTERM |
 
 Only `clean` exits `0`: a status this CLI does not know exits `2`, so a newer
-service can never pass a check by accident. An interrupted check prints no
-report; the service keeps running it, and running the same check again picks
-up its result.
+service can never pass a check by accident, and stderr names the status. An
+interrupted check prints no report. Interrupted before it was sent, nothing
+reached the service; after, a service that received it keeps running it, and
+running the same check again picks up its result.
 
 An inconclusive check fails the check only when it concerns a file the
 change writes. One about other files is listed on an `Inconclusive outside
@@ -307,8 +309,9 @@ contract, including `finding_not_found`.
 approved. The failure codes are `slow_down`, which raises the polling interval,
 `expired_token`, `access_denied`, and `device_flow_disabled`. A failure the
 service marks `retryable`, such as `rate_limited` or `service_unavailable`,
-keeps the code valid: login waits its `Retry-After`, or the interval if that is
-longer, and polls again until the code expires.
+keeps the code valid, and so do a dropped connection and a proxy's `429`,
+`502`, `503` or `504` without a code: login waits the `Retry-After`, or the
+interval if that is longer, and polls again until the code expires.
 
 ## Development
 

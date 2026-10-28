@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 
 	"github.com/BrokkAi/slopcop/internal/config"
@@ -663,6 +664,10 @@ func TestAnUnknownStatusNeverPassesTheCheck(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("exit = %d, want 2; stderr = %s", code, stderr)
 	}
+	// The report reads like a pass, so stderr says why the check failed.
+	if !strings.Contains(stderr, `the service answered status "abandoned"`) {
+		t.Errorf("stderr = %q", stderr)
+	}
 }
 
 // checkRunning answers the service's check_running, as control does while the
@@ -768,6 +773,52 @@ func TestAnInterruptedCheckIsNotPending(t *testing.T) {
 		t.Errorf("stdout = %q, want no report", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "interrupted before the check answered") {
+		t.Errorf("stderr = %q", stderr.String())
+	}
+}
+
+// The exit code names the signal, the shell's way: SIGTERM, as a CI runner
+// sends on cancel, exits 143.
+func TestASignalNamesItsExitCode(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		cancel(interrupt{syscall.SIGTERM})
+		checkRunning(w, "5")
+	}))
+	defer server.Close()
+
+	var stdout, stderr bytes.Buffer
+	code := execute(ctx, []string{"check", "--root", repo, "--service", server.URL}, "test", &stdout, &stderr)
+	if code != 143 {
+		t.Fatalf("exit = %d, want 143, stderr = %s", code, stderr.String())
+	}
+}
+
+// An interrupt before the request goes out says nothing was sent, and sends
+// nothing.
+func TestAnInterruptBeforeSendingSendsNothing(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		checkRunning(w, "5")
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(interrupt{os.Interrupt})
+
+	var stdout, stderr bytes.Buffer
+	code := execute(ctx, []string{"check", "--root", repo, "--service", server.URL}, "test", &stdout, &stderr)
+	if code != 130 || requests != 0 {
+		t.Fatalf("exit = %d (want 130), requests = %d (want 0), stderr = %s", code, requests, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "interrupted before the check was sent") {
 		t.Errorf("stderr = %q", stderr.String())
 	}
 }

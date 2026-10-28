@@ -230,8 +230,9 @@ func printable(value string) string {
 }
 
 // jsonReport is the document `--format json` prints: what an agent needs from
-// stdout. Findings lists the new findings, then the existing ones only with
-// --show-existing; summary counts both either way.
+// stdout. Findings lists the new findings, then, with --show-existing, any
+// existing ones a service from before BrokkAi/bifrost-service#760 still
+// sent; summary counts both either way.
 type jsonReport struct {
 	Status     string                     `json:"status"`
 	BaseCommit string                     `json:"baseCommit"`
@@ -384,8 +385,9 @@ type sarifDescriptor struct {
 }
 
 // writeSARIF prints a SARIF 2.1.0 log with one run. Each result's
-// baselineState says whether the change touched it; existing findings are
-// results only with --show-existing.
+// baselineState says whether the change touched it; the existing findings a
+// service from before BrokkAi/bifrost-service#760 sent are results only
+// with --show-existing.
 func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	findings := listed(response, options)
 	var rules []string

@@ -123,6 +123,15 @@ type Finding struct {
 	New bool `json:"new"`
 }
 
+// KnownStatus reports whether this client knows the response status.
+func (r Response) KnownStatus() bool {
+	switch r.Status {
+	case StatusClean, StatusFindings, StatusIncomplete:
+		return true
+	}
+	return false
+}
+
 // ExitCode maps the response status to the analyzer exit contract. Only
 // clean exits 0: a status this client does not know never passes a check.
 func (r Response) ExitCode() int {
