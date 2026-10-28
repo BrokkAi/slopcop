@@ -111,6 +111,9 @@ report, so a check never needs a Bifrost install.`,
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
 		newVersionCommand(version),
+		newWhoamiCommand(&serviceURL, version),
+		newWorkspaceCommand(&serviceURL, version),
+		newRepoCommand(&serviceURL, version),
 	)
 	return root
 }

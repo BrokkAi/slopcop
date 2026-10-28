@@ -138,6 +138,35 @@ Precedence:
 | Service URL | `--service`, `$SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
 | Token | `$SLOPCOP_TOKEN`, stored value |
 
+## Workspace and repositories
+
+A login runs its checks and ignores in, and bills, one workspace: the one
+active in the browser when the login was approved.
+
+```console
+slopcop whoami                     # account, this login's workspace, its plan, the service URL
+slopcop workspace list             # the account's workspaces; * marks this login's
+slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
+slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
+slopcop repo disable acme/widgets  # stop checking and charging for one (owner only)
+slopcop repo enable acme/widgets   # turn it back on, within the workspace's active limit
+```
+
+`whoami`, `workspace list` and `repo list` take `--format human|json`, as do
+`workspace use` and `repo enable|disable` for their answer. Every active
+repository after a workspace's first costs credits every 30 days; a disabled
+one is not checked or charged and keeps its reports, findings and settings.
+`repo enable` and `repo disable` ask you to type the repository's `owner/name`
+and refuse when stdin is not a terminal: an agent or CI job runs with your
+login, and the service cannot tell it from you, so changing what the workspace
+pays stays a step you take yourself.
+Names match without regard to case; when two workspaces share a name, or two
+providers a repository name, pass the id the listing prints. There is no `repo
+add`: a first check adds a repository. Deleting repositories, archiving
+workspaces, members, credits and repository settings stay in the web app. The
+commands exit `0` on success and `2` with the service's message and remedy
+otherwise, as `ignore` does.
+
 ## Check
 
 ```console
@@ -302,6 +331,18 @@ could be ignored omits it.
 token and `{"findingId": "<id>"}`, and gets back
 `{"findingId": "<id>", "status": "ignored"}`. Failures use the same closed
 contract, including `finding_not_found`.
+
+The account commands use the same bearer token. `GET <service>/v1/whoami`
+answers `account`, `workspace` (`id`, `name`, `kind`, `role`, `current`),
+`plan` (`pro` or `free`) and `workspaces`. `POST <service>/v1/workspace` with
+`{"workspaceId"}` rebinds the login. `GET <service>/v1/repositories` answers
+`repositories` (`id`, `provider`, `fullName`, `enabled`, `active`) with
+`activeRepositoryLimit`, `activeRepositories` and `canManageRepositories`, and
+`POST <service>/v1/repositories/state` with `{"repositoryId", "enabled"}`
+answers `{repositoryId, fullName, enabled, active}`. Their failure codes add
+`account_required`, `workspace_not_found`, `workspace_repository_not_found`,
+`owner_required` and `browser_required` (a private Bitbucket or GitLab
+repository, which only the web app can change) to the check's.
 
 `slopcop login` uses the device flow: `POST /api/device` returns a
 `deviceCode`, `userCode`, `verificationUri`, `expiresIn`, and `interval`, and
