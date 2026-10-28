@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -168,6 +169,80 @@ func TestAwaitDeviceTokenWaitsOutRetryableFailures(t *testing.T) {
 	}
 	if len(notices) != 2 || notices[0] != "slopcop: SlopCop is unavailable right now; polling again in 9s" {
 		t.Fatalf("notices = %q", notices)
+	}
+}
+
+// A dropped connection and a proxy's code-less 502, as a deploy can cause,
+// leave the code valid: polling goes on at the interval.
+func TestAwaitDeviceTokenRidesOutADroppedConnectionAndAProxyError(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = connection.Close()
+		case 2:
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html><body>502 Bad Gateway</body></html>"))
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status": "authorized", "token": "issued-token"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var delays []time.Duration
+	client.wait = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+	var notices []string
+	token, err := client.AwaitDeviceToken(context.Background(), DeviceStart{
+		DeviceCode: "device-1",
+		Interval:   5,
+		ExpiresIn:  600,
+	}, func(line string) { notices = append(notices, line) })
+	if err != nil || token != "issued-token" {
+		t.Fatalf("token = %q, err = %v", token, err)
+	}
+	if len(delays) != 2 || delays[0] != 5*time.Second || delays[1] != 5*time.Second {
+		t.Fatalf("delays = %v, want the 5s interval twice", delays)
+	}
+	if len(notices) != 2 || !strings.HasPrefix(notices[0], "slopcop: could not reach the login service;") ||
+		notices[1] != "slopcop: the login service returned HTTP 502; polling again in 5s" {
+		t.Fatalf("notices = %q", notices)
+	}
+}
+
+// A code that expires while the service keeps failing says so, rather than
+// only that it expired.
+func TestAwaitDeviceTokenNamesTheFailureItExpiredOn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.wait = func(context.Context, time.Duration) error {
+		time.Sleep(600 * time.Millisecond)
+		return nil
+	}
+	_, err = client.AwaitDeviceToken(context.Background(), DeviceStart{DeviceCode: "device-1", Interval: 5, ExpiresIn: 1}, nil)
+	if err == nil || !strings.Contains(err.Error(), "expired while the login service kept failing (the login service returned HTTP 503)") {
+		t.Fatalf("err = %v", err)
 	}
 }
 
