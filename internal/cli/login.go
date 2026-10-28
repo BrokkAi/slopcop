@@ -86,10 +86,17 @@ func remedyError(err error) error {
 // alone: those say "sign in again" only as a step after installing the App or
 // getting access, and appending a login command sends an already-signed-in
 // user back through the login flow for a problem login cannot fix.
+//
+// The account commands' failures get the command that lists what to choose
+// from in the same way.
 var loginHints = map[string]string{
-	"auth_required":        "Sign in with `slopcop login`.",
-	"auth_expired":         "Sign in with `slopcop login`.",
-	"device_flow_disabled": "Sign in with `slopcop login --token <token>`.",
+	"auth_required":                  "Sign in with `slopcop login`.",
+	"auth_expired":                   "Sign in with `slopcop login`.",
+	"account_required":               "Sign in with `slopcop login`.",
+	"device_flow_disabled":           "Sign in with `slopcop login --token <token>`.",
+	"workspace_not_found":            "List them with `slopcop workspace list`.",
+	"workspace_repository_not_found": "List them with `slopcop repo list`.",
+	"owner_required":                 "Switch with `slopcop workspace use <name>`.",
 }
 
 // remedyText is the service's message and remedy, verbatim, plus the slopcop

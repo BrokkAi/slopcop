@@ -192,13 +192,28 @@ func (c *Client) postJSON(ctx context.Context, path string, body any) (int, http
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("encode request: %w", err)
 	}
-	httpRequest, err := http.NewRequestWithContext(
-		ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(payload),
-	)
+	return c.send(ctx, http.MethodPost, path, payload)
+}
+
+// getJSON sends one bodiless GET and returns the status, headers and raw
+// body.
+func (c *Client) getJSON(ctx context.Context, path string) (int, http.Header, []byte, error) {
+	return c.send(ctx, http.MethodGet, path, nil)
+}
+
+// send makes one request; a nil payload sends no body.
+func (c *Client) send(ctx context.Context, method, path string, payload []byte) (int, http.Header, []byte, error) {
+	var body io.Reader
+	if payload != nil {
+		body = bytes.NewReader(payload)
+	}
+	httpRequest, err := http.NewRequestWithContext(ctx, method, c.BaseURL+path, body)
 	if err != nil {
 		return 0, nil, nil, fmt.Errorf("build request: %w", err)
 	}
-	httpRequest.Header.Set("Content-Type", "application/json")
+	if payload != nil {
+		httpRequest.Header.Set("Content-Type", "application/json")
+	}
 	httpRequest.Header.Set("Accept", "application/json")
 	if c.UserAgent != "" {
 		httpRequest.Header.Set("User-Agent", c.UserAgent)
