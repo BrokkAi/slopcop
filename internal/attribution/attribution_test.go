@@ -137,6 +137,10 @@ func installRollout(t *testing.T, codexHome, repo string) string {
 func TestCodexAttributesEachCompletedFileChangeToItsTurnsModel(t *testing.T) {
 	codexHome, repo := t.TempDir(), t.TempDir()
 	installRollout(t, codexHome, repo)
+	cache := `{"models":[{"slug":"gpt-6-luna","default_reasoning_level":"medium"},{"slug":"gpt-6-sol","default_reasoning_level":"xhigh"}]}`
+	if err := os.WriteFile(filepath.Join(codexHome, "models_cache.json"), []byte(cache), 0o600); err != nil {
+		t.Fatal(err)
+	}
 
 	got := detect(environment(map[string]string{
 		"CODEX_THREAD_ID": testThread,
@@ -153,6 +157,9 @@ func TestCodexAttributesEachCompletedFileChangeToItsTurnsModel(t *testing.T) {
 			// and the change from a turn with no context are not
 			// attributed.
 			{Model: "gpt-6-luna", Effort: "high", Source: SourceTranscript, Files: []string{"a.go", "pkg/moved.go"}},
+			// A turn at the default effort records none; the model's
+			// default from Codex's model cache is the one that ran.
+			{Model: "gpt-6-luna", Effort: "medium", Source: SourceTranscript, Files: []string{"d.go"}},
 			// A turn from before collaboration modes keeps its effort on
 			// the turn; /elsewhere is outside the repository.
 			{Model: "gpt-6-sol", Effort: "low", Source: SourceTranscript, Files: []string{"a.go"}},
