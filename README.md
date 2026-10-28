@@ -212,6 +212,28 @@ with a one-line confirmation, and otherwise exits `2` with the service's
 message and remedy; `finding_not_found` means the id is unknown or comes from a
 check outside your workspace.
 
+### Enable or disable this repository
+
+```console
+slopcop repo status    # is this checkout's repository enabled?
+slopcop repo disable   # stop checking it
+slopcop repo enable    # check it again
+```
+
+A disabled repository is not checked: every check of it is refused with the
+service's `repository_disabled` message. It also costs nothing from the next
+UTC day; the day it is disabled was already charged. Its reports, findings,
+and settings are kept and apply again once it is enabled. Only the workspace's
+owner can enable or disable a repository; any member can see its state. The
+repository is the checkout's `origin` (`--root` names another checkout), and
+it must already be in your workspace. A refusal exits `2` with the service's
+message and remedy, like `ignore`.
+
+This is a person's decision, not an agent's. Agents and CI run slopcop with the
+same login you do, so `enable` and `disable` ask you to type the repository's
+`owner/name` and refuse, without contacting the service, when stdin is not a
+terminal or the name does not match. `status` asks nothing.
+
 ### Output and exit codes
 
 The service answers structured data; the CLI renders it. `human` prints one
@@ -292,6 +314,15 @@ could be ignored omits it.
 token and `{"findingId": "<id>"}`, and gets back
 `{"findingId": "<id>", "status": "ignored"}`. Failures use the same closed
 contract, including `finding_not_found`.
+
+`slopcop repo status` calls `POST <service>/v1/repository` with
+`{"repoUrl": "<url>"}`, and `slopcop repo enable` and `disable` call
+`POST <service>/v1/repository/activation` with
+`{"repoUrl": "<url>", "enabled": true|false}`. Both answer
+`{"repository": "owner/name", "enabled": …, "active": …}`; `active` is false
+for an enabled repository over the workspace's active-repository limit, which
+is not checked either. Failures use the same closed contract, including
+`repository_not_added` and `owner_required`.
 
 `slopcop login` uses the device flow: `POST /api/device` returns a
 `deviceCode`, `userCode`, `verificationUri`, `expiresIn`, and `interval`, and

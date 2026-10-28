@@ -18,6 +18,8 @@ import (
 const (
 	checkPath        = "/v1/check"
 	ignorePath       = "/v1/ignore"
+	repositoryPath   = "/v1/repository"
+	activationPath   = "/v1/repository/activation"
 	maxResponseBytes = 32 * 1024 * 1024
 	defaultTimeout   = 10 * time.Minute
 	// checkRunning is the retryable answer to a check that is still running.
@@ -247,6 +249,54 @@ func (c *Client) Ignore(ctx context.Context, findingID string) (IgnoreResponse, 
 	}
 	if decoded.FindingID == "" {
 		decoded.FindingID = findingID
+	}
+	return decoded, nil
+}
+
+// RepositoryRequest is the POST /v1/repository body.
+type RepositoryRequest struct {
+	RepoURL string `json:"repoUrl"`
+}
+
+// ActivationRequest is the POST /v1/repository/activation body. Enabled is
+// always sent: false disables the repository.
+type ActivationRequest struct {
+	RepoURL string `json:"repoUrl"`
+	Enabled bool   `json:"enabled"`
+}
+
+// RepositoryState is a repository of the caller's workspace: whether its
+// owner enabled it, and whether it may be checked now (an enabled repository
+// over the workspace's active limit is not).
+type RepositoryState struct {
+	Repository string `json:"repository"`
+	Enabled    bool   `json:"enabled"`
+	Active     bool   `json:"active"`
+}
+
+// Repository reads the state of the repository repoURL names in the caller's
+// workspace.
+func (c *Client) Repository(ctx context.Context, repoURL string) (RepositoryState, error) {
+	return c.repositoryState(ctx, repositoryPath, RepositoryRequest{RepoURL: repoURL})
+}
+
+// SetRepositoryEnabled enables or disables the repository repoURL names in
+// the caller's workspace. Only the workspace's owner may.
+func (c *Client) SetRepositoryEnabled(ctx context.Context, repoURL string, enabled bool) (RepositoryState, error) {
+	return c.repositoryState(ctx, activationPath, ActivationRequest{RepoURL: repoURL, Enabled: enabled})
+}
+
+func (c *Client) repositoryState(ctx context.Context, path string, body any) (RepositoryState, error) {
+	status, _, payload, err := c.postJSON(ctx, path, body)
+	if err != nil {
+		return RepositoryState{}, err
+	}
+	if status < 200 || status >= 300 {
+		return RepositoryState{}, decodeError(status, payload)
+	}
+	var decoded RepositoryState
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return RepositoryState{}, fmt.Errorf("decode repository response: %w", err)
 	}
 	return decoded, nil
 }

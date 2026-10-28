@@ -78,6 +78,7 @@ report, so a check never needs a Bifrost install.`,
 		newInitCommand(),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
+		newRepoCommand(&serviceURL, version),
 		newVersionCommand(version),
 	)
 	return root
