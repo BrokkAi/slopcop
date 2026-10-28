@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 )
@@ -49,7 +50,7 @@ func (c *Client) StartDevice(ctx context.Context) (DeviceStart, error) {
 
 // AwaitDeviceToken polls until the browser approves the code. The notify
 // callback, when set, receives one line whenever the service asks the client
-// to slow down.
+// to slow down or a poll fails in a way that leaves the code valid.
 func (c *Client) AwaitDeviceToken(
 	ctx context.Context,
 	start DeviceStart,
@@ -66,7 +67,7 @@ func (c *Client) AwaitDeviceToken(
 	deadline := time.Now().Add(expires)
 
 	for {
-		token, err := c.pollDeviceToken(ctx, start, &interval, notify)
+		token, wait, err := c.pollDeviceToken(ctx, start, &interval, notify)
 		if err != nil {
 			return "", err
 		}
@@ -74,28 +75,48 @@ func (c *Client) AwaitDeviceToken(
 			return token, nil
 		}
 		if !time.Now().Before(deadline) {
+			if wait.cause != nil {
+				return "", fmt.Errorf(
+					"this login code expired while the login service kept failing (%v); run `slopcop login` again",
+					wait.cause,
+				)
+			}
 			return "", errors.New("this login code expired; run `slopcop login` again")
 		}
-		if err := c.sleep(ctx, interval); err != nil {
+		if err := c.sleep(ctx, max(interval, wait.pause)); err != nil {
 			return "", err
 		}
 	}
 }
 
+// pollWait is a poll that got no token yet: how long to wait beyond the
+// interval before asking again, and the transient failure it met, if any.
+type pollWait struct {
+	pause time.Duration
+	cause error
+}
+
+// pollDeviceToken asks once for the token. With no token and no error, the
+// login is still waiting.
 func (c *Client) pollDeviceToken(
 	ctx context.Context,
 	start DeviceStart,
 	interval *time.Duration,
 	notify func(string),
-) (string, error) {
-	status, _, payload, err := c.postJSON(ctx, deviceTokenPath, map[string]any{
+) (string, pollWait, error) {
+	status, header, payload, err := c.postJSON(ctx, deviceTokenPath, map[string]any{
 		"deviceCode": start.DeviceCode,
 	})
 	if err != nil {
-		return "", err
+		if ctx.Err() != nil {
+			return "", pollWait{}, err
+		}
+		// A dropped connection leaves the code valid, as a brief outage does.
+		notifyRetry(notify, "could not reach the login service", *interval)
+		return "", pollWait{cause: err}, nil
 	}
 	if status == 202 {
-		return "", nil
+		return "", pollWait{}, nil
 	}
 	if status >= 200 && status < 300 {
 		var body struct {
@@ -104,24 +125,23 @@ func (c *Client) pollDeviceToken(
 			Code   string `json:"code"`
 		}
 		if err := json.Unmarshal(payload, &body); err != nil {
-			return "", fmt.Errorf("decode token response: %w", err)
+			return "", pollWait{}, fmt.Errorf("decode token response: %w", err)
 		}
 		if body.Token != "" {
-			return body.Token, nil
+			return body.Token, pollWait{}, nil
 		}
 		if body.Status == "authorized" {
-			return "", errors.New("the login service authorized the code without returning a token")
+			return "", pollWait{}, errors.New("the login service authorized the code without returning a token")
 		}
 		if body.Status == "pending" || body.Code == "" {
-			return "", nil
+			return "", pollWait{}, nil
 		}
-		payload, _ = json.Marshal(map[string]any{"code": body.Code})
 	}
 
 	failure := deviceFailure(status, payload, start)
 	switch failure.Body.Code {
 	case "authorization_pending":
-		return "", nil
+		return "", pollWait{}, nil
 	case "slow_down":
 		*interval += slowDownStep
 		if notify != nil {
@@ -130,9 +150,35 @@ func (c *Client) pollDeviceToken(
 				int(interval.Seconds()),
 			))
 		}
-		return "", nil
-	default:
-		return "", failure
+		return "", pollWait{}, nil
+	}
+	// A failure the service marks retryable, such as a brief outage or too
+	// many polls, leaves the code valid, and so does a proxy's busy or
+	// unreachable-upstream answer, which carries no code: wait as long as it
+	// asks, then poll again until the code expires.
+	if failure.Body.Retryable || (failure.Body.Code == "" && transientStatus(status)) {
+		pause := retryAfter(header)
+		notifyRetry(notify, strings.TrimSuffix(failure.Body.Message, "."), max(*interval, pause))
+		return "", pollWait{pause: pause, cause: failure}, nil
+	}
+	return "", pollWait{}, failure
+}
+
+// transientStatus is an HTTP status a proxy answers while the service behind
+// it is busy or unreachable.
+func transientStatus(status int) bool {
+	switch status {
+	case http.StatusTooManyRequests, http.StatusBadGateway,
+		http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return false
+}
+
+// notifyRetry says, when notify is set, why the login polls again and when.
+func notifyRetry(notify func(string), why string, wait time.Duration) {
+	if notify != nil {
+		notify(fmt.Sprintf("slopcop: %s; polling again in %ds", why, int(wait.Seconds())))
 	}
 }
 
@@ -140,10 +186,11 @@ func (c *Client) pollDeviceToken(
 // The service may send the full error body or just a code, so both are read.
 func deviceFailure(status int, payload []byte, start DeviceStart) *Error {
 	var body struct {
-		Code    string `json:"code"`
-		Status  string `json:"status"`
-		Message string `json:"message"`
-		Remedy  string `json:"remedy"`
+		Code      string `json:"code"`
+		Status    string `json:"status"`
+		Message   string `json:"message"`
+		Remedy    string `json:"remedy"`
+		Retryable bool   `json:"retryable"`
 	}
 	_ = json.Unmarshal(payload, &body)
 	code := body.Code
@@ -154,6 +201,7 @@ func deviceFailure(status int, payload []byte, start DeviceStart) *Error {
 	failure.Body.Code = code
 	failure.Body.Message = strings.TrimSpace(body.Message)
 	failure.Body.Remedy = strings.TrimSpace(body.Remedy)
+	failure.Body.Retryable = body.Retryable
 	switch code {
 	case "authorization_pending":
 		failure.Body.Message = "This login has not been approved yet."

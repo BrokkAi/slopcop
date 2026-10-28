@@ -147,12 +147,14 @@ func TestEveryCheckInstallsTheBundledSkill(t *testing.T) {
 
 	_, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
 	want := readEmbeddedSkill(t, "SKILL.md")
-	for _, dir := range []string{
-		filepath.Join(home, ".agents", "skills", "slopcop"),
-		filepath.Join(home, ".claude", "skills", "slopcop"),
+	// A missing skill is installed; one that differs, an older or an edited
+	// one alike, is replaced, and the message says so.
+	for dir, said := range map[string]string{
+		filepath.Join(home, ".agents", "skills", "slopcop"): "installed the slopcop skill at ",
+		filepath.Join(home, ".claude", "skills", "slopcop"): "updated the slopcop skill at ",
 	} {
-		if !strings.Contains(stderr, "installed the slopcop skill at "+dir) {
-			t.Errorf("stderr = %q, want it to name %s", stderr, dir)
+		if !strings.Contains(stderr, said+dir) {
+			t.Errorf("stderr = %q, want %q", stderr, said+dir)
 		}
 		if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != want {
 			t.Errorf("%s does not hold the bundled SKILL.md", dir)

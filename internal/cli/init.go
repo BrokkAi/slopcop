@@ -123,17 +123,19 @@ func writeSkill(dir string, files []skillFile) error {
 // syncBundledSkill writes the bundled skill into every well-known skills
 // directory whose harness is installed here, wherever it is missing or
 // differs from the bundled one, so agents follow the instructions of the
-// version that runs. It returns the directories it wrote.
-func syncBundledSkill() ([]string, error) {
+// version that runs. A skill that differs is replaced, local edits included.
+// It returns the directories it wrote: installed ones held no skill, updated
+// ones held a different one.
+func syncBundledSkill() (skillSync, error) {
+	var result skillSync
 	files, err := bundledSkillFiles()
 	if err != nil {
-		return nil, err
+		return result, err
 	}
 	roots, err := skillRoots()
 	if err != nil {
-		return nil, err
+		return result, err
 	}
-	var updated []string
 	for _, root := range roots {
 		if !isDirectory(root.marker) {
 			continue
@@ -142,21 +144,35 @@ func syncBundledSkill() ([]string, error) {
 		if skillMatches(dir, files) {
 			continue
 		}
+		_, statErr := os.Stat(filepath.Join(dir, skillFileName))
 		if err := writeSkill(dir, files); err != nil {
-			return updated, err
+			return result, err
 		}
-		updated = append(updated, dir)
+		if statErr == nil {
+			result.updated = append(result.updated, dir)
+		} else {
+			result.installed = append(result.installed, dir)
+		}
 	}
-	return updated, nil
+	return result, nil
+}
+
+// skillSync is what one sync pass wrote, as skill directories.
+type skillSync struct {
+	installed []string
+	updated   []string
 }
 
 // syncSkillAndReport runs syncBundledSkill and names each directory it wrote
 // on out. A failed install is reported on errOut and never fails the command
 // that asked for it.
 func syncSkillAndReport(out, errOut io.Writer) {
-	updated, err := syncBundledSkill()
-	for _, dir := range updated {
+	result, err := syncBundledSkill()
+	for _, dir := range result.installed {
 		fmt.Fprintf(out, "slopcop: installed the slopcop skill at %s\n", dir)
+	}
+	for _, dir := range result.updated {
+		fmt.Fprintf(out, "slopcop: updated the slopcop skill at %s to this version's, replacing what was there\n", dir)
 	}
 	if err != nil {
 		fmt.Fprintf(errOut, "slopcop: could not install the slopcop skill: %v\n", err)

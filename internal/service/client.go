@@ -87,8 +87,9 @@ func isLoopback(host string) bool {
 
 // Check posts one change and returns the report, asking again while the
 // service answers check_running until ctx ends. An identical request attaches
-// to the running check, so asking again never starts a second one. When ctx
-// ends first, Check returns a *Pending. Other service failures come back as
+// to the running check, so asking again never starts a second one. When ctx's
+// deadline passes first, Check returns a *Pending; when ctx is canceled, as by
+// an interrupt, it returns ctx's error. Other service failures come back as
 // *Error so callers can print the closed code, message, and remedy.
 func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 	pending := &Pending{
@@ -102,9 +103,12 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 		switch {
 		case err == nil:
 			return response, nil
-		case ctx.Err() != nil:
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
 			// The wait ran out mid-request; the service keeps the check.
 			return Response{}, pending
+		case ctx.Err() != nil:
+			// Interrupted mid-request; the service keeps the check.
+			return Response{}, ctx.Err()
 		case !errors.As(err, &serviceError) || serviceError.Body.Code != checkRunning:
 			return Response{}, err
 		}
@@ -118,7 +122,10 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 			return Response{}, pending
 		}
 		if err := c.sleep(ctx, retryAfter); err != nil {
-			return Response{}, pending
+			if errors.Is(err, context.DeadlineExceeded) {
+				return Response{}, pending
+			}
+			return Response{}, err
 		}
 	}
 }

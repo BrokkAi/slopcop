@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -119,6 +120,153 @@ func TestAwaitDeviceTokenSlowDownRaisesInterval(t *testing.T) {
 	}
 	if len(delays) != 1 || delays[0] != 6*time.Second {
 		t.Fatalf("delays = %v, want one 6s wait", delays)
+	}
+}
+
+// A retryable failure, such as a brief outage or too many polls, leaves the
+// login code valid: polling waits as long as the service asks, never less
+// than the interval, and goes on until the code is approved.
+func TestAwaitDeviceTokenWaitsOutRetryableFailures(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		w.Header().Set("Content-Type", "application/json")
+		switch calls {
+		case 1:
+			w.Header().Set("Retry-After", "9")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code": "service_unavailable", "message": "SlopCop is unavailable right now.", "remedy": "Retry shortly.", "retryable": true}`))
+		case 2:
+			w.Header().Set("Retry-After", "2")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"code": "rate_limited", "message": "Too many requests.", "remedy": "Wait, then retry.", "retryable": true}`))
+		default:
+			_, _ = w.Write([]byte(`{"status": "authorized", "token": "issued-token"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var delays []time.Duration
+	client.wait = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+	var notices []string
+	token, err := client.AwaitDeviceToken(context.Background(), DeviceStart{
+		DeviceCode: "device-1",
+		Interval:   5,
+		ExpiresIn:  600,
+	}, func(line string) { notices = append(notices, line) })
+	if err != nil || token != "issued-token" {
+		t.Fatalf("token = %q, err = %v", token, err)
+	}
+	if len(delays) != 2 || delays[0] != 9*time.Second || delays[1] != 5*time.Second {
+		t.Fatalf("delays = %v, want 9s then the 5s interval", delays)
+	}
+	if len(notices) != 2 || notices[0] != "slopcop: SlopCop is unavailable right now; polling again in 9s" {
+		t.Fatalf("notices = %q", notices)
+	}
+}
+
+// A dropped connection and a proxy's code-less 502, as a deploy can cause,
+// leave the code valid: polling goes on at the interval.
+func TestAwaitDeviceTokenRidesOutADroppedConnectionAndAProxyError(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			connection, _, err := w.(http.Hijacker).Hijack()
+			if err != nil {
+				t.Errorf("hijack: %v", err)
+				return
+			}
+			_ = connection.Close()
+		case 2:
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte("<html><body>502 Bad Gateway</body></html>"))
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status": "authorized", "token": "issued-token"}`))
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var delays []time.Duration
+	client.wait = func(_ context.Context, delay time.Duration) error {
+		delays = append(delays, delay)
+		return nil
+	}
+	var notices []string
+	token, err := client.AwaitDeviceToken(context.Background(), DeviceStart{
+		DeviceCode: "device-1",
+		Interval:   5,
+		ExpiresIn:  600,
+	}, func(line string) { notices = append(notices, line) })
+	if err != nil || token != "issued-token" {
+		t.Fatalf("token = %q, err = %v", token, err)
+	}
+	if len(delays) != 2 || delays[0] != 5*time.Second || delays[1] != 5*time.Second {
+		t.Fatalf("delays = %v, want the 5s interval twice", delays)
+	}
+	if len(notices) != 2 || !strings.HasPrefix(notices[0], "slopcop: could not reach the login service;") ||
+		notices[1] != "slopcop: the login service returned HTTP 502; polling again in 5s" {
+		t.Fatalf("notices = %q", notices)
+	}
+}
+
+// A code that expires while the service keeps failing says so, rather than
+// only that it expired.
+func TestAwaitDeviceTokenNamesTheFailureItExpiredOn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.wait = func(context.Context, time.Duration) error {
+		time.Sleep(600 * time.Millisecond)
+		return nil
+	}
+	_, err = client.AwaitDeviceToken(context.Background(), DeviceStart{DeviceCode: "device-1", Interval: 5, ExpiresIn: 1}, nil)
+	if err == nil || !strings.Contains(err.Error(), "expired while the login service kept failing (the login service returned HTTP 503)") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+// A failure the service does not mark retryable still ends the login.
+func TestAwaitDeviceTokenStopsOnANonRetryableFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"code": "invalid_request", "message": "Bad request.", "remedy": "Fix it.", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.wait = func(context.Context, time.Duration) error {
+		t.Fatal("waited after a failure that is not retryable")
+		return nil
+	}
+	var serviceError *Error
+	_, err = client.AwaitDeviceToken(context.Background(), DeviceStart{DeviceCode: "device-1", Interval: 5, ExpiresIn: 600}, nil)
+	if !errors.As(err, &serviceError) || serviceError.Body.Code != "invalid_request" {
+		t.Fatalf("err = %v, want invalid_request", err)
 	}
 }
 

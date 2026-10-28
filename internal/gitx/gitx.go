@@ -21,9 +21,17 @@ func Run(root string, args ...string) (string, error) {
 // RunBytes executes git in root with an optional environment and returns raw
 // stdout. Failures include git's own stderr so the caller can print it.
 func RunBytes(root string, env []string, args ...string) ([]byte, error) {
+	return RunInput(root, env, nil, args...)
+}
+
+// RunInput is RunBytes with input written to git's stdin.
+func RunInput(root string, env []string, input []byte, args ...string) ([]byte, error) {
 	command := exec.Command("git", append([]string{"-C", root}, args...)...)
 	if env != nil {
 		command.Env = env
+	}
+	if input != nil {
+		command.Stdin = bytes.NewReader(input)
 	}
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout

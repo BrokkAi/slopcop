@@ -22,6 +22,15 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
+	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
+	// was sent: a service that received it keeps it, so asking again picks up
+	// its result.
+	interruptedText = "slopcop: interrupted before the check answered. If the service received it, it keeps running it; run the same check again to pick up its result."
+	// interruptedBeforeSendText is printed when the interrupt came during the
+	// local work, before anything was sent.
+	interruptedBeforeSendText = "slopcop: interrupted before the check was sent; nothing reached the service."
+	// showExistingNotice is printed on stderr when --show-existing is passed.
+	showExistingNotice = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
 
 func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version string) error {
@@ -29,58 +38,28 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
+	if opts.showExisting {
+		fmt.Fprintln(cmd.ErrOrStderr(), showExistingNotice)
+	}
 	// The installed skill follows the binary that runs.
 	syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr())
-	repoRoot, err := gitx.Toplevel(opts.root)
-	if err != nil {
-		return err
-	}
-	base, err := resolveBase(repoRoot, opts.base)
-	if err != nil {
-		return err
-	}
-	selection, err := resolveSelection(repoRoot, opts)
-	if err != nil {
-		return err
-	}
-	change, err := gitx.WorkingTreePatch(repoRoot, base, selection.Files)
-	if err != nil {
-		return err
-	}
-
 	stdout := cmd.OutOrStdout()
-	origin, err := gitx.OriginURL(repoRoot)
+	prepared, err := prepareCheck(opts, serviceFlag, version, failOn)
+	// An interrupt during the git work stops git too, which then fails;
+	// either way nothing reached the service.
+	if cmd.Context().Err() != nil {
+		fmt.Fprintln(cmd.ErrOrStderr(), interruptedBeforeSendText)
+		return silentExit{interruptCode(cmd.Context())}
+	}
 	if err != nil {
 		return err
 	}
-	repoURL, err := gitx.CanonicalRepoURL(origin)
-	if err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	target := resolveServiceURL(cfg, serviceFlag)
-	client, err := service.New(target, resolveToken(cfg), "slopcop/"+version, opts.timeout)
-	if err != nil {
-		return err
-	}
-
-	request := service.Request{
-		RepoURL:    repoURL,
-		BaseCommit: base,
-		Change:     base64.StdEncoding.EncodeToString(change.Patch),
-		FailOn:     failOn,
-	}
-	if !selection.IsEmpty() {
-		request.Selection = &selection
-	}
+	client, request := prepared.client, prepared.request
 	if opts.verbose {
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
 			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
-			client.BaseURL, shortSHA(base), change.Files, len(change.Patch), failOn,
+			client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn,
 		)
 	}
 
@@ -91,6 +70,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	defer cancel()
 	response, err := client.Check(ctx, request)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
+			return silentExit{interruptCode(cmd.Context())}
+		}
 		var pending *service.Pending
 		if errors.As(err, &pending) {
 			fmt.Fprintln(cmd.ErrOrStderr(), pending.RemedyText())
@@ -110,7 +93,71 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}
+	if !response.KnownStatus() {
+		// The report alone could read as a pass; say why the exit is 2.
+		fmt.Fprintf(cmd.ErrOrStderr(),
+			"slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n",
+			response.Status)
+	}
 	return silentExit{response.ExitCode()}
+}
+
+// preparedCheck is a check request ready to send, and the client to send it.
+type preparedCheck struct {
+	client  *service.Client
+	request service.Request
+	// files and bytes describe the patch, for --verbose.
+	files, bytes int
+}
+
+// prepareCheck does the local work a check needs before it can be sent: it
+// finds the repository, its base and selection, builds the patch, and
+// resolves the service and credential.
+func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (preparedCheck, error) {
+	var prepared preparedCheck
+	repoRoot, err := gitx.Toplevel(opts.root)
+	if err != nil {
+		return prepared, err
+	}
+	base, err := resolveBase(repoRoot, opts.base)
+	if err != nil {
+		return prepared, err
+	}
+	selection, err := resolveSelection(repoRoot, opts)
+	if err != nil {
+		return prepared, err
+	}
+	change, err := gitx.WorkingTreePatch(repoRoot, base, selection.Files)
+	if err != nil {
+		return prepared, err
+	}
+	origin, err := gitx.OriginURL(repoRoot)
+	if err != nil {
+		return prepared, err
+	}
+	repoURL, err := gitx.CanonicalRepoURL(origin)
+	if err != nil {
+		return prepared, err
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return prepared, err
+	}
+	target := resolveServiceURL(cfg, serviceFlag)
+	client, err := service.New(target, resolveToken(cfg), "slopcop/"+version, opts.timeout)
+	if err != nil {
+		return prepared, err
+	}
+	request := service.Request{
+		RepoURL:    repoURL,
+		BaseCommit: base,
+		Change:     base64.StdEncoding.EncodeToString(change.Patch),
+		FailOn:     failOn,
+	}
+	if !selection.IsEmpty() {
+		request.Selection = &selection
+	}
+	return preparedCheck{client: client, request: request, files: change.Files, bytes: len(change.Patch)}, nil
 }
 
 func resolveEnums(opts *checkOptions) (string, string, error) {
