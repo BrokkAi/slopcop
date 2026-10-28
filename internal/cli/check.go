@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/attribution"
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/report"
@@ -22,6 +23,7 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
+	invalidChange   = "invalid_change"
 	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
 	// was sent: a service that received it keeps it, so asking again picks up
 	// its result.
@@ -61,6 +63,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
 			client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn,
 		)
+		if attributed := request.Attribution; attributed != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: attribution %s session %s\n", attributed.Harness, attributed.SessionID)
+			for _, model := range attributed.Models {
+				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop:   %s effort %s wrote %s\n",
+					model.Model, valueOr(model.Effort, "unknown"), strings.Join(model.Files, ", "))
+			}
+		}
 	}
 
 	// --timeout bounds the whole wait for a result: the client asks again
@@ -69,6 +78,16 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
 	defer cancel()
 	response, err := client.Check(ctx, request)
+	// A service from before attribution rejects the unknown field as
+	// invalid_change; the check itself must still run.
+	var rejected *service.Error
+	if request.Attribution != nil && errors.As(err, &rejected) && rejected.Body.Code == invalidChange {
+		if opts.verbose {
+			fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: the service refused the attribution; sending the check without it")
+		}
+		request.Attribution = nil
+		response, err = client.Check(ctx, request)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
@@ -157,6 +176,7 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
+	request.Attribution = attribution.Detect(repoRoot)
 	return preparedCheck{client: client, request: request, files: change.Files, bytes: len(change.Patch)}, nil
 }
 
@@ -341,6 +361,13 @@ func resolveToken(cfg config.Config) string {
 		return token
 	}
 	return strings.TrimSpace(cfg.Token)
+}
+
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func shortSHA(value string) string {

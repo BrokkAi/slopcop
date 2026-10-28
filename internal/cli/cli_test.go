@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"syscall"
 	"testing"
@@ -65,6 +66,12 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
 	t.Setenv("CODEX_HOME", "")
+	// A test run inside an agent must not attribute its checks to that
+	// agent's session.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("AI_AGENT", "")
+	t.Setenv("CODEX_THREAD_ID", "")
 	// Fail rather than let a test touch the real credential or skill install
 	// if either location ever depends on something not isolated above.
 	configPath, err := config.Path()
@@ -141,6 +148,42 @@ func TestCleanTreeStillAsksTheService(t *testing.T) {
 	}
 	if response.Status != "clean" || response.BaseCommit != wantBase {
 		t.Fatalf("response = %+v", response)
+	}
+}
+
+func TestCheckResendsWithoutAttributionAServiceRejects(t *testing.T) {
+	isolateUserConfig(t)
+	// An agent session with no transcript still attributes the harness.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "ad904a2f-b013-4c97-8bdb-3ccd08e38b31")
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	var attributed []bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		_, ok := body["attribution"]
+		attributed = append(attributed, ok)
+		w.Header().Set("Content-Type", "application/json")
+		// A service from before attribution denies unknown fields.
+		if ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code": "invalid_change", "message": "The change could not be read.", "remedy": "Send one git patch."}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "` + base + `", "applied": true,
+			"summary": {"files": 0, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [], "incomplete": []}`))
+	}))
+	defer server.Close()
+
+	code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !reflect.DeepEqual(attributed, []bool{true, false}) {
+		t.Fatalf("requests carried attribution = %v, want [true false]", attributed)
 	}
 }
 
@@ -248,6 +291,9 @@ func TestCheckSendsTheChangeAndAppliesFailOn(t *testing.T) {
 		if _, ok := request[key]; ok {
 			t.Errorf("request carries %q, which the service rejects", key)
 		}
+	}
+	if _, ok := request["attribution"]; ok {
+		t.Errorf("a check outside any agent session carries attribution: %v", request["attribution"])
 	}
 	selection, _ := request["selection"].(map[string]any)
 	files, _ := selection["files"].([]any)
