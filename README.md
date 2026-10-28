@@ -206,17 +206,25 @@ changes, and binary content. Git-ignored files stay out, except selected
 `.slopcop/policies` rules, which must travel because the service evaluates them
 from the patched checkout.
 
-A check run by a Claude Code agent also sends which models wrote the change,
-so the service can tie each finding to the model that wrote its file. The CLI
-finds the session from `CLAUDE_CODE_SESSION_ID` and reads its transcript under
-`~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`), subagents included.
-From each successful Write, Edit, MultiEdit or NotebookEdit it takes only the
-model, the effort and the file path; it never sends the conversation, tool
-input or file contents. What it sends is the harness, its version, the
-session id as an opaque identifier, and each model and effort with the
-repository-relative files it wrote. A check run outside an agent session sends
-none of this. It is analytics only, asserted by the client, and never decides
-a check. `--verbose` prints it.
+A check run by a Claude Code or Codex agent also sends which models wrote the
+change, so the service can tie each finding to the model that wrote its file.
+The CLI finds the agent's session from its environment and reads that
+session's own record:
+
+- **Claude Code:** `CLAUDE_CODE_SESSION_ID` names the transcript under
+  `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`), subagents included.
+  Each successful Write, Edit, MultiEdit or NotebookEdit gives a model, an
+  effort and a file.
+- **Codex:** `CODEX_THREAD_ID` names the rollout under `~/.codex/sessions` (or
+  `$CODEX_HOME/sessions`). Each completed file change gives the files, and its
+  turn gives the model and effort. A move counts as writing its destination.
+
+It reads only those fields, never the conversation, tool input or file
+contents. What it sends is the harness, its version, the session id as an
+opaque identifier, and each model and effort with the repository-relative
+files it wrote. A check run outside an agent session sends none of this. It
+is analytics only, asserted by the client, and never decides a check.
+`--verbose` prints it.
 
 The service owns the limits on what a check accepts. When a change is too
 large or touches too many files, the service's `payload_too_large` response is

@@ -70,6 +70,7 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("CLAUDE_CODE_SESSION_ID", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("AI_AGENT", "")
+	t.Setenv("CODEX_THREAD_ID", "")
 	// Fail rather than let a test touch the real credential or skill install
 	// if either location ever depends on something not isolated above.
 	configPath, err := config.Path()

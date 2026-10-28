@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -108,6 +109,86 @@ func TestNoAttributionOutsideAnAgentSession(t *testing.T) {
 		}), t.TempDir())
 		if got != nil {
 			t.Errorf("session %q: attribution = %+v, want none", session, got)
+		}
+	}
+}
+
+const testThread = "01a182c8-4697-7bb3-9bcb-d87ea6f2eb99"
+
+// installRollout writes a fixture into a Codex home as the rollout of
+// testThread, with {{repo}} replaced by repo.
+func installRollout(t *testing.T, codexHome, repo string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join("testdata", "codex-rollout.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(codexHome, "sessions", "2026", "10", "28", "rollout-2026-10-28T14-52-05-"+testThread+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.ReplaceAll(string(data), "{{repo}}", filepath.ToSlash(repo))
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func TestCodexAttributesEachCompletedFileChangeToItsTurnsModel(t *testing.T) {
+	codexHome, repo := t.TempDir(), t.TempDir()
+	installRollout(t, codexHome, repo)
+
+	got := detect(environment(map[string]string{
+		"CODEX_THREAD_ID": testThread,
+		"CODEX_HOME":      codexHome,
+		"CODEX_VERSION":   "0.165.0",
+	}), repo)
+
+	want := &service.Attribution{
+		Harness:        "codex",
+		HarnessVersion: "0.165.0",
+		SessionID:      testThread,
+		Models: []service.AttributedModel{
+			// A move writes its destination. The delete, the failed change
+			// and the change from a turn with no context are not
+			// attributed.
+			{Model: "gpt-6-luna", Effort: "high", Source: SourceTranscript, Files: []string{"a.go", "pkg/moved.go"}},
+			// A turn from before collaboration modes keeps its effort on
+			// the turn; /elsewhere is outside the repository.
+			{Model: "gpt-6-sol", Effort: "low", Source: SourceTranscript, Files: []string{"a.go"}},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("attribution =\n%+v\nwant\n%+v", got, want)
+	}
+}
+
+func TestNestedHarnessesPickTheSessionWrittenLast(t *testing.T) {
+	configDir, codexHome, repo := t.TempDir(), t.TempDir(), t.TempDir()
+	transcript := installTranscript(t, configDir, repo, "claude-subagent.jsonl", testSession+".jsonl")
+	rollout := installRollout(t, codexHome, repo)
+	env := environment(map[string]string{
+		"CLAUDE_CODE_SESSION_ID": testSession,
+		"CLAUDE_CONFIG_DIR":      configDir,
+		"CODEX_THREAD_ID":        testThread,
+		"CODEX_HOME":             codexHome,
+	})
+	older, newer := time.Now().Add(-time.Hour), time.Now()
+	for _, tc := range []struct {
+		stale, fresh string
+		want         string
+	}{
+		{stale: rollout, fresh: transcript, want: "claude-code"},
+		{stale: transcript, fresh: rollout, want: "codex"},
+	} {
+		if err := os.Chtimes(tc.stale, older, older); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(tc.fresh, newer, newer); err != nil {
+			t.Fatal(err)
+		}
+		if got := detect(env, repo); got == nil || got.Harness != tc.want {
+			t.Errorf("harness = %+v, want %s", got, tc.want)
 		}
 	}
 }
