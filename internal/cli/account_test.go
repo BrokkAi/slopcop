@@ -2,13 +2,25 @@ package cli
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/spf13/cobra"
+
 	"github.com/BrokkAi/slopcop/internal/service"
 )
+
+// typed stands in for a terminal where the person types answer.
+func typed(t *testing.T, answer string) {
+	t.Helper()
+	original := confirmInput
+	confirmInput = func(*cobra.Command) (io.Reader, bool) { return strings.NewReader(answer), true }
+	t.Cleanup(func() { confirmInput = original })
+}
 
 const (
 	personalID = "11111111-1111-4111-8111-111111111111"
@@ -216,9 +228,13 @@ func TestRepoDisableAndEnableSendTheRepositoryID(t *testing.T) {
 			`", "fullName": "Acme/gadgets", "enabled": ` + string(enabled) + `, "active": false}`))
 	})
 
+	typed(t, "Acme/gadgets\n")
 	code, stdout, stderr := runCLI(t, "repo", "disable", "acme/GADGETS", "--service", server.URL)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if stderr != "Type Acme/gadgets to disable it: " {
+		t.Errorf("stderr = %q", stderr)
 	}
 	if stdout != "slopcop: disabled Acme/gadgets\n" {
 		t.Errorf("stdout = %q", stdout)
@@ -244,11 +260,12 @@ func TestRepoEnablePrintsTheServiceRemedy(t *testing.T) {
 		_, _ = w.Write([]byte(`{"code": "owner_required", "message": "Only the workspace's owner can enable or disable its repositories.", "remedy": "Ask the workspace's owner, or switch to a workspace you own.", "retryable": false}`))
 	})
 
+	typed(t, "Acme/widgets\n")
 	code, stdout, stderr := runCLI(t, "repo", "enable", "Acme/widgets", "--service", server.URL)
 	if code != 2 || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := "Only the workspace's owner can enable or disable its repositories.\n" +
+	want := "Type Acme/widgets to enable it: " + "Only the workspace's owner can enable or disable its repositories.\n" +
 		"Ask the workspace's owner, or switch to a workspace you own.\n" +
 		"Switch with `slopcop workspace use <name>`.\n"
 	if stderr != want {
@@ -278,5 +295,44 @@ func TestAccountCommandsRejectAnUnknownFormat(t *testing.T) {
 		if code != 2 || !strings.Contains(stderr, "use human or json") {
 			t.Errorf("%v: exit = %d, stderr = %q", args, code, stderr)
 		}
+	}
+}
+
+func TestRepoStateChangesNeedTheNameTypedAtATerminal(t *testing.T) {
+	isolateUserConfig(t)
+	server, calls := accountService(t, nil)
+	posted := func() bool {
+		for _, call := range *calls {
+			if call.method == http.MethodPost {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A piped stdin is not a terminal, as for an agent or a CI job.
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = writer.WriteString("Acme/widgets\n")
+	_ = writer.Close()
+	stdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() { os.Stdin = stdin; _ = reader.Close() })
+	code, stdout, stderr := runCLI(t, "repo", "disable", "Acme/widgets", "--service", server.URL)
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "repo disable must be confirmed at a terminal") {
+		t.Errorf("no terminal: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+
+	for _, answer := range []string{"", "y\n", "acme/widgets\n", "Acme/gadgets\n"} {
+		typed(t, answer)
+		code, _, stderr := runCLI(t, "repo", "enable", "Acme/widgets", "--service", server.URL)
+		if code != 2 || !strings.Contains(stderr, "that is not Acme/widgets, so nothing was changed") {
+			t.Errorf("answer %q: exit = %d, stderr = %q", answer, code, stderr)
+		}
+	}
+	if posted() {
+		t.Error("an unconfirmed change reached the service")
 	}
 }

@@ -1,10 +1,12 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -320,7 +322,12 @@ func newRepoStateCommand(serviceURL *string, version string, enable bool) *cobra
 	command := &cobra.Command{
 		Use:   use + " <owner/name|id>",
 		Short: short,
-		Args:  cobra.ExactArgs(1),
+		Long: short + `.
+
+The service cannot tell a person from an agent using the same login, so this
+asks whoever runs it to type the repository's owner/name, and refuses when
+stdin is not a terminal.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkFormat(format); err != nil {
 				return err
@@ -335,6 +342,9 @@ func newRepoStateCommand(serviceURL *string, version string, enable bool) *cobra
 			}
 			repository, err := findRepository(listed.Repositories, args[0])
 			if err != nil {
+				return err
+			}
+			if err := confirmChange(cmd, repository.FullName, use); err != nil {
 				return err
 			}
 			state, err := client.SetRepositoryEnabled(cmd.Context(), repository.ID, enable)
@@ -385,4 +395,38 @@ func findRepository(repositories []service.Repository, wanted string) (service.R
 		}
 		return service.Repository{}, fmt.Errorf("%d repositories are named %q; use the id of one: %s", len(named), wanted, strings.Join(choices, ", "))
 	}
+}
+
+// confirmInput is where enable and disable read the person's confirmation:
+// stdin, and only when it is a terminal. A variable so tests can stand in.
+var confirmInput = func(cmd *cobra.Command) (io.Reader, bool) {
+	file, ok := cmd.InOrStdin().(*os.File)
+	if !ok {
+		return nil, false
+	}
+	info, err := file.Stat()
+	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+		return nil, false
+	}
+	return file, true
+}
+
+// confirmChange asks the person at the terminal to type the repository's
+// name before its state changes. Agents and CI run with the person's own
+// login, so this keeps enabling and disabling, which change what the
+// workspace pays, a step the person takes.
+func confirmChange(cmd *cobra.Command, name, action string) error {
+	input, ok := confirmInput(cmd)
+	if !ok {
+		return fmt.Errorf("repo %s must be confirmed at a terminal; run it yourself, or change it on the Repositories page in SlopCop", action)
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "Type %s to %s it: ", name, action)
+	answer, err := bufio.NewReader(input).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return err
+	}
+	if strings.TrimSpace(answer) != name {
+		return fmt.Errorf("that is not %s, so nothing was changed", name)
+	}
+	return nil
 }

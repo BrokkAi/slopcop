@@ -32,12 +32,9 @@ the workspace (name, kind, role), its plan (Pro or Free) and the service URL
 - `slopcop repo list` shows the workspace's repositories as `active`,
   `disabled`, or `enabled, over the limit`. Every active repository after the
   first costs credits every 30 days, and a disabled one is neither checked nor
-  charged. `slopcop repo disable <owner/name|id>` and `slopcop repo enable
-  <owner/name|id>` change one; only the workspace's owner may. A check of a
-  disabled repository answers `repository_disabled`.
-- Do not switch workspaces or enable or disable repositories unless the user
-  asked for it: each changes what someone pays. Deleting repositories,
-  members, credits and repository settings are done in the web app only.
+  charged. A check of a disabled repository answers `repository_disabled`.
+- Do not switch workspaces unless the user asked for it: it changes which
+  workspace pays.
 
 ## Run a check
 
@@ -102,10 +99,8 @@ the usual codes mean:
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
-| `repository_disabled` | The workspace's owner disabled the repository. Tell the user; `slopcop repo enable` turns it back on if they ask. |
-| `owner_required` | Only the workspace's owner enables or disables repositories. Tell the user. |
-| `workspace_not_found`, `workspace_repository_not_found` | Pick a name from `slopcop workspace list` or `slopcop repo list`. |
-| `browser_required` | A private Bitbucket or GitLab repository; it is enabled or disabled in the web app. |
+| `repository_disabled` | The workspace's owner disabled the repository. Tell the user. |
+| `workspace_not_found` | Pick a name from `slopcop workspace list`. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
 ## What a result claims

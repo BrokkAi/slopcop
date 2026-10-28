@@ -156,6 +156,10 @@ slopcop repo enable acme/widgets   # turn it back on, within the workspace's act
 `workspace use` and `repo enable|disable` for their answer. Every active
 repository after a workspace's first costs credits every 30 days; a disabled
 one is not checked or charged and keeps its reports, findings and settings.
+`repo enable` and `repo disable` ask you to type the repository's `owner/name`
+and refuse when stdin is not a terminal: an agent or CI job runs with your
+login, and the service cannot tell it from you, so changing what the workspace
+pays stays a step you take yourself.
 Names match without regard to case; when two workspaces share a name, or two
 providers a repository name, pass the id the listing prints. There is no `repo
 add`: a first check adds a repository. Deleting repositories, archiving
