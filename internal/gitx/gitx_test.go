@@ -377,6 +377,35 @@ func TestWorkingTreePatchLeavesOutWhatASparseCheckoutSkips(t *testing.T) {
 	}
 }
 
+// A file someone marked skip-worktree by hand, to keep their edits to it out
+// of commits, stays out of the patch as it stays out of `git status`. A
+// selected policy file carries its edit whatever its bit: the service
+// evaluates it, and git refuses to add a marked path.
+func TestWorkingTreePatchKeepsSkipWorktreeExceptForPolicyFiles(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, root, "config.local", "a=1\n")
+	writeFile(t, root, ".slopcop/policies/x.rqlp", "(policy :id \"x\")\n")
+	writeFile(t, root, "src/app.txt", "one\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+	git(t, root, "update-index", "--skip-worktree", "config.local", ".slopcop/policies/x.rqlp")
+	writeFile(t, root, "config.local", "a=2, kept local\n")
+	writeFile(t, root, ".slopcop/policies/x.rqlp", "(policy :id \"x\" :name \"edited\")\n")
+	writeFile(t, root, "src/app.txt", "one, edited\n")
+
+	change, err := WorkingTreePatch(root, base, []string{".slopcop/policies/x.rqlp"})
+	if err != nil {
+		t.Fatalf("WorkingTreePatch: %v", err)
+	}
+	patch := string(change.Patch)
+	if change.Files != 2 ||
+		!strings.Contains(patch, "diff --git a/src/app.txt b/src/app.txt\n") ||
+		!strings.Contains(patch, "diff --git a/.slopcop/policies/x.rqlp b/.slopcop/policies/x.rqlp\n") {
+		t.Fatalf("want src/app.txt and the policy file, got %d file(s):\n%s", change.Files, patch)
+	}
+}
+
 func TestWorkingTreePatchEmptyForCleanTree(t *testing.T) {
 	root := initRepo(t)
 	writeFile(t, root, "src/a.txt", "one\n")
