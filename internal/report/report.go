@@ -80,7 +80,7 @@ func human(response service.Response, options Options) string {
 	if options.ShowExisting {
 		writeBlock(&out, "Already in the code (never fail the check)", existing)
 	}
-	out.WriteString(summaryLine(response, options))
+	out.WriteString(summaryLine(response))
 	out.WriteString("\n")
 	if notice := omittedNotice(response); notice != "" {
 		fmt.Fprintf(&out, "Omitted: %s.\n", notice)
@@ -125,7 +125,7 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 
 // summaryLine is one line, like the first line of Bifrost's human report:
 // the new findings, then how many were already in the code.
-func summaryLine(response service.Response, options Options) string {
+func summaryLine(response service.Response) string {
 	fresh, existing := split(response.Findings)
 	scope := "No new findings"
 	switch len(fresh) {
@@ -138,11 +138,10 @@ func summaryLine(response service.Response, options Options) string {
 	if len(fresh) > 0 {
 		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(fresh))
 	}
-	if len(existing) > 0 {
-		scope = fmt.Sprintf("%s; %d already in the code", scope, len(existing))
-		if !options.ShowExisting {
-			scope += " (--show-existing lists them)"
-		}
+	// The service lists only the findings the change introduced or touched
+	// and counts the rest; a service from before that also listed them.
+	if count := max(response.Summary.ExistingFindings, len(existing)); count > 0 {
+		scope = fmt.Sprintf("%s; %d already in the code", scope, count)
 	}
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
@@ -231,8 +230,9 @@ func printable(value string) string {
 }
 
 // jsonReport is the document `--format json` prints: what an agent needs from
-// stdout. Findings lists the new findings, then the existing ones only with
-// --show-existing; summary counts both either way.
+// stdout. Findings lists the new findings, then, with --show-existing, any
+// existing ones a service from before BrokkAi/bifrost-service#760 still
+// sent; summary counts both either way.
 type jsonReport struct {
 	Status     string                     `json:"status"`
 	BaseCommit string                     `json:"baseCommit"`
@@ -385,8 +385,9 @@ type sarifDescriptor struct {
 }
 
 // writeSARIF prints a SARIF 2.1.0 log with one run. Each result's
-// baselineState says whether the change touched it; existing findings are
-// results only with --show-existing.
+// baselineState says whether the change touched it; the existing findings a
+// service from before BrokkAi/bifrost-service#760 sent are results only
+// with --show-existing.
 func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	findings := listed(response, options)
 	var rules []string

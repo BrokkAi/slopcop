@@ -36,8 +36,7 @@ Flags worth knowing: `--format human|json|sarif` (default `human`),
 finding fails the check; the service alone defaults to `warning`), `--policy
 PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
-otherwise join automatically. `--show-existing` also lists the findings that
-were already in the code. `--timeout DURATION` bounds the whole wait for a
+otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
 stderr.
 
@@ -45,9 +44,9 @@ stderr.
 
 A check fails only on findings the change introduced or touched. Findings that
 were already in the code are counted in `summary.existingFindings`, never
-change the exit code, and are listed only with `--show-existing`. In `json`,
-each listed finding has `new`; `summary.newFindings` counts the new ones. In
-`sarif`, `baselineState` is `new` or `unchanged`. Each finding also carries its
+change the exit code, and are not listed. In `json`, each listed finding has
+`new`; `summary.newFindings` counts them. In `sarif`, `baselineState` is `new`.
+Each finding also carries its
 `id`: an `ID:` line in `human`, `id` in `json`, and
 `properties["slopcop.findingId"]` in `sarif`.
 
@@ -59,6 +58,7 @@ each listed finding has `new`; `summary.newFindings` counts the new ones. In
 | `1` | A new finding crossed `--fail-on`. Fix it. |
 | `2` | No new finding crossed `--fail-on`, but some check did not complete; or the CLI or service failed. |
 | `3` | The check was still running when `--timeout` ran out. Run the same check again. |
+| `130`, `143` | The check was interrupted (Ctrl-C or SIGTERM) before it answered. It printed no report; run the same check again. |
 
 The service sets the status and the CLI follows it. A failed request prints no
 report on stdout, so exit `2` with an empty stdout is a failure, never a clean

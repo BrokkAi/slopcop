@@ -14,12 +14,14 @@ const (
 )
 
 // Exit codes. Pending has its own code so a caller can tell "run the same
-// check again" from a check that finished incomplete.
+// check again" from a check that finished incomplete. Interrupted is the
+// shell's code for a process stopped by Ctrl-C: no result was waited for.
 const (
-	ExitClean      = 0
-	ExitFindings   = 1
-	ExitIncomplete = 2
-	ExitPending    = 3
+	ExitClean       = 0
+	ExitFindings    = 1
+	ExitIncomplete  = 2
+	ExitPending     = 3
+	ExitInterrupted = 130
 )
 
 // Request is the POST /v1/check body. The service decodes with
@@ -29,7 +31,8 @@ type Request struct {
 	// RepoURL is the canonical https repository URL. SSH remotes must be
 	// canonicalized by the caller.
 	RepoURL string `json:"repoUrl"`
-	// BaseCommit is the full 40- or 64-character hex commit the change applies to.
+	// BaseCommit is the full 40-character hex commit the change applies to; the
+	// service does not support SHA-256 repositories.
 	BaseCommit string `json:"baseCommit"`
 	// Change is the standard base64 encoding of one git patch.
 	Change string `json:"change"`
@@ -40,8 +43,8 @@ type Request struct {
 }
 
 // Selection mirrors CheckSelection. File entries are repository-relative
-// .rqlp paths resolved inside the patched tree. The service currently
-// evaluates only Files, so the CLI exposes only the file selector.
+// .rqlp paths resolved inside the patched tree, which the service runs on top
+// of its hosted catalog. The CLI sends only Files.
 type Selection struct {
 	Files      []string `json:"files,omitempty"`
 	Packs      []string `json:"packs,omitempty"`
@@ -74,7 +77,8 @@ type Response struct {
 // Summary mirrors CheckSummary.
 type Summary struct {
 	Files int `json:"files"`
-	// Findings counts every finding: NewFindings plus ExistingFindings.
+	// Findings counts the listed findings. The service lists only new ones,
+	// so it equals NewFindings; ExistingFindings counts the rest.
 	Findings int `json:"findings"`
 	// NewFindings counts the findings the change introduced or touched. Only
 	// these decide the status.
@@ -119,15 +123,25 @@ type Finding struct {
 	New bool `json:"new"`
 }
 
-// ExitCode maps the response status to the analyzer exit contract.
+// KnownStatus reports whether this client knows the response status.
+func (r Response) KnownStatus() bool {
+	switch r.Status {
+	case StatusClean, StatusFindings, StatusIncomplete:
+		return true
+	}
+	return false
+}
+
+// ExitCode maps the response status to the analyzer exit contract. Only
+// clean exits 0: a status this client does not know never passes a check.
 func (r Response) ExitCode() int {
 	switch r.Status {
+	case StatusClean:
+		return ExitClean
 	case StatusFindings:
 		return ExitFindings
-	case StatusIncomplete:
-		return ExitIncomplete
 	default:
-		return ExitClean
+		return ExitIncomplete
 	}
 }
 

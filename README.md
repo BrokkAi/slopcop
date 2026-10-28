@@ -163,7 +163,6 @@ Flags:
 | `--base REV` | base commit or revision for the change |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
-| `--show-existing` | also list the findings that were already in the code |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
@@ -191,9 +190,13 @@ Every check also runs the hosted catalog. Rules under
 A check fails only on findings the change introduced or touched: the service
 marks a finding new when it is in a file the change writes and its lines meet a
 line the change added, or the line beside one it removed. Findings that were
-already in the code are counted, never fail the check, and are listed only with
-`--show-existing`. A change that introduces nothing exits `0`, however many
-findings the repository already holds.
+already in the code are counted (`summary.existingFindings`, and `N already in
+the code` in the human summary), never fail the check, and are not listed. A
+change that introduces nothing exits `0`, however many findings the repository
+already holds. `--show-existing` is deprecated and hidden: the service no longer
+sends those findings, so against it the flag lists nothing (a service from
+before that still gets them listed), and it stays so that scripts passing it
+keep running.
 
 ### Ignore a false positive
 
@@ -215,16 +218,16 @@ check outside your workspace.
 ### Output and exit codes
 
 The service answers structured data; the CLI renders it. `human` prints one
-block per new finding, with an `ID:` line when the service names one, then the
-pre-existing ones with `--show-existing`, a
-summary line such as `1 new finding across 1 file(s); 72 already in the code
-(--show-existing lists them) | Analysis complete`, and any omitted or
+block per new finding, with an `ID:` line when the service names one, then a
+summary line such as `1 new finding across 1 file(s); 72 already in the code |
+Analysis complete`, and any omitted or
 incomplete checks. `json` prints `status`, `baseCommit`, `summary`
 (`newFindings` and `existingFindings` count the split), `findings` (each with
 `new` and its `id`), `incomplete`, and `failure` when the analysis did not
 complete. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
-`new` or `unchanged` and the finding id in `properties["slopcop.findingId"]`. `--format` and `--show-existing` only change the rendering, never
-the request, so the service answers the same check whichever is used.
+`new` and the finding id in `properties["slopcop.findingId"]`. `--format` only
+changes the rendering, never the request, so the service answers the same check
+whichever is used.
 
 | Exit | Meaning |
 | --- | --- |
@@ -232,6 +235,13 @@ the request, so the service answers the same check whichever is used.
 | `1` | A new finding crossed `--fail-on` |
 | `2` | No new finding crossed `--fail-on`, but a check was incomplete; or the CLI or service failed |
 | `3` | The check was still running when `--timeout` ran out |
+| `130`, `143` | Interrupted before the check answered: `130` for Ctrl-C, `143` for SIGTERM |
+
+Only `clean` exits `0`: a status this CLI does not know exits `2`, so a newer
+service can never pass a check by accident, and stderr names the status. An
+interrupted check prints no report. Interrupted before it was sent, nothing
+reached the service; after, a service that received it keeps running it, and
+running the same check again picks up its result.
 
 An inconclusive check fails the check only when it concerns a file the
 change writes. One about other files is listed on an `Inconclusive outside
@@ -296,8 +306,12 @@ contract, including `finding_not_found`.
 `slopcop login` uses the device flow: `POST /api/device` returns a
 `deviceCode`, `userCode`, `verificationUri`, `expiresIn`, and `interval`, and
 `POST /api/token` returns `202` while pending or `200` with a `token` once
-approved. The polling codes are `authorization_pending`, `slow_down`,
-`expired_token`, and `access_denied`.
+approved. The failure codes are `slow_down`, which raises the polling interval,
+`expired_token`, `access_denied`, and `device_flow_disabled`. A failure the
+service marks `retryable`, such as `rate_limited` or `service_unavailable`,
+keeps the code valid, and so do a dropped connection and a proxy's `429`,
+`502`, `503` or `504` without a code: login waits the `Retry-After`, or the
+interval if that is longer, and polls again until the code expires.
 
 ## Development
 
