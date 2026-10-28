@@ -88,7 +88,9 @@ func remedyError(err error) error {
 // user back through the login flow for a problem login cannot fix.
 //
 // The account commands' failures get the command that lists what to choose
-// from in the same way.
+// from in the same way. A disabled repository gets whoami: "your workspace"
+// is the one this login is bound to, which may not be the one the person
+// expects.
 var loginHints = map[string]string{
 	"auth_required":                  "Sign in with `slopcop login`.",
 	"auth_expired":                   "Sign in with `slopcop login`.",
@@ -97,6 +99,7 @@ var loginHints = map[string]string{
 	"workspace_not_found":            "List them with `slopcop workspace list`.",
 	"workspace_repository_not_found": "List them with `slopcop repo list`.",
 	"owner_required":                 "Switch with `slopcop workspace use <name>`.",
+	"repository_disabled":            "`slopcop whoami` shows which workspace this login checks in.",
 }
 
 // remedyText is the service's message and remedy, verbatim, plus the slopcop

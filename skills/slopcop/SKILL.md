@@ -99,7 +99,7 @@ the usual codes mean:
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
-| `repository_disabled` | The workspace's owner disabled the repository. Tell the user. |
+| `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
 | `service_unavailable` | Retry; the service is unavailable. |
 

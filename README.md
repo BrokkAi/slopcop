@@ -299,9 +299,12 @@ again picks up the same analysis.
 Service failures print the closed contract exactly: message, remedy, and any
 install URL. The codes, messages, and remedies are defined by the service in
 `server/src/check.rs` of `BrokkAi/bifrost-service`; the CLI does not
-rewrite them. The remedies name no client, so when one says to sign in the CLI
-adds the `slopcop login` command after it. A failed request prints no report
-on stdout.
+rewrite them. The remedies name no client, so the CLI adds its own command
+after some: `slopcop login` when the remedy is to sign in, the listing to
+choose from after `workspace_not_found` or `workspace_repository_not_found`,
+and `slopcop whoami` after `repository_disabled`, since the workspace that
+disabled it is the one this login is bound to. A failed request prints no
+report on stdout.
 
 ## API
 
