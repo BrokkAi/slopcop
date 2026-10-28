@@ -269,7 +269,7 @@ check outside your workspace.
 The service answers structured data; the CLI renders it. `human` prints one
 block per new finding, with an `ID:` line when the service names one, then a
 summary line such as `1 new finding across 1 file(s); 72 already in the code |
-Analysis complete`, and any omitted or
+Analysis complete`, and any omitted new findings or
 incomplete checks. `json` prints `status`, `baseCommit`, `summary`
 (`newFindings` and `existingFindings` count the split), `findings` (each with
 `new` and its `id`), `incomplete`, and `failure` when the analysis did not

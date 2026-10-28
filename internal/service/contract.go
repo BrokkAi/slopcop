@@ -116,8 +116,11 @@ type Summary struct {
 	// InconclusiveElsewhere counts the inconclusive checks about files the
 	// change does not write; IncompletePolicies does not include them.
 	InconclusiveElsewhere int `json:"inconclusiveElsewhere"`
-	// OmittedFindings counts findings left out because a check found more
-	// than it may report. They never change the status.
+	// OmittedFindings counts new findings left out because a check found
+	// more than it may report. A check keeps new findings first, so this is
+	// not zero only when the change itself has more than the bound; findings
+	// already in the code that were left out count in ExistingFindings. They
+	// never change the status.
 	OmittedFindings uint64 `json:"omittedFindings"`
 	FailOn          string `json:"failOn"`
 }
