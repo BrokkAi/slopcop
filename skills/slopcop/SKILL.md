@@ -83,8 +83,7 @@ The service sets the status and the CLI follows it. A failed request prints no
 report on stdout, so exit `2` with an empty stdout is a failure, never a clean
 result. Exit `2` with a report means the check finished: its `incomplete` list
 names the checks that did not complete, and running it again usually gives the
-same answer. Inconclusive checks about files the change does not write are listed in
-`inconclusiveElsewhere` and never cause exit `2`. A pending check prints
+same answer. Inconclusive checks never cause exit `2` (see below). A pending check prints
 `{"status": "pending", ...}` in `json`;
 running the same check again, in any format, picks up the same analysis.
 
@@ -117,7 +116,7 @@ Status:
 
 | Term | Meaning |
 | --- | --- |
-| `clean` | Every selected check completed for the files the change writes, and no new finding crossed `--fail-on`. The only status that supports "nothing found", and only for those checks, files, and lines. |
+| `clean` | Every selected check completed for the files the change writes (an inconclusive one counts as completed), and no new finding crossed `--fail-on`. The only status that supports "nothing found", and only for those checks, files, and lines. |
 | `findings` | A new finding crossed `--fail-on`. Other checks may still be incomplete. |
 | `incomplete` | No new finding crossed `--fail-on`, but some check could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. |
 | `pending` | Not a result yet. Run the same check again. |
@@ -134,16 +133,19 @@ Why a check is `incomplete` (`incomplete[].reason`):
 
 | Term | Meaning | What to do |
 | --- | --- | --- |
-| `inconclusive` | The check ran but could not prove there is nothing more to find. The usual cause is code or a file the analysis cannot fully model, such as an unsupported construct or language, or a size budget it ran out of. It can also mean Bifrost judged the run unreliable. The findings it did report keep their certainty. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
+| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. The findings it did report keep their certainty. A service from before this code says `inconclusive`. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `timed_out` | The check ran out of time and has no verdict. | Run it again once. A smaller change may finish. |
 | `base_comparison_failed` | The change could not be compared with its base commit, so findings that were already there may be reported as new. Here the risk is extra findings, not missed ones. | Check that the change really introduced each finding before fixing it. |
 | `other` | It did not complete for a reason the service does not classify. | Report it. |
 
 Other bounds in the report:
 
-- `inconclusiveElsewhere`: inconclusive checks about files the change does not
-  write. They never change the status. Mention them, but they are not this
-  change's.
+- `summary.inconclusive`: checks that ran but could not prove there is
+  nothing more to find, typically at a library boundary or in code the
+  analysis cannot fully model. Complete proof is rare in static analysis, so
+  this is normal and is not a problem with the change. They never change the
+  status. Do nothing about them: do not report them as gaps, rerun, rewrite
+  code, or ignore or disable a policy because of them.
 - `summary.omittedFindings`: new findings left out because one check found
   more than it may report; the most severe are listed. Give them little
   weight: they never change the status, and a large count is almost always
