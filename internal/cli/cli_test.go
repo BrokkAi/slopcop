@@ -61,10 +61,13 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
-	// os.UserConfigDir reads this on Windows.
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, "cache"))
+	// os.UserConfigDir and os.UserCacheDir read these on Windows.
 	t.Setenv("AppData", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LocalAppData", filepath.Join(home, "AppData", "Local"))
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
+	t.Setenv("SLOPCOP_WORKSPACE", "")
 	t.Setenv("CODEX_HOME", "")
 	// A test run inside an agent must not attribute its checks to that
 	// agent's session.

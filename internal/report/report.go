@@ -95,6 +95,14 @@ func human(response service.Response, options Options) string {
 	return out.String()
 }
 
+// Findings lists findings the way a human report lists its new ones, for a
+// caller that shows only some of a check's findings.
+func Findings(findings []service.Finding) string {
+	var out strings.Builder
+	writeBlock(&out, "New findings", findings)
+	return out.String()
+}
+
 func writeBlock(out *strings.Builder, heading string, findings []service.Finding) {
 	if len(findings) == 0 {
 		return

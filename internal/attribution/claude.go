@@ -11,7 +11,9 @@ import (
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
-const claudeHarness = "claude-code"
+// ClaudeHarness is the harness name a Claude Code session's attribution
+// carries.
+const ClaudeHarness = "claude-code"
 
 // maxTranscriptBytes bounds the read of one transcript file.
 const maxTranscriptBytes = 1 << 30
@@ -38,23 +40,35 @@ var claudeEditTools = map[string]bool{
 // it made: the model that wrote it, the effort, the file and whether it
 // succeeded. Subagents keep their own transcripts beside the session's.
 func claudeCode(getenv func(string) string, repoRoot string) (*service.Attribution, []string) {
+	return claudeCodeFrom(getenv, repoRoot, "")
+}
+
+// claudeCodeFrom is claudeCode reading the session transcript at transcript,
+// as a hook payload names it. Without one, or with one that is not the
+// session's, the transcript is looked for under the configuration directory.
+func claudeCodeFrom(getenv func(string) string, repoRoot, transcript string) (*service.Attribution, []string) {
 	sessionID := strings.TrimSpace(getenv("CLAUDE_CODE_SESSION_ID"))
 	if !sessionIDPattern.MatchString(sessionID) || strings.Trim(sessionID, ".") == "" {
 		return nil, nil
 	}
-	attribution := &service.Attribution{Harness: claudeHarness, SessionID: sessionID}
+	attribution := &service.Attribution{Harness: ClaudeHarness, SessionID: sessionID}
 	if match := agentVersionPattern.FindStringSubmatch(getenv("AI_AGENT")); match != nil {
 		attribution.HarnessVersion = strings.ReplaceAll(match[1], "-", ".")
 	}
-	configDir := strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR"))
-	if configDir == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return attribution, nil
+	var transcripts []string
+	if filepath.IsAbs(transcript) && filepath.Base(transcript) == sessionID+".jsonl" {
+		transcripts = []string{transcript}
+	} else {
+		configDir := strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR"))
+		if configDir == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return attribution, nil
+			}
+			configDir = filepath.Join(home, ".claude")
 		}
-		configDir = filepath.Join(home, ".claude")
+		transcripts, _ = filepath.Glob(filepath.Join(configDir, "projects", "*", sessionID+".jsonl"))
 	}
-	transcripts, _ := filepath.Glob(filepath.Join(configDir, "projects", "*", sessionID+".jsonl"))
 	var files []string
 	for _, transcript := range transcripts {
 		files = append(files, transcript)

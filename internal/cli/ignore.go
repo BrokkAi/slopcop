@@ -63,6 +63,7 @@ func runIgnore(cmd *cobra.Command, serviceFlag, version, workspace, findingID st
 		}
 		return err
 	}
+	forgetFinding(".", findingID)
 	fmt.Fprintf(
 		cmd.OutOrStdout(),
 		"slopcop: ignored finding %s; later checks of this repository will not report it\n",

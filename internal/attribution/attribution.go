@@ -33,6 +33,21 @@ func Detect(repoRoot string) *service.Attribution {
 	return detect(os.Getenv, repoRoot)
 }
 
+// DetectClaudeHook returns the attribution of the Claude Code session a Stop
+// hook names. Hooks do not necessarily inherit the session environment an
+// agent's own commands receive, so the payload's session id and transcript
+// path take its place. Its models name the files the session wrote.
+func DetectClaudeHook(repoRoot, sessionID, transcript string) *service.Attribution {
+	getenv := func(name string) string {
+		if name == "CLAUDE_CODE_SESSION_ID" {
+			return sessionID
+		}
+		return os.Getenv(name)
+	}
+	attribution, _ := claudeCodeFrom(getenv, repoRoot, transcript)
+	return attribution
+}
+
 // detect reads every harness whose session the environment names. A harness
 // started from another inherits that one's environment too, so when both are
 // named the one whose session record was written last is the one running the

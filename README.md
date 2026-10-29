@@ -113,8 +113,9 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop. `slopcop init` installs it into each well-known skills directory whose
-harness is present, and names what it did:
+slopcop, plus an automatic check hook for Claude Code. `slopcop init`
+installs the skill into each well-known skills directory whose harness is
+present, and names what it did:
 
 | Location | Harness |
 | --- | --- |
@@ -128,6 +129,34 @@ directories, rewriting one that differs from the skill bundled into the binary,
 so an agent follows the instructions of the slopcop version it runs; local
 edits to an installed skill do not survive them. `slopcop init --no-skill`
 skips the install and any update of it.
+
+Init also adds a `Stop` hook to Claude Code's `settings.json`, under
+`CLAUDE_CONFIG_DIR` or `~/.claude`, and leaves everything else in the file
+as it was. When the agent stops, the hook checks the working tree through the
+same hosted API, but only when all of these hold:
+
+- the session wrote files in the repository with its edit tools;
+- slopcop is signed in, and the workspace a check would use
+  (`$SLOPCOP_WORKSPACE`, or the login's) has the repository active
+  (`slopcop repo list`), so nothing is sent from other repositories;
+- the tree differs from the last check in the session, including a check the
+  agent ran by hand.
+
+New findings in files the session wrote are handed to the agent to fix, once
+for a given tree and at most twice in a row; then the agent is let go and you
+are told what remains. A finding ignored with `slopcop ignore` is not handed
+back. New findings in other files on the branch are only mentioned. The hook
+never keeps the agent going on its own failures: a refusal the service calls
+final, such as an expired login, is reported once and the hook stays quiet for
+the rest of the session, until a check by hand completes; a brief outage is
+only reported. The hook runs as `slopcop hook claude || true`, so even a
+`slopcop` that cannot run it, such as an older one first on `PATH`, lets the
+agent stop; init warns when that is the case, because no check would run.
+
+Use `slopcop init --no-hooks` to install only the skill, or
+`slopcop init --remove-hooks` to remove SlopCop's hook and nothing else.
+Ordinary checks do not reinstall a removed hook. The skill remains the way to
+check from Codex and other harnesses.
 
 ## Sign in
 
@@ -448,6 +477,7 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
+| `internal/hooks` | Claude Code hook installation and removal |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |
