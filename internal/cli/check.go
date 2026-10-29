@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -24,6 +25,9 @@ const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
 	invalidChange   = "invalid_change"
+	// repositoryAddUnconfirmed is the service's refusal of a check that would
+	// add a repository its workspace then pays for.
+	repositoryAddUnconfirmed = "repository_add_unconfirmed"
 	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
 	// was sent: a service that received it keeps it, so asking again picks up
 	// its result.
@@ -57,6 +61,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return err
 	}
 	client, request := prepared.client, prepared.request
+	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
+		return checkFailure(cmd, err)
+	}
 	if opts.verbose {
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
@@ -88,6 +95,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		request.Attribution = nil
 		response, err = client.Check(ctx, request)
 	}
+	if errors.As(err, &rejected) && rejected.Body.Code == repositoryAddUnconfirmed {
+		response, err = addRepositoryOnConfirm(cmd, client, request, rejected)
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
@@ -101,12 +111,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			}
 			return silentExit{service.ExitPending}
 		}
-		var serviceError *service.Error
-		if errors.As(err, &serviceError) {
-			fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
-			return silentExit{service.ExitIncomplete}
-		}
-		return err
+		return checkFailure(cmd, err)
 	}
 	options := report.Options{ShowExisting: opts.showExisting}
 	if err := report.Write(stdout, response, format, options); err != nil {
@@ -119,6 +124,53 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			response.Status)
 	}
 	return silentExit{response.ExitCode()}
+}
+
+// checkFailure prints a service failure's message and remedy and exits 2,
+// the exit of a check that did not complete. Any other error is returned as
+// is.
+func checkFailure(cmd *cobra.Command, err error) error {
+	var serviceError *service.Error
+	if errors.As(err, &serviceError) {
+		fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
+		return silentExit{service.ExitIncomplete}
+	}
+	return err
+}
+
+// addRepositoryOnConfirm asks the person at the terminal whether to add the
+// repository to the workspace, which then pays for it, and sends the check
+// again, confirmed, on a yes. The service cannot tell a person from an agent
+// using the same login, so with no terminal, as for an agent or CI, the
+// refusal stands and its remedy tells the person to run the check.
+func addRepositoryOnConfirm(cmd *cobra.Command, client *service.Client, request service.Request, refusal *service.Error) (service.Response, error) {
+	if _, ok := confirmInput(cmd); !ok {
+		return service.Response{}, refusal
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), refusal.Error())
+	question := fmt.Sprintf("Add %s to %s?", repositoryName(request.RepoURL), workspaceName(cmd.Context(), client))
+	yes, err := confirmYes(cmd, question)
+	if err != nil {
+		return service.Response{}, err
+	}
+	if !yes {
+		return service.Response{}, errors.New("nothing was added, so the check did not run")
+	}
+	request.AddRepository = true
+	// The wait for the person is not part of the check's own.
+	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
+	defer cancel()
+	return client.Check(ctx, request)
+}
+
+// repositoryName is owner/name of a canonical repository URL, for a
+// question about it.
+func repositoryName(repoURL string) string {
+	parsed, err := url.Parse(repoURL)
+	if err != nil || parsed.Path == "" {
+		return repoURL
+	}
+	return strings.TrimSuffix(strings.Trim(parsed.Path, "/"), ".git")
 }
 
 // preparedCheck is a check request ready to send, and the client to send it.

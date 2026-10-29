@@ -43,6 +43,10 @@ type Request struct {
 	// Attribution is optional and advisory: the service validates each field
 	// on its own and drops what fails, so it never refuses a check.
 	Attribution *Attribution `json:"attribution,omitempty"`
+	// AddRepository confirms adding the repository to a workspace that then
+	// pays for it. Without it such a check answers
+	// repository_add_unconfirmed. Only a person at a terminal sets it.
+	AddRepository bool `json:"addRepository,omitempty"`
 }
 
 // Attribution mirrors the check request's attribution: which agent harness

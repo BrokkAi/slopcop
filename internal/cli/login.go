@@ -98,7 +98,7 @@ var loginHints = map[string]string{
 	"device_flow_disabled":           "Sign in with `slopcop login --token <token>`.",
 	"workspace_not_found":            "List them with `slopcop workspace list`.",
 	"workspace_repository_not_found": "List them with `slopcop repo list`.",
-	"owner_required":                 "Switch with `slopcop workspace use <name>`.",
+	"owner_required":                 "Name a workspace you own with `--workspace <name>`.",
 	"repository_disabled":            "`slopcop whoami` shows which workspace this login checks in.",
 }
 

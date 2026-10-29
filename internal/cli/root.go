@@ -141,6 +141,7 @@ type checkOptions struct {
 	verbose      bool
 	showExisting bool
 	timeout      time.Duration
+	workspace    string
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
@@ -160,6 +161,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")
 	flags.BoolVar(&opts.verbose, "verbose", false, "print the resolved request to stderr")
 	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "how long to wait for the result; a check still running then exits 3")
+	addWorkspaceFlag(command, false, &opts.workspace)
 }
 
 func newVersionCommand(version string) *cobra.Command {

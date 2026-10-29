@@ -13,13 +13,15 @@ import (
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
-// findingIDPattern is the UUID shape the service gives every finding.
-var findingIDPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
+// uuidPattern is the UUID shape the service gives every finding and
+// workspace.
+var uuidPattern = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
 
 const ignoreTimeout = time.Minute
 
 func newIgnoreCommand(serviceURL *string, version string) *cobra.Command {
-	return &cobra.Command{
+	workspace := ""
+	command := &cobra.Command{
 		Use:   "ignore <finding-id>",
 		Short: "Stop reporting a false-positive finding",
 		Long: `Stop reporting one finding that is a false positive.
@@ -29,14 +31,16 @@ finding in its repository for your workspace, not its rule; later checks of
 the repository never report it again. Ignoring a finding twice is fine.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runIgnore(cmd, *serviceURL, version, args[0])
+			return runIgnore(cmd, *serviceURL, version, workspace, args[0])
 		},
 	}
+	addWorkspaceFlag(command, false, &workspace)
+	return command
 }
 
-func runIgnore(cmd *cobra.Command, serviceFlag, version, findingID string) error {
+func runIgnore(cmd *cobra.Command, serviceFlag, version, workspace, findingID string) error {
 	findingID = strings.TrimSpace(findingID)
-	if !findingIDPattern.MatchString(findingID) {
+	if !uuidPattern.MatchString(findingID) {
 		return fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
 	}
 	cfg, err := config.Load()
@@ -46,6 +50,9 @@ func runIgnore(cmd *cobra.Command, serviceFlag, version, findingID string) error
 	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, ignoreTimeout)
 	if err != nil {
 		return err
+	}
+	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
+		return serviceFailure(cmd, err)
 	}
 	response, err := client.Ignore(cmd.Context(), findingID)
 	if err != nil {
