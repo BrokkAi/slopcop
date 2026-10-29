@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"unicode/utf8"
 
@@ -22,12 +23,24 @@ import (
 const (
 	maxHookInputBytes  = 1 << 20
 	maxHookOutputRunes = 30000
+	// maxHolds is how many stops in a row the hook holds the agent back
+	// at: the first, and once more after the agent changed the tree.
+	maxHolds = 2
 )
+
+// repositoryProviders names the provider the service lists a repository
+// under, by the host of its canonical URL. The service checks no other host.
+var repositoryProviders = map[string]string{
+	"github.com":    "github",
+	"gitlab.com":    "gitlab",
+	"bitbucket.org": "bitbucket",
+}
 
 type hookInput struct {
 	Event          string `json:"hook_event_name"`
 	CWD            string `json:"cwd"`
 	SessionID      string `json:"session_id"`
+	TranscriptPath string `json:"transcript_path"`
 	StopHookActive bool   `json:"stop_hook_active"`
 }
 
@@ -77,30 +90,32 @@ func runHook(cmd *cobra.Command, serviceURL, version string) (output hookOutput)
 
 // stopHook checks the change when this session wrote files in the
 // repository, and hands the agent the new findings in those files. It sends
-// nothing when the session wrote nothing here, when no one is signed in,
+// nothing when no one is signed in, when the session wrote nothing here,
 // when the workspace does not check the repository, or when it already has
 // the result for this tree; and it says nothing unless there is something to
-// act on.
+// act on. The cheapest of those tests come first.
 func stopHook(ctx context.Context, input hookInput, serviceURL, version string) hookOutput {
 	repoRoot, err := gitx.Toplevel(input.CWD)
 	if err != nil {
 		return hookOutput{}
 	}
-	attributed := attribution.DetectClaudeHook(repoRoot, input.SessionID)
+	cfg, err := config.Load()
+	if err != nil || resolveToken(cfg) == "" {
+		return hookOutput{}
+	}
+	path := hookStatePath(input.SessionID, repoRoot)
+	state, loaded := loadHookState(path)
+	state.inWorkspace(resolveWorkspaceName(""))
+	if state.Off {
+		return hookOutput{}
+	}
+	attributed := attribution.DetectClaudeHook(repoRoot, input.SessionID, input.TranscriptPath)
 	written := writtenFiles(attributed)
 	if len(written) == 0 {
 		return hookOutput{}
 	}
-	if cfg, err := config.Load(); err != nil || resolveToken(cfg) == "" {
-		return hookOutput{}
-	}
-	path := hookStatePath(input.SessionID, repoRoot)
-	state := loadHookState(path)
-	if state.Off {
-		return hookOutput{}
-	}
 	opts := &checkOptions{root: repoRoot, timeout: agenthooks.CheckTimeout}
-	prepared, err := prepareCheck(opts, serviceURL, version, failOnFinding)
+	prepared, err := prepareCheck(opts, cfg, serviceURL, version, failOnFinding)
 	if err != nil {
 		// No origin, no commits: a check by hand says why.
 		return hookOutput{}
@@ -113,7 +128,7 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 			return hookOutput{SystemMessage: message}
 		}
 	}
-	output := state.answer(written, fresh, input.StopHookActive)
+	output := state.answer(written, fresh, input.StopHookActive, loaded)
 	saveHookState(path, state)
 	return output
 }
@@ -139,10 +154,15 @@ func writtenFiles(attributed *service.Attribution) map[string]bool {
 func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState) (string, bool) {
 	ctx, cancel := context.WithTimeout(ctx, prepared.client.Timeout())
 	defer cancel()
-	// The hook runs in the workspace a check by hand would, and a
-	// workspace that cannot be found now will not be found later.
+	// The hook runs in the workspace a check by hand would. A workspace
+	// the account does not have will not appear later in the session; a
+	// failure to ask the service can pass.
 	if err := useWorkspace(ctx, prepared.client, ""); err != nil {
-		state.Off = true
+		var serviceError *service.Error
+		var transport *url.Error
+		if !errors.As(err, &serviceError) && !errors.As(err, &transport) && ctx.Err() == nil {
+			state.Off = true
+		}
 		return hookFailure(err, state), false
 	}
 	if !state.Active {
@@ -156,28 +176,36 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 		}
 		state.Active = true
 	}
-	response, err := sendCheck(ctx, prepared.client, prepared.request, nil)
+	response, err := sendCheck(ctx, prepared.client, &prepared.request, nil)
 	if err != nil {
 		return hookFailure(err, state), false
 	}
 	if !response.KnownStatus() {
 		return fmt.Sprintf("slopcop: the service answered status %q, which this version of slopcop does not know. Update slopcop.", response.Status), false
 	}
-	state.completed(prepared.fingerprint, response)
+	state.completed(prepared.workspace, prepared.fingerprint, response)
 	return "", true
 }
 
-// repositoryActive reports whether the login's workspace checks the
-// repository now. A repository it has not added, or has disabled, is not
-// sent at all.
+// repositoryActive reports whether the workspace checks the repository now,
+// by its provider and owner/name. A repository it has not added, or has
+// disabled, is not sent at all.
 func repositoryActive(ctx context.Context, client *service.Client, repoURL string) (bool, error) {
+	parsed, err := url.Parse(repoURL)
+	if err != nil {
+		return false, nil
+	}
+	provider := repositoryProviders[parsed.Hostname()]
+	if provider == "" {
+		return false, nil
+	}
 	name := repositoryName(repoURL)
 	listed, err := client.Repositories(ctx)
 	if err != nil {
 		return false, err
 	}
 	for _, repository := range listed.Repositories {
-		if repository.Active && strings.EqualFold(repository.FullName, name) {
+		if repository.Active && strings.EqualFold(repository.Provider, provider) && strings.EqualFold(repository.FullName, name) {
 			return true, nil
 		}
 	}
@@ -187,7 +215,9 @@ func repositoryActive(ctx context.Context, client *service.Client, repoURL strin
 // hookFailure is what to tell the user about a check that got no result. A
 // refusal that sending again will not change, such as a login the service no
 // longer accepts, turns the hook off for the rest of the session, so it is
-// said once.
+// said once. A refusal is final when the service names it and does not call
+// it retryable: a gateway's answer with no code, as in a brief outage, is
+// not.
 func hookFailure(err error, state *hookState) string {
 	var pending *service.Pending
 	if errors.As(err, &pending) {
@@ -195,7 +225,7 @@ func hookFailure(err error, state *hookState) string {
 	}
 	var serviceError *service.Error
 	if errors.As(err, &serviceError) {
-		if !serviceError.Body.Retryable {
+		if serviceError.Body.Code != "" && !serviceError.Body.Retryable {
 			state.Off = true
 		}
 		return boundedHookText("slopcop: the automatic check did not run.\n" + remedyText(serviceError))
@@ -204,10 +234,13 @@ func hookFailure(err error, state *hookState) string {
 }
 
 // answer turns the last completed check into the hook's answer. Only new
-// findings in files this session wrote hold the agent back, and only once
-// for a given tree. An agent already held back once is let go, and the user
-// is told what remains.
-func (s *hookState) answer(written map[string]bool, fresh, stopHookActive bool) hookOutput {
+// findings in files this session wrote hold the agent back, once for a given
+// tree and at most maxHolds stops in a row; then the agent is let go and the
+// user is told what remains. Claude Code's stop_hook_active says some hook
+// held the agent at the stop before, not that this one did, so the hook
+// counts its own holds; without its state it cannot, and holds only at a
+// stop that follows none.
+func (s *hookState) answer(written map[string]bool, fresh, stopHookActive, loaded bool) hookOutput {
 	var mine []service.Finding
 	for _, finding := range s.Findings {
 		if written[finding.Path] {
@@ -215,18 +248,23 @@ func (s *hookState) answer(written map[string]bool, fresh, stopHookActive bool) 
 		}
 	}
 	others := len(s.Findings) - len(mine)
+	if !stopHookActive {
+		s.Holds = 0
+	}
+	canHold := !stopHookActive || (loaded && s.Holds < maxHolds)
 	switch {
-	case len(mine) > 0 && stopHookActive:
+	case len(mine) > 0 && !s.Handed && canHold:
 		s.Handed = true
-		return hookOutput{SystemMessage: boundedHookText(fmt.Sprintf(
-			"slopcop: %d new finding(s) remain in files this session wrote.\n%s", len(mine), report.Findings(mine)))}
-	case len(mine) > 0 && !s.Handed:
-		s.Handed = true
+		s.Holds++
 		return hookOutput{
 			Decision: "block",
 			Reason: boundedHookText("SlopCop found new findings in files you wrote this session. " +
 				"Fix them before you stop; SlopCop checks the change again when you do.\n" + report.Findings(mine)),
 		}
+	case len(mine) > 0 && stopHookActive:
+		s.Handed = true
+		return hookOutput{SystemMessage: boundedHookText(fmt.Sprintf(
+			"slopcop: %d new finding(s) remain in files this session wrote.\n%s", len(mine), report.Findings(mine)))}
 	case others > 0 && others != s.Others:
 		s.Others = others
 		return hookOutput{SystemMessage: fmt.Sprintf(

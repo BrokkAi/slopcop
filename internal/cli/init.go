@@ -296,6 +296,12 @@ SlopCop's hook.`,
 			for _, path := range hookResult.ChangedPaths {
 				fmt.Fprintf(stdout, "slopcop: installed the automatic check hook in %s\n", path)
 			}
+			if hookResult.Installed {
+				if problem := agenthooks.CommandProblem(); problem != "" {
+					fmt.Fprintf(cmd.ErrOrStderr(),
+						"slopcop: warning: %s. Put this slopcop first on PATH, or run 'slopcop init --remove-hooks'.\n", problem)
+				}
+			}
 			return nil
 		},
 	}

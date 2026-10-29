@@ -258,3 +258,29 @@ func TestCommandUsesNoShellSpecificSyntax(t *testing.T) {
 		t.Fatalf("command %q is not a stable simple command", command)
 	}
 }
+
+func TestCommandProblemProbesTheSlopcopOnPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake slopcop is a shell script")
+	}
+	bin := t.TempDir()
+	t.Setenv("PATH", bin)
+	if problem := CommandProblem(); !strings.Contains(problem, "no slopcop is on PATH") {
+		t.Fatalf("problem with none on PATH = %q", problem)
+	}
+	fake := filepath.Join(bin, "slopcop")
+	for _, tc := range []struct {
+		script string
+		ok     bool
+	}{
+		{"#!/bin/sh\necho '{}'\n", true},
+		{"#!/bin/sh\necho 'unknown command \"hook\"' >&2\nexit 2\n", false},
+	} {
+		if err := os.WriteFile(fake, []byte(tc.script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if problem := CommandProblem(); (problem == "") != tc.ok {
+			t.Fatalf("script %q: problem = %q", tc.script, problem)
+		}
+	}
+}

@@ -2,10 +2,12 @@
 package hooks
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -25,6 +27,9 @@ const (
 // Result describes the files an install or removal changed.
 type Result struct {
 	ChangedPaths []string
+	// Installed says the hook is in Claude Code's settings after an
+	// install, whether or not this install changed them.
+	Installed bool
 }
 
 // Install registers SlopCop's Stop hook when Claude Code is installed here.
@@ -65,14 +70,34 @@ func reconcile(install bool) (Result, error) {
 	if err != nil {
 		return result, fmt.Errorf("reconcile %s: %w", path, err)
 	}
+	result.Installed = install
 	if !changed {
 		return result, nil
 	}
 	if err := writeAtomic(target, updated, mode); err != nil {
-		return result, err
+		return Result{}, err
 	}
 	result.ChangedPaths = append(result.ChangedPaths, path)
 	return result, nil
+}
+
+// CommandProblem says why the slopcop Claude Code finds on PATH could not
+// run the hook, or nothing when it can. A slopcop from before the hook exits
+// 2 on it, which Claude Code takes from a Stop hook as an order to keep the
+// agent going, so the hook is asked to answer as Claude Code would ask it.
+func CommandProblem() string {
+	found, err := exec.LookPath("slopcop")
+	if err != nil {
+		return "no slopcop is on PATH, so Claude Code cannot run the hook"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	// Without "claude" the hook reads nothing and answers {}.
+	out, err := exec.CommandContext(ctx, found, "hook").Output()
+	if err != nil || strings.TrimSpace(string(out)) != "{}" {
+		return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the hook, and each time it fails Claude Code would keep the agent going", found)
+	}
+	return ""
 }
 
 // claudeConfigDir is where Claude Code reads its settings: CLAUDE_CONFIG_DIR

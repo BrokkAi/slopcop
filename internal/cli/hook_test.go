@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -28,6 +29,8 @@ type fakeService struct {
 	findings []string
 	// refusal, when set, is the error body every request is answered with.
 	refusal string
+	// outages is how many requests a gateway answers with a bare 503 first.
+	outages int
 	lists   int
 	checks  int
 	// workspaces are the SlopCop-Workspace headers the requests carried.
@@ -45,6 +48,13 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			_, _ = w.Write([]byte(f.refusal))
 			return
 		}
+		if f.outages > 0 {
+			f.outages--
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte("<html>Service Unavailable</html>"))
+			return
+		}
 		switch r.URL.Path {
 		case "/v1/repositories":
 			f.lists++
@@ -60,7 +70,7 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			for i, path := range f.findings {
 				response.Status = service.StatusFindings
 				response.Findings = append(response.Findings, service.Finding{
-					ID: fmt.Sprintf("finding-%d", i), PolicyID: "demo.policy", Severity: "warning", Certainty: "definite",
+					ID: fakeFindingID(i), PolicyID: "demo.policy", Severity: "warning", Certainty: "definite",
 					Path: path, StartLine: &line, Title: "Fix " + path, New: true,
 				})
 			}
@@ -68,12 +78,21 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			response.Summary.NewFindings = len(response.Findings)
 			response.Summary.FailOn = failOnFinding
 			_ = json.NewEncoder(w).Encode(response)
+		case "/v1/ignore":
+			var body service.IgnoreRequest
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewEncoder(w).Encode(service.IgnoreResponse{FindingID: body.FindingID, Status: "ignored"})
 		default:
 			t.Errorf("path = %s", r.URL.Path)
 		}
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+// fakeFindingID is the id the fake service gives its i-th finding.
+func fakeFindingID(i int) string {
+	return fmt.Sprintf("00000000-0000-4000-8000-%012d", i)
 }
 
 // isolateHook isolates the user's configuration, signs in, and gives Claude
@@ -346,6 +365,194 @@ func TestHookCacheFailureDoesNotHoldTheAgentTwice(t *testing.T) {
 	}
 	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output.Decision != "" {
 		t.Fatalf("continued hook blocked again: %+v", output)
+	}
+}
+
+func TestHookTreatsABriefOutageAsPassing(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}, outages: 1}
+	server := fake.start(t, repo)
+
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	if output.Decision != "" || !strings.Contains(output.SystemMessage, "did not run") {
+		t.Fatalf("output during the outage = %+v", output)
+	}
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("output after the outage = %+v", output)
+	}
+}
+
+func TestHookMatchesTheRepositoryProvider(t *testing.T) {
+	isolateHook(t)
+	// The workspace has github.com/BrokkAi/slopcop; this is a GitLab clone.
+	repo := newRepo(t, "https://gitlab.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
+		t.Fatalf("output = %+v", output)
+	}
+	if fake.checks != 0 {
+		t.Fatalf("checks = %d, want none", fake.checks)
+	}
+}
+
+func TestACheckByHandTurnsTheHookBackOn(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	// Not active yet: the hook turns off.
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) || fake.checks != 0 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+	// The person adds the repository with a check by hand.
+	fake.active = []string{"BrokkAi/slopcop"}
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 1 {
+		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
+	}
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	if output.Decision != "block" || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestACheckByHandOfTheSameTreeDoesNotHoldAgain(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("first output = %+v", output)
+	}
+	runTestHook(t, server.URL, stopPayload(repo, true))
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 1 {
+		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
+	}
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
+		t.Fatalf("output after the same check by hand = %+v", output)
+	}
+}
+
+func TestACheckByHandInAnotherWorkspaceDoesNotOpenTheGate(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{}
+	server := fake.start(t, repo)
+
+	const other = "6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b"
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "-w", other, "--service", server.URL); code != 0 {
+		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
+	}
+	// The login's own workspace does not have the repository.
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
+		t.Fatalf("output = %+v", output)
+	}
+	if fake.lists != 1 || fake.checks != 1 {
+		t.Fatalf("lists = %d, checks = %d, want 1 and only the check by hand", fake.lists, fake.checks)
+	}
+}
+
+func TestAnIgnoredFindingIsNotHandedBack(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("first output = %+v", output)
+	}
+	t.Chdir(repo)
+	if code, _, stderr := runCLI(t, "ignore", fakeFindingID(0), "--service", server.URL); code != 0 {
+		t.Fatalf("ignore exit = %d, stderr = %s", code, stderr)
+	}
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
+		t.Fatalf("output after the ignore = %+v", output)
+	}
+}
+
+func TestHookHoldsAfterAnotherHookHeld(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
+		t.Fatalf("clean output = %+v", output)
+	}
+	// Another Stop hook held the agent, which then wrote a finding.
+	fake.findings = []string{"demo.go"}
+	writeFile(t, repo, "demo.go", "package demo // changed\n")
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output.Decision != "block" {
+		t.Fatalf("output = %+v", output)
+	}
+}
+
+func TestHookHoldsAtMostTwiceInARow(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	for i, want := range []string{"block", "block", ""} {
+		writeFile(t, repo, "demo.go", fmt.Sprintf("package demo // %d\n", i))
+		output := runTestHook(t, server.URL, stopPayload(repo, i > 0))
+		if output.Decision != want {
+			t.Fatalf("stop %d: output = %+v, want decision %q", i, output, want)
+		}
+	}
+}
+
+func TestSendCheckDropsARefusedAttributionForLaterSends(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		if _, ok := body["attribution"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":"invalid_change","message":"Unknown field.","remedy":"Update.","retryable":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status":"clean","baseCommit":"0000000000000000000000000000000000000000","applied":true,"summary":{},"findings":[],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	client, err := service.New(server.URL, "", "slopcop/test", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := service.Request{
+		RepoURL:     "https://github.com/BrokkAi/slopcop",
+		BaseCommit:  "0000000000000000000000000000000000000000",
+		Attribution: &service.Attribution{Harness: "claude-code"},
+	}
+	if _, err := sendCheck(context.Background(), client, &request, nil); err != nil {
+		t.Fatal(err)
+	}
+	if request.Attribution != nil {
+		t.Fatal("the request still carries the attribution the service refused")
 	}
 }
 

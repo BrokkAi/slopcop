@@ -51,7 +51,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	// The installed skill follows the binary that runs.
 	syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr())
 	stdout := cmd.OutOrStdout()
-	prepared, err := prepareCheck(opts, serviceFlag, version, failOn)
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	prepared, err := prepareCheck(opts, cfg, serviceFlag, version, failOn)
 	// An interrupt during the git work stops git too, which then fails;
 	// either way nothing reached the service.
 	if cmd.Context().Err() != nil {
@@ -90,7 +94,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if opts.verbose {
 		verbose = cmd.ErrOrStderr()
 	}
-	response, err := sendCheck(ctx, client, request, verbose)
+	response, err := sendCheck(ctx, client, &request, verbose)
 	var rejected *service.Error
 	if errors.As(err, &rejected) && rejected.Body.Code == repositoryAddUnconfirmed {
 		response, err = addRepositoryOnConfirm(cmd, client, request, rejected)
@@ -174,17 +178,17 @@ func repositoryName(repoURL string) string {
 
 // sendCheck sends a check and waits for its result. A service from before
 // attribution rejects the unknown field as invalid_change; the check itself
-// must still run, so it is sent again without it, and verbose, when set,
-// hears why.
-func sendCheck(ctx context.Context, client *service.Client, request service.Request, verbose io.Writer) (service.Response, error) {
-	response, err := client.Check(ctx, request)
+// must still run, so it is sent again without it, the request keeps it
+// dropped for anything sent after, and verbose, when set, hears why.
+func sendCheck(ctx context.Context, client *service.Client, request *service.Request, verbose io.Writer) (service.Response, error) {
+	response, err := client.Check(ctx, *request)
 	var rejected *service.Error
 	if request.Attribution != nil && errors.As(err, &rejected) && rejected.Body.Code == invalidChange {
 		if verbose != nil {
 			fmt.Fprintln(verbose, "slopcop: the service refused the attribution; sending the check without it")
 		}
 		request.Attribution = nil
-		response, err = client.Check(ctx, request)
+		response, err = client.Check(ctx, *request)
 	}
 	return response, err
 }
@@ -195,9 +199,12 @@ type preparedCheck struct {
 	client   *service.Client
 	request  service.Request
 	repoRoot string
-	// fingerprint names the check without its attribution, in the
-	// workspace it is asked to run in, so the Stop hook can tell a check it
-	// already has the result of.
+	// workspace is the workspace the check is asked to run in, by the name
+	// it was given.
+	workspace string
+	// fingerprint names the check without its attribution, in that
+	// workspace, so the Stop hook can tell a check it already has the
+	// result of.
 	fingerprint string
 	// files and bytes describe the patch, for --verbose.
 	files, bytes int
@@ -206,7 +213,7 @@ type preparedCheck struct {
 // prepareCheck does the local work a check needs before it can be sent: it
 // finds the repository, its base and selection, builds the patch, and
 // resolves the service and credential.
-func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (preparedCheck, error) {
+func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, failOn string) (preparedCheck, error) {
 	var prepared preparedCheck
 	repoRoot, err := gitx.Toplevel(opts.root)
 	if err != nil {
@@ -232,10 +239,6 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 	if err != nil {
 		return prepared, err
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return prepared, err
-	}
 	target := resolveServiceURL(cfg, serviceFlag)
 	token := resolveToken(cfg)
 	client, err := service.New(target, token, "slopcop/"+version, opts.timeout)
@@ -251,11 +254,13 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
+	workspace := resolveWorkspaceName(opts.workspace)
 	return preparedCheck{
 		client:      client,
 		request:     request,
 		repoRoot:    repoRoot,
-		fingerprint: fingerprintCheck(target, token, resolveWorkspaceName(opts.workspace), request),
+		workspace:   workspace,
+		fingerprint: fingerprintCheck(target, token, workspace, request),
 		files:       change.Files,
 		bytes:       len(change.Patch),
 	}, nil

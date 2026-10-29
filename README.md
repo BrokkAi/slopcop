@@ -143,11 +143,14 @@ same hosted API, but only when all of these hold:
   agent ran by hand.
 
 New findings in files the session wrote are handed to the agent to fix, once
-for a given tree; if it stops again without fixing them, it is let go and you
-are told what remains. New findings in other files on the branch are only
-mentioned. The hook never keeps the agent going on its own failures: a refused
-login or similar is reported once, and the hook stays quiet for the rest of the
-session.
+for a given tree and at most twice in a row; then the agent is let go and you
+are told what remains. A finding ignored with `slopcop ignore` is not handed
+back. New findings in other files on the branch are only mentioned. The hook
+never keeps the agent going on its own failures: a refusal the service calls
+final, such as an expired login, is reported once and the hook stays quiet for
+the rest of the session, until a check by hand completes; a brief outage is
+only reported. Init warns when the `slopcop` first on `PATH` cannot run the
+hook, as an older one cannot.
 
 Use `slopcop init --no-hooks` to install only the skill, or
 `slopcop init --remove-hooks` to remove SlopCop's hook and nothing else.

@@ -35,16 +35,16 @@ func Detect(repoRoot string) *service.Attribution {
 
 // DetectClaudeHook returns the attribution of the Claude Code session a Stop
 // hook names. Hooks do not necessarily inherit the session environment an
-// agent's own commands receive, so the payload's session id takes that
-// variable's place. Its models name the files the session wrote.
-func DetectClaudeHook(repoRoot, sessionID string) *service.Attribution {
+// agent's own commands receive, so the payload's session id and transcript
+// path take its place. Its models name the files the session wrote.
+func DetectClaudeHook(repoRoot, sessionID, transcript string) *service.Attribution {
 	getenv := func(name string) string {
 		if name == "CLAUDE_CODE_SESSION_ID" {
 			return sessionID
 		}
 		return os.Getenv(name)
 	}
-	attribution, _ := claudeCode(getenv, repoRoot)
+	attribution, _ := claudeCodeFrom(getenv, repoRoot, transcript)
 	return attribution
 }
 
