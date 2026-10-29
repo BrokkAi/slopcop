@@ -10,7 +10,8 @@ import (
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
-const codexHarness = "codex"
+// CodexHarness is the harness name a Codex session's attribution carries.
+const CodexHarness = "codex"
 
 var (
 	turnContextMarker = []byte(`"turn_context"`)
@@ -49,12 +50,19 @@ type codexLine struct {
 // rollout log records the model and effort of every turn and every file
 // change. A failed edit records no file change.
 func codex(getenv func(string) string, repoRoot string) (*service.Attribution, []string) {
+	return codexFrom(getenv, repoRoot, "")
+}
+
+// codexFrom is codex reading the thread's rollout at rollout, as a hook
+// payload names it. Without one, or with one that is not the thread's, the
+// rollout is looked for under the Codex home.
+func codexFrom(getenv func(string) string, repoRoot, rollout string) (*service.Attribution, []string) {
 	threadID := strings.TrimSpace(getenv("CODEX_THREAD_ID"))
 	if !sessionIDPattern.MatchString(threadID) || strings.Trim(threadID, ".") == "" {
 		return nil, nil
 	}
 	attribution := &service.Attribution{
-		Harness:        codexHarness,
+		Harness:        CodexHarness,
 		HarnessVersion: strings.TrimSpace(getenv("CODEX_VERSION")),
 		SessionID:      threadID,
 	}
@@ -66,7 +74,13 @@ func codex(getenv func(string) string, repoRoot string) (*service.Attribution, [
 		}
 		codexHome = filepath.Join(home, ".codex")
 	}
-	rollouts, _ := filepath.Glob(filepath.Join(codexHome, "sessions", "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
+	var rollouts []string
+	if name := filepath.Base(rollout); filepath.IsAbs(rollout) &&
+		strings.HasPrefix(name, "rollout-") && strings.HasSuffix(name, "-"+threadID+".jsonl") {
+		rollouts = []string{rollout}
+	} else {
+		rollouts, _ = filepath.Glob(filepath.Join(codexHome, "sessions", "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
+	}
 	var edits []fileEdit
 	for _, rollout := range rollouts {
 		edits = append(edits, codexEdits(rollout)...)

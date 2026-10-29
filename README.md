@@ -113,7 +113,7 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop, plus an automatic check hook for Claude Code. `slopcop init`
+slopcop, plus an automatic check hook for Claude Code and Codex. `slopcop init`
 installs the skill into each well-known skills directory whose harness is
 present, and names what it did:
 
@@ -130,10 +130,20 @@ so an agent follows the instructions of the slopcop version it runs; local
 edits to an installed skill do not survive them. `slopcop init --no-skill`
 skips the install and any update of it.
 
-Init also adds a `Stop` hook to Claude Code's `settings.json`, under
-`CLAUDE_CONFIG_DIR` or `~/.claude`, and leaves everything else in the file
-as it was. When the agent stops, the hook checks the working tree through the
-same hosted API, but only when all of these hold:
+Init also adds a `Stop` hook for each harness installed here, and leaves
+everything else in the file as it was:
+
+| File | Harness |
+| --- | --- |
+| `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
+| `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
+
+Codex runs a new or changed hook only once you trust it: open Codex and review
+it with `/hooks`. Init never writes that trust itself. The hook stays the same
+from one release to the next, so an update does not ask for it again.
+
+When the agent stops, the hook checks the working tree through the same
+hosted API, but only when all of these hold:
 
 - the session wrote files in the repository with its edit tools;
 - slopcop is signed in, and the workspace a check would use
@@ -149,14 +159,15 @@ back. New findings in other files on the branch are only mentioned. The hook
 never keeps the agent going on its own failures: a refusal the service calls
 final, such as an expired login, is reported once and the hook stays quiet for
 the rest of the session, until a check by hand completes; a brief outage is
-only reported. The hook runs as `slopcop hook claude || true`, so even a
-`slopcop` that cannot run it, such as an older one first on `PATH`, lets the
+only reported. The hook runs as `slopcop hook claude || true` (and
+`slopcop hook codex || true`, or `|| exit /b 0` under Windows' `cmd`), so even
+a `slopcop` that cannot run it, such as an older one first on `PATH`, lets the
 agent stop; init warns when that is the case, because no check would run.
 
 Use `slopcop init --no-hooks` to install only the skill, or
-`slopcop init --remove-hooks` to remove SlopCop's hook and nothing else.
+`slopcop init --remove-hooks` to remove SlopCop's hooks and nothing else.
 Ordinary checks do not reinstall a removed hook. The skill remains the way to
-check from Codex and other harnesses.
+check from other harnesses.
 
 ## Sign in
 
@@ -477,7 +488,7 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
-| `internal/hooks` | Claude Code hook installation and removal |
+| `internal/hooks` | Claude Code and Codex hook installation and removal |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |

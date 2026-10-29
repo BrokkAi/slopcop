@@ -6,16 +6,14 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"strconv"
-	"time"
 )
 
 const statusMessage = "Checking the change with SlopCop"
 
-// reconcileJSON adds or removes SlopCop's Stop handler in the text of a
-// settings file. Everything else in the file keeps its keys, their order and
-// their values; only the indentation may change.
-func reconcileJSON(data []byte, install bool) ([]byte, bool, error) {
+// reconcileJSON adds or removes SlopCop's Stop handler for h in the text of
+// a settings file. Everything else in the file keeps its keys, their order
+// and their values; only the indentation may change.
+func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	root, err := decodeSettings(data)
 	if err != nil {
 		return nil, false, err
@@ -36,7 +34,7 @@ func reconcileJSON(data []byte, install bool) ([]byte, bool, error) {
 		}
 	}
 
-	canonical := commandHandler()
+	canonical := h.handler()
 	found, changed := false, false
 	newStop := make([]any, 0, len(stop)+1)
 	for _, groupValue := range stop {
@@ -60,7 +58,7 @@ func reconcileJSON(data []byte, install bool) ([]byte, bool, error) {
 			if !ok {
 				return nil, false, fmt.Errorf("every hook handler must be an object")
 			}
-			if value, _ := handler.get("command"); value != command && value != legacyCommand {
+			if value, _ := handler.get("command"); !h.ours(value) {
 				kept = append(kept, handler)
 				continue
 			}
@@ -155,15 +153,6 @@ func childObject(parent *object, key string, create bool) (*object, error) {
 		return nil, fmt.Errorf("%s must be an object", key)
 	}
 	return child, nil
-}
-
-func commandHandler() *object {
-	handler := newObject()
-	handler.set("type", "command")
-	handler.set("command", command)
-	handler.set("timeout", json.Number(strconv.Itoa(int(hookTimeout/time.Second))))
-	handler.set("statusMessage", statusMessage)
-	return handler
 }
 
 // object is a JSON object that keeps its keys in the order they were read,

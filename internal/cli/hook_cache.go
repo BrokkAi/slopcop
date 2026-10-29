@@ -19,7 +19,7 @@ import (
 const hookStateLifetime = 7 * 24 * time.Hour
 
 // hookState is what the Stop hook remembers about one repository in one
-// Claude Code session.
+// Claude Code or Codex session.
 type hookState struct {
 	// Workspace is the workspace Active and Off are about, as a check names
 	// it: --workspace or $SLOPCOP_WORKSPACE, or empty for the login's own.
@@ -99,57 +99,64 @@ func fingerprintCheck(serviceURL, token, workspace string, request service.Reque
 	return hex.EncodeToString(digest[:])
 }
 
-// rememberCheck records a check run by hand in the Claude Code session that
-// ran it, so that session's Stop hook does not send the same check again.
+// rememberCheck records a check run by hand in the session that ran it, so
+// that session's Stop hook does not send the same check again.
 func rememberCheck(prepared preparedCheck, response service.Response) {
 	attributed := prepared.request.Attribution
-	if attributed == nil || attributed.Harness != attribution.ClaudeHarness {
+	if attributed == nil {
 		return
 	}
-	path := hookStatePath(attributed.SessionID, prepared.repoRoot)
+	path := hookStatePath(attributed.Harness, attributed.SessionID, prepared.repoRoot)
 	state, _ := loadHookState(path)
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	saveHookState(path, state)
 }
 
-// forgetFinding drops an ignored finding from the state of the Claude Code
-// session that ignored it, in the repository at dir, so its Stop hook does
-// not hand the finding back.
+// sessionVariables name the variable each harness puts its session id in,
+// in the commands its agent runs.
+var sessionVariables = map[string]string{
+	attribution.ClaudeHarness: "CLAUDE_CODE_SESSION_ID",
+	attribution.CodexHarness:  "CODEX_THREAD_ID",
+}
+
+// forgetFinding drops an ignored finding from the state of the session that
+// ignored it, in the repository at dir, so its Stop hook does not hand the
+// finding back.
 func forgetFinding(dir, findingID string) {
-	sessionID := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
 	repoRoot, err := gitx.Toplevel(dir)
-	if sessionID == "" || err != nil {
+	if err != nil {
 		return
 	}
-	path := hookStatePath(sessionID, repoRoot)
-	state, loaded := loadHookState(path)
-	if !loaded {
-		return
-	}
-	kept := make([]service.Finding, 0, len(state.Findings))
-	for _, finding := range state.Findings {
-		if !strings.EqualFold(finding.ID, findingID) {
-			kept = append(kept, finding)
+	for harness, variable := range sessionVariables {
+		path := hookStatePath(harness, strings.TrimSpace(os.Getenv(variable)), repoRoot)
+		state, loaded := loadHookState(path)
+		if !loaded {
+			continue
+		}
+		kept := make([]service.Finding, 0, len(state.Findings))
+		for _, finding := range state.Findings {
+			if !strings.EqualFold(finding.ID, findingID) {
+				kept = append(kept, finding)
+			}
+		}
+		if len(kept) != len(state.Findings) {
+			state.Findings = kept
+			saveHookState(path, state)
 		}
 	}
-	if len(kept) == len(state.Findings) {
-		return
-	}
-	state.Findings = kept
-	saveHookState(path, state)
 }
 
 // hookStatePath is where the state of one repository in one session is
 // kept, or empty when there is no cache directory to keep it in.
-func hookStatePath(sessionID, repoRoot string) string {
-	if sessionID == "" {
+func hookStatePath(harness, sessionID, repoRoot string) string {
+	if harness == "" || sessionID == "" {
 		return ""
 	}
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return ""
 	}
-	identity := attribution.ClaudeHarness + "\x00" + sessionID + "\x00" + repoRoot
+	identity := harness + "\x00" + sessionID + "\x00" + repoRoot
 	digest := sha256.Sum256([]byte(identity))
 	return filepath.Join(dir, "slopcop", "checks", hex.EncodeToString(digest[:])+".json")
 }

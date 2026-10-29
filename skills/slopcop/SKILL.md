@@ -67,8 +67,8 @@ otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
 stderr.
 
-In Claude Code, `slopcop init` can install a `Stop` hook that checks the
-change when you stop and hands back new findings in files you wrote. It does
+In Claude Code and Codex, `slopcop init` can install a `Stop` hook that checks
+the change when you stop and hands back new findings in files you wrote. It does
 not send a check whose result your session already has, so a check you ran by
 hand is not repeated. Keep running checks as described above; the hook is a
 backstop, not a replacement.

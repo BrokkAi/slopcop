@@ -237,8 +237,8 @@ func newInitCommand() *cobra.Command {
 		Use:   "init",
 		Short: "Install the bundled agent skill and the automatic check hook",
 		Long: `Install the agent skill that ships inside this binary, so a coding agent
-knows how to run slopcop, and a Claude Code hook that checks what a session
-wrote when the agent stops.
+knows how to run slopcop, and a Claude Code and Codex hook that checks what a
+session wrote when the agent stops.
 
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
@@ -247,9 +247,10 @@ there is left alone. Login and every check also install the skill, and
 rewrite one that differs from the bundled skill. Pass --no-skill to leave the
 skill install and any update of it undone.
 
-A Claude Code Stop hook goes into settings.json under CLAUDE_CONFIG_DIR or
-~/.claude. Pass --no-hooks to skip it, or --remove-hooks to remove only
-SlopCop's hook.`,
+A Stop hook goes into Claude Code's settings.json, under CLAUDE_CONFIG_DIR or
+~/.claude, and Codex's hooks.json, under CODEX_HOME or ~/.codex, for each
+harness installed here. Codex runs it only once you trust it with /hooks.
+Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stdout := cmd.OutOrStdout()
@@ -296,7 +297,10 @@ SlopCop's hook.`,
 			for _, path := range hookResult.ChangedPaths {
 				fmt.Fprintf(stdout, "slopcop: installed the automatic check hook in %s\n", path)
 			}
-			if hookResult.Installed {
+			if hookResult.NeedsTrust {
+				fmt.Fprintln(stdout, "slopcop: Codex runs the hook only once you trust it: open Codex and review it with /hooks")
+			}
+			if len(hookResult.Installed) > 0 {
 				if problem := agenthooks.CommandProblem(); problem != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"slopcop: warning: %s. Put this slopcop first on PATH, or run 'slopcop init --remove-hooks'.\n", problem)
