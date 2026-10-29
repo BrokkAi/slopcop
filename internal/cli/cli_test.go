@@ -17,6 +17,7 @@ import (
 	"testing"
 
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -332,7 +333,7 @@ func TestCheckPrintsTheServiceRemedy(t *testing.T) {
 	code, stdout, stderr := runCLI(t,
 		"check", "--root", repo, "--service", server.URL,
 	)
-	if code != 2 {
+	if code != service.ExitNeedsPerson {
 		t.Fatalf("exit = %d", code)
 	}
 	if stdout != "" {
@@ -368,10 +369,10 @@ func TestCheckOfADisabledRepositoryPointsAtWhoami(t *testing.T) {
 	defer server.Close()
 
 	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-	if code != 2 || stdout != "" {
+	if code != service.ExitNeedsPerson || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := "This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
+	want := "slopcop: repository_disabled: This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
 		"Enable it on the Repositories page in SlopCop, then retry.\n" +
 		"`slopcop whoami` shows which workspace this login checks in.\n"
 	if stderr != want {
@@ -423,7 +424,7 @@ func TestCheckPrintsRepoStateRemediesWithoutLoginHint(t *testing.T) {
 			code, stdout, stderr := runCLI(t,
 				"check", "--root", repo, "--service", server.URL,
 			)
-			if code != 2 {
+			if code != service.ExitNeedsPerson {
 				t.Fatalf("exit = %d", code)
 			}
 			if stdout != "" {
@@ -1052,13 +1053,27 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		server, checks := addService(t, base)
 		pipedStdin(t, "y\n")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-		want := "This check would add the repository to your workspace, where it uses 100 credits every 30 days.\n" +
+		want := "slopcop: repository_add_unconfirmed: This check would add the repository to your workspace, where it uses 100 credits every 30 days.\n" +
 			"Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.\n"
-		if code != 2 || stdout != "" || stderr != want {
+		if code != service.ExitNeedsPerson || stdout != "" || stderr != want {
 			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 		}
 		if len(*checks) != 1 {
 			t.Errorf("checks = %v, want the one refused", *checks)
+		}
+	})
+
+	t.Run("json prints the refusal on stdout", func(t *testing.T) {
+		server, _ := addService(t, base)
+		pipedStdin(t, "")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
+		var document map[string]any
+		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
+		}
+		if code != service.ExitNeedsPerson || document["status"] != "failed" || document["code"] != "repository_add_unconfirmed" ||
+			document["retryable"] != false || !strings.HasPrefix(document["remedy"].(string), "Run the check yourself") {
+			t.Errorf("exit = %d, stdout = %v", code, document)
 		}
 	})
 }

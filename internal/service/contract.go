@@ -4,23 +4,28 @@ package service
 
 import "strings"
 
-// Check statuses and their exit codes, mirrored from CheckStatus. Pending is
-// the CLI's own: the service answered check_running until --timeout ran out.
+// Check statuses and their exit codes, mirrored from CheckStatus. Pending and
+// failed are the CLI's own: the service answered check_running until
+// --timeout ran out, or refused the check with an error.
 const (
 	StatusClean      = "clean"
 	StatusFindings   = "findings"
 	StatusIncomplete = "incomplete"
 	StatusPending    = "pending"
+	StatusFailed     = "failed"
 )
 
 // Exit codes. Pending has its own code so a caller can tell "run the same
-// check again" from a check that finished incomplete. Interrupted is the
-// shell's code for a process stopped by Ctrl-C: no result was waited for.
+// check again" from a check that finished incomplete. NeedsPerson is a
+// refusal only a person can clear, so a script stops instead of retrying.
+// Interrupted is the shell's code for a process stopped by Ctrl-C: no result
+// was waited for.
 const (
 	ExitClean       = 0
 	ExitFindings    = 1
 	ExitIncomplete  = 2
 	ExitPending     = 3
+	ExitNeedsPerson = 4
 	ExitInterrupted = 130
 )
 

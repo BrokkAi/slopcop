@@ -285,6 +285,60 @@ func WritePending(w io.Writer, pending service.Pending, format string) error {
 	}
 }
 
+// failureReport is the document `--format json` prints for a check the
+// service refused: its closed error code, verbatim message and remedy, and
+// whether the same request may succeed later.
+type failureReport struct {
+	Status     string `json:"status"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	Remedy     string `json:"remedy"`
+	Retryable  bool   `json:"retryable"`
+	InstallURL string `json:"installUrl,omitempty"`
+	TopUpURL   string `json:"topUpUrl,omitempty"`
+}
+
+// WriteFailure renders a check the service refused. The human format prints
+// nothing on stdout: the code, message, and remedy are on stderr and the exit
+// code is 2.
+func WriteFailure(w io.Writer, failure *service.Error, format string) error {
+	switch format {
+	case "", FormatHuman:
+		return nil
+	case FormatJSON:
+		return encode(w, failureReport{
+			Status:     service.StatusFailed,
+			Code:       failure.Body.Code,
+			Message:    failure.Error(),
+			Remedy:     failure.Body.Remedy,
+			Retryable:  failure.Body.Retryable,
+			InstallURL: failure.Body.InstallURL,
+			TopUpURL:   failure.Body.TopUpURL,
+		}, "json report")
+	case FormatSARIF:
+		id := failure.Body.Code
+		if id == "" {
+			id = "slopcop.failed"
+		}
+		return encode(w, sarifLog(sarifRun{
+			Tool:    sarifTool{Driver: sarifDriver{Name: "SlopCop", InformationURI: "https://slopcop.com", Rules: []sarifRule{}}},
+			Results: []sarifResult{},
+			Invocations: []sarifInvocation{{
+				ExecutionSuccessful: false,
+				ToolExecutionNotifications: []sarifNotification{{
+					Level:      "error",
+					Message:    sarifMessage{Text: strings.TrimSpace(failure.Error() + " " + failure.Body.Remedy)},
+					Descriptor: &sarifDescriptor{ID: id},
+					Properties: map[string]any{"slopcop.retryable": failure.Body.Retryable},
+				}},
+			}},
+			Properties: map[string]any{"slopcop.status": service.StatusFailed},
+		}), "sarif report")
+	default:
+		return fmt.Errorf("unknown format %q (expected human, json, or sarif)", format)
+	}
+}
+
 func sarifLog(run sarifRun) sarifDocument {
 	return sarifDocument{Schema: sarifSchema, Version: "2.1.0", Runs: []sarifRun{run}}
 }

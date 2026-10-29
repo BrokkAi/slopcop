@@ -42,7 +42,7 @@ the workspace (name, kind, role), its plan (Pro or Free) and the service URL
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
 - A first check adds the repository to the workspace. When the workspace would
-  then pay for it, the check exits `2` with `repository_add_unconfirmed`. Do
+  then pay for it, the check exits `4` with `repository_add_unconfirmed`. Do
   not work around it: tell the user to run the check themselves, which asks
   them to confirm, or to add the repository on the Repositories page.
 
@@ -91,11 +91,18 @@ Each finding also carries its
 | `1` | A new finding crossed `--fail-on`. Fix it. |
 | `2` | No new finding crossed `--fail-on`, but some check did not complete; or the CLI or service failed. |
 | `3` | The check was still running when `--timeout` ran out. Run the same check again. |
+| `4` | The service refused the check, and only a person can clear it. Do not retry; tell the user the `code` and remedy. |
 | `130`, `143` | The check was interrupted (Ctrl-C or SIGTERM) before it answered. It printed no report; run the same check again. |
 
-The service sets the status and the CLI follows it. A failed request prints no
-report on stdout, so exit `2` with an empty stdout is a failure, never a clean
-result. Exit `2` with a report means the check finished: its `incomplete` list
+The service sets the status and the CLI follows it. A failed request prints
+`{"status": "failed", "code": ..., "message": ..., "remedy": ..., "retryable":
+...}` in `json` (in `human`, nothing on stdout, and stderr starts with
+`slopcop: <code>:`). Act on its `code` with the table below: never treat it as
+a clean result, and retry only when `retryable` is `true`. It exits `4` when
+only a person can clear the refusal (signing in, credits, access, or what the
+workspace checks), and `2` for the rest. Any other error
+from the CLI exits `2` with an empty stdout. Exit `2` with a check report
+means the check finished: its `incomplete` list
 names the checks that did not complete, and running it again usually gives the
 same answer. Inconclusive checks never cause exit `2` (see below). A pending check prints
 `{"status": "pending", ...}` in `json`;

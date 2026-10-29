@@ -25,6 +25,27 @@ var knownErrors = map[string]ErrorBody{
 	},
 }
 
+// personCodes are the refusals only a person can clear: signing in, paying,
+// installing or granting access, or choosing what the workspace checks. An
+// agent that retries or rewrites the change gets the same answer.
+var personCodes = map[string]bool{
+	"auth_required":                      true,
+	"auth_expired":                       true,
+	"account_required":                   true,
+	"repo_not_indexed":                   true,
+	"app_not_installed":                  true,
+	"app_no_repo_access":                 true,
+	"gitlab_not_connected":               true,
+	"no_access":                          true,
+	"insufficient_credits":               true,
+	"repository_disabled":                true,
+	"repository_add_unconfirmed":         true,
+	"workspace_repository_limit_reached": true,
+	"active_repository_limit_reached":    true,
+	"owner_required":                     true,
+	"browser_required":                   true,
+}
+
 // Error is a non-2xx response from the check API.
 type Error struct {
 	StatusCode int
@@ -59,4 +80,9 @@ func (e *Error) RemedyText() string {
 		lines = append(lines, topUp)
 	}
 	return strings.Join(lines, "\n")
+}
+
+// NeedsPerson reports whether only a person can clear this refusal.
+func (e *Error) NeedsPerson() bool {
+	return personCodes[e.Body.Code]
 }

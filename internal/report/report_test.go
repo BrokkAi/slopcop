@@ -396,6 +396,57 @@ func TestPendingIsAParseableReport(t *testing.T) {
 	}
 }
 
+func TestFailureIsAParseableReport(t *testing.T) {
+	failure := &service.Error{StatusCode: 402, Body: service.ErrorBody{
+		Code:     "insufficient_credits",
+		Message:  "The workspace is out of credits.",
+		Remedy:   "Add credits, then retry.",
+		TopUpURL: "https://slopcop.com/credits",
+	}}
+	write := func(format string) string {
+		var out bytes.Buffer
+		if err := WriteFailure(&out, failure, format); err != nil {
+			t.Fatalf("WriteFailure(%s): %v", format, err)
+		}
+		return out.String()
+	}
+	if got := write(FormatHuman); got != "" {
+		t.Errorf("human failure writes stdout: %q", got)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(write(FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	want := map[string]any{
+		"status":    "failed",
+		"code":      "insufficient_credits",
+		"message":   "The workspace is out of credits.",
+		"remedy":    "Add credits, then retry.",
+		"retryable": false,
+		"topUpUrl":  "https://slopcop.com/credits",
+	}
+	if !reflect.DeepEqual(document, want) {
+		t.Errorf("json = %v", document)
+	}
+	var log map[string]any
+	if err := json.Unmarshal([]byte(write(FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	if run["properties"].(map[string]any)["slopcop.status"] != "failed" || len(run["results"].([]any)) != 0 {
+		t.Errorf("run = %v", run)
+	}
+	invocation := run["invocations"].([]any)[0].(map[string]any)
+	notification := invocation["toolExecutionNotifications"].([]any)[0].(map[string]any)
+	if invocation["executionSuccessful"] != false || notification["level"] != "error" ||
+		notification["descriptor"].(map[string]any)["id"] != "insufficient_credits" {
+		t.Errorf("invocation = %v", invocation)
+	}
+	if err := WriteFailure(&bytes.Buffer{}, failure, "xml"); err == nil {
+		t.Error("expected an error for an unknown format")
+	}
+}
+
 func TestSARIFIsAValid210Log(t *testing.T) {
 	findings := sampleFindings()
 	unrated := finding("lib/util.py", 7, "unrated", "acme.custom")
