@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -129,11 +130,17 @@ func TestHookFailuresAreNonblockingAndNotCached(t *testing.T) {
 
 func TestHookCacheFailureDoesNotBlockARecheck(t *testing.T) {
 	isolateUserConfig(t)
-	cache := t.TempDir() + "/cache-file"
+	// A file where the cache directory belongs makes every cache write fail.
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cache), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cache, []byte("not a directory"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("XDG_CACHE_HOME", cache)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	calls := 0
 	server := serveCheck(t, repo, "findings", &calls)
