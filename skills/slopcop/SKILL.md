@@ -67,6 +67,11 @@ otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
 stderr.
 
+When the service reports a newer release, the CLI prints one line on stderr,
+at most once a day, starting `slopcop vX.Y.Z is available`. It never touches
+stdout or the exit code; mention it to the user rather than upgrading on your
+own. `SLOPCOP_NO_UPDATE_NOTICE=1` turns it off.
+
 In Claude Code and Codex, `slopcop init` can install a `Stop` hook that checks
 the change when you stop and hands back new findings in files you wrote. It does
 not send a check whose result your session already has, so a check you ran by
@@ -124,6 +129,7 @@ the usual codes mean:
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
 | `repository_add_unconfirmed` | The check would add a repository the workspace then pays for. Tell the user; only they can confirm it, by running the check at a terminal. |
+| `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
 ## What a result claims

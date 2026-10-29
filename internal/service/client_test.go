@@ -378,3 +378,32 @@ func TestOnlyPersonCodesNeedAPerson(t *testing.T) {
 		}
 	}
 }
+
+func TestEveryResponseReportsTheLatestVersion(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("SlopCop-Latest-Version", " v0.0.9 ")
+		w.WriteHeader(http.StatusUpgradeRequired)
+		_, _ = w.Write([]byte(`{"code": "client_outdated", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	var reported []string
+	client.LatestVersion = func(latest string) { reported = append(reported, latest) }
+	_, err = client.Ignore(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e")
+	if len(reported) != 1 || reported[0] != "v0.0.9" {
+		t.Errorf("reported = %q", reported)
+	}
+	var serviceError *Error
+	if !errors.As(err, &serviceError) {
+		t.Fatalf("expected *Error, got %v", err)
+	}
+	want := "This version of slopcop is older than the check service accepts.\n" +
+		"Upgrade slopcop to the latest release, then retry: https://github.com/BrokkAi/slopcop#install"
+	if serviceError.RemedyText() != want || serviceError.NeedsPerson() {
+		t.Errorf("error = %+v", serviceError)
+	}
+}

@@ -31,6 +31,16 @@ func Path() (string, error) {
 	return filepath.Join(dir, "slopcop", "config.json"), nil
 }
 
+// NoticePath returns the file, next to the configuration, that records when
+// the last upgrade notice was printed.
+func NoticePath() (string, error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "update-notice"), nil
+}
+
 // Load reads the configuration. A missing file is not an error.
 func Load() (Config, error) {
 	var cfg Config

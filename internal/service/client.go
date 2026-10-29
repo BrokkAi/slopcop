@@ -20,9 +20,12 @@ const (
 	ignorePath = "/v1/ignore"
 	// workspaceHeader names, for one request, the workspace of the login's
 	// account it runs in instead of the one the login is bound to.
-	workspaceHeader  = "SlopCop-Workspace"
-	maxResponseBytes = 32 * 1024 * 1024
-	defaultTimeout   = 10 * time.Minute
+	workspaceHeader = "SlopCop-Workspace"
+	// latestVersionHeader names the newest slopcop release the service
+	// knows of.
+	latestVersionHeader = "SlopCop-Latest-Version"
+	maxResponseBytes    = 32 * 1024 * 1024
+	defaultTimeout      = 10 * time.Minute
 	// checkRunning is the retryable answer to a check that is still running.
 	checkRunning = "check_running"
 	// defaultRetryAfter is the wait when check_running names none, and
@@ -41,6 +44,9 @@ type Client struct {
 	// login stays bound where it was.
 	Workspace string
 	HTTP      *http.Client
+	// LatestVersion, when set, is called with the newest release the service
+	// reports on any response.
+	LatestVersion func(string)
 	// wait sleeps between device-flow polls; nil uses a real timer.
 	wait func(context.Context, time.Duration) error
 }
@@ -238,6 +244,9 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 		return 0, nil, nil, fmt.Errorf("reach %s: %w", c.BaseURL, err)
 	}
 	defer response.Body.Close()
+	if latest := strings.TrimSpace(response.Header.Get(latestVersionHeader)); latest != "" && c.LatestVersion != nil {
+		c.LatestVersion(latest)
+	}
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {

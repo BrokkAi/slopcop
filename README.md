@@ -101,6 +101,25 @@ installs `slopcop.exe` to `%LOCALAPPDATA%\Programs\slopcop`, and adds that
 directory to the user `Path`. `SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and
 `SLOPCOP_NO_MODIFY_PATH` override its defaults.
 
+### Upgrade notice
+
+Every response from the service names its newest release in the
+`SlopCop-Latest-Version` header. When that is newer than the running build,
+the CLI prints one line on stderr, never stdout, so `--format json` and
+`sarif` stay clean:
+
+```text
+slopcop v0.0.9 is available (you have v0.0.7). Upgrade: npm install --global @brokkai/slopcop@latest
+```
+
+The command follows the channel the binary was installed through (npm, npx,
+pip, pipx, or uv), judged by where it lives, and links back here otherwise.
+The notice prints at most once a day; the time of the last one is kept in
+`slopcop/update-notice` next to the config. `dev` builds, `Stop` hook runs, and
+runs with `$SLOPCOP_NO_UPDATE_NOTICE` set to any non-empty value never print
+it. A service that no longer accepts a version answers `client_outdated`
+(HTTP 426), which exits `2`.
+
 ### Go
 
 ```console

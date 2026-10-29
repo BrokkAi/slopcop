@@ -18,6 +18,7 @@ import (
 
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/service"
+	"github.com/BrokkAi/slopcop/internal/update"
 )
 
 func runGit(t *testing.T, dir string, args ...string) string {
@@ -1076,4 +1077,51 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 			t.Errorf("exit = %d, stdout = %v", code, document)
 		}
 	})
+}
+
+func TestAnUpgradeNoticeGoesToStderrOnceADay(t *testing.T) {
+	isolateUserConfig(t)
+	t.Setenv(update.DisableEnv, "")
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	body := `{
+		"status": "clean",
+		"baseCommit": "` + base + `",
+		"applied": true,
+		"summary": {"files": 0, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
+		"findings": [],
+		"incomplete": []
+	}`
+	latest := ""
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if latest != "" {
+			w.Header().Set("SlopCop-Latest-Version", latest)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+
+	run := func() (string, string) {
+		t.Helper()
+		var stdout, stderr bytes.Buffer
+		args := []string{"check", "--root", repo, "--service", server.URL, "--format", "json"}
+		if code := execute(context.Background(), args, "v0.0.7", &stdout, &stderr); code != 0 {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
+		}
+		return stdout.String(), stderr.String()
+	}
+	plain, _ := run()
+
+	latest = "v0.0.9"
+	stdout, stderr := run()
+	if stdout != plain {
+		t.Errorf("stdout changed with a newer release:\n%s\nwant:\n%s", stdout, plain)
+	}
+	if !strings.Contains(stderr, "slopcop v0.0.9 is available (you have v0.0.7). Upgrade: ") {
+		t.Errorf("stderr = %q, want the notice", stderr)
+	}
+	if _, stderr := run(); strings.Contains(stderr, "is available") {
+		t.Errorf("a second run the same day printed the notice again: %q", stderr)
+	}
 }

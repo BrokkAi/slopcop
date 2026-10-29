@@ -19,6 +19,10 @@ type ErrorBody struct {
 // knownErrors fills in the message and remedy of a closed code the service
 // answered without them, so the caller still prints a useful failure.
 var knownErrors = map[string]ErrorBody{
+	"client_outdated": {
+		Message: "This version of slopcop is older than the check service accepts.",
+		Remedy:  "Upgrade slopcop to the latest release, then retry: https://github.com/BrokkAi/slopcop#install",
+	},
 	"finding_not_found": {
 		Message: "SlopCop has no such finding for this login.",
 		Remedy:  "Use a finding id from a check you ran with this login.",

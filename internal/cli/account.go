@@ -21,12 +21,17 @@ const accountTimeout = time.Minute
 
 // accountClient is a client for the login's own account routes, with the
 // service URL it resolved.
-func accountClient(serviceFlag, version string) (*service.Client, error) {
+func accountClient(cmd *cobra.Command, serviceFlag, version string) (*service.Client, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
 	}
-	return service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, accountTimeout)
+	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, accountTimeout)
+	if err != nil {
+		return nil, err
+	}
+	noticeUpdates(client, cmd.ErrOrStderr(), version)
+	return client, nil
 }
 
 // serviceFailure prints a service failure's message and remedy, as a check
@@ -82,7 +87,7 @@ service URL. Run it before a check when it matters which workspace pays.`,
 			if err := checkFormat(format); err != nil {
 				return err
 			}
-			client, err := accountClient(*serviceURL, version)
+			client, err := accountClient(cmd, *serviceURL, version)
 			if err != nil {
 				return err
 			}
@@ -139,7 +144,7 @@ func newWorkspaceListCommand(serviceURL *string, version string) *cobra.Command 
 			if err := checkFormat(format); err != nil {
 				return err
 			}
-			client, err := accountClient(*serviceURL, version)
+			client, err := accountClient(cmd, *serviceURL, version)
 			if err != nil {
 				return err
 			}
@@ -185,7 +190,7 @@ another workspace once, pass --workspace to that command instead.`,
 			if err := checkFormat(format); err != nil {
 				return err
 			}
-			client, err := accountClient(*serviceURL, version)
+			client, err := accountClient(cmd, *serviceURL, version)
 			if err != nil {
 				return err
 			}
@@ -300,7 +305,7 @@ func newRepoListCommand(serviceURL, workspace *string, version string) *cobra.Co
 			if err := checkFormat(format); err != nil {
 				return err
 			}
-			client, err := accountClient(*serviceURL, version)
+			client, err := accountClient(cmd, *serviceURL, version)
 			if err != nil {
 				return err
 			}
@@ -355,7 +360,7 @@ stdin is not a terminal.`,
 			if err := checkFormat(format); err != nil {
 				return err
 			}
-			client, err := accountClient(*serviceURL, version)
+			client, err := accountClient(cmd, *serviceURL, version)
 			if err != nil {
 				return err
 			}

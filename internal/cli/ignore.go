@@ -51,6 +51,7 @@ func runIgnore(cmd *cobra.Command, serviceFlag, version, workspace, findingID st
 	if err != nil {
 		return err
 	}
+	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
 		return serviceFailure(cmd, err)
 	}
