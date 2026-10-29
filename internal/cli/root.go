@@ -143,7 +143,6 @@ type checkOptions struct {
 	showExisting bool
 	timeout      time.Duration
 	workspace    string
-	hook         *hookInput
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {

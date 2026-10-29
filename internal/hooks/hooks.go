@@ -1,4 +1,4 @@
-// Package hooks installs and removes SlopCop's agent harness Stop hooks.
+// Package hooks installs and removes SlopCop's Claude Code Stop hook.
 package hooks
 
 import (
@@ -8,94 +8,85 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 const (
-	claudeCommand = "slopcop hook claude"
-	codexCommand  = "slopcop hook codex"
-	fileMode      = 0o600
+	command  = "slopcop hook claude"
+	fileMode = 0o600
+	// CheckTimeout bounds the hook's wait for a check's result.
+	CheckTimeout = 10 * time.Minute
+	// hookTimeout is the timeout Claude Code gives the hook. It leaves room
+	// beyond CheckTimeout for the local work before the check is sent, so
+	// the hook answers before Claude Code stops waiting for it.
+	hookTimeout = CheckTimeout + 2*time.Minute
 )
 
-// Result describes files changed by an install or removal.
+// Result describes the files an install or removal changed.
 type Result struct {
-	ChangedPaths   []string
-	CodexInstalled bool
+	ChangedPaths []string
 }
 
-// Install registers SlopCop's Stop hook for each detected agent harness.
+// Install registers SlopCop's Stop hook when Claude Code is installed here.
 func Install() (Result, error) {
 	return reconcile(true)
 }
 
-// Remove unregisters SlopCop's Stop hooks without changing Codex feature flags.
+// Remove unregisters SlopCop's Stop hook.
 func Remove() (Result, error) {
 	return reconcile(false)
 }
 
-type fileUpdate struct {
-	path string
-	data []byte
-	mode fs.FileMode
-}
-
 func reconcile(install bool) (Result, error) {
 	var result Result
+	dir, err := claudeConfigDir()
+	if err != nil {
+		return result, err
+	}
+	found, err := harnessDirExists(dir)
+	if err != nil || !found {
+		return result, err
+	}
+	path := filepath.Join(dir, "settings.json")
+	// A settings file linked from elsewhere, as dotfiles often are, is
+	// written where the link points, so the link survives.
+	target, err := resolveLink(path)
+	if err != nil {
+		return result, err
+	}
+	data, mode, exists, err := readExisting(target)
+	if err != nil {
+		return result, err
+	}
+	if !exists && !install {
+		return result, nil
+	}
+	updated, changed, err := reconcileJSON(data, install)
+	if err != nil {
+		return result, fmt.Errorf("reconcile %s: %w", path, err)
+	}
+	if !changed {
+		return result, nil
+	}
+	if err := writeAtomic(target, updated, mode); err != nil {
+		return result, err
+	}
+	result.ChangedPaths = append(result.ChangedPaths, path)
+	return result, nil
+}
+
+// claudeConfigDir is where Claude Code reads its settings: CLAUDE_CONFIG_DIR
+// when it is set, as the attribution package reads it, and ~/.claude
+// otherwise.
+func claudeConfigDir() (string, error) {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return result, fmt.Errorf("locate the user home directory: %w", err)
+		return "", fmt.Errorf("locate the user home directory: %w", err)
 	}
-	claudeDir := filepath.Join(home, ".claude")
-	codexDir := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-	if codexDir == "" {
-		codexDir = filepath.Join(home, ".codex")
-	}
-
-	claudeFound, err := harnessDirExists(claudeDir)
-	if err != nil {
-		return result, err
-	}
-	codexFound, err := harnessDirExists(codexDir)
-	if err != nil {
-		return result, err
-	}
-
-	var updates []fileUpdate
-	if claudeFound {
-		update, err := prepareJSON(filepath.Join(claudeDir, "settings.json"), claudeCommand, install)
-		if err != nil {
-			return result, err
-		}
-		if update != nil {
-			updates = append(updates, *update)
-		}
-	}
-	if codexFound {
-		update, err := prepareJSON(filepath.Join(codexDir, "hooks.json"), codexCommand, install)
-		if err != nil {
-			return result, err
-		}
-		if update != nil {
-			updates = append(updates, *update)
-		}
-		if install {
-			update, err = prepareCodexConfig(filepath.Join(codexDir, "config.toml"))
-			if err != nil {
-				return result, err
-			}
-			if update != nil {
-				updates = append(updates, *update)
-			}
-		}
-	}
-
-	for _, update := range updates {
-		if err := writeAtomic(update.path, update.data, update.mode); err != nil {
-			return result, err
-		}
-		result.ChangedPaths = append(result.ChangedPaths, update.path)
-	}
-	result.CodexInstalled = install && codexFound
-	return result, nil
+	return filepath.Join(home, ".claude"), nil
 }
 
 func harnessDirExists(path string) (bool, error) {
@@ -107,6 +98,23 @@ func harnessDirExists(path string) (bool, error) {
 		return false, fmt.Errorf("stat %s: %w", path, err)
 	}
 	return info.IsDir(), nil
+}
+
+// resolveLink follows symbolic links at path to the file they name. A path
+// that does not exist yet is its own target; a link to nowhere is refused
+// rather than replaced.
+func resolveLink(path string) (string, error) {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err == nil {
+		return resolved, nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return "", fmt.Errorf("resolve %s: %w", path, err)
+	}
+	if _, lstatErr := os.Lstat(path); lstatErr == nil {
+		return "", fmt.Errorf("%s is a symbolic link to a file that does not exist", path)
+	}
+	return path, nil
 }
 
 func readExisting(path string) ([]byte, fs.FileMode, bool, error) {

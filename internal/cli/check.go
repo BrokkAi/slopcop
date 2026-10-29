@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/url"
 	"os"
@@ -60,12 +61,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
+	prepared.request.Attribution = attribution.Detect(prepared.repoRoot)
 	client, request := prepared.client, prepared.request
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
 		return checkFailure(cmd, err)
-	}
-	if opts.hook != nil && duplicateHookCheck(prepared, opts.hook) {
-		return nil
 	}
 	if opts.verbose {
 		fmt.Fprintf(
@@ -87,17 +86,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	// same running check.
 	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
 	defer cancel()
-	response, err := client.Check(ctx, request)
-	// A service from before attribution rejects the unknown field as
-	// invalid_change; the check itself must still run.
-	var rejected *service.Error
-	if request.Attribution != nil && errors.As(err, &rejected) && rejected.Body.Code == invalidChange {
-		if opts.verbose {
-			fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: the service refused the attribution; sending the check without it")
-		}
-		request.Attribution = nil
-		response, err = client.Check(ctx, request)
+	var verbose io.Writer
+	if opts.verbose {
+		verbose = cmd.ErrOrStderr()
 	}
+	response, err := sendCheck(ctx, client, request, verbose)
+	var rejected *service.Error
 	if errors.As(err, &rejected) && rejected.Body.Code == repositoryAddUnconfirmed {
 		response, err = addRepositoryOnConfirm(cmd, client, request, rejected)
 	}
@@ -126,7 +120,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			"slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n",
 			response.Status)
 	} else {
-		rememberCompletedCheck(prepared, request.Attribution, opts.hook)
+		rememberCheck(prepared, response)
 	}
 	return silentExit{response.ExitCode()}
 }
@@ -178,11 +172,32 @@ func repositoryName(repoURL string) string {
 	return strings.TrimSuffix(strings.Trim(parsed.Path, "/"), ".git")
 }
 
+// sendCheck sends a check and waits for its result. A service from before
+// attribution rejects the unknown field as invalid_change; the check itself
+// must still run, so it is sent again without it, and verbose, when set,
+// hears why.
+func sendCheck(ctx context.Context, client *service.Client, request service.Request, verbose io.Writer) (service.Response, error) {
+	response, err := client.Check(ctx, request)
+	var rejected *service.Error
+	if request.Attribution != nil && errors.As(err, &rejected) && rejected.Body.Code == invalidChange {
+		if verbose != nil {
+			fmt.Fprintln(verbose, "slopcop: the service refused the attribution; sending the check without it")
+		}
+		request.Attribution = nil
+		response, err = client.Check(ctx, request)
+	}
+	return response, err
+}
+
 // preparedCheck is a check request ready to send, and the client to send it.
+// The caller adds the attribution.
 type preparedCheck struct {
-	client      *service.Client
-	request     service.Request
-	repoRoot    string
+	client   *service.Client
+	request  service.Request
+	repoRoot string
+	// fingerprint names the check without its attribution, in the
+	// workspace it is asked to run in, so the Stop hook can tell a check it
+	// already has the result of.
 	fingerprint string
 	// files and bytes describe the patch, for --verbose.
 	files, bytes int
@@ -236,16 +251,11 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
-	if opts.hook != nil {
-		request.Attribution = attribution.DetectHook(repoRoot, opts.hook.Harness, opts.hook.SessionID)
-	} else {
-		request.Attribution = attribution.Detect(repoRoot)
-	}
 	return preparedCheck{
 		client:      client,
 		request:     request,
 		repoRoot:    repoRoot,
-		fingerprint: fingerprintCheck(target, token, request),
+		fingerprint: fingerprintCheck(target, token, resolveWorkspaceName(opts.workspace), request),
 		files:       change.Files,
 		bytes:       len(change.Patch),
 	}, nil

@@ -9,20 +9,16 @@ import (
 	"testing"
 )
 
-func isolateHomes(t *testing.T) (home, codex string) {
+func isolateHome(t *testing.T) string {
 	t.Helper()
-	home = t.TempDir()
-	codex = filepath.Join(home, ".codex")
+	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("CODEX_HOME", codex)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.MkdirAll(codex, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	return home, codex
+	return home
 }
 
 func writeConfig(t *testing.T, path, content string) {
@@ -44,56 +40,36 @@ func readConfig(t *testing.T, path string) []byte {
 	return data
 }
 
-func TestInstallIsIdempotentAndRemoveLeavesFeatureSetting(t *testing.T) {
-	home, codex := isolateHomes(t)
-	claudePath := filepath.Join(home, ".claude", "settings.json")
-	codexPath := filepath.Join(codex, "hooks.json")
-	configPath := filepath.Join(codex, "config.toml")
+func TestInstallIsIdempotentAndRemoveUndoesIt(t *testing.T) {
+	home := isolateHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
 
 	result, err := Install()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.ChangedPaths) != 3 || !result.CodexInstalled {
+	if len(result.ChangedPaths) != 1 || result.ChangedPaths[0] != path {
 		t.Fatalf("result = %+v", result)
 	}
-	for _, path := range []string{claudePath, codexPath} {
-		data := readConfig(t, path)
-		if bytes.Count(data, []byte(`"command": "slopcop hook`)) != 1 || !bytes.Contains(data, []byte(`"timeout": 660`)) {
-			t.Fatalf("%s =\n%s", path, data)
-		}
-	}
-	if got := string(readConfig(t, configPath)); got != "[features]\nhooks = true\n" {
-		t.Fatalf("config.toml = %q", got)
+	data := readConfig(t, path)
+	if bytes.Count(data, []byte(`"command": "slopcop hook claude"`)) != 1 || !bytes.Contains(data, []byte(`"timeout": 720`)) {
+		t.Fatalf("settings.json =\n%s", data)
 	}
 
-	beforeClaude := readConfig(t, claudePath)
-	beforeCodex := readConfig(t, codexPath)
 	result, err = Install()
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(result.ChangedPaths) != 0 {
+		t.Fatalf("second install = %+v, %v", result, err)
 	}
-	if len(result.ChangedPaths) != 0 {
-		t.Fatalf("second install changed %v", result.ChangedPaths)
-	}
-	if !bytes.Equal(beforeClaude, readConfig(t, claudePath)) || !bytes.Equal(beforeCodex, readConfig(t, codexPath)) {
-		t.Fatal("second install rewrote a settings file")
+	if !bytes.Equal(data, readConfig(t, path)) {
+		t.Fatal("second install rewrote settings.json")
 	}
 
 	result, err = Remove()
-	if err != nil {
-		t.Fatal(err)
+	if err != nil || len(result.ChangedPaths) != 1 {
+		t.Fatalf("remove = %+v, %v", result, err)
 	}
-	if len(result.ChangedPaths) != 2 || result.CodexInstalled {
-		t.Fatalf("remove result = %+v", result)
-	}
-	for _, path := range []string{claudePath, codexPath} {
-		if bytes.Contains(readConfig(t, path), []byte("slopcop hook")) {
-			t.Fatalf("%s still contains SlopCop", path)
-		}
-	}
-	if got := string(readConfig(t, configPath)); got != "[features]\nhooks = true\n" {
-		t.Fatalf("remove changed config.toml = %q", got)
+	if got := string(readConfig(t, path)); got != "{}\n" {
+		t.Fatalf("remove left %q", got)
 	}
 	result, err = Remove()
 	if err != nil || len(result.ChangedPaths) != 0 {
@@ -102,9 +78,9 @@ func TestInstallIsIdempotentAndRemoveLeavesFeatureSetting(t *testing.T) {
 }
 
 func TestInstallAndRemovePreserveUserConfiguration(t *testing.T) {
-	home, codex := isolateHomes(t)
-	claudePath := filepath.Join(home, ".claude", "settings.json")
-	writeConfig(t, claudePath, `{
+	home := isolateHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	writeConfig(t, path, `{
   "theme": "dark",
   "hooks": {
     "Stop": [
@@ -124,7 +100,7 @@ func TestInstallAndRemovePreserveUserConfiguration(t *testing.T) {
 	if _, err := Install(); err != nil {
 		t.Fatal(err)
 	}
-	installed := readConfig(t, claudePath)
+	installed := readConfig(t, path)
 	if bytes.Count(installed, []byte(`"command": "slopcop hook claude"`)) != 2 {
 		t.Fatalf("Stop dedup or unrelated event preservation failed:\n%s", installed)
 	}
@@ -140,7 +116,7 @@ func TestInstallAndRemovePreserveUserConfiguration(t *testing.T) {
 	if _, err := Remove(); err != nil {
 		t.Fatal(err)
 	}
-	removed := readConfig(t, claudePath)
+	removed := readConfig(t, path)
 	if bytes.Count(removed, []byte(`"command": "slopcop hook claude"`)) != 1 {
 		t.Fatalf("remove did not limit itself to Stop:\n%s", removed)
 	}
@@ -149,23 +125,54 @@ func TestInstallAndRemovePreserveUserConfiguration(t *testing.T) {
 			t.Errorf("removed settings lack %s", want)
 		}
 	}
+}
 
-	writeConfig(t, filepath.Join(codex, "hooks.json"), `{"description":"keep","hooks":{"Stop":[{"matcher":"mine","hooks":[{"type":"command","command":"mine"}]}]}}`)
+func TestInstallKeepsKeyOrderAndText(t *testing.T) {
+	home := isolateHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	writeConfig(t, path, `{"zeta": 1, "statusLine": {"command": "a && b > c <d>"}, "alpha": [true, null, 1.50]}`)
+
 	if _, err := Install(); err != nil {
 		t.Fatal(err)
 	}
-	codexSettings := readConfig(t, filepath.Join(codex, "hooks.json"))
-	for _, want := range []string{`"description": "keep"`, `"matcher": "mine"`, `"command": "mine"`, `"command": "slopcop hook codex"`} {
-		if !bytes.Contains(codexSettings, []byte(want)) {
-			t.Errorf("Codex settings lack %s", want)
+	if _, err := Remove(); err != nil {
+		t.Fatal(err)
+	}
+	want := `{
+  "zeta": 1,
+  "statusLine": {
+    "command": "a && b > c <d>"
+  },
+  "alpha": [
+    true,
+    null,
+    1.50
+  ]
+}
+`
+	if got := string(readConfig(t, path)); got != want {
+		t.Fatalf("settings.json =\n%s\nwant\n%s", got, want)
+	}
+}
+
+func TestNullOrEmptySettingsAreAnEmptyObject(t *testing.T) {
+	home := isolateHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	for _, content := range []string{"null", "", "  \n"} {
+		writeConfig(t, path, content)
+		if _, err := Install(); err != nil {
+			t.Fatalf("Install of %q: %v", content, err)
+		}
+		if !bytes.Contains(readConfig(t, path), []byte(`"command": "slopcop hook claude"`)) {
+			t.Fatalf("Install of %q did not add the hook", content)
 		}
 	}
 }
 
-func TestMalformedJSONIsNotOverwritten(t *testing.T) {
-	home, _ := isolateHomes(t)
-	for _, content := range []string{`{"hooks":`, `{"hooks":"wrong"}`, `{"hooks":{"Stop":[{"hooks":"wrong"}]}}`} {
-		path := filepath.Join(home, ".claude", "settings.json")
+func TestMalformedSettingsAreNotOverwritten(t *testing.T) {
+	home := isolateHome(t)
+	path := filepath.Join(home, ".claude", "settings.json")
+	for _, content := range []string{`{"hooks":`, `{"hooks":"wrong"}`, `{"hooks":{"Stop":[{"hooks":"wrong"}]}}`, `[]`, `{} {}`} {
 		writeConfig(t, path, content)
 		if _, err := Install(); err == nil {
 			t.Fatalf("Install accepted %s", content)
@@ -176,39 +183,51 @@ func TestMalformedJSONIsNotOverwritten(t *testing.T) {
 	}
 }
 
-func TestInstallUsesCustomCodexHomeAndPreservesMode(t *testing.T) {
-	home, _ := isolateHomes(t)
-	custom := filepath.Join(home, "custom-codex")
-	t.Setenv("CODEX_HOME", custom)
+func TestInstallWritesThroughASymbolicLink(t *testing.T) {
+	home := isolateHome(t)
+	dotfiles := filepath.Join(home, "dotfiles", "settings.json")
+	writeConfig(t, dotfiles, `{"theme": "dark"}`)
+	link := filepath.Join(home, ".claude", "settings.json")
+	if err := os.Symlink(dotfiles, link); err != nil {
+		t.Skipf("symbolic links are unavailable: %v", err)
+	}
+
+	if _, err := Install(); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(link)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("install replaced the symbolic link with a file")
+	}
+	if !bytes.Contains(readConfig(t, dotfiles), []byte("slopcop hook claude")) {
+		t.Fatal("install did not write the linked file")
+	}
+}
+
+func TestInstallUsesClaudeConfigDirAndPreservesMode(t *testing.T) {
+	home := isolateHome(t)
+	custom := filepath.Join(home, "custom-claude")
+	t.Setenv("CLAUDE_CONFIG_DIR", custom)
 	if err := os.MkdirAll(custom, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.RemoveAll(filepath.Join(home, ".claude")); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.RemoveAll(filepath.Join(home, ".codex")); err != nil {
+	path := filepath.Join(custom, "settings.json")
+	writeConfig(t, path, `{"custom":true}`)
+	if err := os.Chmod(path, 0o640); err != nil {
 		t.Fatal(err)
 	}
 
 	if _, err := Install(); err != nil {
 		t.Fatal(err)
 	}
-	path := filepath.Join(custom, "hooks.json")
-	if _, err := os.Stat(path); err != nil {
-		t.Fatal(err)
+	if !bytes.Contains(readConfig(t, path), []byte("slopcop hook claude")) {
+		t.Fatal("install did not use CLAUDE_CONFIG_DIR")
 	}
-	if _, err := os.Stat(filepath.Join(home, ".codex")); !os.IsNotExist(err) {
-		t.Fatalf("default Codex home was created: %v", err)
-	}
-	if err := os.Chmod(path, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	writeConfig(t, path, `{"custom":true}`)
-	if err := os.Chmod(path, 0o640); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := Install(); err != nil {
-		t.Fatal(err)
+	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
+		t.Fatalf("install wrote ~/.claude/settings.json: %v", err)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -220,60 +239,13 @@ func TestInstallUsesCustomCodexHomeAndPreservesMode(t *testing.T) {
 	}
 }
 
-func TestCodexConfigReconciliation(t *testing.T) {
-	for _, tc := range []struct {
-		name, input, want string
-		changed           bool
-	}{
-		{name: "empty", input: "", want: "[features]\nhooks = true\n", changed: true},
-		{name: "false", input: "[features]\nhooks = false # keep this comment\n", want: "[features]\nhooks = true # keep this comment\n", changed: true},
-		{name: "already true", input: "[features]\nhooks = true\n", changed: false},
-		{name: "existing features", input: "[features]\nmodel = \"x\"\n", want: "[features]\nhooks = true\nmodel = \"x\"\n", changed: true},
-		{name: "other settings", input: "model = \"x\"\n\n[features]\n\n[ui]\ncolor = true\n", want: "model = \"x\"\n\n[features]\nhooks = true\n\n[ui]\ncolor = true\n", changed: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, changed, err := reconcileCodexConfig([]byte(tc.input))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if changed != tc.changed || (tc.want != "" && string(got) != tc.want) {
-				t.Fatalf("changed = %v, got = %q, want changed %v and %q", changed, got, tc.changed, tc.want)
-			}
-			_, again, err := reconcileCodexConfig(got)
-			if err != nil || again {
-				t.Fatalf("second reconciliation changed %q: %v", got, err)
-			}
-		})
-	}
-}
-
-func TestAmbiguousCodexConfigIsNotOverwritten(t *testing.T) {
-	_, codex := isolateHomes(t)
-	if err := os.RemoveAll(filepath.Dir(codex)); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(codex, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	for _, content := range []string{"[features\nhooks = false\n", "[features]\nhooks = false\nhooks = true\n", "[features]\nhooks = \"yes\"\n"} {
-		path := filepath.Join(codex, "config.toml")
-		writeConfig(t, path, content)
-		if _, err := Install(); err == nil {
-			t.Fatalf("Install accepted %q", content)
-		}
-		if got := string(readConfig(t, path)); got != content {
-			t.Fatalf("file changed from %q to %q", content, got)
-		}
-	}
-}
-
 func TestNoHarnessInstallsNothing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("CODEX_HOME", filepath.Join(home, "missing-codex"))
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	result, err := Install()
-	if err != nil || len(result.ChangedPaths) != 0 || result.CodexInstalled {
+	if err != nil || len(result.ChangedPaths) != 0 {
 		t.Fatalf("result = %+v, err = %v", result, err)
 	}
 	if entries, err := os.ReadDir(home); err != nil || len(entries) != 0 {
@@ -282,9 +254,7 @@ func TestNoHarnessInstallsNothing(t *testing.T) {
 }
 
 func TestCommandUsesNoShellSpecificSyntax(t *testing.T) {
-	for _, command := range []string{claudeCommand, codexCommand} {
-		if strings.ContainsAny(command, `"$\\`) {
-			t.Fatalf("command %q is not a stable simple command", command)
-		}
+	if strings.ContainsAny(command, `"$\|&;`) {
+		t.Fatalf("command %q is not a stable simple command", command)
 	}
 }

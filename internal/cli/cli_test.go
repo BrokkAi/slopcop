@@ -67,6 +67,7 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("LocalAppData", filepath.Join(home, "AppData", "Local"))
 	t.Setenv("SLOPCOP_TOKEN", "")
 	t.Setenv("SLOPCOP_SERVICE", "")
+	t.Setenv("SLOPCOP_WORKSPACE", "")
 	t.Setenv("CODEX_HOME", "")
 	// A test run inside an agent must not attribute its checks to that
 	// agent's session.

@@ -10,25 +10,21 @@ import (
 func TestInitInstallsAndRemovesHooksWithoutRemovingTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
-	makeHarness(t, filepath.Join(home, ".codex"))
 
 	code, stdout, stderr := runCLI(t, "init")
 	if code != 0 {
 		t.Fatalf("init exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "/hooks") {
-		t.Fatalf("init did not explain Codex trust: %q", stdout)
-	}
 	settings := filepath.Join(home, ".claude", "settings.json")
-	codexHooks := filepath.Join(home, ".codex", "hooks.json")
-	for _, path := range []string{settings, codexHooks} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(string(data), "slopcop hook") {
-			t.Fatalf("%s = %s", path, data)
-		}
+	if !strings.Contains(stdout, "installed the automatic check hook in "+settings) {
+		t.Fatalf("init stdout = %q", stdout)
+	}
+	data, err := os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "slopcop hook claude") {
+		t.Fatalf("%s = %s", settings, data)
 	}
 
 	code, stdout, stderr = runCLI(t, "init", "--remove-hooks")
@@ -38,26 +34,23 @@ func TestInitInstallsAndRemovesHooksWithoutRemovingTheSkill(t *testing.T) {
 	if !strings.Contains(stdout, "removed") {
 		t.Fatalf("remove stdout = %q", stdout)
 	}
-	for _, path := range []string{settings, codexHooks} {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(data), "slopcop hook") {
-			t.Fatalf("%s still holds the hook: %s", path, data)
-		}
+	data, err = os.ReadFile(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "slopcop hook") {
+		t.Fatalf("%s still holds the hook: %s", settings, data)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".claude", "skills", "slopcop", "SKILL.md")); err != nil {
 		t.Fatalf("remove removed the skill: %v", err)
 	}
 
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
-	calls := 0
-	server := serveCheck(t, repo, "clean", &calls)
+	server := (&fakeService{}).start(t, repo)
 	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 0 {
 		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
 	}
-	data, err := os.ReadFile(settings)
+	data, err = os.ReadFile(settings)
 	if err != nil {
 		t.Fatal(err)
 	}

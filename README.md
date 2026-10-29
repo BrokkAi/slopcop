@@ -113,7 +113,7 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop, plus automatic check hooks for Claude Code and Codex. `slopcop init`
+slopcop, plus an automatic check hook for Claude Code. `slopcop init`
 installs the skill into each well-known skills directory whose harness is
 present, and names what it did:
 
@@ -130,25 +130,29 @@ so an agent follows the instructions of the slopcop version it runs; local
 edits to an installed skill do not survive them. `slopcop init --no-skill`
 skips the install and any update of it.
 
-Init also registers a synchronous `Stop` hook in `~/.claude/settings.json` for
-Claude Code and `$CODEX_HOME/hooks.json` for Codex. It enables hooks in Codex's
-`config.toml` and leaves unrelated settings and hooks alone. Codex asks for a
-new hook to be trusted before it runs: review SlopCop's hook with `/hooks`.
-Init never writes Codex's trust state.
+Init also adds a `Stop` hook to Claude Code's `settings.json`, under
+`CLAUDE_CONFIG_DIR` or `~/.claude`, and leaves everything else in the file
+as it was. When the agent stops, the hook checks the working tree through the
+same hosted API, but only when all of these hold:
 
-At the end of an agent turn, the hook checks the current working tree through
-the same hosted API. New findings are returned to the agent so it can fix them;
-a changed tree is checked again. An identical check already completed in that
-harness session, including an explicit check, is not sent again by the hook.
-Authentication, service, and incomplete-analysis failures never trap the agent
-in a continuation loop. The hook uses the event's working directory and session
-ID; it does not send the conversation. Session-record attribution remains
-limited to the fields described under "What is sent".
+- the session wrote files in the repository with its edit tools;
+- slopcop is signed in, and the workspace a check would use
+  (`$SLOPCOP_WORKSPACE`, or the login's) has the repository active
+  (`slopcop repo list`), so nothing is sent from other repositories;
+- the tree differs from the last check in the session, including a check the
+  agent ran by hand.
+
+New findings in files the session wrote are handed to the agent to fix, once
+for a given tree; if it stops again without fixing them, it is let go and you
+are told what remains. New findings in other files on the branch are only
+mentioned. The hook never keeps the agent going on its own failures: a refused
+login or similar is reported once, and the hook stays quiet for the rest of the
+session.
 
 Use `slopcop init --no-hooks` to install only the skill, or
-`slopcop init --remove-hooks` to remove SlopCop's hooks while preserving all
-other hook configuration. Ordinary checks do not reinstall removed hooks. The
-skill remains available for harnesses without an installed and trusted hook.
+`slopcop init --remove-hooks` to remove SlopCop's hook and nothing else.
+Ordinary checks do not reinstall a removed hook. The skill remains the way to
+check from Codex and other harnesses.
 
 ## Sign in
 
@@ -469,7 +473,7 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
-| `internal/hooks` | Claude Code and Codex hook installation and removal |
+| `internal/hooks` | Claude Code hook installation and removal |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |

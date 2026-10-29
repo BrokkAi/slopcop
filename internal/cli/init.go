@@ -235,9 +235,10 @@ func newInitCommand() *cobra.Command {
 	var noSkill, noHooks, removeHooks bool
 	command := &cobra.Command{
 		Use:   "init",
-		Short: "Install the bundled agent skill and automatic check hooks",
-		Long: `Install the agent skill and automatic check hooks that ship inside this
-binary, so a coding agent knows how to run slopcop and checks each completed turn.
+		Short: "Install the bundled agent skill and the automatic check hook",
+		Long: `Install the agent skill that ships inside this binary, so a coding agent
+knows how to run slopcop, and a Claude Code hook that checks what a session
+wrote when the agent stops.
 
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
@@ -246,9 +247,9 @@ there is left alone. Login and every check also install the skill, and
 rewrite one that differs from the bundled skill. Pass --no-skill to leave the
 skill install and any update of it undone.
 
-Stop hooks go into ~/.claude/settings.json and $CODEX_HOME/hooks.json. Codex
-asks you to trust a new hook with /hooks. Pass --no-hooks to skip hook setup,
-or --remove-hooks to remove only SlopCop's hook entries.`,
+A Claude Code Stop hook goes into settings.json under CLAUDE_CONFIG_DIR or
+~/.claude. Pass --no-hooks to skip it, or --remove-hooks to remove only
+SlopCop's hook.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stdout := cmd.OutOrStdout()
@@ -261,7 +262,7 @@ or --remove-hooks to remove only SlopCop's hook entries.`,
 					fmt.Fprintf(stdout, "slopcop: removed the automatic check hook from %s\n", path)
 				}
 				if len(result.ChangedPaths) == 0 {
-					fmt.Fprintln(stdout, "slopcop: no automatic check hooks found, nothing to remove")
+					fmt.Fprintln(stdout, "slopcop: no automatic check hook found, nothing to remove")
 				}
 				return nil
 			}
@@ -285,7 +286,7 @@ or --remove-hooks to remove only SlopCop's hook entries.`,
 			}
 
 			if noHooks {
-				fmt.Fprintln(stdout, "slopcop: left the automatic check hooks alone (--no-hooks)")
+				fmt.Fprintln(stdout, "slopcop: left the automatic check hook alone (--no-hooks)")
 				return nil
 			}
 			hookResult, err := agenthooks.Install()
@@ -293,17 +294,14 @@ or --remove-hooks to remove only SlopCop's hook entries.`,
 				return err
 			}
 			for _, path := range hookResult.ChangedPaths {
-				fmt.Fprintf(stdout, "slopcop: installed or updated the automatic check hook in %s\n", path)
-			}
-			if hookResult.CodexInstalled {
-				fmt.Fprintln(stdout, "slopcop: review and trust the Codex hook with /hooks before it can run")
+				fmt.Fprintf(stdout, "slopcop: installed the automatic check hook in %s\n", path)
 			}
 			return nil
 		},
 	}
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")
-	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install or update the automatic check hooks")
-	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove SlopCop's automatic check hooks")
+	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install or update the automatic check hook")
+	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove SlopCop's automatic check hook")
 	command.MarkFlagsMutuallyExclusive("no-hooks", "remove-hooks")
 	return command
 }
