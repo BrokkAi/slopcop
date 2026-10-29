@@ -37,6 +37,7 @@ whose harness is installed here, as every check does.`,
 				if err != nil {
 					return err
 				}
+				noticeUpdates(client, cmd.ErrOrStderr(), version)
 				start, err := client.StartDevice(cmd.Context())
 				if err != nil {
 					return remedyError(err)

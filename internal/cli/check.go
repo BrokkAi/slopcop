@@ -65,6 +65,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
+	// A hook run leaves this out: its stderr is not a person's terminal.
+	noticeUpdates(prepared.client, cmd.ErrOrStderr(), version)
 	prepared.request.Attribution = attribution.Detect(prepared.repoRoot)
 	client, request := prepared.client, prepared.request
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
