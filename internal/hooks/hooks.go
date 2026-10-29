@@ -14,8 +14,15 @@ import (
 )
 
 const (
-	command  = "slopcop hook claude"
-	fileMode = 0o600
+	// command runs the hook. Claude Code takes exit 2 from a Stop hook as
+	// an order to keep the agent going, and a slopcop that cannot run the
+	// hook, such as one from before it, exits 2; || true turns any failure
+	// into one that lets the agent stop.
+	command = "slopcop hook claude || true"
+	// legacyCommand is the hook as first installed, without that guard.
+	// Install and removal treat it as SlopCop's too.
+	legacyCommand = "slopcop hook claude"
+	fileMode      = 0o600
 	// CheckTimeout bounds the hook's wait for a check's result.
 	CheckTimeout = 10 * time.Minute
 	// hookTimeout is the timeout Claude Code gives the hook. It leaves room
@@ -82,9 +89,9 @@ func reconcile(install bool) (Result, error) {
 }
 
 // CommandProblem says why the slopcop Claude Code finds on PATH could not
-// run the hook, or nothing when it can. A slopcop from before the hook exits
-// 2 on it, which Claude Code takes from a Stop hook as an order to keep the
-// agent going, so the hook is asked to answer as Claude Code would ask it.
+// run the hook, or nothing when it can, by asking it to answer as Claude Code
+// would. The command's guard keeps a failure from holding the agent, but the
+// failure would leave every check undone without a word.
 func CommandProblem() string {
 	found, err := exec.LookPath("slopcop")
 	if err != nil {
@@ -95,7 +102,7 @@ func CommandProblem() string {
 	// Without "claude" the hook reads nothing and answers {}.
 	out, err := exec.CommandContext(ctx, found, "hook").Output()
 	if err != nil || strings.TrimSpace(string(out)) != "{}" {
-		return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the hook, and each time it fails Claude Code would keep the agent going", found)
+		return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the hook, so no automatic check will run", found)
 	}
 	return ""
 }

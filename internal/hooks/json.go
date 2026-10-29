@@ -60,7 +60,7 @@ func reconcileJSON(data []byte, install bool) ([]byte, bool, error) {
 			if !ok {
 				return nil, false, fmt.Errorf("every hook handler must be an object")
 			}
-			if value, _ := handler.get("command"); value != command {
+			if value, _ := handler.get("command"); value != command && value != legacyCommand {
 				kept = append(kept, handler)
 				continue
 			}

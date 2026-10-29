@@ -3,6 +3,7 @@ package hooks
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -52,7 +53,7 @@ func TestInstallIsIdempotentAndRemoveUndoesIt(t *testing.T) {
 		t.Fatalf("result = %+v", result)
 	}
 	data := readConfig(t, path)
-	if bytes.Count(data, []byte(`"command": "slopcop hook claude"`)) != 1 || !bytes.Contains(data, []byte(`"timeout": 720`)) {
+	if bytes.Count(data, []byte(`"command": "slopcop hook claude || true"`)) != 1 || !bytes.Contains(data, []byte(`"timeout": 720`)) {
 		t.Fatalf("settings.json =\n%s", data)
 	}
 
@@ -101,7 +102,10 @@ func TestInstallAndRemovePreserveUserConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	installed := readConfig(t, path)
-	if bytes.Count(installed, []byte(`"command": "slopcop hook claude"`)) != 2 {
+	// The legacy handlers under Stop become one guarded handler; the one
+	// under PostToolUse is not SlopCop's Stop hook and stays.
+	if bytes.Count(installed, []byte(`"command": "slopcop hook claude || true"`)) != 1 ||
+		bytes.Count(installed, []byte(`"command": "slopcop hook claude"`)) != 1 {
 		t.Fatalf("Stop dedup or unrelated event preservation failed:\n%s", installed)
 	}
 	for _, want := range []string{`"theme": "dark"`, `"command": "my-stop"`, `"matcher": "mine"`, `"keep": 12345678901234567890`} {
@@ -117,7 +121,7 @@ func TestInstallAndRemovePreserveUserConfiguration(t *testing.T) {
 		t.Fatal(err)
 	}
 	removed := readConfig(t, path)
-	if bytes.Count(removed, []byte(`"command": "slopcop hook claude"`)) != 1 {
+	if bytes.Contains(removed, []byte(`"slopcop hook claude || true"`)) || bytes.Count(removed, []byte(`"command": "slopcop hook claude"`)) != 1 {
 		t.Fatalf("remove did not limit itself to Stop:\n%s", removed)
 	}
 	for _, want := range []string{`"theme": "dark"`, `"command": "my-stop"`, `"PostToolUse"`, `"keep": 12345678901234567890`} {
@@ -163,7 +167,7 @@ func TestNullOrEmptySettingsAreAnEmptyObject(t *testing.T) {
 		if _, err := Install(); err != nil {
 			t.Fatalf("Install of %q: %v", content, err)
 		}
-		if !bytes.Contains(readConfig(t, path), []byte(`"command": "slopcop hook claude"`)) {
+		if !bytes.Contains(readConfig(t, path), []byte(`"command": "slopcop hook claude || true"`)) {
 			t.Fatalf("Install of %q did not add the hook", content)
 		}
 	}
@@ -253,9 +257,19 @@ func TestNoHarnessInstallsNothing(t *testing.T) {
 	}
 }
 
-func TestCommandUsesNoShellSpecificSyntax(t *testing.T) {
-	if strings.ContainsAny(command, `"$\|&;`) {
-		t.Fatalf("command %q is not a stable simple command", command)
+func TestCommandNeverExitsTwo(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake slopcop is a shell script")
+	}
+	bin := t.TempDir()
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// A slopcop from before the hook exits 2 on it.
+	script := "#!/bin/sh\necho 'unknown command \"hook\"' >&2\nexit 2\n"
+	if err := os.WriteFile(filepath.Join(bin, "slopcop"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("sh", "-c", command).CombinedOutput(); err != nil {
+		t.Fatalf("%q failed: %v\n%s", command, err, out)
 	}
 }
 

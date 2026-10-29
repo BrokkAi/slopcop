@@ -149,8 +149,9 @@ back. New findings in other files on the branch are only mentioned. The hook
 never keeps the agent going on its own failures: a refusal the service calls
 final, such as an expired login, is reported once and the hook stays quiet for
 the rest of the session, until a check by hand completes; a brief outage is
-only reported. Init warns when the `slopcop` first on `PATH` cannot run the
-hook, as an older one cannot.
+only reported. The hook runs as `slopcop hook claude || true`, so even a
+`slopcop` that cannot run it, such as an older one first on `PATH`, lets the
+agent stop; init warns when that is the case, because no check would run.
 
 Use `slopcop init --no-hooks` to install only the skill, or
 `slopcop init --remove-hooks` to remove SlopCop's hook and nothing else.
