@@ -68,7 +68,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	prepared.request.Attribution = attribution.Detect(prepared.repoRoot)
 	client, request := prepared.client, prepared.request
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
-		return checkFailure(cmd, err)
+		return checkFailure(cmd, err, format)
 	}
 	if opts.verbose {
 		fmt.Fprintf(
@@ -112,7 +112,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			}
 			return silentExit{service.ExitPending}
 		}
-		return checkFailure(cmd, err)
+		return checkFailure(cmd, err, format)
 	}
 	options := report.Options{ShowExisting: opts.showExisting}
 	if err := report.Write(stdout, response, format, options); err != nil {
@@ -129,13 +129,24 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	return silentExit{response.ExitCode()}
 }
 
-// checkFailure prints a service failure's message and remedy and exits 2,
-// the exit of a check that did not complete. Any other error is returned as
-// is.
-func checkFailure(cmd *cobra.Command, err error) error {
+// checkFailure prints a service failure's code, message, and remedy on
+// stderr, writes the failure report for machine formats on stdout, and exits
+// 4 when only a person can clear it, otherwise 2, the exit of a check that
+// did not complete. Any other error is returned as is.
+func checkFailure(cmd *cobra.Command, err error, format string) error {
 	var serviceError *service.Error
 	if errors.As(err, &serviceError) {
-		fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
+		text := remedyText(serviceError)
+		if code := serviceError.Body.Code; code != "" {
+			text = "slopcop: " + code + ": " + text
+		}
+		fmt.Fprintln(cmd.ErrOrStderr(), text)
+		if err := report.WriteFailure(cmd.OutOrStdout(), serviceError, format); err != nil {
+			return err
+		}
+		if serviceError.NeedsPerson() {
+			return silentExit{service.ExitNeedsPerson}
+		}
 		return silentExit{service.ExitIncomplete}
 	}
 	return err

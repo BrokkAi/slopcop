@@ -361,3 +361,20 @@ func TestCheckReadsTheFindingID(t *testing.T) {
 		t.Errorf("findings = %+v", response.Findings)
 	}
 }
+
+func TestOnlyPersonCodesNeedAPerson(t *testing.T) {
+	for code, want := range map[string]bool{
+		"repository_add_unconfirmed": true,
+		"insufficient_credits":       true,
+		"auth_expired":               true,
+		"base_not_found":             false,
+		"payload_too_large":          false,
+		"service_unavailable":        false,
+		"":                           false,
+	} {
+		failure := &Error{Body: ErrorBody{Code: code}}
+		if got := failure.NeedsPerson(); got != want {
+			t.Errorf("NeedsPerson(%q) = %v, want %v", code, got, want)
+		}
+	}
+}

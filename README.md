@@ -230,7 +230,8 @@ it (it already has an active repository and is charged), the service refuses
 the check with `repository_add_unconfirmed` until a person confirms: at a
 terminal `check` prints what it costs, asks `Add owner/name to "Workspace"?
 [y/N]`, and on a yes sends the check again; with no terminal, as for an agent
-or CI, it exits `2` with the service's remedy. A workspace's first repository
+or CI, it exits `4` with the service's remedy and, in `json`, a `failed`
+report naming the code. A workspace's first repository
 is added without asking. Deleting repositories, archiving
 workspaces, members, credits and repository settings stay in the web app. The
 commands exit `0` on success and `2` with the service's message and remedy
@@ -354,6 +355,7 @@ whichever is used.
 | `1` | A new finding crossed `--fail-on` |
 | `2` | No new finding crossed `--fail-on`, but a check was incomplete; or the CLI or service failed |
 | `3` | The check was still running when `--timeout` ran out |
+| `4` | The service refused the check, and only a person can clear it |
 | `130`, `143` | Interrupted before the check answered: `130` for Ctrl-C, `143` for SIGTERM |
 
 Only `clean` exits `0`: a status this CLI does not know exits `2`, so a newer
@@ -394,8 +396,20 @@ after some: `slopcop login` when the remedy is to sign in, the listing to
 choose from after `workspace_not_found` or `workspace_repository_not_found`,
 and `slopcop whoami` after `repository_disabled`, since the workspace that
 disabled it is the one this login is bound to, and `--workspace` after
-`owner_required`. A failed request prints no
-report on stdout.
+`owner_required`. A failed check exits `4` when only a person can clear the
+refusal (`auth_required`, `auth_expired`, `account_required`,
+`repo_not_indexed`, `app_not_installed`, `app_no_repo_access`,
+`gitlab_not_connected`, `no_access`, `insufficient_credits`,
+`repository_disabled`, `repository_add_unconfirmed`,
+`workspace_repository_limit_reached`, `active_repository_limit_reached`,
+`owner_required`, and `browser_required`), so a script can stop instead of
+retrying, and `2` otherwise. Stderr starts with the code, as in `slopcop:
+repository_add_unconfirmed: …`. `human` prints nothing on stdout; `json`
+prints `{"status": "failed", "code": …, "message": …, "remedy": …,
+"retryable": …}`, plus `installUrl` or `topUpUrl` when the service sent one;
+`sarif` prints a run with `slopcop.status` `failed`, whose invocation is
+unsuccessful and carries an `error` notification whose descriptor id is the
+code.
 
 ## API
 
