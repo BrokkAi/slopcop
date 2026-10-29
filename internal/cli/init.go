@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	agenthooks "github.com/BrokkAi/slopcop/internal/hooks"
 	"github.com/BrokkAi/slopcop/skills"
 )
 
@@ -231,42 +232,78 @@ func isDirectory(path string) bool {
 }
 
 func newInitCommand() *cobra.Command {
-	var noSkill bool
+	var noSkill, noHooks, removeHooks bool
 	command := &cobra.Command{
 		Use:   "init",
-		Short: "Install the bundled agent skill",
-		Long: `Install the agent skill that ships inside this binary, so a coding agent
-knows how to run slopcop.
+		Short: "Install the bundled agent skill and automatic check hooks",
+		Long: `Install the agent skill and automatic check hooks that ship inside this
+binary, so a coding agent knows how to run slopcop and checks each completed turn.
 
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
 Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
 there is left alone. Login and every check also install the skill, and
-rewrite one that differs from the bundled skill. Pass --no-skill to leave the skill install and any
-update of it undone.`,
+rewrite one that differs from the bundled skill. Pass --no-skill to leave the
+skill install and any update of it undone.
+
+Stop hooks go into ~/.claude/settings.json and $CODEX_HOME/hooks.json. Codex
+asks you to trust a new hook with /hooks. Pass --no-hooks to skip hook setup,
+or --remove-hooks to remove only SlopCop's hook entries.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stdout := cmd.OutOrStdout()
-			if noSkill {
-				fmt.Fprintln(stdout, "slopcop: left the slopcop skill alone (--no-skill)")
+			if removeHooks {
+				result, err := agenthooks.Remove()
+				if err != nil {
+					return err
+				}
+				for _, path := range result.ChangedPaths {
+					fmt.Fprintf(stdout, "slopcop: removed the automatic check hook from %s\n", path)
+				}
+				if len(result.ChangedPaths) == 0 {
+					fmt.Fprintln(stdout, "slopcop: no automatic check hooks found, nothing to remove")
+				}
 				return nil
 			}
-			result, err := installBundledSkill()
+
+			if noSkill {
+				fmt.Fprintln(stdout, "slopcop: left the slopcop skill alone (--no-skill)")
+			} else {
+				result, err := installBundledSkill()
+				if err != nil {
+					return err
+				}
+				for _, dir := range result.installed {
+					fmt.Fprintf(stdout, "slopcop: installed the slopcop skill at %s\n", dir)
+				}
+				for _, dir := range result.present {
+					fmt.Fprintf(stdout, "slopcop: the slopcop skill is already at %s\n", dir)
+				}
+				if len(result.installed) == 0 && len(result.present) == 0 {
+					fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
+				}
+			}
+
+			if noHooks {
+				fmt.Fprintln(stdout, "slopcop: left the automatic check hooks alone (--no-hooks)")
+				return nil
+			}
+			hookResult, err := agenthooks.Install()
 			if err != nil {
 				return err
 			}
-			for _, dir := range result.installed {
-				fmt.Fprintf(stdout, "slopcop: installed the slopcop skill at %s\n", dir)
+			for _, path := range hookResult.ChangedPaths {
+				fmt.Fprintf(stdout, "slopcop: installed or updated the automatic check hook in %s\n", path)
 			}
-			for _, dir := range result.present {
-				fmt.Fprintf(stdout, "slopcop: the slopcop skill is already at %s\n", dir)
-			}
-			if len(result.installed) == 0 && len(result.present) == 0 {
-				fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
+			if hookResult.CodexInstalled {
+				fmt.Fprintln(stdout, "slopcop: review and trust the Codex hook with /hooks before it can run")
 			}
 			return nil
 		},
 	}
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")
+	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install or update the automatic check hooks")
+	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove SlopCop's automatic check hooks")
+	command.MarkFlagsMutuallyExclusive("no-hooks", "remove-hooks")
 	return command
 }

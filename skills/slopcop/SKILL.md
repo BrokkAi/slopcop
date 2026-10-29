@@ -67,6 +67,13 @@ otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
 stderr.
 
+`slopcop init` can install Claude Code and Codex `Stop` hooks that run this
+check at turn end and return new findings for fixing. A hook skips an identical
+check already completed in its harness session, but checks a changed tree. Do
+not repeat a manual check merely because a Stop hook is about to run. Explicit
+checks keep the always-send behavior above. The skill remains the fallback when
+no hook is installed or trusted.
+
 ## New and pre-existing findings
 
 A check fails only on findings the change introduced or touched. Findings that

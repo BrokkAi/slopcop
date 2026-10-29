@@ -108,6 +108,7 @@ report, so a check never needs a Bifrost install.`,
 		newCheckCommand(opts, &serviceURL, version),
 		newIgnoreCommand(&serviceURL, version),
 		newInitCommand(),
+		newHookCommand(&serviceURL, version),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
 		newVersionCommand(version),
@@ -142,6 +143,7 @@ type checkOptions struct {
 	showExisting bool
 	timeout      time.Duration
 	workspace    string
+	hook         *hookInput
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {

@@ -64,6 +64,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
 		return checkFailure(cmd, err)
 	}
+	if opts.hook != nil && duplicateHookCheck(prepared, opts.hook) {
+		return nil
+	}
 	if opts.verbose {
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
@@ -122,6 +125,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(cmd.ErrOrStderr(),
 			"slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n",
 			response.Status)
+	} else {
+		rememberCompletedCheck(prepared, request.Attribution, opts.hook)
 	}
 	return silentExit{response.ExitCode()}
 }
@@ -175,8 +180,10 @@ func repositoryName(repoURL string) string {
 
 // preparedCheck is a check request ready to send, and the client to send it.
 type preparedCheck struct {
-	client  *service.Client
-	request service.Request
+	client      *service.Client
+	request     service.Request
+	repoRoot    string
+	fingerprint string
 	// files and bytes describe the patch, for --verbose.
 	files, bytes int
 }
@@ -215,7 +222,8 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 		return prepared, err
 	}
 	target := resolveServiceURL(cfg, serviceFlag)
-	client, err := service.New(target, resolveToken(cfg), "slopcop/"+version, opts.timeout)
+	token := resolveToken(cfg)
+	client, err := service.New(target, token, "slopcop/"+version, opts.timeout)
 	if err != nil {
 		return prepared, err
 	}
@@ -228,8 +236,19 @@ func prepareCheck(opts *checkOptions, serviceFlag, version, failOn string) (prep
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
-	request.Attribution = attribution.Detect(repoRoot)
-	return preparedCheck{client: client, request: request, files: change.Files, bytes: len(change.Patch)}, nil
+	if opts.hook != nil {
+		request.Attribution = attribution.DetectHook(repoRoot, opts.hook.Harness, opts.hook.SessionID)
+	} else {
+		request.Attribution = attribution.Detect(repoRoot)
+	}
+	return preparedCheck{
+		client:      client,
+		request:     request,
+		repoRoot:    repoRoot,
+		fingerprint: fingerprintCheck(target, token, request),
+		files:       change.Files,
+		bytes:       len(change.Patch),
+	}, nil
 }
 
 func resolveEnums(opts *checkOptions) (string, string, error) {

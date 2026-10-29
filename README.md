@@ -113,8 +113,9 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 ## Enable it in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop. `slopcop init` installs it into each well-known skills directory whose
-harness is present, and names what it did:
+slopcop, plus automatic check hooks for Claude Code and Codex. `slopcop init`
+installs the skill into each well-known skills directory whose harness is
+present, and names what it did:
 
 | Location | Harness |
 | --- | --- |
@@ -128,6 +129,26 @@ directories, rewriting one that differs from the skill bundled into the binary,
 so an agent follows the instructions of the slopcop version it runs; local
 edits to an installed skill do not survive them. `slopcop init --no-skill`
 skips the install and any update of it.
+
+Init also registers a synchronous `Stop` hook in `~/.claude/settings.json` for
+Claude Code and `$CODEX_HOME/hooks.json` for Codex. It enables hooks in Codex's
+`config.toml` and leaves unrelated settings and hooks alone. Codex asks for a
+new hook to be trusted before it runs: review SlopCop's hook with `/hooks`.
+Init never writes Codex's trust state.
+
+At the end of an agent turn, the hook checks the current working tree through
+the same hosted API. New findings are returned to the agent so it can fix them;
+a changed tree is checked again. An identical check already completed in that
+harness session, including an explicit check, is not sent again by the hook.
+Authentication, service, and incomplete-analysis failures never trap the agent
+in a continuation loop. The hook uses the event's working directory and session
+ID; it does not send the conversation. Session-record attribution remains
+limited to the fields described under "What is sent".
+
+Use `slopcop init --no-hooks` to install only the skill, or
+`slopcop init --remove-hooks` to remove SlopCop's hooks while preserving all
+other hook configuration. Ordinary checks do not reinstall removed hooks. The
+skill remains available for harnesses without an installed and trusted hook.
 
 ## Sign in
 
@@ -448,6 +469,7 @@ Layout:
 | `internal/service` | `/v1/check` client and the wire contract |
 | `internal/report` | human, JSON, and SARIF rendering from the structured response |
 | `internal/config` | stored service URL and token |
+| `internal/hooks` | Claude Code and Codex hook installation and removal |
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |

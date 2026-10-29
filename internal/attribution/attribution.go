@@ -33,6 +33,32 @@ func Detect(repoRoot string) *service.Attribution {
 	return detect(os.Getenv, repoRoot)
 }
 
+// DetectHook returns attribution for the harness that delivered a hook
+// payload. Hooks do not necessarily inherit the session environment an agent's
+// own commands receive, so the payload's session id takes that variable's
+// place. Unlike Detect, it does not choose between nested harnesses: the hook
+// already names the one running this check.
+func DetectHook(repoRoot, harness, sessionID string) *service.Attribution {
+	var key string
+	var read func(func(string) string, string) (*service.Attribution, []string)
+	switch harness {
+	case claudeHarness:
+		key, read = "CLAUDE_CODE_SESSION_ID", claudeCode
+	case codexHarness:
+		key, read = "CODEX_THREAD_ID", codex
+	default:
+		return nil
+	}
+	getenv := func(name string) string {
+		if name == key {
+			return sessionID
+		}
+		return os.Getenv(name)
+	}
+	attribution, _ := read(getenv, repoRoot)
+	return attribution
+}
+
 // detect reads every harness whose session the environment names. A harness
 // started from another inherits that one's environment too, so when both are
 // named the one whose session record was written last is the one running the
