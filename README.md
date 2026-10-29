@@ -149,6 +149,7 @@ Precedence:
 | --- | --- |
 | Service URL | `--service`, `$SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
 | Token | `$SLOPCOP_TOKEN`, stored value |
+| Workspace (`check`, `ignore`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
 
 ## Workspace and repositories
 
@@ -159,6 +160,7 @@ active in the browser when the login was approved.
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
 slopcop workspace list             # the account's workspaces; * marks this login's
 slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
+slopcop check -w "Acme team"       # check in, and bill, another workspace this once
 slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
 slopcop repo disable acme/widgets  # stop checking and charging for one (owner only)
 slopcop repo enable acme/widgets   # turn it back on, within the workspace's active limit
@@ -172,9 +174,22 @@ one is not checked or charged and keeps its reports, findings and settings.
 and refuse when stdin is not a terminal: an agent or CI job runs with your
 login, and the service cannot tell it from you, so changing what the workspace
 pays stays a step you take yourself.
+`workspace use` moves every agent and script using this login, not only the
+one that runs it, so it asks `[y/N]` and refuses when stdin is not a terminal.
+To check in another workspace without moving anyone, `check`, `ignore` and
+`repo` take `-w`/`--workspace <name|id>` (or `$SLOPCOP_WORKSPACE`) for that one
+command; the login stays where it was. Give agents that share a login their
+own `--workspace` instead of switching it.
+
 Names match without regard to case; when two workspaces share a name, or two
 providers a repository name, pass the id the listing prints. There is no `repo
-add`: a first check adds a repository. Deleting repositories, archiving
+add`: a first check adds a repository. When the workspace would then pay for
+it (it already has an active repository and is charged), the service refuses
+the check with `repository_add_unconfirmed` until a person confirms: at a
+terminal `check` prints what it costs, asks `Add owner/name to "Workspace"?
+[y/N]`, and on a yes sends the check again; with no terminal, as for an agent
+or CI, it exits `2` with the service's remedy. A workspace's first repository
+is added without asking. Deleting repositories, archiving
 workspaces, members, credits and repository settings stay in the web app. The
 commands exit `0` on success and `2` with the service's message and remedy
 otherwise, as `ignore` does.
@@ -207,6 +222,7 @@ Flags:
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
+| `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's |
 | `--verbose` | print the resolved request to stderr |
 
 ### What is sent
@@ -335,7 +351,8 @@ rewrite them. The remedies name no client, so the CLI adds its own command
 after some: `slopcop login` when the remedy is to sign in, the listing to
 choose from after `workspace_not_found` or `workspace_repository_not_found`,
 and `slopcop whoami` after `repository_disabled`, since the workspace that
-disabled it is the one this login is bound to. A failed request prints no
+disabled it is the one this login is bound to, and `--workspace` after
+`owner_required`. A failed request prints no
 report on stdout.
 
 ## API
@@ -348,11 +365,16 @@ The CLI calls `POST <service>/v1/check` with a bearer token:
   "baseCommit": "0123456789abcdef0123456789abcdef01234567",
   "change": "<base64 git patch>",
   "selection": {"files": [".slopcop/policies/rule.rqlp"]},
-  "failOn": "finding"
+  "failOn": "finding",
+  "addRepository": true
 }
 ```
 
-The service rejects any other field. The response carries `status`,
+`addRepository` is sent only after a person confirms adding the repository. The
+service rejects any other field. With `--workspace`, every request, the
+check's, the ignore's and the account routes', carries the workspace's id in
+the `SlopCop-Workspace` header; a name is first looked up with
+`GET <service>/v1/whoami`. The response carries `status`,
 `baseCommit`, `applied`, `summary`, `findings`, `incomplete`, and `failure`
 when the analysis did not complete. Against a service from before findings
 were marked `new`, the CLI treats every finding as new, as that service gated

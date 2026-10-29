@@ -54,6 +54,7 @@ type accountCall struct {
 	method        string
 	path          string
 	authorization string
+	workspace     string
 	body          map[string]any
 }
 
@@ -63,7 +64,12 @@ func accountService(t *testing.T, answer func(w http.ResponseWriter, r *http.Req
 	t.Helper()
 	calls := &[]accountCall{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		call := accountCall{method: r.Method, path: r.URL.Path, authorization: r.Header.Get("Authorization")}
+		call := accountCall{
+			method:        r.Method,
+			path:          r.URL.Path,
+			authorization: r.Header.Get("Authorization"),
+			workspace:     r.Header.Get("SlopCop-Workspace"),
+		}
 		if r.Method == http.MethodPost {
 			if err := json.NewDecoder(r.Body).Decode(&call.body); err != nil {
 				t.Errorf("decode request: %v", err)
@@ -146,6 +152,7 @@ func TestWorkspaceUseBindsTheLoginByName(t *testing.T) {
 	isolateUserConfig(t)
 	server, calls := accountService(t, nil)
 
+	typed(t, "y\n")
 	code, stdout, stderr := runCLI(t, "workspace", "use", "acme TEAM", "--service", server.URL)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
@@ -267,7 +274,7 @@ func TestRepoEnablePrintsTheServiceRemedy(t *testing.T) {
 	}
 	want := "Type Acme/widgets to enable it: " + "Only the workspace's owner can enable or disable its repositories.\n" +
 		"Ask the workspace's owner, or switch to a workspace you own.\n" +
-		"Switch with `slopcop workspace use <name>`.\n"
+		"Name a workspace you own with `--workspace <name>`.\n"
 	if stderr != want {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
@@ -311,15 +318,7 @@ func TestRepoStateChangesNeedTheNameTypedAtATerminal(t *testing.T) {
 	}
 
 	// A piped stdin is not a terminal, as for an agent or a CI job.
-	reader, writer, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _ = writer.WriteString("Acme/widgets\n")
-	_ = writer.Close()
-	stdin := os.Stdin
-	os.Stdin = reader
-	t.Cleanup(func() { os.Stdin = stdin; _ = reader.Close() })
+	pipedStdin(t, "Acme/widgets\n")
 	code, stdout, stderr := runCLI(t, "repo", "disable", "Acme/widgets", "--service", server.URL)
 	if code != 2 || stdout != "" || !strings.Contains(stderr, "repo disable must be confirmed at a terminal") {
 		t.Errorf("no terminal: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
@@ -334,5 +333,95 @@ func TestRepoStateChangesNeedTheNameTypedAtATerminal(t *testing.T) {
 	}
 	if posted() {
 		t.Error("an unconfirmed change reached the service")
+	}
+}
+
+// pipedStdin stands in for an agent or a CI job, whose stdin is not a
+// terminal.
+func pipedStdin(t *testing.T, input string) {
+	t.Helper()
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = writer.WriteString(input)
+	_ = writer.Close()
+	stdin := os.Stdin
+	os.Stdin = reader
+	t.Cleanup(func() { os.Stdin = stdin; _ = reader.Close() })
+}
+
+func TestWorkspaceUseNeedsAYesAtATerminal(t *testing.T) {
+	isolateUserConfig(t)
+	server, calls := accountService(t, nil)
+	posted := func() bool {
+		for _, call := range *calls {
+			if call.method == http.MethodPost {
+				return true
+			}
+		}
+		return false
+	}
+
+	pipedStdin(t, "y\n")
+	code, stdout, stderr := runCLI(t, "workspace", "use", "Acme team", "--service", server.URL)
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "must be confirmed at a terminal") ||
+		!strings.Contains(stderr, `pass --workspace "Acme team"`) {
+		t.Errorf("no terminal: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+
+	for _, answer := range []string{"", "n\n", "Acme team\n"} {
+		typed(t, answer)
+		code, _, stderr := runCLI(t, "workspace", "use", "Acme team", "--service", server.URL)
+		if code != 2 || !strings.Contains(stderr, `this login still checks in "Dave"`) {
+			t.Errorf("answer %q: exit = %d, stderr = %q", answer, code, stderr)
+		}
+	}
+	if posted() {
+		t.Error("an unconfirmed binding reached the service")
+	}
+}
+
+func TestRepoCommandsRunInTheWorkspaceNamed(t *testing.T) {
+	isolateUserConfig(t)
+	server, calls := accountService(t, func(w http.ResponseWriter, _ *http.Request, body map[string]any) {
+		_, _ = w.Write([]byte(`{"repositoryId": "` + body["repositoryId"].(string) + `", "fullName": "Acme/widgets", "enabled": false, "active": false}`))
+	})
+
+	// A name is looked up among the account's workspaces; the listing and
+	// the change both name the workspace it found.
+	code, _, stderr := runCLI(t, "repo", "list", "-w", "acme team", "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	last := (*calls)[len(*calls)-1]
+	if last.path != "/v1/repositories" || last.workspace != teamID {
+		t.Errorf("list call = %+v", last)
+	}
+	typed(t, "Acme/widgets\n")
+	code, _, stderr = runCLI(t, "repo", "disable", "Acme/widgets", "--workspace", teamID, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	for _, call := range *calls {
+		if call.path == "/v1/repositories" || call.path == "/v1/repositories/state" {
+			if call.workspace != teamID {
+				t.Errorf("call = %+v, want workspace %s", call, teamID)
+			}
+		}
+	}
+
+	// $SLOPCOP_WORKSPACE names one when the flag does not, and an unknown
+	// name sends nothing.
+	t.Setenv("SLOPCOP_WORKSPACE", "Nobody")
+	before := len(*calls)
+	code, _, stderr = runCLI(t, "repo", "list", "--service", server.URL)
+	if code != 2 || !strings.Contains(stderr, `no workspace of your account is named "Nobody"`) {
+		t.Errorf("unknown: exit = %d, stderr = %q", code, stderr)
+	}
+	for _, call := range (*calls)[before:] {
+		if call.path == "/v1/repositories" {
+			t.Errorf("an unknown workspace still listed: %+v", call)
+		}
 	}
 }

@@ -16,8 +16,11 @@ import (
 )
 
 const (
-	checkPath        = "/v1/check"
-	ignorePath       = "/v1/ignore"
+	checkPath  = "/v1/check"
+	ignorePath = "/v1/ignore"
+	// workspaceHeader names, for one request, the workspace of the login's
+	// account it runs in instead of the one the login is bound to.
+	workspaceHeader  = "SlopCop-Workspace"
 	maxResponseBytes = 32 * 1024 * 1024
 	defaultTimeout   = 10 * time.Minute
 	// checkRunning is the retryable answer to a check that is still running.
@@ -33,6 +36,10 @@ type Client struct {
 	BaseURL   string
 	Token     string
 	UserAgent string
+	// Workspace, when set, is the id of the workspace every request runs in
+	// and bills instead of the one the login is bound to (--workspace). The
+	// login stays bound where it was.
+	Workspace string
 	HTTP      *http.Client
 	// wait sleeps between device-flow polls; nil uses a real timer.
 	wait func(context.Context, time.Duration) error
@@ -217,6 +224,9 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 	}
 	if c.Token != "" {
 		httpRequest.Header.Set("Authorization", "Bearer "+c.Token)
+	}
+	if c.Workspace != "" {
+		httpRequest.Header.Set(workspaceHeader, c.Workspace)
 	}
 
 	client := c.HTTP

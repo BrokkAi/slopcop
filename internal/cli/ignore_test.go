@@ -105,3 +105,20 @@ func TestIgnoreRejectsAnIDThatIsNotAUUID(t *testing.T) {
 		t.Error("an invalid id reached the service")
 	}
 }
+
+func TestIgnoreRunsInTheWorkspaceNamed(t *testing.T) {
+	isolateUserConfig(t)
+	var workspace string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		workspace = r.Header.Get("SlopCop-Workspace")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"findingId": "` + findingID + `", "status": "ignored"}`))
+	}))
+	defer server.Close()
+
+	// An id is sent as is, without a lookup.
+	code, _, stderr := runCLI(t, "ignore", findingID, "-w", teamID, "--service", server.URL)
+	if code != 0 || workspace != teamID {
+		t.Errorf("exit = %d, workspace = %q, stderr = %s", code, workspace, stderr)
+	}
+}

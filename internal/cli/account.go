@@ -175,7 +175,11 @@ func newWorkspaceUseCommand(serviceURL *string, version string) *cobra.Command {
 		Short: "Bind this login to another workspace of the account",
 		Long: `Bind this login to another workspace of your account, by name or id, so
 its checks and ignores run in, and bill, that workspace. The browser's
-workspace does not change.`,
+workspace does not change.
+
+Every agent and script using this login moves with it, so this asks whoever
+runs it to confirm, and refuses when stdin is not a terminal. To check in
+another workspace once, pass --workspace to that command instead.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkFormat(format); err != nil {
@@ -192,6 +196,19 @@ workspace does not change.`,
 			workspace, err := findWorkspace(whoami.Workspaces, args[0])
 			if err != nil {
 				return err
+			}
+			if !workspace.Current {
+				question := fmt.Sprintf("Every agent and script using this login will then check in, and bill, %q. Bind it there?", workspace.Name)
+				yes, err := confirmYes(cmd, question)
+				if errors.Is(err, errNotATerminal) {
+					return fmt.Errorf("workspace use moves every agent using this login, so it must be confirmed at a terminal; to check in %q once, pass --workspace %q to that command", workspace.Name, workspace.Name)
+				}
+				if err != nil {
+					return err
+				}
+				if !yes {
+					return fmt.Errorf("this login still checks in %q", whoami.Workspace.Name)
+				}
 			}
 			if err := client.UseWorkspace(cmd.Context(), workspace.ID); err != nil {
 				return serviceFailure(cmd, err)
@@ -241,7 +258,8 @@ func newRepoCommand(serviceURL *string, version string) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "repo",
 		Short: "List, enable or disable the workspace's repositories",
-		Long: `List the repositories of this login's workspace, or enable or disable one.
+		Long: `List the repositories of this login's workspace, or of the one --workspace
+names, or enable or disable one.
 
 Each active repository after a workspace's first costs credits every 30 days;
 a disabled one is not checked or charged, and keeps its reports, findings and
@@ -249,10 +267,12 @@ settings. Only the workspace's owner enables or disables. A first check adds
 a repository, so there is no 'repo add'.`,
 		Args: cobra.NoArgs,
 	}
+	workspace := ""
+	addWorkspaceFlag(command, true, &workspace)
 	command.AddCommand(
-		newRepoListCommand(serviceURL, version),
-		newRepoStateCommand(serviceURL, version, true),
-		newRepoStateCommand(serviceURL, version, false),
+		newRepoListCommand(serviceURL, &workspace, version),
+		newRepoStateCommand(serviceURL, &workspace, version, true),
+		newRepoStateCommand(serviceURL, &workspace, version, false),
 	)
 	return command
 }
@@ -270,7 +290,7 @@ func repositoryState(repository service.Repository) string {
 	}
 }
 
-func newRepoListCommand(serviceURL *string, version string) *cobra.Command {
+func newRepoListCommand(serviceURL, workspace *string, version string) *cobra.Command {
 	format := ""
 	command := &cobra.Command{
 		Use:   "list",
@@ -283,6 +303,9 @@ func newRepoListCommand(serviceURL *string, version string) *cobra.Command {
 			client, err := accountClient(*serviceURL, version)
 			if err != nil {
 				return err
+			}
+			if err := useWorkspace(cmd.Context(), client, *workspace); err != nil {
+				return serviceFailure(cmd, err)
 			}
 			listed, err := client.Repositories(cmd.Context())
 			if err != nil {
@@ -313,7 +336,7 @@ func newRepoListCommand(serviceURL *string, version string) *cobra.Command {
 	return command
 }
 
-func newRepoStateCommand(serviceURL *string, version string, enable bool) *cobra.Command {
+func newRepoStateCommand(serviceURL, workspace *string, version string, enable bool) *cobra.Command {
 	format := ""
 	use, short, done := "disable", "Disable a repository: it is not checked or charged", "disabled"
 	if enable {
@@ -335,6 +358,9 @@ stdin is not a terminal.`,
 			client, err := accountClient(*serviceURL, version)
 			if err != nil {
 				return err
+			}
+			if err := useWorkspace(cmd.Context(), client, *workspace); err != nil {
+				return serviceFailure(cmd, err)
 			}
 			listed, err := client.Repositories(cmd.Context())
 			if err != nil {

@@ -29,14 +29,22 @@ the workspace (name, kind, role), its plan (Pro or Free) and the service URL
 (`--format json` for `service`, `account`, `workspace` and `plan`).
 
 - `slopcop workspace list` lists the account's workspaces; `*` marks this
-  login's. `slopcop workspace use <name|id>` moves this login, and only it,
-  to another one; the browser's workspace does not change.
+  login's. `slopcop workspace use <name|id>` moves this login to another one,
+  and with it every agent using the login, so it asks the person at a
+  terminal and refuses when stdin is not one. Do not try to answer it.
+- To check, ignore or list repositories in another workspace, pass
+  `-w`/`--workspace <name|id>` to that command (or set `$SLOPCOP_WORKSPACE`).
+  It applies to that command only and moves no one.
 - `slopcop repo list` shows the workspace's repositories as `active`,
   `disabled`, or `enabled, over the limit`. Every active repository after the
   first costs credits every 30 days, and a disabled one is neither checked nor
   charged. A check of a disabled repository answers `repository_disabled`.
-- Do not switch workspaces unless the user asked for it: it changes which
+- Do not choose a workspace the user did not name: it changes which
   workspace pays.
+- A first check adds the repository to the workspace. When the workspace would
+  then pay for it, the check exits `2` with `repository_add_unconfirmed`. Do
+  not work around it: tell the user to run the check themselves, which asks
+  them to confirm, or to add the repository on the Repositories page.
 
 ## Run a check
 
@@ -102,6 +110,7 @@ the usual codes mean:
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
+| `repository_add_unconfirmed` | The check would add a repository the workspace then pays for. Tell the user; only they can confirm it, by running the check at a terminal. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
 ## What a result claims

@@ -968,3 +968,94 @@ func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
 		t.Fatalf("each format sends the same check, so the service reuses it: %q", bodies)
 	}
 }
+
+// addService answers a check of a repository its workspace would pay for:
+// refused until the request confirms adding it, then clean. It records each
+// check's workspace header and addRepository, and answers whoami.
+func addService(t *testing.T, base string) (*httptest.Server, *[]map[string]any) {
+	t.Helper()
+	checks := &[]map[string]any{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/v1/whoami" {
+			_, _ = w.Write([]byte(whoamiBody))
+			return
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		*checks = append(*checks, map[string]any{
+			"workspace":     r.Header.Get("SlopCop-Workspace"),
+			"addRepository": body["addRepository"],
+		})
+		if body["addRepository"] != true {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(`{
+				"code": "repository_add_unconfirmed",
+				"message": "This check would add the repository to your workspace, where it uses 100 credits every 30 days.",
+				"remedy": "Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.",
+				"retryable": false
+			}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "` + base + `", "applied": true,
+			"summary": {"files": 0, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [], "incomplete": []}`))
+	}))
+	t.Cleanup(server.Close)
+	return server, checks
+}
+
+func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+
+	t.Run("a yes sends the check again, confirmed", func(t *testing.T) {
+		server, checks := addService(t, base)
+		typed(t, "y\n")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "-w", "Acme team", "--service", server.URL)
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr)
+		}
+		if !strings.Contains(stderr, "where it uses 100 credits every 30 days.\nAdd BrokkAi/slopcop to \"Acme team\"? [y/N] ") {
+			t.Errorf("stderr = %q", stderr)
+		}
+		// Both in the workspace --workspace named.
+		want := []map[string]any{
+			{"workspace": teamID, "addRepository": nil},
+			{"workspace": teamID, "addRepository": true},
+		}
+		if !reflect.DeepEqual(*checks, want) {
+			t.Errorf("checks = %v, want %v", *checks, want)
+		}
+	})
+
+	t.Run("anything but yes adds nothing", func(t *testing.T) {
+		server, checks := addService(t, base)
+		typed(t, "\n")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+		if code != 2 || stdout != "" || !strings.Contains(stderr, `Add BrokkAi/slopcop to "Dave"?`) ||
+			!strings.Contains(stderr, "nothing was added, so the check did not run") {
+			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if len(*checks) != 1 {
+			t.Errorf("checks = %v, want the one refused", *checks)
+		}
+	})
+
+	t.Run("with no terminal the refusal stands", func(t *testing.T) {
+		server, checks := addService(t, base)
+		pipedStdin(t, "y\n")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+		want := "This check would add the repository to your workspace, where it uses 100 credits every 30 days.\n" +
+			"Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.\n"
+		if code != 2 || stdout != "" || stderr != want {
+			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if len(*checks) != 1 {
+			t.Errorf("checks = %v, want the one refused", *checks)
+		}
+	})
+}
