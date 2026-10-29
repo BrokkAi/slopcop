@@ -15,6 +15,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/attribution"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -96,12 +97,53 @@ func fakeFindingID(i int) string {
 }
 
 // isolateHook isolates the user's configuration, signs in, and gives Claude
-// Code a configuration directory to keep session transcripts in.
+// Code and Codex directories to keep session records in.
 func isolateHook(t *testing.T) {
 	t.Helper()
 	isolateUserConfig(t)
 	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CODEX_HOME", t.TempDir())
 	t.Setenv("SLOPCOP_TOKEN", "test-token")
+}
+
+// writeCodexEdits writes the rollout of the Codex session's root thread,
+// which wrote files in repo, and returns its path.
+func writeCodexEdits(t *testing.T, repo string, files ...string) string {
+	t.Helper()
+	return writeCodexThread(t, hookSession, repo, files...)
+}
+
+// writeCodexThread writes the rollout of thread, of the Codex session, in
+// which it wrote files in repo, and returns its path.
+func writeCodexThread(t *testing.T, thread, repo string, files ...string) string {
+	t.Helper()
+	meta, _ := json.Marshal(map[string]any{
+		"type":    "session_meta",
+		"payload": map[string]any{"session_id": hookSession, "id": thread},
+	})
+	context, _ := json.Marshal(map[string]any{
+		"type":    "turn_context",
+		"payload": map[string]any{"turn_id": "turn-1", "model": "gpt-6-luna", "effort": "high"},
+	})
+	lines := []string{string(meta), string(context)}
+	for i, file := range files {
+		change, _ := json.Marshal(map[string]any{
+			"type": "event_msg",
+			"payload": map[string]any{"type": "item_completed", "turn_id": "turn-1", "item": map[string]any{
+				"type": "FileChange", "id": fmt.Sprintf("exec-%d", i), "status": "completed",
+				"changes": map[string]any{filepath.Join(repo, filepath.FromSlash(file)): map[string]any{"type": "add"}},
+			}},
+		})
+		lines = append(lines, string(change))
+	}
+	path := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", "2026", "10", "29", "rollout-2026-10-29T10-00-00-"+thread+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return path
 }
 
 // writeSessionEdits writes the transcript of a Claude Code session that
@@ -139,10 +181,15 @@ func stopPayload(repo string, active bool) string {
 
 func runTestHook(t *testing.T, serviceURL, payload string) hookOutput {
 	t.Helper()
+	return runHookAs(t, attribution.ClaudeHarness, serviceURL, payload)
+}
+
+func runHookAs(t *testing.T, harness, serviceURL, payload string) hookOutput {
+	t.Helper()
 	command := &cobra.Command{}
 	command.SetContext(context.Background())
 	command.SetIn(strings.NewReader(payload))
-	return runHook(command, serviceURL, "test")
+	return runHook(command, harness, serviceURL, "test")
 }
 
 func TestHookHoldsTheAgentOnceForFindingsInItsFiles(t *testing.T) {
@@ -332,7 +379,7 @@ func TestHookIgnoresWhatIsNotAStopOfASession(t *testing.T) {
 
 func TestHookCommandNeverFails(t *testing.T) {
 	isolateHook(t)
-	for _, args := range [][]string{{"hook", "codex"}, {"hook"}, {"hook", "claude", "--unknown"}} {
+	for _, args := range [][]string{{"hook", "other"}, {"hook"}, {"hook", "claude", "--unknown"}} {
 		var stdout, stderr bytes.Buffer
 		code := execute(context.Background(), args, "test", &stdout, &stderr)
 		if code != 0 || strings.TrimSpace(stdout.String()) != "{}" {
@@ -553,6 +600,125 @@ func TestSendCheckDropsARefusedAttributionForLaterSends(t *testing.T) {
 	}
 	if request.Attribution != nil {
 		t.Fatal("the request still carries the attribution the service refused")
+	}
+}
+
+func TestCodexHookHoldsTheAgentForFindingsInItsFiles(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeFile(t, repo, "theirs.go", "package demo\n")
+	rollout := writeCodexEdits(t, repo, "demo.go")
+	// The hook's environment names another Codex home; the payload's
+	// rollout path is the one read.
+	t.Setenv("CODEX_HOME", t.TempDir())
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go", "theirs.go"}}
+	server := fake.start(t, repo)
+
+	payload := func(active bool) string {
+		return fmt.Sprintf(`{"hook_event_name":"Stop","cwd":%q,"session_id":%q,"transcript_path":%q,"stop_hook_active":%t,"turn_id":"turn-1","model":"gpt-6-luna"}`,
+			repo, hookSession, rollout, active)
+	}
+	output := runHookAs(t, attribution.CodexHarness, server.URL, payload(false))
+	if output.Decision != "block" || !strings.Contains(output.Reason, "Fix demo.go") || strings.Contains(output.Reason, "theirs.go") {
+		t.Fatalf("output = %+v", output)
+	}
+	output = runHookAs(t, attribution.CodexHarness, server.URL, payload(true))
+	if output.Decision != "" || !strings.Contains(output.SystemMessage, "remain") || fake.checks != 1 {
+		t.Fatalf("held output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestCodexHookUsesTheResultOfACheckRunByHand(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CODEX_THREAD_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeCodexEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 1 {
+		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
+	}
+	output := runHookAs(t, attribution.CodexHarness, server.URL, stopPayload(repo, false))
+	if output.Decision != "block" || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestCodexCheckByHandInASubagentIsTheSessions(t *testing.T) {
+	isolateHook(t)
+	const subagent = "01a182c8-0000-7000-8000-000000000002"
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeCodexEdits(t, repo)
+	writeCodexThread(t, subagent, repo, "demo.go")
+	// The check runs in the subagent, whose commands name its own thread.
+	t.Setenv("CODEX_THREAD_ID", subagent)
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 1 {
+		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
+	}
+	// The session's Stop hook finds the subagent's edit and its check.
+	output := runHookAs(t, attribution.CodexHarness, server.URL, stopPayload(repo, false))
+	if output.Decision != "block" || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestCodexHookWaitsForALateRollout(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	edited, err := os.ReadFile(writeCodexEdits(t, repo, "demo.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollout := writeCodexEdits(t, repo)
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	// Codex writes the turn's edit just after the hook first reads.
+	done := make(chan error)
+	go func() {
+		time.Sleep(rolloutSettle / 4)
+		done <- os.WriteFile(rollout, edited, 0o600)
+	}()
+	payload := fmt.Sprintf(`{"hook_event_name":"Stop","cwd":%q,"session_id":%q,"transcript_path":%q}`, repo, hookSession, rollout)
+	output := runHookAs(t, attribution.CodexHarness, server.URL, payload)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if output.Decision != "block" || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestHookStatesArePrunedOnceADay(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * hookStateLifetime)
+	stale := func(name string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	first := stale("first.json")
+	saveHookState(filepath.Join(dir, "current.json"), hookState{})
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("an over session's state was kept: %v", err)
+	}
+	second := stale("second.json")
+	saveHookState(filepath.Join(dir, "current.json"), hookState{})
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("pruned again within the day: %v", err)
 	}
 }
 

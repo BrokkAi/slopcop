@@ -237,8 +237,8 @@ func newInitCommand() *cobra.Command {
 		Use:   "init",
 		Short: "Install the bundled agent skill and the automatic check hook",
 		Long: `Install the agent skill that ships inside this binary, so a coding agent
-knows how to run slopcop, and a Claude Code hook that checks what a session
-wrote when the agent stops.
+knows how to run slopcop, and a Claude Code and Codex hook that checks what a
+session wrote when the agent stops.
 
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
@@ -247,24 +247,24 @@ there is left alone. Login and every check also install the skill, and
 rewrite one that differs from the bundled skill. Pass --no-skill to leave the
 skill install and any update of it undone.
 
-A Claude Code Stop hook goes into settings.json under CLAUDE_CONFIG_DIR or
-~/.claude. Pass --no-hooks to skip it, or --remove-hooks to remove only
-SlopCop's hook.`,
+A Stop hook goes into Claude Code's settings.json, under CLAUDE_CONFIG_DIR or
+~/.claude, and Codex's hooks.json, under CODEX_HOME or ~/.codex, for each
+harness installed here. Codex runs it only once you trust it with /hooks.
+Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stdout := cmd.OutOrStdout()
 			if removeHooks {
+				// Each harness is updated on its own, so what changed is
+				// said even when another harness failed.
 				result, err := agenthooks.Remove()
-				if err != nil {
-					return err
-				}
 				for _, path := range result.ChangedPaths {
 					fmt.Fprintf(stdout, "slopcop: removed the automatic check hook from %s\n", path)
 				}
-				if len(result.ChangedPaths) == 0 {
+				if len(result.ChangedPaths) == 0 && err == nil {
 					fmt.Fprintln(stdout, "slopcop: no automatic check hook found, nothing to remove")
 				}
-				return nil
+				return err
 			}
 
 			if noSkill {
@@ -290,19 +290,21 @@ SlopCop's hook.`,
 				return nil
 			}
 			hookResult, err := agenthooks.Install()
-			if err != nil {
-				return err
-			}
 			for _, path := range hookResult.ChangedPaths {
 				fmt.Fprintf(stdout, "slopcop: installed the automatic check hook in %s\n", path)
 			}
-			if hookResult.Installed {
-				if problem := agenthooks.CommandProblem(); problem != "" {
+			// Codex says nothing when it skips a hook it does not trust,
+			// so this is said every time, not only when the hook changed.
+			if hookResult.NeedsTrust {
+				fmt.Fprintln(stdout, "slopcop: Codex runs the hook only once you trust it; if you have not, open Codex and review it with /hooks")
+			}
+			if len(hookResult.Installed) > 0 {
+				if problem := agenthooks.CommandProblem(hookResult.Installed); problem != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"slopcop: warning: %s. Put this slopcop first on PATH, or run 'slopcop init --remove-hooks'.\n", problem)
 				}
 			}
-			return nil
+			return err
 		},
 	}
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")

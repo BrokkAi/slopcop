@@ -10,7 +10,8 @@ import (
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
-const codexHarness = "codex"
+// CodexHarness is the harness name a Codex session's attribution carries.
+const CodexHarness = "codex"
 
 var (
 	turnContextMarker = []byte(`"turn_context"`)
@@ -49,24 +50,37 @@ type codexLine struct {
 // rollout log records the model and effort of every turn and every file
 // change. A failed edit records no file change.
 func codex(getenv func(string) string, repoRoot string) (*service.Attribution, []string) {
+	return codexFrom(getenv, repoRoot, "")
+}
+
+// codexFrom is codex reading the thread's rollout at rollout, as a hook
+// payload names it; without one, the rollout is looked for under the Codex
+// home. The rollouts of the session's subagents, which keep their own, are
+// read too.
+func codexFrom(getenv func(string) string, repoRoot, rollout string) (*service.Attribution, []string) {
 	threadID := strings.TrimSpace(getenv("CODEX_THREAD_ID"))
 	if !sessionIDPattern.MatchString(threadID) || strings.Trim(threadID, ".") == "" {
 		return nil, nil
 	}
 	attribution := &service.Attribution{
-		Harness:        codexHarness,
+		Harness:        CodexHarness,
 		HarnessVersion: strings.TrimSpace(getenv("CODEX_VERSION")),
 		SessionID:      threadID,
 	}
-	codexHome := strings.TrimSpace(getenv("CODEX_HOME"))
-	if codexHome == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
+	var rollouts []string
+	codexHome := rolloutHome(rollout)
+	if codexHome != "" {
+		rollouts = []string{rollout}
+	} else {
+		codexHome = codexHomeDir(getenv)
+		if codexHome == "" {
 			return attribution, nil
 		}
-		codexHome = filepath.Join(home, ".codex")
+		rollouts, _ = filepath.Glob(filepath.Join(codexHome, "sessions", "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
 	}
-	rollouts, _ := filepath.Glob(filepath.Join(codexHome, "sessions", "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
+	if len(rollouts) > 0 {
+		rollouts = append(rollouts, codexSubagentRollouts(rollouts[0])...)
+	}
 	var edits []fileEdit
 	for _, rollout := range rollouts {
 		edits = append(edits, codexEdits(rollout)...)
@@ -84,6 +98,97 @@ func codex(getenv func(string) string, repoRoot string) (*service.Attribution, [
 	}
 	attribution.Models = models(repoRoot, edits)
 	return attribution, rollouts
+}
+
+// codexHomeDir is CODEX_HOME, or ~/.codex, or empty when neither is known.
+func codexHomeDir(getenv func(string) string) string {
+	if dir := strings.TrimSpace(getenv("CODEX_HOME")); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".codex")
+}
+
+// rolloutHome is the Codex home that keeps the rollout at path, under
+// sessions/YYYY/MM/DD, or empty when path is not such a rollout.
+func rolloutHome(path string) string {
+	if !filepath.IsAbs(path) || !strings.HasPrefix(filepath.Base(path), "rollout-") || filepath.Ext(path) != ".jsonl" {
+		return ""
+	}
+	sessions := filepath.Dir(filepath.Dir(filepath.Dir(filepath.Dir(path))))
+	if filepath.Base(sessions) != "sessions" {
+		return ""
+	}
+	return filepath.Dir(sessions)
+}
+
+// codexMeta is the line that opens a rollout. SessionID names the session
+// the thread belongs to: a subagent's thread has an id of its own, but keeps
+// its parent's session.
+type codexMeta struct {
+	Type    string `json:"type"`
+	Payload struct {
+		SessionID string `json:"session_id"`
+		ID        string `json:"id"`
+	} `json:"payload"`
+}
+
+// rolloutMeta reads the session_meta line that opens the rollout at path.
+func rolloutMeta(path string) (codexMeta, bool) {
+	var meta codexMeta
+	found := false
+	readFirst(path, func(line []byte) {
+		found = json.Unmarshal(line, &meta) == nil && meta.Type == "session_meta" && meta.Payload.SessionID != ""
+	})
+	return meta, found
+}
+
+// codexSubagentRollouts are the rollouts of the other threads of the session
+// root's rollout belongs to: its subagents'. They are looked for in root's
+// day and the days after it, since a session can run past midnight.
+func codexSubagentRollouts(root string) []string {
+	meta, ok := rolloutMeta(root)
+	if !ok {
+		return nil
+	}
+	day := filepath.Dir(root)
+	sessions := filepath.Dir(filepath.Dir(filepath.Dir(day)))
+	days, _ := filepath.Glob(filepath.Join(sessions, "*", "*", "*"))
+	var found []string
+	for _, dir := range days {
+		if dir < day {
+			continue
+		}
+		candidates, _ := filepath.Glob(filepath.Join(dir, "rollout-*.jsonl"))
+		for _, candidate := range candidates {
+			if candidate == root {
+				continue
+			}
+			if other, ok := rolloutMeta(candidate); ok && other.Payload.SessionID == meta.Payload.SessionID {
+				found = append(found, candidate)
+			}
+		}
+	}
+	return found
+}
+
+// codexSession is the session the thread threadID belongs to, as its
+// rollout records it, or threadID itself when that cannot be read.
+func codexSession(getenv func(string) string, threadID string) string {
+	codexHome := codexHomeDir(getenv)
+	if codexHome == "" {
+		return threadID
+	}
+	rollouts, _ := filepath.Glob(filepath.Join(codexHome, "sessions", "*", "*", "*", "rollout-*-"+threadID+".jsonl"))
+	for _, rollout := range rollouts {
+		if meta, ok := rolloutMeta(rollout); ok {
+			return meta.Payload.SessionID
+		}
+	}
+	return threadID
 }
 
 // codexDefaultEfforts reads each model's default effort from the model list

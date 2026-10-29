@@ -1,8 +1,10 @@
-// Package hooks installs and removes SlopCop's Claude Code Stop hook.
+// Package hooks installs and removes SlopCop's Stop hook for Claude Code and
+// Codex.
 package hooks
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,111 +16,200 @@ import (
 )
 
 const (
-	// command runs the hook. Claude Code takes exit 2 from a Stop hook as
-	// an order to keep the agent going, and a slopcop that cannot run the
-	// hook, such as one from before it, exits 2; || true turns any failure
-	// into one that lets the agent stop.
-	command = "slopcop hook claude || true"
-	// legacyCommand is the hook as first installed, without that guard.
-	// Install and removal treat it as SlopCop's too.
-	legacyCommand = "slopcop hook claude"
-	fileMode      = 0o600
-	// CheckTimeout bounds the hook's wait for a check's result.
+	fileMode = 0o600
+	// CheckTimeout bounds the hook's wait for a check's result. It stays
+	// below hookTimeoutSeconds, with room for the local work before the
+	// check is sent, so the hook answers before the harness stops waiting.
 	CheckTimeout = 10 * time.Minute
-	// hookTimeout is the timeout Claude Code gives the hook. It leaves room
-	// beyond CheckTimeout for the local work before the check is sent, so
-	// the hook answers before Claude Code stops waiting for it.
-	hookTimeout = CheckTimeout + 2*time.Minute
+	// hookTimeoutSeconds and statusMessage are part of the handler, which
+	// Codex trusts by its hash: changing either makes every Codex user
+	// trust the hook again, so they are fixed, not derived.
+	hookTimeoutSeconds = "720"
+	statusMessage      = "Checking the change with SlopCop"
 )
 
-// Result describes the files an install or removal changed.
+// Result describes what an install or removal did.
 type Result struct {
+	// ChangedPaths are the settings files it changed.
 	ChangedPaths []string
-	// Installed says the hook is in Claude Code's settings after an
+	// Installed names the harnesses whose settings hold the hook after an
 	// install, whether or not this install changed them.
-	Installed bool
+	Installed []string
+	// NeedsTrust says the hook is installed in a harness that runs it only
+	// once someone trusts it, as Codex does with /hooks.
+	NeedsTrust bool
 }
 
-// Install registers SlopCop's Stop hook when Claude Code is installed here.
+// harness is an agent harness the hook installs into.
+type harness struct {
+	// name is the harness `slopcop hook` takes.
+	name string
+	// dir is the harness's configuration directory. The harness counts as
+	// installed here when it exists.
+	dir string
+	// file is the settings file in dir that holds its hooks.
+	file string
+	// windowsCommand, when set, is the command on Windows, for a harness
+	// that runs hooks through cmd /C, which has no true.
+	windowsCommand string
+	// needsTrust says the harness runs a new or changed hook only once
+	// someone trusts it.
+	needsTrust bool
+}
+
+// harnesses are the harnesses the hook installs into, each at the
+// configuration directory it reads: CLAUDE_CONFIG_DIR or ~/.claude for
+// Claude Code, as the attribution package reads it, and CODEX_HOME or
+// ~/.codex for Codex. A harness whose directory cannot be told is left out.
+func harnesses() []harness {
+	home, homeErr := os.UserHomeDir()
+	dir := func(variable, fallback string) string {
+		if value := strings.TrimSpace(os.Getenv(variable)); value != "" {
+			return value
+		}
+		if homeErr != nil {
+			return ""
+		}
+		return filepath.Join(home, fallback)
+	}
+	all := []harness{
+		{name: "claude", dir: dir("CLAUDE_CONFIG_DIR", ".claude"), file: "settings.json"},
+		{
+			name: "codex", dir: dir("CODEX_HOME", ".codex"), file: "hooks.json",
+			windowsCommand: "slopcop hook codex || exit /b 0", needsTrust: true,
+		},
+	}
+	var known []harness
+	for _, h := range all {
+		if h.dir != "" {
+			known = append(known, h)
+		}
+	}
+	return known
+}
+
+// command runs the hook. A harness takes exit 2 from a Stop hook as an order
+// to keep the agent going, and a slopcop that cannot run the hook, such as
+// one from before it, exits 2; || true turns any failure into one that lets
+// the agent stop.
+func (h harness) command() string {
+	return "slopcop hook " + h.name + " || true"
+}
+
+// ours reports whether a handler's command is SlopCop's hook for this
+// harness, as installed now or as first installed, without the guard.
+func (h harness) ours(command any) bool {
+	return command == h.command() || command == "slopcop hook "+h.name
+}
+
+// handler is SlopCop's hook handler for this harness. It stays the same from
+// one release to the next, since Codex trusts a hook by its hash.
+func (h harness) handler() *object {
+	handler := newObject()
+	handler.set("type", "command")
+	handler.set("command", h.command())
+	if h.windowsCommand != "" {
+		handler.set("commandWindows", h.windowsCommand)
+	}
+	handler.set("timeout", json.Number(hookTimeoutSeconds))
+	handler.set("statusMessage", statusMessage)
+	return handler
+}
+
+// Install registers SlopCop's Stop hook in each harness installed here.
 func Install() (Result, error) {
 	return reconcile(true)
 }
 
-// Remove unregisters SlopCop's Stop hook.
+// Remove unregisters SlopCop's Stop hook from each harness.
 func Remove() (Result, error) {
 	return reconcile(false)
 }
 
+// reconcile updates each harness on its own: a settings file it cannot read
+// or write is left as it was and named in the error, and the other harnesses
+// are updated all the same. Result says what changed either way.
 func reconcile(install bool) (Result, error) {
 	var result Result
-	dir, err := claudeConfigDir()
-	if err != nil {
-		return result, err
+	found := harnesses()
+	if len(found) == 0 {
+		return result, errors.New("locate the user home directory: set HOME, or CLAUDE_CONFIG_DIR and CODEX_HOME")
 	}
-	found, err := harnessDirExists(dir)
-	if err != nil || !found {
-		return result, err
+	var errs []error
+	for _, h := range found {
+		changed, present, err := reconcileHarness(h, install)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if changed != "" {
+			result.ChangedPaths = append(result.ChangedPaths, changed)
+		}
+		if install && present {
+			result.Installed = append(result.Installed, h.name)
+			result.NeedsTrust = result.NeedsTrust || h.needsTrust
+		}
 	}
-	path := filepath.Join(dir, "settings.json")
+	return result, errors.Join(errs...)
+}
+
+// reconcileHarness adds or removes the hook in one harness's settings. It
+// returns the settings file when it changed it, and whether the harness is
+// installed here.
+func reconcileHarness(h harness, install bool) (string, bool, error) {
+	present, err := harnessDirExists(h.dir)
+	if err != nil || !present {
+		return "", false, err
+	}
+	path := filepath.Join(h.dir, h.file)
 	// A settings file linked from elsewhere, as dotfiles often are, is
 	// written where the link points, so the link survives.
 	target, err := resolveLink(path)
 	if err != nil {
-		return result, err
+		return "", true, err
 	}
 	data, mode, exists, err := readExisting(target)
 	if err != nil {
-		return result, err
+		return "", true, err
 	}
 	if !exists && !install {
-		return result, nil
+		return "", true, nil
 	}
-	updated, changed, err := reconcileJSON(data, install)
+	updated, changed, err := reconcileJSON(data, install, h)
 	if err != nil {
-		return result, fmt.Errorf("reconcile %s: %w", path, err)
+		return "", true, fmt.Errorf("reconcile %s: %w", path, err)
 	}
-	result.Installed = install
 	if !changed {
-		return result, nil
+		return "", true, nil
 	}
 	if err := writeAtomic(target, updated, mode); err != nil {
-		return Result{}, err
+		return "", true, err
 	}
-	result.ChangedPaths = append(result.ChangedPaths, path)
-	return result, nil
+	return path, true, nil
 }
 
-// CommandProblem says why the slopcop Claude Code finds on PATH could not
-// run the hook, or nothing when it can, by asking it to answer as Claude Code
-// would. The command's guard keeps a failure from holding the agent, but the
-// failure would leave every check undone without a word.
-func CommandProblem() string {
+// CommandProblem says why the slopcop a harness finds on PATH could not run
+// the hook of each of harnesses, or nothing when it can. The command's guard
+// keeps a failure from holding the agent, but the failure would leave every
+// check undone without a word. A slopcop that knows a harness reads the
+// payload and, given none, says so; one that does not answers {} or fails.
+func CommandProblem(harnesses []string) string {
 	found, err := exec.LookPath("slopcop")
 	if err != nil {
-		return "no slopcop is on PATH, so Claude Code cannot run the hook"
+		return "no slopcop is on PATH, so no harness can run the hook"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	// Without "claude" the hook reads nothing and answers {}.
-	out, err := exec.CommandContext(ctx, found, "hook").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "{}" {
-		return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the hook, so no automatic check will run", found)
+	for _, name := range harnesses {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		out, err := exec.CommandContext(ctx, found, "hook", name).Output()
+		cancel()
+		var answer struct {
+			SystemMessage string `json:"systemMessage"`
+		}
+		if err != nil || json.Unmarshal(out, &answer) != nil || answer.SystemMessage == "" {
+			return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the %s hook, so no automatic check will run there", found, name)
+		}
 	}
 	return ""
-}
-
-// claudeConfigDir is where Claude Code reads its settings: CLAUDE_CONFIG_DIR
-// when it is set, as the attribution package reads it, and ~/.claude
-// otherwise.
-func claudeConfigDir() (string, error) {
-	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		return dir, nil
-	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("locate the user home directory: %w", err)
-	}
-	return filepath.Join(home, ".claude"), nil
 }
 
 func harnessDirExists(path string) (bool, error) {

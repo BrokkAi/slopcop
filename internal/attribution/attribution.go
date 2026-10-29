@@ -33,19 +33,57 @@ func Detect(repoRoot string) *service.Attribution {
 	return detect(os.Getenv, repoRoot)
 }
 
-// DetectClaudeHook returns the attribution of the Claude Code session a Stop
-// hook names. Hooks do not necessarily inherit the session environment an
-// agent's own commands receive, so the payload's session id and transcript
-// path take its place. Its models name the files the session wrote.
-func DetectClaudeHook(repoRoot, sessionID, transcript string) *service.Attribution {
+// hookHarnesses are the harnesses with a Stop hook: the variable each puts
+// its session id in, in the commands its agent runs, and how its session is
+// read.
+var hookHarnesses = map[string]struct {
+	variable string
+	read     func(func(string) string, string, string) (*service.Attribution, []string)
+}{
+	ClaudeHarness: {"CLAUDE_CODE_SESSION_ID", claudeCodeFrom},
+	CodexHarness:  {"CODEX_THREAD_ID", codexFrom},
+}
+
+// DetectHook returns the attribution of the session a Stop hook of harness
+// names. Hooks do not necessarily inherit the session environment an agent's
+// own commands receive, so the payload's session id and transcript path take
+// its place. Its models name the files the session wrote.
+func DetectHook(harness, repoRoot, sessionID, transcript string) *service.Attribution {
+	h, ok := hookHarnesses[harness]
+	if !ok {
+		return nil
+	}
 	getenv := func(name string) string {
-		if name == "CLAUDE_CODE_SESSION_ID" {
+		if name == h.variable {
 			return sessionID
 		}
 		return os.Getenv(name)
 	}
-	attribution, _ := claudeCodeFrom(getenv, repoRoot, transcript)
+	attribution, _ := h.read(getenv, repoRoot, transcript)
 	return attribution
+}
+
+// HookSession is the session id the Stop hook of harness names for the
+// session id an attribution carries. They differ for a Codex subagent: its
+// commands name its own thread, but its hooks name the session it belongs
+// to.
+func HookSession(harness, sessionID string) string {
+	if harness == CodexHarness {
+		return codexSession(os.Getenv, sessionID)
+	}
+	return sessionID
+}
+
+// HookSessions maps each harness whose session the environment names to the
+// session id its Stop hook names.
+func HookSessions() map[string]string {
+	sessions := map[string]string{}
+	for harness, h := range hookHarnesses {
+		if id := strings.TrimSpace(os.Getenv(h.variable)); sessionIDPattern.MatchString(id) {
+			sessions[harness] = HookSession(harness, id)
+		}
+	}
+	return sessions
 }
 
 // detect reads every harness whose session the environment names. A harness
@@ -81,6 +119,20 @@ func lastWritten(paths []string) time.Time {
 // maxLineBytes bounds one session record line held in memory. A longer line
 // is skipped. A variable so tests can lower it.
 var maxLineBytes = 64 << 20
+
+// readFirst calls each with the first line of a session record, at most
+// maxLineBytes long.
+func readFirst(path string, each func(line []byte)) {
+	file, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	line, err := bufio.NewReaderSize(io.LimitReader(file, int64(maxLineBytes)), 64<<10).ReadBytes('\n')
+	if len(line) > 0 && (err == nil || errors.Is(err, io.EOF)) {
+		each(line)
+	}
+}
 
 // readRecord opens one session record, bounded by maxTranscriptBytes, and
 // calls each for every line of at most maxLineBytes.

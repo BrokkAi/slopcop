@@ -19,7 +19,7 @@ import (
 const hookStateLifetime = 7 * 24 * time.Hour
 
 // hookState is what the Stop hook remembers about one repository in one
-// Claude Code session.
+// Claude Code or Codex session.
 type hookState struct {
 	// Workspace is the workspace Active and Off are about, as a check names
 	// it: --workspace or $SLOPCOP_WORKSPACE, or empty for the login's own.
@@ -99,57 +99,62 @@ func fingerprintCheck(serviceURL, token, workspace string, request service.Reque
 	return hex.EncodeToString(digest[:])
 }
 
-// rememberCheck records a check run by hand in the Claude Code session that
-// ran it, so that session's Stop hook does not send the same check again.
+// rememberCheck records a check run by hand in the session that ran it, so
+// that session's Stop hook does not send the same check again.
 func rememberCheck(prepared preparedCheck, response service.Response) {
 	attributed := prepared.request.Attribution
-	if attributed == nil || attributed.Harness != attribution.ClaudeHarness {
+	if attributed == nil {
 		return
 	}
-	path := hookStatePath(attributed.SessionID, prepared.repoRoot)
+	session := attribution.HookSession(attributed.Harness, attributed.SessionID)
+	path := hookStatePath(attributed.Harness, session, prepared.repoRoot)
 	state, _ := loadHookState(path)
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	saveHookState(path, state)
 }
 
-// forgetFinding drops an ignored finding from the state of the Claude Code
-// session that ignored it, in the repository at dir, so its Stop hook does
-// not hand the finding back.
+// forgetFinding drops an ignored finding from the state of the session that
+// ignored it, in the repository at dir, so its Stop hook does not hand the
+// finding back.
 func forgetFinding(dir, findingID string) {
-	sessionID := strings.TrimSpace(os.Getenv("CLAUDE_CODE_SESSION_ID"))
+	sessions := attribution.HookSessions()
+	if len(sessions) == 0 {
+		return
+	}
 	repoRoot, err := gitx.Toplevel(dir)
-	if sessionID == "" || err != nil {
+	if err != nil {
 		return
 	}
-	path := hookStatePath(sessionID, repoRoot)
-	state, loaded := loadHookState(path)
-	if !loaded {
-		return
-	}
-	kept := make([]service.Finding, 0, len(state.Findings))
-	for _, finding := range state.Findings {
-		if !strings.EqualFold(finding.ID, findingID) {
-			kept = append(kept, finding)
+	for harness, session := range sessions {
+		path := hookStatePath(harness, session, repoRoot)
+		state, loaded := loadHookState(path)
+		if !loaded {
+			continue
+		}
+		kept := make([]service.Finding, 0, len(state.Findings))
+		for _, finding := range state.Findings {
+			if !strings.EqualFold(finding.ID, findingID) {
+				kept = append(kept, finding)
+			}
+		}
+		if len(kept) != len(state.Findings) {
+			state.Findings = kept
+			saveHookState(path, state)
 		}
 	}
-	if len(kept) == len(state.Findings) {
-		return
-	}
-	state.Findings = kept
-	saveHookState(path, state)
 }
 
 // hookStatePath is where the state of one repository in one session is
 // kept, or empty when there is no cache directory to keep it in.
-func hookStatePath(sessionID, repoRoot string) string {
-	if sessionID == "" {
+func hookStatePath(harness, sessionID, repoRoot string) string {
+	if harness == "" || sessionID == "" {
 		return ""
 	}
 	dir, err := os.UserCacheDir()
 	if err != nil {
 		return ""
 	}
-	identity := attribution.ClaudeHarness + "\x00" + sessionID + "\x00" + repoRoot
+	identity := harness + "\x00" + sessionID + "\x00" + repoRoot
 	digest := sha256.Sum256([]byte(identity))
 	return filepath.Join(dir, "slopcop", "checks", hex.EncodeToString(digest[:])+".json")
 }
@@ -190,14 +195,23 @@ func saveHookState(path string, state hookState) {
 	pruneHookStates(dir)
 }
 
+// pruneHookStates drops the state of sessions that are over, at most once a
+// day, which a marker file's time keeps.
 func pruneHookStates(dir string) {
+	marker := filepath.Join(dir, ".pruned")
+	if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < 24*time.Hour {
+		return
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
 		info, err := entry.Info()
-		if err == nil && info.Mode().IsRegular() && time.Since(info.ModTime()) > hookStateLifetime {
+		if err == nil && info.Mode().IsRegular() && entry.Name() != ".pruned" && time.Since(info.ModTime()) > hookStateLifetime {
 			_ = os.Remove(filepath.Join(dir, entry.Name()))
 		}
 	}

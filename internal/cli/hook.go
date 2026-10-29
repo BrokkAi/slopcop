@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -28,6 +29,17 @@ const (
 	maxHolds = 2
 )
 
+// rolloutSettle is how long the Codex hook waits for a rollout that shows no
+// edits yet before it reads it again.
+var rolloutSettle = 300 * time.Millisecond
+
+// hookHarnesses maps the harness `slopcop hook` takes to the harness its
+// attribution names.
+var hookHarnesses = map[string]string{
+	"claude": attribution.ClaudeHarness,
+	"codex":  attribution.CodexHarness,
+}
+
 // repositoryProviders names the provider the service lists a repository
 // under, by the host of its canonical URL. The service checks no other host.
 var repositoryProviders = map[string]string{
@@ -37,6 +49,8 @@ var repositoryProviders = map[string]string{
 }
 
 type hookInput struct {
+	// Harness is the attribution harness the hook ran under.
+	Harness        string `json:"-"`
 	Event          string `json:"hook_event_name"`
 	CWD            string `json:"cwd"`
 	SessionID      string `json:"session_id"`
@@ -52,18 +66,18 @@ type hookOutput struct {
 
 func newHookCommand(serviceURL *string, version string) *cobra.Command {
 	return &cobra.Command{
-		Use:    "hook claude",
-		Short:  "Run a check from a Claude Code Stop hook",
+		Use:    "hook <claude|codex>",
+		Short:  "Run a check from a Claude Code or Codex Stop hook",
 		Hidden: true,
-		// Claude Code reads exit 2 from a Stop hook as an order to keep
-		// going, so the hook takes any arguments and always exits 0 with
-		// its answer on stdout.
+		// A harness reads exit 2 from a Stop hook as an order to keep going,
+		// so the hook takes any arguments and always exits 0 with its
+		// answer on stdout.
 		DisableFlagParsing: true,
 		Args:               cobra.ArbitraryArgs,
 		Run: func(cmd *cobra.Command, args []string) {
 			var output hookOutput
-			if len(args) == 1 && args[0] == "claude" {
-				output = runHook(cmd, *serviceURL, version)
+			if len(args) == 1 && hookHarnesses[args[0]] != "" {
+				output = runHook(cmd, hookHarnesses[args[0]], *serviceURL, version)
 			}
 			_ = json.NewEncoder(cmd.OutOrStdout()).Encode(output)
 		},
@@ -72,7 +86,7 @@ func newHookCommand(serviceURL *string, version string) *cobra.Command {
 
 // runHook answers one Stop hook. Whatever goes wrong, a panic included,
 // becomes a message for the user, never a failure that keeps the agent going.
-func runHook(cmd *cobra.Command, serviceURL, version string) (output hookOutput) {
+func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output hookOutput) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			output = hookOutput{SystemMessage: fmt.Sprintf("slopcop: the automatic check failed: %v", recovered)}
@@ -85,6 +99,7 @@ func runHook(cmd *cobra.Command, serviceURL, version string) (output hookOutput)
 	if input.Event != "Stop" || strings.TrimSpace(input.CWD) == "" || input.SessionID == "" {
 		return hookOutput{}
 	}
+	input.Harness = harness
 	return stopHook(cmd.Context(), input, serviceURL, version)
 }
 
@@ -103,14 +118,21 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	if err != nil || resolveToken(cfg) == "" {
 		return hookOutput{}
 	}
-	path := hookStatePath(input.SessionID, repoRoot)
+	path := hookStatePath(input.Harness, input.SessionID, repoRoot)
 	state, loaded := loadHookState(path)
 	state.inWorkspace(resolveWorkspaceName(""))
 	if state.Off {
 		return hookOutput{}
 	}
-	attributed := attribution.DetectClaudeHook(repoRoot, input.SessionID, input.TranscriptPath)
+	attributed := attribution.DetectHook(input.Harness, repoRoot, input.SessionID, input.TranscriptPath)
 	written := writtenFiles(attributed)
+	if len(written) == 0 && input.Harness == attribution.CodexHarness {
+		// Codex writes its rollout as it goes and does not flush it before
+		// its Stop hooks, so the turn's last edits can land a moment late.
+		time.Sleep(rolloutSettle)
+		attributed = attribution.DetectHook(input.Harness, repoRoot, input.SessionID, input.TranscriptPath)
+		written = writtenFiles(attributed)
+	}
 	if len(written) == 0 {
 		return hookOutput{}
 	}
