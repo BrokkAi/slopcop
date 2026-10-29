@@ -25,16 +25,17 @@ prompts, one request, and the analyzer's exit contract.
 
 ## Install
 
-npm, PyPI, the release archive, and the PowerShell installer all install the
-same release binary for macOS, Linux, and Windows on x64 and arm64, so
-`slopcop version` reports which release it came from. The Go toolchain can
-build that binary from source instead.
+npm, PyPI, the release archive, and the shell and PowerShell installers all
+install the same release binary for macOS, Linux, and Windows on x64 and
+arm64, so `slopcop version` reports which release it came from. The Go
+toolchain can build that binary from source instead.
 
 | Channel | Platforms | Needs |
 | --- | --- | --- |
 | [npm](#npm) | macOS, Linux, Windows | Node 22 or newer |
 | [PyPI](#pypi) | macOS, Linux, Windows | Python 3.9 or newer |
 | [Release archive](#release-archive) | macOS, Linux, Windows | nothing |
+| [Shell installer](#shell-installer) | macOS, Linux | curl |
 | [PowerShell installer](#powershell-installer) | Windows | PowerShell |
 | [Go](#go) | built from source | Go 1.25 or newer |
 
@@ -77,6 +78,17 @@ grep "${os}_${arch}" checksums.txt | sha256sum -c -   # shasum -a 256 -c - on ma
 tar -xzf "slopcop_v${ver}_${os}_${arch}.tar.gz" slopcop
 sudo install -m 755 slopcop /usr/local/bin/slopcop
 ```
+
+### Shell installer
+
+```console
+curl -fsSL https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.sh | sh
+```
+
+It takes the latest release, verifies the archive against `checksums.txt`,
+installs `slopcop` to `$HOME/.local/bin`, and adds that directory to the
+shell profile. `SLOPCOP_VERSION`, `SLOPCOP_INSTALL_DIR`, and
+`SLOPCOP_NO_MODIFY_PATH` override its defaults.
 
 ### PowerShell installer
 
