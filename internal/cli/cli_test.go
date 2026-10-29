@@ -145,14 +145,70 @@ func TestCleanTreeStillAsksTheService(t *testing.T) {
 		t.Errorf("baseCommit = %v, want %s", captured["baseCommit"], wantBase)
 	}
 	var response struct {
-		Status     string `json:"status"`
-		BaseCommit string `json:"baseCommit"`
+		Status      string `json:"status"`
+		BaseCommit  string `json:"baseCommit"`
+		EmptyChange bool   `json:"emptyChange"`
 	}
 	if err := json.Unmarshal([]byte(stdout), &response); err != nil {
 		t.Fatalf("stdout is not json: %v\n%s", err, stdout)
 	}
-	if response.Status != "clean" || response.BaseCommit != wantBase {
+	if response.Status != "clean" || response.BaseCommit != wantBase || !response.EmptyChange {
 		t.Fatalf("response = %+v", response)
+	}
+	if !strings.Contains(stderr, "no change was checked") || !strings.Contains(stderr, "--base") {
+		t.Errorf("stderr does not say the patch was empty: %q", stderr)
+	}
+}
+
+func TestPushedBranchFallsBackToTheDefaultBranch(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	mainCommit := runGit(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", mainCommit)
+	runGit(t, repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	runGit(t, repo, "checkout", "-qb", "feature")
+	writeFile(t, repo, "feature.txt", "pushed work\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "feature")
+	// The feature branch is pushed: its upstream already has HEAD.
+	runGit(t, repo, "update-ref", "refs/remotes/origin/feature", "HEAD")
+	runGit(t, repo, "branch", "--set-upstream-to=origin/feature")
+
+	var captured map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&captured); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "clean",
+			"baseCommit": "` + mainCommit + `",
+			"applied": true,
+			"summary": {"files": 1, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [],
+			"incomplete": []
+		}`))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t,
+		"check", "--root", repo, "--service", server.URL, "--format", "json",
+	)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if captured["baseCommit"] != mainCommit {
+		t.Errorf("baseCommit = %v, want the origin/HEAD merge base %s", captured["baseCommit"], mainCommit)
+	}
+	patch, err := base64.StdEncoding.DecodeString(captured["change"].(string))
+	if err != nil {
+		t.Fatalf("decode change: %v", err)
+	}
+	if !strings.Contains(string(patch), "b/feature.txt") {
+		t.Errorf("patch does not carry the pushed commit:\n%s", patch)
+	}
+	if strings.Contains(stdout, "emptyChange") || strings.Contains(stderr, "no change was checked") {
+		t.Errorf("a non-empty change was reported as empty: stdout %q, stderr %q", stdout, stderr)
 	}
 }
 

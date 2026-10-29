@@ -29,6 +29,10 @@ type Options struct {
 	// ShowExisting lists the findings that were already in the code, after
 	// the new ones. They are counted either way.
 	ShowExisting bool
+	// EmptyChange marks a check whose patch was empty: the working tree
+	// matched the base, so no change was checked. The human format leaves it
+	// to the CLI's note on stderr.
+	EmptyChange bool
 }
 
 // Write renders the response to w.
@@ -230,16 +234,19 @@ type jsonReport struct {
 	Findings   []service.Finding          `json:"findings"`
 	Incomplete []service.IncompletePolicy `json:"incomplete"`
 	Failure    string                     `json:"failure,omitempty"`
+	// EmptyChange is set only when the patch was empty.
+	EmptyChange bool `json:"emptyChange,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
-		Status:     response.Status,
-		BaseCommit: response.BaseCommit,
-		Summary:    response.Summary,
-		Findings:   listed(response, options),
-		Incomplete: response.Incomplete,
-		Failure:    response.Failure,
+		Status:      response.Status,
+		BaseCommit:  response.BaseCommit,
+		Summary:     response.Summary,
+		Findings:    listed(response, options),
+		Incomplete:  response.Incomplete,
+		Failure:     response.Failure,
+		EmptyChange: options.EmptyChange,
 	}, "json report")
 }
 
@@ -508,6 +515,18 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		})
 	}
 
+	properties := map[string]any{
+		"slopcop.status":           response.Status,
+		"slopcop.baseCommit":       response.BaseCommit,
+		"slopcop.failOn":           response.Summary.FailOn,
+		"slopcop.newFindings":      response.Summary.NewFindings,
+		"slopcop.existingFindings": response.Summary.ExistingFindings,
+		"slopcop.inconclusive":     response.Summary.Inconclusive,
+	}
+	if options.EmptyChange {
+		properties["slopcop.emptyChange"] = true
+	}
+
 	return encode(w, sarifLog(sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
 			Name:           "SlopCop",
@@ -521,14 +540,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			ExecutionSuccessful:        response.Failure == "" && response.Summary.IncompletePolicies == 0,
 			ToolExecutionNotifications: notifications,
 		}},
-		Properties: map[string]any{
-			"slopcop.status":           response.Status,
-			"slopcop.baseCommit":       response.BaseCommit,
-			"slopcop.failOn":           response.Summary.FailOn,
-			"slopcop.newFindings":      response.Summary.NewFindings,
-			"slopcop.existingFindings": response.Summary.ExistingFindings,
-			"slopcop.inconclusive":     response.Summary.Inconclusive,
-		},
+		Properties: properties,
 	}), "sarif report")
 }
 
