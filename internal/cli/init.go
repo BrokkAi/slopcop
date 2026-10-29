@@ -255,17 +255,16 @@ Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			stdout := cmd.OutOrStdout()
 			if removeHooks {
+				// Each harness is updated on its own, so what changed is
+				// said even when another harness failed.
 				result, err := agenthooks.Remove()
-				if err != nil {
-					return err
-				}
 				for _, path := range result.ChangedPaths {
 					fmt.Fprintf(stdout, "slopcop: removed the automatic check hook from %s\n", path)
 				}
-				if len(result.ChangedPaths) == 0 {
+				if len(result.ChangedPaths) == 0 && err == nil {
 					fmt.Fprintln(stdout, "slopcop: no automatic check hook found, nothing to remove")
 				}
-				return nil
+				return err
 			}
 
 			if noSkill {
@@ -291,22 +290,21 @@ Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 				return nil
 			}
 			hookResult, err := agenthooks.Install()
-			if err != nil {
-				return err
-			}
 			for _, path := range hookResult.ChangedPaths {
 				fmt.Fprintf(stdout, "slopcop: installed the automatic check hook in %s\n", path)
 			}
+			// Codex says nothing when it skips a hook it does not trust,
+			// so this is said every time, not only when the hook changed.
 			if hookResult.NeedsTrust {
-				fmt.Fprintln(stdout, "slopcop: Codex runs the hook only once you trust it: open Codex and review it with /hooks")
+				fmt.Fprintln(stdout, "slopcop: Codex runs the hook only once you trust it; if you have not, open Codex and review it with /hooks")
 			}
 			if len(hookResult.Installed) > 0 {
-				if problem := agenthooks.CommandProblem(); problem != "" {
+				if problem := agenthooks.CommandProblem(hookResult.Installed); problem != "" {
 					fmt.Fprintf(cmd.ErrOrStderr(),
 						"slopcop: warning: %s. Put this slopcop first on PATH, or run 'slopcop init --remove-hooks'.\n", problem)
 				}
 			}
-			return nil
+			return err
 		},
 	}
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")

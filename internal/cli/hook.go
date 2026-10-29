@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -27,6 +28,10 @@ const (
 	// at: the first, and once more after the agent changed the tree.
 	maxHolds = 2
 )
+
+// rolloutSettle is how long the Codex hook waits for a rollout that shows no
+// edits yet before it reads it again.
+var rolloutSettle = 300 * time.Millisecond
 
 // hookHarnesses maps the harness `slopcop hook` takes to the harness its
 // attribution names.
@@ -121,6 +126,13 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	}
 	attributed := attribution.DetectHook(input.Harness, repoRoot, input.SessionID, input.TranscriptPath)
 	written := writtenFiles(attributed)
+	if len(written) == 0 && input.Harness == attribution.CodexHarness {
+		// Codex writes its rollout as it goes and does not flush it before
+		// its Stop hooks, so the turn's last edits can land a moment late.
+		time.Sleep(rolloutSettle)
+		attributed = attribution.DetectHook(input.Harness, repoRoot, input.SessionID, input.TranscriptPath)
+		written = writtenFiles(attributed)
+	}
 	if len(written) == 0 {
 		return hookOutput{}
 	}

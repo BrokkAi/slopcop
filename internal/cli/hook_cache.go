@@ -106,29 +106,27 @@ func rememberCheck(prepared preparedCheck, response service.Response) {
 	if attributed == nil {
 		return
 	}
-	path := hookStatePath(attributed.Harness, attributed.SessionID, prepared.repoRoot)
+	session := attribution.HookSession(attributed.Harness, attributed.SessionID)
+	path := hookStatePath(attributed.Harness, session, prepared.repoRoot)
 	state, _ := loadHookState(path)
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	saveHookState(path, state)
-}
-
-// sessionVariables name the variable each harness puts its session id in,
-// in the commands its agent runs.
-var sessionVariables = map[string]string{
-	attribution.ClaudeHarness: "CLAUDE_CODE_SESSION_ID",
-	attribution.CodexHarness:  "CODEX_THREAD_ID",
 }
 
 // forgetFinding drops an ignored finding from the state of the session that
 // ignored it, in the repository at dir, so its Stop hook does not hand the
 // finding back.
 func forgetFinding(dir, findingID string) {
+	sessions := attribution.HookSessions()
+	if len(sessions) == 0 {
+		return
+	}
 	repoRoot, err := gitx.Toplevel(dir)
 	if err != nil {
 		return
 	}
-	for harness, variable := range sessionVariables {
-		path := hookStatePath(harness, strings.TrimSpace(os.Getenv(variable)), repoRoot)
+	for harness, session := range sessions {
+		path := hookStatePath(harness, session, repoRoot)
 		state, loaded := loadHookState(path)
 		if !loaded {
 			continue
@@ -197,14 +195,23 @@ func saveHookState(path string, state hookState) {
 	pruneHookStates(dir)
 }
 
+// pruneHookStates drops the state of sessions that are over, at most once a
+// day, which a marker file's time keeps.
 func pruneHookStates(dir string) {
+	marker := filepath.Join(dir, ".pruned")
+	if info, err := os.Stat(marker); err == nil && time.Since(info.ModTime()) < 24*time.Hour {
+		return
+	}
+	if err := os.WriteFile(marker, nil, 0o600); err != nil {
+		return
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
 		info, err := entry.Info()
-		if err == nil && info.Mode().IsRegular() && time.Since(info.ModTime()) > hookStateLifetime {
+		if err == nil && info.Mode().IsRegular() && entry.Name() != ".pruned" && time.Since(info.ModTime()) > hookStateLifetime {
 			_ = os.Remove(filepath.Join(dir, entry.Name()))
 		}
 	}

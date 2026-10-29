@@ -11,19 +11,21 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"time"
 )
 
 const (
 	fileMode = 0o600
-	// CheckTimeout bounds the hook's wait for a check's result.
+	// CheckTimeout bounds the hook's wait for a check's result. It stays
+	// below hookTimeoutSeconds, with room for the local work before the
+	// check is sent, so the hook answers before the harness stops waiting.
 	CheckTimeout = 10 * time.Minute
-	// hookTimeout is the timeout a harness gives the hook. It leaves room
-	// beyond CheckTimeout for the local work before the check is sent, so
-	// the hook answers before the harness stops waiting for it.
-	hookTimeout = CheckTimeout + 2*time.Minute
+	// hookTimeoutSeconds and statusMessage are part of the handler, which
+	// Codex trusts by its hash: changing either makes every Codex user
+	// trust the hook again, so they are fixed, not derived.
+	hookTimeoutSeconds = "720"
+	statusMessage      = "Checking the change with SlopCop"
 )
 
 // Result describes what an install or removal did.
@@ -33,8 +35,8 @@ type Result struct {
 	// Installed names the harnesses whose settings hold the hook after an
 	// install, whether or not this install changed them.
 	Installed []string
-	// NeedsTrust says the install changed Codex's hook, which Codex runs
-	// only once someone trusts it with /hooks.
+	// NeedsTrust says the hook is installed in a harness that runs it only
+	// once someone trusts it, as Codex does with /hooks.
 	NeedsTrust bool
 }
 
@@ -47,27 +49,43 @@ type harness struct {
 	dir string
 	// file is the settings file in dir that holds its hooks.
 	file string
+	// windowsCommand, when set, is the command on Windows, for a harness
+	// that runs hooks through cmd /C, which has no true.
+	windowsCommand string
+	// needsTrust says the harness runs a new or changed hook only once
+	// someone trusts it.
+	needsTrust bool
 }
 
 // harnesses are the harnesses the hook installs into, each at the
 // configuration directory it reads: CLAUDE_CONFIG_DIR or ~/.claude for
 // Claude Code, as the attribution package reads it, and CODEX_HOME or
-// ~/.codex for Codex.
-func harnesses() ([]harness, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return nil, fmt.Errorf("locate the user home directory: %w", err)
-	}
+// ~/.codex for Codex. A harness whose directory cannot be told is left out.
+func harnesses() []harness {
+	home, homeErr := os.UserHomeDir()
 	dir := func(variable, fallback string) string {
 		if value := strings.TrimSpace(os.Getenv(variable)); value != "" {
 			return value
 		}
+		if homeErr != nil {
+			return ""
+		}
 		return filepath.Join(home, fallback)
 	}
-	return []harness{
+	all := []harness{
 		{name: "claude", dir: dir("CLAUDE_CONFIG_DIR", ".claude"), file: "settings.json"},
-		{name: "codex", dir: dir("CODEX_HOME", ".codex"), file: "hooks.json"},
-	}, nil
+		{
+			name: "codex", dir: dir("CODEX_HOME", ".codex"), file: "hooks.json",
+			windowsCommand: "slopcop hook codex || exit /b 0", needsTrust: true,
+		},
+	}
+	var known []harness
+	for _, h := range all {
+		if h.dir != "" {
+			known = append(known, h)
+		}
+	}
+	return known
 }
 
 // command runs the hook. A harness takes exit 2 from a Stop hook as an order
@@ -84,18 +102,16 @@ func (h harness) ours(command any) bool {
 	return command == h.command() || command == "slopcop hook "+h.name
 }
 
-// handler is SlopCop's hook handler for this harness. Codex trusts a hook by
-// the hash of its handler, so the handler stays the same from one release
-// to the next.
+// handler is SlopCop's hook handler for this harness. It stays the same from
+// one release to the next, since Codex trusts a hook by its hash.
 func (h harness) handler() *object {
 	handler := newObject()
 	handler.set("type", "command")
 	handler.set("command", h.command())
-	if h.name == "codex" {
-		// Codex runs a hook through cmd /C on Windows, which has no true.
-		handler.set("commandWindows", "slopcop hook codex || exit /b 0")
+	if h.windowsCommand != "" {
+		handler.set("commandWindows", h.windowsCommand)
 	}
-	handler.set("timeout", json.Number(strconv.Itoa(int(hookTimeout/time.Second))))
+	handler.set("timeout", json.Number(hookTimeoutSeconds))
 	handler.set("statusMessage", statusMessage)
 	return handler
 }
@@ -110,84 +126,88 @@ func Remove() (Result, error) {
 	return reconcile(false)
 }
 
-// update is a settings file to rewrite.
-type update struct {
-	harness harness
-	path    string
-	target  string
-	data    []byte
-	mode    fs.FileMode
-}
-
-// reconcile works out every change before it writes any, so a settings file
-// it cannot read leaves the others as they were too.
+// reconcile updates each harness on its own: a settings file it cannot read
+// or write is left as it was and named in the error, and the other harnesses
+// are updated all the same. Result says what changed either way.
 func reconcile(install bool) (Result, error) {
 	var result Result
-	found, err := harnesses()
-	if err != nil {
-		return result, err
+	found := harnesses()
+	if len(found) == 0 {
+		return result, errors.New("locate the user home directory: set HOME, or CLAUDE_CONFIG_DIR and CODEX_HOME")
 	}
-	var updates []update
+	var errs []error
 	for _, h := range found {
-		present, err := harnessDirExists(h.dir)
+		changed, present, err := reconcileHarness(h, install)
 		if err != nil {
-			return result, err
-		}
-		if !present {
+			errs = append(errs, err)
 			continue
 		}
-		path := filepath.Join(h.dir, h.file)
-		// A settings file linked from elsewhere, as dotfiles often are, is
-		// written where the link points, so the link survives.
-		target, err := resolveLink(path)
-		if err != nil {
-			return result, err
+		if changed != "" {
+			result.ChangedPaths = append(result.ChangedPaths, changed)
 		}
-		data, mode, exists, err := readExisting(target)
-		if err != nil {
-			return result, err
-		}
-		if !exists && !install {
-			continue
-		}
-		updated, changed, err := reconcileJSON(data, install, h)
-		if err != nil {
-			return result, fmt.Errorf("reconcile %s: %w", path, err)
-		}
-		if install {
+		if install && present {
 			result.Installed = append(result.Installed, h.name)
-		}
-		if changed {
-			updates = append(updates, update{harness: h, path: path, target: target, data: updated, mode: mode})
+			result.NeedsTrust = result.NeedsTrust || h.needsTrust
 		}
 	}
-	for _, u := range updates {
-		if err := writeAtomic(u.target, u.data, u.mode); err != nil {
-			return result, err
-		}
-		result.ChangedPaths = append(result.ChangedPaths, u.path)
-		if install && u.harness.name == "codex" {
-			result.NeedsTrust = true
-		}
+	return result, errors.Join(errs...)
+}
+
+// reconcileHarness adds or removes the hook in one harness's settings. It
+// returns the settings file when it changed it, and whether the harness is
+// installed here.
+func reconcileHarness(h harness, install bool) (string, bool, error) {
+	present, err := harnessDirExists(h.dir)
+	if err != nil || !present {
+		return "", false, err
 	}
-	return result, nil
+	path := filepath.Join(h.dir, h.file)
+	// A settings file linked from elsewhere, as dotfiles often are, is
+	// written where the link points, so the link survives.
+	target, err := resolveLink(path)
+	if err != nil {
+		return "", true, err
+	}
+	data, mode, exists, err := readExisting(target)
+	if err != nil {
+		return "", true, err
+	}
+	if !exists && !install {
+		return "", true, nil
+	}
+	updated, changed, err := reconcileJSON(data, install, h)
+	if err != nil {
+		return "", true, fmt.Errorf("reconcile %s: %w", path, err)
+	}
+	if !changed {
+		return "", true, nil
+	}
+	if err := writeAtomic(target, updated, mode); err != nil {
+		return "", true, err
+	}
+	return path, true, nil
 }
 
 // CommandProblem says why the slopcop a harness finds on PATH could not run
-// the hook, or nothing when it can, by asking it to answer as a harness
-// would. The command's guard keeps a failure from holding the agent, but the
-// failure would leave every check undone without a word.
-func CommandProblem() string {
+// the hook of each of harnesses, or nothing when it can. The command's guard
+// keeps a failure from holding the agent, but the failure would leave every
+// check undone without a word. A slopcop that knows a harness reads the
+// payload and, given none, says so; one that does not answers {} or fails.
+func CommandProblem(harnesses []string) string {
 	found, err := exec.LookPath("slopcop")
 	if err != nil {
 		return "no slopcop is on PATH, so no harness can run the hook"
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	// Without a harness the hook reads nothing and answers {}.
-	out, err := exec.CommandContext(ctx, found, "hook").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "{}" {
-		return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the hook, so no automatic check will run", found)
+	for _, name := range harnesses {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		out, err := exec.CommandContext(ctx, found, "hook", name).Output()
+		cancel()
+		var answer struct {
+			SystemMessage string `json:"systemMessage"`
+		}
+		if err != nil || json.Unmarshal(out, &answer) != nil || answer.SystemMessage == "" {
+			return fmt.Sprintf("%s, the slopcop first on PATH, cannot run the %s hook, so no automatic check will run there", found, name)
+		}
 	}
 	return ""
 }

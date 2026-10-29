@@ -2,12 +2,15 @@ package hooks
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 func isolateHome(t *testing.T) string {
@@ -274,9 +277,10 @@ func TestInstallAddsTheCodexHook(t *testing.T) {
 		t.Fatalf("install used ~/.codex instead of CODEX_HOME: %v", err)
 	}
 
-	// An unchanged hook keeps its hash, so Codex keeps trusting it.
+	// An unchanged hook keeps its hash, so Codex keeps trusting it; init
+	// still reminds, since Codex says nothing of a hook it skips.
 	result, err = Install()
-	if err != nil || result.NeedsTrust || len(result.ChangedPaths) != 0 {
+	if err != nil || !result.NeedsTrust || len(result.ChangedPaths) != 0 {
 		t.Fatalf("second install = %+v, %v", result, err)
 	}
 	if _, err := Remove(); err != nil {
@@ -288,17 +292,83 @@ func TestInstallAddsTheCodexHook(t *testing.T) {
 	}
 }
 
-func TestAnUnreadableSettingsFileChangesNoOther(t *testing.T) {
+func TestAnUnreadableSettingsFileLeavesTheOtherHarnessUpdated(t *testing.T) {
 	home := isolateHome(t)
 	if err := os.MkdirAll(filepath.Join(home, ".codex"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	writeConfig(t, filepath.Join(home, ".codex", "hooks.json"), `{"hooks":`)
-	if _, err := Install(); err == nil {
-		t.Fatal("Install accepted a malformed hooks.json")
+	codex := filepath.Join(home, ".codex", "hooks.json")
+	writeConfig(t, codex, `{"hooks":`)
+	claude := filepath.Join(home, ".claude", "settings.json")
+
+	result, err := Install()
+	if err == nil || !strings.Contains(err.Error(), "hooks.json") {
+		t.Fatalf("Install error = %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".claude", "settings.json")); !os.IsNotExist(err) {
-		t.Fatalf("Install wrote Claude Code's settings anyway: %v", err)
+	if len(result.ChangedPaths) != 1 || result.ChangedPaths[0] != claude || result.NeedsTrust {
+		t.Fatalf("result = %+v", result)
+	}
+	if !bytes.Contains(readConfig(t, claude), []byte("slopcop hook claude")) {
+		t.Fatal("Install left Claude Code without the hook")
+	}
+
+	result, err = Remove()
+	if err == nil || len(result.ChangedPaths) != 1 || bytes.Contains(readConfig(t, claude), []byte("slopcop hook")) {
+		t.Fatalf("Remove = %+v, %v", result, err)
+	}
+	if got := string(readConfig(t, codex)); got != `{"hooks":` {
+		t.Fatalf("hooks.json changed to %q", got)
+	}
+
+	// The other way round: a broken Claude Code settings file, which comes
+	// first, does not keep Codex from its hook.
+	writeConfig(t, claude, `{"hooks":`)
+	writeConfig(t, codex, `{}`)
+	result, err = Install()
+	if err == nil || len(result.ChangedPaths) != 1 || result.ChangedPaths[0] != codex {
+		t.Fatalf("Install = %+v, %v", result, err)
+	}
+}
+
+func TestInstallNeedsNoHomeWithTheHarnessDirectoriesSet(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("CLAUDE_CONFIG_DIR", dir)
+	t.Setenv("CODEX_HOME", "")
+	result, err := Install()
+	if err != nil || len(result.ChangedPaths) != 1 {
+		t.Fatalf("result = %+v, err = %v", result, err)
+	}
+}
+
+func TestHandlersStayTheSame(t *testing.T) {
+	// Codex trusts a hook by its handler's hash: a change here makes every
+	// Codex user trust the hook again.
+	for name, want := range map[string]string{
+		"claude": `{"type":"command","command":"slopcop hook claude || true","timeout":720,"statusMessage":"Checking the change with SlopCop"}`,
+		"codex":  `{"type":"command","command":"slopcop hook codex || true","commandWindows":"slopcop hook codex || exit /b 0","timeout":720,"statusMessage":"Checking the change with SlopCop"}`,
+	} {
+		var h harness
+		for _, candidate := range harnesses() {
+			if candidate.name == name {
+				h = candidate
+			}
+		}
+		var out bytes.Buffer
+		if err := encodeValue(&out, h.handler(), ""); err != nil {
+			t.Fatal(err)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, out.Bytes()); err != nil {
+			t.Fatal(err)
+		}
+		if compact.String() != want {
+			t.Errorf("%s handler = %s\nwant %s", name, compact.String(), want)
+		}
+	}
+	if seconds, _ := strconv.Atoi(hookTimeoutSeconds); CheckTimeout+time.Minute > time.Duration(seconds)*time.Second {
+		t.Errorf("CheckTimeout %v leaves too little of the hook's %ss", CheckTimeout, hookTimeoutSeconds)
 	}
 }
 
@@ -341,22 +411,25 @@ func TestCommandProblemProbesTheSlopcopOnPath(t *testing.T) {
 	}
 	bin := t.TempDir()
 	t.Setenv("PATH", bin)
-	if problem := CommandProblem(); !strings.Contains(problem, "no slopcop is on PATH") {
+	if problem := CommandProblem([]string{"claude"}); !strings.Contains(problem, "no slopcop is on PATH") {
 		t.Fatalf("problem with none on PATH = %q", problem)
 	}
 	fake := filepath.Join(bin, "slopcop")
 	for _, tc := range []struct {
-		script string
-		ok     bool
+		name, script string
+		ok           bool
 	}{
-		{"#!/bin/sh\necho '{}'\n", true},
-		{"#!/bin/sh\necho 'unknown command \"hook\"' >&2\nexit 2\n", false},
+		{"knows the hook", "#!/bin/sh\necho '{\"systemMessage\":\"could not read the payload\"}'\n", true},
+		// A slopcop from before Codex answers {} for a harness it does not
+		// know.
+		{"knows only Claude Code", "#!/bin/sh\n[ \"$2\" = claude ] && echo '{\"systemMessage\":\"x\"}' || echo '{}'\n", false},
+		{"has no hook", "#!/bin/sh\necho 'unknown command \"hook\"' >&2\nexit 2\n", false},
 	} {
 		if err := os.WriteFile(fake, []byte(tc.script), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if problem := CommandProblem(); (problem == "") != tc.ok {
-			t.Fatalf("script %q: problem = %q", tc.script, problem)
+		if problem := CommandProblem([]string{"claude", "codex"}); (problem == "") != tc.ok {
+			t.Fatalf("%s: problem = %q", tc.name, problem)
 		}
 	}
 }

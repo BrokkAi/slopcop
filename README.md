@@ -139,13 +139,15 @@ everything else in the file as it was:
 | `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
 
 Codex runs a new or changed hook only once you trust it: open Codex and review
-it with `/hooks`. Init never writes that trust itself. The hook stays the same
-from one release to the next, so an update does not ask for it again.
+it with `/hooks`. Init never writes that trust itself, and reminds you each
+time it runs, since Codex says nothing of a hook it skips. The hook stays the
+same from one release to the next, so an update does not ask for it again.
 
 When the agent stops, the hook checks the working tree through the same
 hosted API, but only when all of these hold:
 
-- the session wrote files in the repository with its edit tools;
+- the session wrote files in the repository with its edit tools (a Codex
+  session's subagents included);
 - slopcop is signed in, and the workspace a check would use
   (`$SLOPCOP_WORKSPACE`, or the login's) has the repository active
   (`slopcop repo list`), so nothing is sent from other repositories;

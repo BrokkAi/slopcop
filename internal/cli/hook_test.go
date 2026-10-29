@@ -106,15 +106,26 @@ func isolateHook(t *testing.T) {
 	t.Setenv("SLOPCOP_TOKEN", "test-token")
 }
 
-// writeCodexEdits writes the rollout of a Codex thread that wrote files in
-// repo, and returns its path.
+// writeCodexEdits writes the rollout of the Codex session's root thread,
+// which wrote files in repo, and returns its path.
 func writeCodexEdits(t *testing.T, repo string, files ...string) string {
 	t.Helper()
+	return writeCodexThread(t, hookSession, repo, files...)
+}
+
+// writeCodexThread writes the rollout of thread, of the Codex session, in
+// which it wrote files in repo, and returns its path.
+func writeCodexThread(t *testing.T, thread, repo string, files ...string) string {
+	t.Helper()
+	meta, _ := json.Marshal(map[string]any{
+		"type":    "session_meta",
+		"payload": map[string]any{"session_id": hookSession, "id": thread},
+	})
 	context, _ := json.Marshal(map[string]any{
 		"type":    "turn_context",
 		"payload": map[string]any{"turn_id": "turn-1", "model": "gpt-6-luna", "effort": "high"},
 	})
-	lines := []string{string(context)}
+	lines := []string{string(meta), string(context)}
 	for i, file := range files {
 		change, _ := json.Marshal(map[string]any{
 			"type": "event_msg",
@@ -125,7 +136,7 @@ func writeCodexEdits(t *testing.T, repo string, files ...string) string {
 		})
 		lines = append(lines, string(change))
 	}
-	path := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", "2026", "10", "29", "rollout-2026-10-29T10-00-00-"+hookSession+".jsonl")
+	path := filepath.Join(os.Getenv("CODEX_HOME"), "sessions", "2026", "10", "29", "rollout-2026-10-29T10-00-00-"+thread+".jsonl")
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -633,6 +644,81 @@ func TestCodexHookUsesTheResultOfACheckRunByHand(t *testing.T) {
 	output := runHookAs(t, attribution.CodexHarness, server.URL, stopPayload(repo, false))
 	if output.Decision != "block" || fake.checks != 1 {
 		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestCodexCheckByHandInASubagentIsTheSessions(t *testing.T) {
+	isolateHook(t)
+	const subagent = "01a182c8-0000-7000-8000-000000000002"
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeCodexEdits(t, repo)
+	writeCodexThread(t, subagent, repo, "demo.go")
+	// The check runs in the subagent, whose commands name its own thread.
+	t.Setenv("CODEX_THREAD_ID", subagent)
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 1 {
+		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
+	}
+	// The session's Stop hook finds the subagent's edit and its check.
+	output := runHookAs(t, attribution.CodexHarness, server.URL, stopPayload(repo, false))
+	if output.Decision != "block" || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestCodexHookWaitsForALateRollout(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	edited, err := os.ReadFile(writeCodexEdits(t, repo, "demo.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollout := writeCodexEdits(t, repo)
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	// Codex writes the turn's edit just after the hook first reads.
+	done := make(chan error)
+	go func() {
+		time.Sleep(rolloutSettle / 4)
+		done <- os.WriteFile(rollout, edited, 0o600)
+	}()
+	payload := fmt.Sprintf(`{"hook_event_name":"Stop","cwd":%q,"session_id":%q,"transcript_path":%q}`, repo, hookSession, rollout)
+	output := runHookAs(t, attribution.CodexHarness, server.URL, payload)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if output.Decision != "block" || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestHookStatesArePrunedOnceADay(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-2 * hookStateLifetime)
+	stale := func(name string) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte("{}"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	first := stale("first.json")
+	saveHookState(filepath.Join(dir, "current.json"), hookState{})
+	if _, err := os.Stat(first); !os.IsNotExist(err) {
+		t.Fatalf("an over session's state was kept: %v", err)
+	}
+	second := stale("second.json")
+	saveHookState(filepath.Join(dir, "current.json"), hookState{})
+	if _, err := os.Stat(second); err != nil {
+		t.Fatalf("pruned again within the day: %v", err)
 	}
 }
 

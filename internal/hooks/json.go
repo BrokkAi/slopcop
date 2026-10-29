@@ -8,8 +8,6 @@ import (
 	"reflect"
 )
 
-const statusMessage = "Checking the change with SlopCop"
-
 // reconcileJSON adds or removes SlopCop's Stop handler for h in the text of
 // a settings file. Everything else in the file keeps its keys, their order
 // and their values; only the indentation may change.
