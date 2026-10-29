@@ -246,13 +246,19 @@ slopcop --root ../repo --base HEAD~1
 ```
 
 The base commit defaults to the merge base with the branch upstream, then the
-merge base with `origin/HEAD`, then `HEAD`. The service must already have the
+merge base with `origin/HEAD`, then `HEAD` when neither is known. When the
+upstream merge base yields an empty patch, as on a branch whose commits are all
+pushed, the CLI uses the merge base with `origin/HEAD` instead, so a check
+right after a push still covers the branch. The service must already have the
 base commit in its clone; a missing one comes back as the service's
 `base_not_found` message and remedy.
 
 Every run sends one check request, even when the working tree matches the base
 and the patch is empty. A clean result or a failure always comes from the
-service.
+service. A report for an empty patch comes with a note on stderr that suggests
+`--base`, and `json` adds `"emptyChange": true` (`sarif`:
+`properties["slopcop.emptyChange"]`): a clean result then means nothing
+changed was checked.
 
 Flags:
 
@@ -343,8 +349,8 @@ summary line such as `1 new finding across 1 file(s); 72 already in the code |
 Analysis complete`, and any omitted new findings or
 incomplete checks. `json` prints `status`, `baseCommit`, `summary`
 (`newFindings` and `existingFindings` count the split), `findings` (each with
-`new` and its `id`), `incomplete`, and `failure` when the analysis did not
-complete. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
+`new` and its `id`), `incomplete`, `failure` when the analysis did not
+complete, and `emptyChange` when the patch was empty. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
 `new` and the finding id in `properties["slopcop.findingId"]`. `--format` only
 changes the rendering, never the request, so the service answers the same check
 whichever is used.

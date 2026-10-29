@@ -37,6 +37,10 @@ const (
 	// local work, before anything was sent.
 	interruptedBeforeSendText = "slopcop: interrupted before the check was sent; nothing reached the service."
 	// showExistingNotice is printed on stderr when --show-existing is passed.
+	// emptyChangeNotice is printed on stderr with a report for an empty
+	// patch, so a clean result is not read as a pass for work never sent.
+	emptyChangeNotice = "slopcop: the working tree matches the base %s, so the patch is empty and no change was checked. " +
+		"To check committed work, pass --base with the branch it targets, for example --base origin/main."
 	showExistingNotice = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
 
@@ -114,7 +118,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}
 		return checkFailure(cmd, err, format)
 	}
-	options := report.Options{ShowExisting: opts.showExisting}
+	emptyChange := prepared.bytes == 0
+	if emptyChange {
+		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
+	}
+	options := report.Options{ShowExisting: opts.showExisting, EmptyChange: emptyChange}
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}
@@ -230,7 +238,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	base, err := resolveBase(repoRoot, opts.base)
+	bases, err := resolveBases(repoRoot, opts.base)
 	if err != nil {
 		return prepared, err
 	}
@@ -238,9 +246,20 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	change, err := gitx.WorkingTreePatch(repoRoot, base, selection.Files)
-	if err != nil {
-		return prepared, err
+	// A default base that yields an empty patch, such as the upstream of a
+	// branch with nothing unpushed, gives way to the next default, so a check
+	// right after a push still covers the branch's work.
+	var base string
+	var change gitx.WorkingChange
+	for _, candidate := range bases {
+		base = candidate
+		change, err = gitx.WorkingTreePatch(repoRoot, base, selection.Files)
+		if err != nil {
+			return prepared, err
+		}
+		if len(change.Patch) > 0 {
+			break
+		}
 	}
 	origin, err := gitx.OriginURL(repoRoot)
 	if err != nil {
@@ -302,28 +321,38 @@ func resolveEnums(opts *checkOptions) (string, string, error) {
 	return format, failOn, nil
 }
 
-// resolveBase picks a commit the service can already resolve: the merge base
-// with the branch upstream, then the remote default branch, then HEAD. A wrong
-// guess is corrected by the service's base_not_found remedy.
-func resolveBase(root, rev string) (string, error) {
+// resolveBases lists the bases to try, in order. An explicit revision is the
+// only one. Otherwise each is a commit the service can already resolve: the
+// merge base with the branch upstream, then the remote default branch, or HEAD
+// when neither is known. A wrong guess is corrected by the service's
+// base_not_found remedy.
+func resolveBases(root, rev string) ([]string, error) {
 	if strings.TrimSpace(rev) != "" {
-		return gitx.ResolveCommit(root, strings.TrimSpace(rev))
+		base, err := gitx.ResolveCommit(root, strings.TrimSpace(rev))
+		if err != nil {
+			return nil, err
+		}
+		return []string{base}, nil
 	}
+	var bases []string
 	if base, ok, err := gitx.UpstreamBase(root); err != nil {
-		return "", err
+		return nil, err
 	} else if ok {
-		return base, nil
+		bases = append(bases, base)
 	}
 	if base, ok, err := gitx.OriginHeadBase(root); err != nil {
-		return "", err
-	} else if ok {
-		return base, nil
+		return nil, err
+	} else if ok && (len(bases) == 0 || bases[0] != base) {
+		bases = append(bases, base)
+	}
+	if len(bases) > 0 {
+		return bases, nil
 	}
 	head, err := gitx.HeadCommit(root)
 	if err != nil {
-		return "", fmt.Errorf("this repository has no commits yet, so there is nothing to check")
+		return nil, fmt.Errorf("this repository has no commits yet, so there is nothing to check")
 	}
-	return head, nil
+	return []string{head}, nil
 }
 
 // resolveSelection collects the policy selection the service should evaluate

@@ -55,8 +55,17 @@ slopcop --root ../repo --base HEAD~1
 ```
 
 The base commit defaults to the merge base with the branch upstream, then the
-merge base with `origin/HEAD`, then `HEAD`. One request goes out per run, even
-when nothing changed: an empty patch is a real check, not a skip.
+merge base with `origin/HEAD`, then `HEAD` when neither is known. If the
+upstream merge base gives an empty patch, as on a pushed branch, the CLI uses
+the `origin/HEAD` merge base instead. One request goes out per run, even when
+nothing changed: an empty patch is a real check, not a skip. Its report has
+`"emptyChange": true` and stderr says so; a `clean` status then means nothing
+was checked, not that the work passed.
+
+When you check work you have already committed, pass `--base` with the branch
+the change targets, such as the PR's base (`--base origin/main`), instead of
+relying on the default. On the default branch with nothing unpushed, the
+default base is `HEAD` and the patch is empty.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
 `--fail-on never|finding|note|warning|error` (default `finding`, so any new
@@ -179,6 +188,9 @@ Other bounds in the report:
 - `failure`: the analysis as a whole did not complete, and the report makes no
   claim about the code, even if it lists findings. `applied` is `false`
   whenever the analysis did not complete.
+- `emptyChange`: `true` only when the patch was empty because the working tree
+  matches the base. Nothing was checked; rerun with `--base` if you meant to
+  check committed work.
 
 ## Act on the findings
 

@@ -722,3 +722,16 @@ func TestEveryFormatCarriesTheFindingID(t *testing.T) {
 		t.Errorf("sarif invented an id: %v", results[1])
 	}
 }
+
+func TestEmptyChangeIsMarkedInMachineReports(t *testing.T) {
+	r := response(service.StatusClean, "finding", nil)
+	for _, format := range []string{FormatJSON, FormatSARIF} {
+		marked := renderWith(t, r, format, Options{EmptyChange: true})
+		if !strings.Contains(marked, "mptyChange\": true") {
+			t.Errorf("%s report does not mark the empty change:\n%s", format, marked)
+		}
+		if strings.Contains(render(t, r, format), "mptyChange") {
+			t.Errorf("%s report marks a non-empty change as empty", format)
+		}
+	}
+}
