@@ -62,22 +62,31 @@ func useWorkspace(ctx context.Context, client *service.Client, flagValue string)
 	return nil
 }
 
-// workspaceName is the name of the workspace client's requests run in, for a
-// question about it. It falls back to "your workspace" when it cannot tell.
-func workspaceName(ctx context.Context, client *service.Client) string {
+// resolvedWorkspace is the name of the workspace client's requests run in,
+// and whether the service could say.
+func resolvedWorkspace(ctx context.Context, client *service.Client) (string, bool) {
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
-		return "your workspace"
+		return "", false
 	}
 	if client.Workspace == "" {
-		return fmt.Sprintf("%q", whoami.Workspace.Name)
+		return whoami.Workspace.Name, true
 	}
 	for _, workspace := range whoami.Workspaces {
 		if strings.EqualFold(workspace.ID, client.Workspace) {
-			return fmt.Sprintf("%q", workspace.Name)
+			return workspace.Name, true
 		}
 	}
-	return "your workspace"
+	return "", false
+}
+
+// workspaceName is a resolved workspace's name, quoted, for a question or
+// notice about it; "your workspace" when it could not be resolved.
+func workspaceName(name string, known bool) string {
+	if !known {
+		return "your workspace"
+	}
+	return fmt.Sprintf("%q", name)
 }
 
 // errNotATerminal is confirmYes's answer when stdin is not a terminal, as for

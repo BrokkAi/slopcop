@@ -338,6 +338,19 @@ func TestRepoStateChangesNeedTheNameTypedAtATerminal(t *testing.T) {
 
 // pipedStdin stands in for an agent or a CI job, whose stdin is not a
 // terminal.
+// nullStdin stands in for a shell that gives the command the null device as
+// its stdin.
+func nullStdin(t *testing.T) {
+	t.Helper()
+	null, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdin := os.Stdin
+	os.Stdin = null
+	t.Cleanup(func() { os.Stdin = stdin; _ = null.Close() })
+}
+
 func pipedStdin(t *testing.T, input string) {
 	t.Helper()
 	reader, writer, err := os.Pipe()
