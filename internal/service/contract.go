@@ -50,7 +50,8 @@ type Request struct {
 	Attribution *Attribution `json:"attribution,omitempty"`
 	// AddRepository confirms adding the repository to a workspace that then
 	// pays for it. Without it such a check answers
-	// repository_add_unconfirmed. Only a person at a terminal sets it.
+	// repository_add_unconfirmed. It is sent only after a person confirms, at
+	// a terminal or by --add-repository for a named workspace.
 	AddRepository bool `json:"addRepository,omitempty"`
 }
 

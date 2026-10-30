@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/service"
@@ -428,15 +429,13 @@ func findRepository(repositories []service.Repository, wanted string) (service.R
 	}
 }
 
-// confirmInput is where enable and disable read the person's confirmation:
-// stdin, and only when it is a terminal. A variable so tests can stand in.
+// confirmInput is where a confirmation is read from: stdin, and only when
+// it is a terminal. A pipe, a file, or the null device, which an agent's
+// shell often gives its commands, is not one, so nothing is asked there. A
+// variable so tests can stand in.
 var confirmInput = func(cmd *cobra.Command) (io.Reader, bool) {
 	file, ok := cmd.InOrStdin().(*os.File)
-	if !ok {
-		return nil, false
-	}
-	info, err := file.Stat()
-	if err != nil || info.Mode()&os.ModeCharDevice == 0 {
+	if !ok || !term.IsTerminal(int(file.Fd())) {
 		return nil, false
 	}
 	return file, true

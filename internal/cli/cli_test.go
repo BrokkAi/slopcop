@@ -1080,7 +1080,8 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit = %d, stderr = %s", code, stderr)
 		}
-		if !strings.Contains(stderr, "where it uses 100 credits every 30 days.\nAdd BrokkAi/slopcop to \"Acme team\"? [y/N] ") {
+		if !strings.Contains(stderr, "where it uses 100 credits every 30 days.\nAdd BrokkAi/slopcop to \"Acme team\"? [y/N] ") ||
+			!strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") {
 			t.Errorf("stderr = %q", stderr)
 		}
 		// Both in the workspace --workspace named.
@@ -1093,12 +1094,19 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		}
 	})
 
-	t.Run("anything but yes adds nothing", func(t *testing.T) {
+	// refused is the stderr of the refusal when no one confirms, in the
+	// login's own workspace: the service's text, then the command that
+	// confirms it for that workspace.
+	refused := "slopcop: repository_add_unconfirmed: This check would add the repository to your workspace, where it uses 100 credits every 30 days.\n" +
+		"Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.\n" +
+		"Once the user approves adding it there, run the check again with `--add-repository --workspace \"Dave\"`.\n"
+
+	t.Run("anything but yes adds nothing, and the refusal stands", func(t *testing.T) {
 		server, checks := addService(t, base)
 		typed(t, "\n")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-		if code != 2 || stdout != "" || !strings.Contains(stderr, `Add BrokkAi/slopcop to "Dave"?`) ||
-			!strings.Contains(stderr, "nothing was added, so the check did not run") {
+		if code != service.ExitNeedsPerson || stdout != "" || !strings.Contains(stderr, `Add BrokkAi/slopcop to "Dave"? [y/N] `) ||
+			!strings.HasSuffix(stderr, "slopcop: nothing was added, so the check did not run\n"+refused) {
 			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 		}
 		if len(*checks) != 1 {
@@ -1110,13 +1118,65 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		server, checks := addService(t, base)
 		pipedStdin(t, "y\n")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-		want := "slopcop: repository_add_unconfirmed: This check would add the repository to your workspace, where it uses 100 credits every 30 days.\n" +
-			"Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.\n"
-		if code != service.ExitNeedsPerson || stdout != "" || stderr != want {
+		if code != service.ExitNeedsPerson || stdout != "" || stderr != refused {
 			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 		}
 		if len(*checks) != 1 {
 			t.Errorf("checks = %v, want the one refused", *checks)
+		}
+	})
+
+	t.Run("the null device is not a terminal", func(t *testing.T) {
+		// An agent's shell often runs a command with stdin on the null
+		// device, which is a character device but not a terminal: the
+		// check must not ask there, and must fail as any unconfirmed add.
+		server, checks := addService(t, base)
+		nullStdin(t)
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
+		var document map[string]any
+		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
+		}
+		if code != service.ExitNeedsPerson || document["code"] != "repository_add_unconfirmed" || stderr != refused {
+			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
+		}
+		if len(*checks) != 1 {
+			t.Errorf("checks = %v, want the one refused", *checks)
+		}
+	})
+
+	t.Run("--add-repository carries the approval for the workspace named", func(t *testing.T) {
+		server, checks := addService(t, base)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "-w", "Acme team", "--service", server.URL)
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr = %s", code, stderr)
+		}
+		if strings.Contains(stderr, "[y/N]") || !strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") {
+			t.Errorf("stderr = %q", stderr)
+		}
+		want := []map[string]any{
+			{"workspace": teamID, "addRepository": nil},
+			{"workspace": teamID, "addRepository": true},
+		}
+		if !reflect.DeepEqual(*checks, want) {
+			t.Errorf("checks = %v, want %v", *checks, want)
+		}
+	})
+
+	t.Run("--add-repository without --workspace sends nothing", func(t *testing.T) {
+		// The approval is for one workspace, so the flag names it; the
+		// workspace the login points at, or $SLOPCOP_WORKSPACE, is not
+		// what the user approved.
+		server, checks := addService(t, base)
+		t.Setenv("SLOPCOP_WORKSPACE", "Acme team")
+		pipedStdin(t, "")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "--format", "json", "--service", server.URL)
+		if code != 2 || stdout != "" || !strings.HasPrefix(stderr, "slopcop: --add-repository needs --workspace <name|id>: ") {
+			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		if len(*checks) != 0 {
+			t.Errorf("checks = %v, want none", *checks)
 		}
 	})
 

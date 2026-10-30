@@ -42,9 +42,15 @@ the workspace (name, kind, role), its plan (Pro or Free) and the service URL
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
 - A first check adds the repository to the workspace. When the workspace would
-  then pay for it, the check exits `4` with `repository_add_unconfirmed`. Do
-  not work around it: tell the user to run the check themselves, which asks
-  them to confirm, or to add the repository on the Repositories page.
+  then pay for it, the check exits `4` with `repository_add_unconfirmed`, and
+  stderr names the workspace it would add to. Stop and tell the user: the
+  repository, the workspace, and the cost from the message. Only when the
+  user has approved adding it to that workspace, run the check again with
+  `--add-repository --workspace <name|id>`, naming the workspace they
+  approved; the flag refuses to run without `--workspace`. Do not pass it
+  without that approval, pick a workspace they did not name, or pipe an
+  answer into the check. Without the flag, a check that is not at a terminal
+  asks nothing and exits `4` the same way.
 
 ## Run a check
 
@@ -74,7 +80,8 @@ PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
-stderr.
+stderr. `--add-repository`, with `--workspace`, confirms adding the
+repository once the user has approved it (see above).
 
 When the service reports a newer release, the CLI prints one line on stderr,
 at most once a day, starting `slopcop vX.Y.Z is available`. It never touches
@@ -137,7 +144,7 @@ the usual codes mean:
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
-| `repository_add_unconfirmed` | The check would add a repository the workspace then pays for. Tell the user; only they can confirm it, by running the check at a terminal. |
+| `repository_add_unconfirmed` | The check would add a repository the workspace then pays for. Tell the user which workspace and what it costs. Once they approve it, run the check again with `--add-repository --workspace <name|id>` for that workspace; otherwise they confirm at a terminal or on the Repositories page. |
 | `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
 
