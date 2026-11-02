@@ -33,6 +33,9 @@ type Options struct {
 	// matched the base, so no change was checked. The human format leaves it
 	// to the CLI's note on stderr.
 	EmptyChange bool
+	// Verbose lists the inconclusive checks in the human format, which
+	// otherwise only counts them. The machine formats always list them.
+	Verbose bool
 }
 
 // Write renders the response to w.
@@ -93,9 +96,15 @@ func human(response service.Response, options Options) string {
 		out.WriteString(line)
 		out.WriteString("\n")
 	}
-	// Inconclusive checks are not named: one that could not prove there is
-	// nothing more to find is the norm for static analysis, and there is
-	// nothing for the reader to do about it.
+	// One that could not prove there is nothing more to find is the norm for
+	// static analysis, so by default they get one line, for a reader judging
+	// what a clean result is worth.
+	if options.Verbose {
+		writeInconclusive(&out, response)
+	} else if line := inconclusiveLine(response); line != "" {
+		out.WriteString(line)
+		out.WriteString("\n")
+	}
 	return out.String()
 }
 
@@ -212,6 +221,97 @@ func incompleteLine(response service.Response) string {
 	return "Incomplete: " + strings.Join(named, ", ")
 }
 
+// inconclusiveCheck is one inconclusive check as the reports name it.
+type inconclusiveCheck struct {
+	PolicyID string `json:"policyId"`
+	Reason   string `json:"reason"`
+	// Elsewhere says the check concerns only files the change does not
+	// write. Without it, it may concern the change itself.
+	Elsewhere bool `json:"elsewhere"`
+}
+
+// inconclusiveChecks merges the service's two lists, sorted by policy id.
+// The elsewhere checks are a subset of the others and both lists are cut at
+// the same bound in id order, so the flag is exact for every check listed. A
+// service from before `inconclusive` sent only the elsewhere list.
+func inconclusiveChecks(response service.Response) []inconclusiveCheck {
+	elsewhere := make(map[string]bool, len(response.InconclusiveElsewhere))
+	for _, policy := range response.InconclusiveElsewhere {
+		elsewhere[policy.PolicyID] = true
+	}
+	checks := []inconclusiveCheck{}
+	seen := make(map[string]bool)
+	for _, list := range [][]service.IncompletePolicy{response.Inconclusive, response.InconclusiveElsewhere} {
+		for _, policy := range list {
+			if seen[policy.PolicyID] {
+				continue
+			}
+			seen[policy.PolicyID] = true
+			checks = append(checks, inconclusiveCheck{
+				PolicyID:  policy.PolicyID,
+				Reason:    policy.Reason,
+				Elsewhere: elsewhere[policy.PolicyID],
+			})
+		}
+	}
+	sort.Slice(checks, func(i, j int) bool { return checks[i].PolicyID < checks[j].PolicyID })
+	return checks
+}
+
+// inconclusiveCounts is how many checks were inconclusive, and how many of
+// them concern only files the change does not write. The summary counts
+// past the listed bound.
+func inconclusiveCounts(response service.Response, checks []inconclusiveCheck) (total, elsewhere int) {
+	for _, check := range checks {
+		if check.Elsewhere {
+			elsewhere++
+		}
+	}
+	return max(response.Summary.Inconclusive, len(checks)),
+		max(response.Summary.InconclusiveElsewhere, elsewhere)
+}
+
+// inconclusiveLine counts the inconclusive checks, such as `Inconclusive: 23
+// check(s), 3 only about files the change does not write; they never fail
+// the check. --verbose names them.`
+func inconclusiveLine(response service.Response) string {
+	checks := inconclusiveChecks(response)
+	total, elsewhere := inconclusiveCounts(response, checks)
+	if total == 0 {
+		return ""
+	}
+	line := fmt.Sprintf("Inconclusive: %d check(s)", total)
+	if elsewhere > 0 {
+		line = fmt.Sprintf("%s, %d only about files the change does not write", line, elsewhere)
+	}
+	line += "; they never fail the check."
+	if len(checks) > 0 {
+		line += " --verbose names them."
+	}
+	return line
+}
+
+// writeInconclusive names each inconclusive check, one per line, and counts
+// the ones past the listed bound.
+func writeInconclusive(out *strings.Builder, response service.Response) {
+	checks := inconclusiveChecks(response)
+	total, _ := inconclusiveCounts(response, checks)
+	if total == 0 {
+		return
+	}
+	out.WriteString("Inconclusive (never fail the check)\n")
+	for _, check := range checks {
+		where := ""
+		if check.Elsewhere {
+			where = " (only files the change does not write)"
+		}
+		fmt.Fprintf(out, "  %s%s\n", printable(check.PolicyID), where)
+	}
+	if unnamed := total - len(checks); unnamed > 0 {
+		fmt.Fprintf(out, "  and %d more\n", unnamed)
+	}
+}
+
 // printable keeps control and bidirectional-override characters from hostile
 // repository content off the terminal.
 func printable(value string) string {
@@ -233,20 +333,24 @@ type jsonReport struct {
 	Summary    service.Summary            `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
 	Incomplete []service.IncompletePolicy `json:"incomplete"`
-	Failure    string                     `json:"failure,omitempty"`
+	// Inconclusive names the checks summary.inconclusive counts, up to the
+	// service's bound. They never change the status.
+	Inconclusive []inconclusiveCheck `json:"inconclusive"`
+	Failure      string              `json:"failure,omitempty"`
 	// EmptyChange is set only when the patch was empty.
 	EmptyChange bool `json:"emptyChange,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
-		Status:      response.Status,
-		BaseCommit:  response.BaseCommit,
-		Summary:     response.Summary,
-		Findings:    listed(response, options),
-		Incomplete:  response.Incomplete,
-		Failure:     response.Failure,
-		EmptyChange: options.EmptyChange,
+		Status:       response.Status,
+		BaseCommit:   response.BaseCommit,
+		Summary:      response.Summary,
+		Findings:     listed(response, options),
+		Incomplete:   response.Incomplete,
+		Inconclusive: inconclusiveChecks(response),
+		Failure:      response.Failure,
+		EmptyChange:  options.EmptyChange,
 	}, "json report")
 }
 
@@ -514,14 +618,31 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Properties: map[string]any{"slopcop.reason": policy.Reason},
 		})
 	}
+	// Inconclusive checks are notes: they never change the status or the
+	// execution's success.
+	for _, check := range inconclusiveChecks(response) {
+		notifications = append(notifications, sarifNotification{
+			Level: "note",
+			Message: sarifMessage{Text: fmt.Sprintf(
+				"%s could not prove there is nothing more to find (%s)", check.PolicyID, check.Reason,
+			)},
+			Descriptor: &sarifDescriptor{ID: check.PolicyID},
+			Properties: map[string]any{
+				"slopcop.reason":       check.Reason,
+				"slopcop.inconclusive": true,
+				"slopcop.elsewhere":    check.Elsewhere,
+			},
+		})
+	}
 
 	properties := map[string]any{
-		"slopcop.status":           response.Status,
-		"slopcop.baseCommit":       response.BaseCommit,
-		"slopcop.failOn":           response.Summary.FailOn,
-		"slopcop.newFindings":      response.Summary.NewFindings,
-		"slopcop.existingFindings": response.Summary.ExistingFindings,
-		"slopcop.inconclusive":     response.Summary.Inconclusive,
+		"slopcop.status":                response.Status,
+		"slopcop.baseCommit":            response.BaseCommit,
+		"slopcop.failOn":                response.Summary.FailOn,
+		"slopcop.newFindings":           response.Summary.NewFindings,
+		"slopcop.existingFindings":      response.Summary.ExistingFindings,
+		"slopcop.inconclusive":          response.Summary.Inconclusive,
+		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 	}
 	if options.EmptyChange {
 		properties["slopcop.emptyChange"] = true
