@@ -2,6 +2,7 @@ package gitx
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -489,5 +490,38 @@ func TestCanonicalRepoURL(t *testing.T) {
 		if got, err := CanonicalRepoURL(raw); err == nil {
 			t.Errorf("CanonicalRepoURL(%q) = %q, want an error", raw, got)
 		}
+	}
+}
+
+func TestRemoteDefaultBranchFollowsARename(t *testing.T) {
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	git(t, t.TempDir(), "init", "-q", "--bare", "-b", "main", origin)
+	work := t.TempDir()
+	git(t, work, "clone", "-q", origin, ".")
+	git(t, work, "config", "user.email", "test@example.com")
+	git(t, work, "config", "user.name", "Test")
+	writeFile(t, work, "a.txt", "a\n")
+	git(t, work, "add", "-A")
+	git(t, work, "commit", "-qm", "a")
+	git(t, work, "push", "-q", "origin", "main")
+	git(t, work, "remote", "set-head", "origin", "--auto")
+
+	if branch, ok := RemoteDefaultBranch(context.Background(), work); !ok || branch != "main" {
+		t.Fatalf("RemoteDefaultBranch = %q, %v; want main", branch, ok)
+	}
+	if head := OriginHead(work); head != "origin/main" {
+		t.Fatalf("OriginHead = %q, want origin/main", head)
+	}
+
+	git(t, origin, "branch", "-m", "main", "master")
+	if branch, ok := RemoteDefaultBranch(context.Background(), work); !ok || branch != "master" {
+		t.Fatalf("after the rename, RemoteDefaultBranch = %q, %v; want master", branch, ok)
+	}
+	if head := OriginHead(work); head != "origin/main" {
+		t.Fatalf("a rename on origin moved the local origin/HEAD to %q", head)
+	}
+
+	if _, ok := RemoteDefaultBranch(context.Background(), t.TempDir()); ok {
+		t.Fatal("a directory with no origin named a default branch")
 	}
 }

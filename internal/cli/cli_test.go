@@ -1322,3 +1322,49 @@ func TestBaseUsesTheMergeBaseWithTheNamedBranch(t *testing.T) {
 		t.Fatalf("requests = %d, want 2", len(captured))
 	}
 }
+
+// A base the service does not have often comes from a clone that missed a
+// rename of origin's default branch, so origin/HEAD, and the default base,
+// still point at the old one.
+func TestBaseNotFoundHintNamesOriginsDefaultBranch(t *testing.T) {
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	runGit(t, t.TempDir(), "init", "-q", "--bare", "-b", "main", origin)
+	work := t.TempDir()
+	runGit(t, work, "clone", "-q", origin, ".")
+	runGit(t, work, "config", "user.email", "test@example.com")
+	runGit(t, work, "config", "user.name", "Test")
+	writeFile(t, work, "a.txt", "a\n")
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-qm", "a")
+	runGit(t, work, "push", "-q", "origin", "main")
+	runGit(t, work, "remote", "set-head", "origin", "--auto")
+	pushed := runGit(t, work, "rev-parse", "HEAD")
+
+	runGit(t, origin, "branch", "-m", "main", "master")
+	runGit(t, work, "fetch", "-q", "--prune", "origin")
+	hint := describeBase(work, pushed, "master")
+	for _, want := range []string{
+		"origin's default branch is master",
+		"origin/HEAD is origin/main",
+		"git remote set-head origin --auto",
+		"--base origin/master",
+	} {
+		if !strings.Contains(hint, want) {
+			t.Errorf("after a rename, hint = %q, want %q", hint, want)
+		}
+	}
+
+	runGit(t, work, "remote", "set-head", "origin", "--auto")
+	if hint := describeBase(work, pushed, "master"); hint != "" {
+		t.Errorf("a base on origin's default branch got hint %q", hint)
+	}
+
+	writeFile(t, work, "b.txt", "b\n")
+	runGit(t, work, "add", "-A")
+	runGit(t, work, "commit", "-qm", "b")
+	local := runGit(t, work, "rev-parse", "HEAD")
+	hint = describeBase(work, local, "master")
+	if !strings.Contains(hint, "is not on origin/master") || !strings.Contains(hint, "--base origin/master") {
+		t.Errorf("an unpushed base got hint %q", hint)
+	}
+}

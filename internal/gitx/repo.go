@@ -1,8 +1,10 @@
 package gitx
 
 import (
+	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -71,8 +73,8 @@ func UpstreamBase(root string) (string, bool, error) {
 // branch is known locally. It is the fallback base for a branch with no
 // upstream, such as a fresh CI checkout.
 func OriginHeadBase(root string) (string, bool, error) {
-	head, err := Run(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
-	if err != nil || head == "" {
+	head := OriginHead(root)
+	if head == "" {
 		return "", false, nil
 	}
 	return MergeBase(root, "HEAD", head)
@@ -86,4 +88,42 @@ func MergeBase(root, a, b string) (string, bool, error) {
 		return "", false, nil
 	}
 	return out, true, nil
+}
+
+// RemoteDefaultBranch asks origin for its default branch, such as "master".
+// It reaches the network, so it runs only to explain a failure; the boolean is
+// false when origin cannot be asked without a prompt before ctx ends.
+func RemoteDefaultBranch(ctx context.Context, root string) (string, bool) {
+	env := withEnv(os.Environ(), "GIT_TERMINAL_PROMPT", "0")
+	out, err := RunContext(ctx, root, env, "ls-remote", "--symref", "origin", "HEAD")
+	if err != nil {
+		return "", false
+	}
+	for _, line := range strings.Split(out, "\n") {
+		target, ok := strings.CutPrefix(line, "ref: refs/heads/")
+		if !ok {
+			continue
+		}
+		if branch, _, ok := strings.Cut(target, "\t"); ok && branch != "" {
+			return branch, true
+		}
+	}
+	return "", false
+}
+
+// OriginHead returns the remote-tracking branch refs/remotes/origin/HEAD
+// names, such as "origin/main", or "" when it is unset.
+func OriginHead(root string) string {
+	head, err := Run(root, "symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD")
+	if err != nil {
+		return ""
+	}
+	return head
+}
+
+// IsAncestor reports whether commit a is an ancestor of, or equal to, b. It
+// is false when git cannot tell, such as when b does not resolve.
+func IsAncestor(root, a, b string) bool {
+	_, err := Run(root, "merge-base", "--is-ancestor", a, b)
+	return err == nil
 }

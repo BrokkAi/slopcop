@@ -4,6 +4,7 @@ package gitx
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -26,7 +27,21 @@ func RunBytes(root string, env []string, args ...string) ([]byte, error) {
 
 // RunInput is RunBytes with input written to git's stdin.
 func RunInput(root string, env []string, input []byte, args ...string) ([]byte, error) {
-	command := exec.Command("git", append([]string{"-C", root}, args...)...)
+	return runContext(context.Background(), root, env, input, args...)
+}
+
+// RunContext is Run, stopped when ctx ends, for git commands that reach the
+// network.
+func RunContext(ctx context.Context, root string, env []string, args ...string) (string, error) {
+	out, err := runContext(ctx, root, env, nil, args...)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func runContext(ctx context.Context, root string, env []string, input []byte, args ...string) ([]byte, error) {
+	command := exec.CommandContext(ctx, "git", append([]string{"-C", root}, args...)...)
 	if env != nil {
 		command.Env = env
 	}
