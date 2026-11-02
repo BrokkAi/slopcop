@@ -193,8 +193,11 @@ Other bounds in the report:
   nothing more to find, typically at a library boundary or in code the
   analysis cannot fully model. Complete proof is rare in static analysis, so
   this is normal and is not a problem with the change. They never change the
-  status. Do nothing about them: do not report them as gaps, rerun, rewrite
-  code, or ignore or disable a policy because of them.
+  status. `inconclusive` names them by policy id, with `elsewhere: true` for
+  one that concerns only files the change does not write. Do nothing about
+  them: do not report them as gaps, rerun, rewrite code, or ignore or disable
+  a policy because of them. Name them only when someone asks how much a
+  `clean` result covers.
 - `summary.omittedFindings`: new findings left out because one check found
   more than it may report; the most severe are listed. Give them little
   weight: they never change the status, and a large count is almost always

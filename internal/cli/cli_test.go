@@ -160,6 +160,44 @@ func TestCleanTreeStillAsksTheService(t *testing.T) {
 	}
 }
 
+func TestVerboseNamesInconclusiveChecks(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "clean",
+			"baseCommit": "` + base + `",
+			"applied": true,
+			"summary": {"files": 1, "findings": 0, "incompletePolicies": 0,
+				"inconclusive": 2, "inconclusiveElsewhere": 1, "failOn": "finding"},
+			"findings": [],
+			"incomplete": [],
+			"inconclusive": [{"policyId": "acme.a", "reason": "inconclusive"},
+				{"policyId": "acme.b", "reason": "inconclusive"}],
+			"inconclusiveElsewhere": [{"policyId": "acme.b", "reason": "inconclusive"}]
+		}`))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "Inconclusive: 2 check(s), 1 only about files the change does not write") ||
+		strings.Contains(stdout, "acme.a") {
+		t.Errorf("stdout = %q", stdout)
+	}
+	code, stdout, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL, "--verbose")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "  acme.a\n  acme.b (only files the change does not write)\n") {
+		t.Errorf("verbose stdout = %q", stdout)
+	}
+}
+
 func TestPushedBranchFallsBackToTheDefaultBranch(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")

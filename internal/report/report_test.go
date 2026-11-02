@@ -283,7 +283,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if want := []string{"baseCommit", "findings", "incomplete", "status", "summary"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"baseCommit", "findings", "incomplete", "inconclusive", "status", "summary"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("keys = %v, want %v", keys, want)
 	}
 	wantSummary := map[string]any{
@@ -636,33 +636,109 @@ func TestSARIFSaysWhatDidNotComplete(t *testing.T) {
 	}
 }
 
-func TestInconclusiveChecksAreCountedNotNamed(t *testing.T) {
-	unproven := response(service.StatusClean, "finding", []service.Finding{})
-	unproven.Summary.Inconclusive = 6
-	unproven.Summary.InconclusiveElsewhere = 2
-	if got, want := render(t, unproven, FormatHuman), "No new findings | Analysis complete\n"; got != want {
+func unproven() service.Response {
+	r := response(service.StatusClean, "finding", []service.Finding{})
+	r.Summary.Inconclusive = 6
+	r.Summary.InconclusiveElsewhere = 2
+	r.Inconclusive = []service.IncompletePolicy{
+		{PolicyID: "acme.a", Reason: "inconclusive"},
+		{PolicyID: "acme.b", Reason: "inconclusive"},
+		{PolicyID: "acme.c", Reason: "inconclusive"},
+	}
+	r.InconclusiveElsewhere = []service.IncompletePolicy{{PolicyID: "acme.b", Reason: "inconclusive"}}
+	return r
+}
+
+func TestHumanCountsInconclusiveChecksAndVerboseNamesThem(t *testing.T) {
+	want := "No new findings | Analysis complete\n" +
+		"Inconclusive: 6 check(s), 2 only about files the change does not write; " +
+		"they never fail the check. --verbose names them.\n"
+	if got := render(t, unproven(), FormatHuman); got != want {
 		t.Errorf("human = %q, want %q", got, want)
 	}
 
-	var document map[string]any
-	if err := json.Unmarshal([]byte(render(t, unproven, FormatJSON)), &document); err != nil {
-		t.Fatalf("json: %v", err)
-	}
-	if document["summary"].(map[string]any)["inconclusive"] != float64(6) {
-		t.Errorf("json = %v", document)
+	want = "No new findings | Analysis complete\n" +
+		"Inconclusive (never fail the check)\n" +
+		"  acme.a\n" +
+		"  acme.b (only files the change does not write)\n" +
+		"  acme.c\n" +
+		"  and 3 more\n"
+	if got := renderWith(t, unproven(), FormatHuman, Options{Verbose: true}); got != want {
+		t.Errorf("verbose human = %q, want %q", got, want)
 	}
 
+	// A service from before the lists only counts them.
+	counted := response(service.StatusClean, "finding", []service.Finding{})
+	counted.Summary.Inconclusive = 4
+	want = "No new findings | Analysis complete\nInconclusive: 4 check(s); they never fail the check.\n"
+	if got := render(t, counted, FormatHuman); got != want {
+		t.Errorf("counted human = %q, want %q", got, want)
+	}
+	clean := response(service.StatusClean, "finding", []service.Finding{})
+	if got := renderWith(t, clean, FormatHuman, Options{Verbose: true}); got != "No new findings | Analysis complete\n" {
+		t.Errorf("clean verbose human = %q", got)
+	}
+}
+
+func TestJSONNamesInconclusiveChecks(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, unproven(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["status"] != "clean" || document["summary"].(map[string]any)["inconclusive"] != float64(6) {
+		t.Errorf("json = %v", document)
+	}
+	want := []any{
+		map[string]any{"policyId": "acme.a", "reason": "inconclusive", "elsewhere": false},
+		map[string]any{"policyId": "acme.b", "reason": "inconclusive", "elsewhere": true},
+		map[string]any{"policyId": "acme.c", "reason": "inconclusive", "elsewhere": false},
+	}
+	if !reflect.DeepEqual(document["inconclusive"], want) {
+		t.Errorf("inconclusive = %v", document["inconclusive"])
+	}
+
+	// A service from before `inconclusive` sent only the elsewhere list.
+	older := response(service.StatusClean, "finding", []service.Finding{})
+	older.Summary.InconclusiveElsewhere = 1
+	older.InconclusiveElsewhere = []service.IncompletePolicy{{PolicyID: "acme.b", Reason: "inconclusive"}}
+	if err := json.Unmarshal([]byte(render(t, older, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if !reflect.DeepEqual(document["inconclusive"], want[1:2]) {
+		t.Errorf("older inconclusive = %v", document["inconclusive"])
+	}
+}
+
+func TestSARIFNotesEachInconclusiveCheck(t *testing.T) {
 	var log map[string]any
-	if err := json.Unmarshal([]byte(render(t, unproven, FormatSARIF)), &log); err != nil {
+	if err := json.Unmarshal([]byte(render(t, unproven(), FormatSARIF)), &log); err != nil {
 		t.Fatalf("sarif: %v", err)
 	}
 	run := log["runs"].([]any)[0].(map[string]any)
 	invocation := run["invocations"].([]any)[0].(map[string]any)
-	if invocation["executionSuccessful"] != true || invocation["toolExecutionNotifications"] != nil {
+	if invocation["executionSuccessful"] != true {
 		t.Errorf("invocation = %v", invocation)
 	}
-	if run["properties"].(map[string]any)["slopcop.inconclusive"] != float64(6) {
-		t.Errorf("properties = %v", run["properties"])
+	notifications := invocation["toolExecutionNotifications"].([]any)
+	if len(notifications) != 3 {
+		t.Fatalf("notifications = %v", notifications)
+	}
+	want := map[string]any{
+		"level":      "note",
+		"message":    map[string]any{"text": "acme.b could not prove there is nothing more to find (inconclusive)"},
+		"descriptor": map[string]any{"id": "acme.b"},
+		"properties": map[string]any{
+			"slopcop.reason":       "inconclusive",
+			"slopcop.inconclusive": true,
+			"slopcop.elsewhere":    true,
+		},
+	}
+	if !reflect.DeepEqual(notifications[1], want) {
+		t.Errorf("notification = %v", notifications[1])
+	}
+	properties := run["properties"].(map[string]any)
+	if properties["slopcop.inconclusive"] != float64(6) || properties["slopcop.inconclusiveElsewhere"] != float64(2) {
+		t.Errorf("properties = %v", properties)
 	}
 }
 

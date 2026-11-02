@@ -69,6 +69,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	// stdout.
 	reportOptions := report.Options{
 		ShowExisting: opts.showExisting,
+		Verbose:      opts.verbose,
 		SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), version),
 	}
 	stdout := cmd.OutOrStdout()
