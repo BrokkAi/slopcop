@@ -291,7 +291,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	bases, err := resolveBases(repoRoot, opts.base)
+	bases, err := resolveBases(repoRoot, opts.base, opts.baseExact)
 	if err != nil {
 		return prepared, err
 	}
@@ -379,11 +379,37 @@ func resolveEnums(opts *checkOptions) (string, string, error) {
 // merge base with the branch upstream, then the remote default branch, or HEAD
 // when neither is known. A wrong guess is corrected by the service's
 // base_not_found remedy.
-func resolveBases(root, rev string) ([]string, error) {
-	if strings.TrimSpace(rev) != "" {
-		base, err := gitx.ResolveCommit(root, strings.TrimSpace(rev))
+//
+// --base names the branch the change started from and, like
+// `git diff REV...HEAD`, resolves to its merge base with HEAD, so commits that
+// landed on that branch after the branch point are not sent as reverse edits.
+// --base-exact uses the named commit as is.
+func resolveBases(root, rev, exact string) ([]string, error) {
+	rev, exact = strings.TrimSpace(rev), strings.TrimSpace(exact)
+	if rev != "" && exact != "" {
+		return nil, fmt.Errorf("--base and --base-exact cannot be used together")
+	}
+	if exact != "" {
+		base, err := gitx.ResolveCommit(root, exact)
 		if err != nil {
 			return nil, err
+		}
+		return []string{base}, nil
+	}
+	if rev != "" {
+		commit, err := gitx.ResolveCommit(root, rev)
+		if err != nil {
+			return nil, err
+		}
+		base, ok, err := gitx.MergeBase(root, "HEAD", commit)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf(
+				"%s has no merge base with HEAD; pass --base-exact %s to diff against it directly",
+				rev, rev,
+			)
 		}
 		return []string{base}, nil
 	}

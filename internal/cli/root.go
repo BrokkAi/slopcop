@@ -135,6 +135,7 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 type checkOptions struct {
 	root         string
 	base         string
+	baseExact    string
 	format       string
 	failOn       string
 	policies     []string
@@ -151,7 +152,8 @@ type checkOptions struct {
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags := command.Flags()
 	flags.StringVar(&opts.root, "root", ".", "repository path to check")
-	flags.StringVar(&opts.base, "base", "", "base commit or revision (default: merge-base with the upstream branch)")
+	flags.StringVar(&opts.base, "base", "", "branch or revision the change started from; the base is its merge base with HEAD (default: merge base with the upstream branch)")
+	flags.StringVar(&opts.baseExact, "base-exact", "", "exact base commit or revision, used without taking a merge base")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
 	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")

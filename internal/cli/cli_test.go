@@ -1241,3 +1241,84 @@ func TestAnUpgradeNoticeGoesToStderrOnceADay(t *testing.T) {
 		t.Errorf("a second run the same day printed the notice again: %q", stderr)
 	}
 }
+
+func TestBaseUsesTheMergeBaseWithTheNamedBranch(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	branchPoint := runGit(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "checkout", "-q", "-b", "feature")
+	writeFile(t, repo, "feature.txt", "feature\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "feature")
+	runGit(t, repo, "checkout", "-q", "main")
+	writeFile(t, repo, "later-on-main.txt", "main moved on\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "main moved on")
+	mainTip := runGit(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "checkout", "-q", "feature")
+
+	var captured []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode request: %v", err)
+		}
+		captured = append(captured, body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "clean",
+			"baseCommit": "` + body["baseCommit"].(string) + `",
+			"applied": true,
+			"summary": {"files": 1, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [],
+			"incomplete": []
+		}`))
+	}))
+	defer server.Close()
+
+	patchFor := func(request map[string]any) string {
+		t.Helper()
+		patch, err := base64.StdEncoding.DecodeString(request["change"].(string))
+		if err != nil {
+			t.Fatalf("change is not base64: %v", err)
+		}
+		return string(patch)
+	}
+
+	code, _, stderr := runCLI(t,
+		"check", "--root", repo, "--service", server.URL, "--format", "json", "--base", "main",
+	)
+	if code != 0 {
+		t.Fatalf("--base exit = %d, stderr = %s", code, stderr)
+	}
+	if captured[0]["baseCommit"] != branchPoint {
+		t.Errorf("--base baseCommit = %v, want the merge base %s", captured[0]["baseCommit"], branchPoint)
+	}
+	if patch := patchFor(captured[0]); !strings.Contains(patch, "feature.txt") ||
+		strings.Contains(patch, "later-on-main.txt") {
+		t.Errorf("--base patch should carry only the branch's change:\n%s", patch)
+	}
+
+	code, _, stderr = runCLI(t,
+		"check", "--root", repo, "--service", server.URL, "--format", "json", "--base-exact", "main",
+	)
+	if code != 0 {
+		t.Fatalf("--base-exact exit = %d, stderr = %s", code, stderr)
+	}
+	if captured[1]["baseCommit"] != mainTip {
+		t.Errorf("--base-exact baseCommit = %v, want the tip %s", captured[1]["baseCommit"], mainTip)
+	}
+	if patch := patchFor(captured[1]); !strings.Contains(patch, "later-on-main.txt") {
+		t.Errorf("--base-exact patch should reverse main's newer commit:\n%s", patch)
+	}
+
+	code, _, stderr = runCLI(t,
+		"check", "--root", repo, "--service", server.URL, "--base", "main", "--base-exact", "main",
+	)
+	if code != 2 || !strings.Contains(stderr, "cannot be used together") {
+		t.Fatalf("both flags: exit = %d, stderr = %q", code, stderr)
+	}
+	if len(captured) != 2 {
+		t.Fatalf("requests = %d, want 2", len(captured))
+	}
+}
