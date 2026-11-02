@@ -19,6 +19,7 @@ func TestStartDevice(t *testing.T) {
 			"deviceCode": "device-1",
 			"userCode": "ABCD-EFGH",
 			"verificationUri": "https://slopcop.com/device",
+			"verificationUriComplete": "https://slopcop.com/device?code=ABCD-EFGH",
 			"expiresIn": 600,
 			"interval": 2
 		}`))
@@ -41,6 +42,28 @@ func TestStartDevice(t *testing.T) {
 	}
 	if start.VerificationURI != "https://slopcop.com/device" || start.Interval != 2 {
 		t.Fatalf("start = %+v", start)
+	}
+	if start.VerificationURIComplete != "https://slopcop.com/device?code=ABCD-EFGH" {
+		t.Fatalf("start = %+v", start)
+	}
+}
+
+func TestDeviceInstructionsLeadWithTheOneClickLink(t *testing.T) {
+	start := DeviceStart{
+		UserCode:                "ABCD-EFGH",
+		VerificationURI:         "https://slopcop.com/device",
+		VerificationURIComplete: "https://slopcop.com/device?code=ABCD-EFGH",
+	}
+	want := "Open https://slopcop.com/device?code=ABCD-EFGH to approve this login (code ABCD-EFGH)\n" +
+		"or open https://slopcop.com/device and enter the code"
+	if got := start.Instructions(); got != want {
+		t.Fatalf("Instructions() = %q, want %q", got, want)
+	}
+
+	// A service from before the link was added sends only the page.
+	start.VerificationURIComplete = ""
+	if got := start.Instructions(); got != "Open https://slopcop.com/device and enter code ABCD-EFGH" {
+		t.Fatalf("Instructions() = %q", got)
 	}
 }
 

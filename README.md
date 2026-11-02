@@ -210,8 +210,10 @@ slopcop login                           # browser device flow
 slopcop login --token "$SLOPCOP_TOKEN"  # existing credential, for CI and agents
 ```
 
-The browser flow prints a URL and a code and stores the token once the login is
-approved. The service URL defaults to `https://slopcop.com`; `--service`,
+The browser flow prints a link that opens the approval page with the code
+filled in, plus the page and code to type in instead, and stores the token once
+the login is approved. Approve only if the page shows the code your terminal
+printed. The service URL defaults to `https://slopcop.com`; `--service`,
 `$SLOPCOP_SERVICE`, or a stored value override it.
 
 The credential lives in `slopcop/config.json` under the user config directory

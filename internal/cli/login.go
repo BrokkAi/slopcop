@@ -18,8 +18,8 @@ func newLoginCommand(serviceURL *string, version string) *cobra.Command {
 		Short: "Sign in to the SlopCop check service",
 		Long: `Sign in to the SlopCop check service.
 
-With no flags, login starts the browser device flow: it prints a URL and a
-code, then waits for approval. Pass --token to store an existing credential,
+With no flags, login starts the browser device flow: it prints a link that
+opens the approval page with the code filled in, then waits for approval. Pass --token to store an existing credential,
 which is what CI and agent harnesses use.
 
 Login also installs the agent skill into every well-known skills directory
@@ -42,11 +42,7 @@ whose harness is installed here, as every check does.`,
 				if err != nil {
 					return remedyError(err)
 				}
-				fmt.Fprintf(
-					cmd.ErrOrStderr(),
-					"Open %s and enter code %s\n",
-					start.VerificationURI, start.UserCode,
-				)
+				fmt.Fprintln(cmd.ErrOrStderr(), start.Instructions())
 				credential, err = client.AwaitDeviceToken(cmd.Context(), start, func(line string) {
 					fmt.Fprintln(cmd.ErrOrStderr(), line)
 				})

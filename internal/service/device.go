@@ -25,8 +25,11 @@ type DeviceStart struct {
 	DeviceCode      string `json:"deviceCode"`
 	UserCode        string `json:"userCode"`
 	VerificationURI string `json:"verificationUri"`
-	ExpiresIn       int    `json:"expiresIn"`
-	Interval        int    `json:"interval"`
+	// VerificationURIComplete opens the approval page with the code filled in.
+	// Services before it was added leave it empty.
+	VerificationURIComplete string `json:"verificationUriComplete"`
+	ExpiresIn               int    `json:"expiresIn"`
+	Interval                int    `json:"interval"`
 }
 
 // StartDevice begins the device flow.
@@ -224,6 +227,20 @@ func deviceFailure(status int, payload []byte, start DeviceStart) *Error {
 		}
 	}
 	return failure
+}
+
+// Instructions say how to approve the login: the one-click link when the
+// service sent one, and always the page and code to type, so the person can
+// check the code the page fills in against the one they were shown.
+func (start DeviceStart) Instructions() string {
+	manual := fmt.Sprintf("Open %s and enter code %s", start.VerificationURI, start.UserCode)
+	if start.VerificationURIComplete == "" {
+		return manual
+	}
+	return fmt.Sprintf(
+		"Open %s to approve this login (code %s)\nor open %s and enter the code",
+		start.VerificationURIComplete, start.UserCode, start.VerificationURI,
+	)
 }
 
 func deviceRemedy(start DeviceStart) string {
