@@ -139,7 +139,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if emptyChange {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
 	}
-	options := report.Options{ShowExisting: opts.showExisting, EmptyChange: emptyChange}
+	options := report.Options{ShowExisting: opts.showExisting, EmptyChange: emptyChange, Verbose: opts.verbose}
 	if err := report.Write(stdout, response, format, options); err != nil {
 		return err
 	}

@@ -307,7 +307,7 @@ Flags:
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's |
 | `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it |
-| `--verbose` | print the resolved request to stderr |
+| `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 ### What is sent
 
@@ -384,7 +384,7 @@ summary line such as `1 new finding across 1 file(s); 72 already in the code |
 Analysis complete`, and any omitted new findings or
 incomplete checks. `json` prints `status`, `baseCommit`, `summary`
 (`newFindings` and `existingFindings` count the split), `findings` (each with
-`new` and its `id`), `incomplete`, `failure` when the analysis did not
+`new` and its `id`), `incomplete`, `inconclusive`, `failure` when the analysis did not
 complete, and `emptyChange` when the patch was empty. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
 `new` and the finding id in `properties["slopcop.findingId"]`. `--format` only
 changes the rendering, never the request, so the service answers the same check
@@ -406,10 +406,18 @@ reached the service; after, a service that received it keeps running it, and
 running the same check again picks up its result.
 
 An inconclusive check, one that ran but could not prove there is nothing
-more to find, never changes the exit code and is not named in any format.
-Complete proof is rare in static analysis, typically at a library boundary,
-so this is the norm rather than a gap. `summary.inconclusive` counts them in
-`json`, as does `slopcop.inconclusive` in `sarif`. A check that timed out or
+more to find, never changes the exit code or the status. Complete proof is
+rare in static analysis, typically at a library boundary, so this is the norm
+rather than a gap. Each report still says where they are, so a reviewer can
+judge what a `clean` result is worth: `human` prints one `Inconclusive:` line
+with the count and how many concern only files the change does not write, and
+`--verbose` names each check. `json` lists them in `inconclusive`, each with
+`policyId`, `reason` and `elsewhere` (true when it concerns only files the
+change does not write), beside the `summary.inconclusive` count. `sarif` adds
+a `note` notification per check with `slopcop.inconclusive` and
+`slopcop.elsewhere` properties. The service names at most 50; the counts
+cover the rest. It does not yet say which files or lines each one concerns,
+or what evidence was missing. A check that timed out or
 that Bifrost judged unreliable is incomplete and counts wherever it is.
 
 The service applies `--fail-on` and sets the status; the exit code follows it.

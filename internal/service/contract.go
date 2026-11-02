@@ -100,6 +100,12 @@ type Response struct {
 	Summary    Summary            `json:"summary"`
 	Findings   []Finding          `json:"findings"`
 	Incomplete []IncompletePolicy `json:"incomplete"`
+	// Inconclusive names at most 50 of the Summary.Inconclusive checks, one
+	// per policy, sorted by id. A service from before it omits it.
+	Inconclusive []IncompletePolicy `json:"inconclusive"`
+	// InconclusiveElsewhere names the Inconclusive checks about files the
+	// change does not write, at most 50, sorted by id.
+	InconclusiveElsewhere []IncompletePolicy `json:"inconclusiveElsewhere"`
 	// Failure says why the analysis did not complete, when it failed.
 	Failure string `json:"failure,omitempty"`
 }
@@ -122,8 +128,8 @@ type Summary struct {
 	IncompletePolicyIDs []string `json:"incompletePolicyIds"`
 	// Inconclusive counts the checks that ran and could not prove there is
 	// nothing more to find. That is the norm for static analysis, not a
-	// fault: they never change the status, IncompletePolicies does not
-	// include them, and there is nothing to do about them.
+	// fault: they never change the status and IncompletePolicies does not
+	// include them.
 	Inconclusive int `json:"inconclusive"`
 	// InconclusiveElsewhere counts the Inconclusive checks about files the
 	// change does not write. A service from before Inconclusive counted only
