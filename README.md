@@ -179,12 +179,27 @@ When the agent stops, the hook checks the working tree through the same
 hosted API, but only when all of these hold:
 
 - the session wrote files in the repository with its edit tools (a Codex
-  session's subagents included);
+  session's subagents included), or the working tree has a changed
+  dependency manifest or lockfile (see below);
 - slopcop is signed in, and the workspace a check would use
   (`$SLOPCOP_WORKSPACE`, or the login's) has the repository active
   (`slopcop repo list`), so nothing is sent from other repositories;
 - the tree differs from the last check in the session, including a check the
   agent ran by hand.
+
+An agent often adds a dependency through its shell, with `npm install`,
+`pnpm add`, `cargo add` or `uv add`, which no edit tool records. So the hook
+also checks when git shows one of these files changed, added or untracked in
+any directory of the repository: `package.json`, `package-lock.json`,
+`npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.toml`,
+`Cargo.lock`, `pyproject.toml`, `uv.lock`, `poetry.lock`, `requirements*.txt`,
+`go.mod` and `go.sum`. Files git ignores and those under `node_modules` do
+not count. The hook recognises these files by name only: it never reads
+them, runs a package manager or asks an advisory database; the hosted check
+reads them like any other file in the change. A changed dependency file
+counts as one the session wrote, since the hook cannot tell which command
+changed it, so its new findings are handed to the agent like those in files
+it edited, even if the file was already changed when the session began.
 
 New findings in files the session wrote are handed to the agent to fix, once
 for a given tree and at most twice in a row; then the agent is let go and you

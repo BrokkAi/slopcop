@@ -160,3 +160,26 @@ func withEnv(env []string, key, value string) []string {
 	}
 	return append(filtered, prefix+value)
 }
+
+// ChangedPaths lists the repository-relative paths that pathspecs match and
+// that differ from HEAD in the working tree, untracked ones included and
+// ignored ones left out, as `git status` sees them. It reads only paths, never
+// file contents, and takes no lock on the user's index.
+func ChangedPaths(root string, pathspecs []string) ([]string, error) {
+	args := append([]string{
+		"--no-optional-locks", "-c", "core.quotePath=false",
+		"status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames", "--",
+	}, pathspecs...)
+	out, err := RunBytes(root, nil, args...)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, entry := range bytes.Split(out, []byte{0}) {
+		// Each entry is two status letters, a space, then the path.
+		if len(entry) > 3 {
+			paths = append(paths, string(entry[3:]))
+		}
+	}
+	return paths, nil
+}
