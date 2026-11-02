@@ -280,7 +280,11 @@ change started from and, like `git diff REV...HEAD`, uses the merge base of
 `REV` and `HEAD`, so commits that landed on `REV` after the branch point are not
 sent as reverse edits. `--base-exact REV` diffs against `REV` itself. The
 service must already have the base commit in its clone; a missing one comes back as the service's
-`base_not_found` message and remedy.
+`base_not_found` message and remedy. The CLI then asks origin for its default
+branch (`git ls-remote`, no prompt, 10 second limit) and adds a line when the
+clone explains the failure: origin's default branch was renamed and
+`origin/HEAD` still names the old one, or the base is not on origin's default
+branch.
 
 Every run sends one check request, even when the working tree matches the base
 and the patch is empty. A clean result or a failure always comes from the

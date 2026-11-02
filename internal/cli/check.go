@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -29,6 +30,7 @@ const (
 	// repositoryAddUnconfirmed is the service's refusal of a check that would
 	// add a repository its workspace then pays for.
 	repositoryAddUnconfirmed = "repository_add_unconfirmed"
+	baseNotFound             = "base_not_found"
 	// addRepositoryNeedsWorkspace is the usage error for --add-repository
 	// without --workspace: the approval is for one workspace, so the flag
 	// names it rather than trusting wherever the login points.
@@ -115,6 +117,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if errors.As(err, &rejected) && rejected.Body.Code == repositoryAddUnconfirmed {
 		response, err = addRepositoryOnConfirm(cmd, client, opts, request, rejected)
 	}
+	if errors.As(err, &rejected) && rejected.Body.Code == baseNotFound {
+		err = &baseRefusal{refusal: rejected, text: baseNotFoundHint(cmd.Context(), prepared.repoRoot, request.BaseCommit)}
+	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
@@ -157,9 +162,11 @@ func checkFailure(cmd *cobra.Command, err error, format string) error {
 	var serviceError *service.Error
 	if errors.As(err, &serviceError) {
 		text := remedyText(serviceError)
-		var unconfirmed *addRefusal
-		if errors.As(err, &unconfirmed) {
-			text += "\n" + unconfirmed.hint()
+		var withHint hinted
+		if errors.As(err, &withHint) {
+			if hint := withHint.hint(); hint != "" {
+				text += "\n" + hint
+			}
 		}
 		if code := serviceError.Body.Code; code != "" {
 			text = "slopcop: " + code + ": " + text
@@ -213,6 +220,58 @@ func addRepositoryOnConfirm(cmd *cobra.Command, client *service.Client, opts *ch
 		fmt.Fprintf(stderr, "slopcop: added %s to %s\n", repository, workspaceName(workspace, known))
 	}
 	return response, err
+}
+
+// hinted is a service refusal the CLI adds a line of its own to, after the
+// service's remedy.
+type hinted interface {
+	hint() string
+}
+
+// baseRefusal is base_not_found with what the local clone says about why.
+type baseRefusal struct {
+	refusal *service.Error
+	text    string
+}
+
+func (r *baseRefusal) Error() string { return r.refusal.Error() }
+
+func (r *baseRefusal) Unwrap() error { return r.refusal }
+
+func (r *baseRefusal) hint() string { return r.text }
+
+// baseNotFoundHint explains a base the service does not have when the clone
+// can tell why: origin's default branch moved, as after a rename from main to
+// master, and the clone still points origin/HEAD, and so the default base, at
+// the old one; or the base is not on origin's default branch at all. It asks
+// origin, so it runs only after the service refused, and says nothing when
+// origin cannot be asked in time.
+func baseNotFoundHint(ctx context.Context, root, base string) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	branch, ok := gitx.RemoteDefaultBranch(ctx, root)
+	if !ok {
+		return ""
+	}
+	return describeBase(root, base, branch)
+}
+
+// describeBase is baseNotFoundHint once origin has named its default branch.
+func describeBase(root, base, branch string) string {
+	want := "origin/" + branch
+	if local := gitx.OriginHead(root); local != want {
+		return fmt.Sprintf(
+			"origin's default branch is %s, but this clone's origin/HEAD is %s. Run `git fetch --prune origin` and `git remote set-head origin --auto`, then rebase onto %s or pass `--base %s`.",
+			branch, valueOr(local, "unset"), want, want,
+		)
+	}
+	if !gitx.IsAncestor(root, base, want) {
+		return fmt.Sprintf(
+			"The base %s is not on %s, origin's default branch, as of the last fetch. Run `git fetch origin`, then rebase onto %s or pass `--base %s` if the change targets it.",
+			shortSHA(base), want, want, want,
+		)
+	}
+	return ""
 }
 
 // addRefusal is repository_add_unconfirmed when no one confirmed it: the

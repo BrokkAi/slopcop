@@ -143,7 +143,7 @@ the usual codes mean:
 | `device_flow_disabled` | This deployment has no browser login; use `slopcop login --token`. |
 | `repo_not_indexed` | Analyze the repository on SlopCop first; a private one needs the SlopCop GitHub App. |
 | `no_access` | The account needs access to the repository. |
-| `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. |
+| `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. Follow that line. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
