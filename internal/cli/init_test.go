@@ -1,15 +1,19 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/skills"
 )
 
@@ -296,6 +300,174 @@ func TestBundledSkillIsDiscoverable(t *testing.T) {
 	for _, want := range []string{"name: slopcop", "description: "} {
 		if !strings.Contains(frontmatter, want) {
 			t.Errorf("frontmatter %q lacks %q", frontmatter, want)
+		}
+	}
+}
+
+// writeStampedSkill puts a skill in dir as the given version wrote it: each
+// file with a stamp that records it.
+func writeStampedSkill(t *testing.T, dir, version string, contents map[string]string) {
+	t.Helper()
+	var files []skillFile
+	for name, content := range contents {
+		files = append(files, skillFile{relative: filepath.FromSlash(name), data: []byte(content)})
+	}
+	if err := writeSkill(dir, files, version); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// failingService answers every check with a refusal, so a check run gets as
+// far as the skill sync and a failure report.
+func failingService(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(`{"code": "repo_renamed", "message": "renamed", "remedy": "fix the remote", "retryable": false}`))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func skillUpdates(t *testing.T, stdout string) []report.SkillUpdate {
+	t.Helper()
+	var document struct {
+		SkillUpdated []report.SkillUpdate `json:"skillUpdated"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("stdout is not a json report: %v\n%s", err, stdout)
+	}
+	return document.SkillUpdated
+}
+
+// An update names the version it replaces, the one it installs and the files
+// that changed, on stderr and in the json report, and removes the files the
+// bundle no longer has. A skill as its version wrote it needs no copy.
+func TestCheckNamesTheSkillVersionsAndFilesItChanges(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeStampedSkill(t, dir, "v0.0.9", map[string]string{
+		"SKILL.md":       "an older skill\n",
+		"notes/stale.md": "a file the bundle dropped\n",
+	})
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := failingService(t)
+
+	_, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	wantChanged := []string{"SKILL.md", "agents/openai.yaml", "notes/stale.md"}
+	notice := "updated the slopcop skill at " + dir + " from v0.0.9 to test (changed: " + strings.Join(wantChanged, ", ") + ")"
+	if !strings.Contains(stderr, notice) {
+		t.Errorf("stderr = %q, want %q", stderr, notice)
+	}
+	if strings.Contains(stderr, "local edits") {
+		t.Errorf("stderr = %q, want no copy of a skill without local edits", stderr)
+	}
+	want := []report.SkillUpdate{{Dir: dir, From: "v0.0.9", To: "test", Changed: wantChanged}}
+	if got := skillUpdates(t, stdout); !reflect.DeepEqual(got, want) {
+		t.Errorf("skillUpdated = %+v, want %+v", got, want)
+	}
+	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
+		t.Error("SKILL.md is not the bundled one")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "notes")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("the dropped file's folder is still there: %v", err)
+	}
+	if stamp, ok := readSkillStamp(dir); !ok || stamp.Version != "test" {
+		t.Errorf("stamp = %+v, %v, want version test", stamp, ok)
+	}
+
+	_, stdout, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	if strings.Contains(stderr, "skill") || len(skillUpdates(t, stdout)) != 0 {
+		t.Errorf("a current skill was reported: stderr = %q, stdout = %s", stderr, stdout)
+	}
+}
+
+// A skill with local edits is copied outside every skills directory before
+// it is replaced, and the notice and the report say where.
+func TestCheckKeepsACopyOfASkillWithLocalEdits(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	writeStampedSkill(t, dir, "v0.0.9", map[string]string{"SKILL.md": "an older skill\n"})
+	writeFile(t, dir, "SKILL.md", "an older skill, with my notes\n")
+	writeFile(t, dir, "mine.md", "my own file\n")
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := failingService(t)
+
+	_, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	updates := skillUpdates(t, stdout)
+	if len(updates) != 1 || updates[0].From != "v0.0.9" || updates[0].Backup == "" {
+		t.Fatalf("skillUpdated = %+v, want one update from v0.0.9 with a backup", updates)
+	}
+	backup := updates[0].Backup
+	if !strings.Contains(stderr, "local edits; a copy is at "+backup) {
+		t.Errorf("stderr = %q, want it to name the copy at %s", stderr, backup)
+	}
+	backups, err := config.SkillBackupDir()
+	requireUnder(t, backups, backup, err)
+	if got := filepath.Base(backup); !strings.HasPrefix(got, "claude-") {
+		t.Errorf("backup %s is not named for its harness", backup)
+	}
+	for name, want := range map[string]string{
+		"SKILL.md": "an older skill, with my notes\n",
+		"mine.md":  "my own file\n",
+	} {
+		if got := readSkillFile(t, filepath.Join(backup, name)); got != want {
+			t.Errorf("the copy's %s = %q, want %q", name, got, want)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "mine.md")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("a file the bundle lacks stayed in the skill: %v", err)
+	}
+}
+
+// A skill a release before the stamp installed is known by its files, so it
+// is named and needs no copy; one that matches no release is unknown and
+// edited.
+func TestSkillOriginKnowsReleasesBeforeTheStamp(t *testing.T) {
+	v009 := map[string]string{
+		"SKILL.md":           "506acaa83b67693f56aff616f32d0224091d5602462e1b330166ade1840bd7f8",
+		"agents/openai.yaml": "2b3ebe4e9299ac6c1eed486258fb9789338fb904622773a462ec3f227c180765",
+	}
+	if from, edited := skillOrigin(v009, skillStamp{}, false); from != "v0.0.9" || edited {
+		t.Errorf("skillOrigin(v0.0.9) = %q, %v, want v0.0.9 without edits", from, edited)
+	}
+	v009["SKILL.md"] = fileDigest([]byte("edited\n"))
+	if from, edited := skillOrigin(v009, skillStamp{}, false); from != skillVersionUnknown || !edited {
+		t.Errorf("skillOrigin(edited) = %q, %v, want unknown with edits", from, edited)
+	}
+}
+
+// A skill that matches the bundle under another version's stamp only has its
+// stamp brought up to date, without a notice.
+func TestMatchingSkillOnlyGetsANewStamp(t *testing.T) {
+	isolateAgentHome(t)
+	files, err := bundledSkillFiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(t.TempDir(), "skills", "slopcop")
+	if err := writeSkill(dir, files, "v0.0.9"); err != nil {
+		t.Fatal(err)
+	}
+	if _, wrote, err := syncSkillAt(dir, files, "v0.0.10"); err != nil || wrote {
+		t.Fatalf("syncSkillAt = %v, %v, want nothing written", wrote, err)
+	}
+	if stamp, _ := readSkillStamp(dir); stamp.Version != "v0.0.10" {
+		t.Errorf("stamp version = %q, want v0.0.10", stamp.Version)
+	}
+}
+
+// The notice for a release links its notes.
+func TestSkillNoticeLinksReleaseNotes(t *testing.T) {
+	got := skillNotice(report.SkillUpdate{Dir: "d", From: skillVersionUnknown, To: "v0.0.11", Changed: []string{"SKILL.md"}})
+	for _, want := range []string{"from an unrecognised version to v0.0.11", releaseNotesURL + "v0.0.11"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("notice = %q, want %q", got, want)
 		}
 	}
 }

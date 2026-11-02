@@ -3,6 +3,7 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"reflect"
 	"sort"
 	"strings"
@@ -355,7 +356,7 @@ func TestPendingIsAParseableReport(t *testing.T) {
 	pending := service.Pending{RetryAfter: 5, Message: "The check is still running.", Remedy: "Run the same check again."}
 	write := func(format string) string {
 		var out bytes.Buffer
-		if err := WritePending(&out, pending, format); err != nil {
+		if err := WritePending(&out, pending, format, Options{}); err != nil {
 			t.Fatalf("WritePending(%s): %v", format, err)
 		}
 		return out.String()
@@ -391,7 +392,7 @@ func TestPendingIsAParseableReport(t *testing.T) {
 		notification["properties"].(map[string]any)["slopcop.retryAfter"] != float64(5) {
 		t.Errorf("invocation = %v", invocation)
 	}
-	if err := WritePending(&bytes.Buffer{}, pending, "xml"); err == nil {
+	if err := WritePending(&bytes.Buffer{}, pending, "xml", Options{}); err == nil {
 		t.Error("expected an error for an unknown format")
 	}
 }
@@ -405,7 +406,7 @@ func TestFailureIsAParseableReport(t *testing.T) {
 	}}
 	write := func(format string) string {
 		var out bytes.Buffer
-		if err := WriteFailure(&out, failure, format); err != nil {
+		if err := WriteFailure(&out, failure, format, Options{}); err != nil {
 			t.Fatalf("WriteFailure(%s): %v", format, err)
 		}
 		return out.String()
@@ -442,7 +443,7 @@ func TestFailureIsAParseableReport(t *testing.T) {
 		notification["descriptor"].(map[string]any)["id"] != "insufficient_credits" {
 		t.Errorf("invocation = %v", invocation)
 	}
-	if err := WriteFailure(&bytes.Buffer{}, failure, "xml"); err == nil {
+	if err := WriteFailure(&bytes.Buffer{}, failure, "xml", Options{}); err == nil {
 		t.Error("expected an error for an unknown format")
 	}
 }
@@ -732,6 +733,70 @@ func TestEmptyChangeIsMarkedInMachineReports(t *testing.T) {
 		}
 		if strings.Contains(render(t, r, format), "mptyChange") {
 			t.Errorf("%s report marks a non-empty change as empty", format)
+		}
+	}
+}
+
+// A run that wrote the skill says so in every machine report, the failed and
+// the pending alike, so an agent that reads only stdout rereads it.
+func TestSkillUpdateIsInEveryMachineReport(t *testing.T) {
+	options := Options{SkillUpdated: []SkillUpdate{{
+		Dir:     "/home/me/.claude/skills/slopcop",
+		From:    "v0.0.9",
+		To:      "v0.0.10",
+		Changed: []string{"SKILL.md"},
+		Backup:  "/home/me/.config/slopcop/skill-backups/claude-20261102T101500Z",
+	}}}
+	want := []any{map[string]any{
+		"dir":     "/home/me/.claude/skills/slopcop",
+		"from":    "v0.0.9",
+		"to":      "v0.0.10",
+		"changed": []any{"SKILL.md"},
+		"backup":  "/home/me/.config/slopcop/skill-backups/claude-20261102T101500Z",
+	}}
+	writers := map[string]func(io.Writer, string, Options) error{
+		"report": func(w io.Writer, format string, options Options) error {
+			return Write(w, response(service.StatusClean, "finding", nil), format, options)
+		},
+		"pending": func(w io.Writer, format string, options Options) error {
+			return WritePending(w, service.Pending{RetryAfter: 5}, format, options)
+		},
+		"failure": func(w io.Writer, format string, options Options) error {
+			return WriteFailure(w, &service.Error{StatusCode: 409, Body: service.ErrorBody{Code: "repo_renamed"}}, format, options)
+		},
+	}
+	for name, write := range writers {
+		var out bytes.Buffer
+		if err := write(&out, FormatJSON, options); err != nil {
+			t.Fatalf("%s json: %v", name, err)
+		}
+		var document map[string]any
+		if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+			t.Fatalf("%s json: %v", name, err)
+		}
+		if !reflect.DeepEqual(document["skillUpdated"], want) {
+			t.Errorf("%s json skillUpdated = %v, want %v", name, document["skillUpdated"], want)
+		}
+
+		out.Reset()
+		if err := write(&out, FormatSARIF, options); err != nil {
+			t.Fatalf("%s sarif: %v", name, err)
+		}
+		var log map[string]any
+		if err := json.Unmarshal(out.Bytes(), &log); err != nil {
+			t.Fatalf("%s sarif: %v", name, err)
+		}
+		run := log["runs"].([]any)[0].(map[string]any)
+		if got := run["properties"].(map[string]any)["slopcop.skillUpdated"]; !reflect.DeepEqual(got, want) {
+			t.Errorf("%s sarif slopcop.skillUpdated = %v, want %v", name, got, want)
+		}
+
+		out.Reset()
+		if err := write(&out, FormatJSON, Options{}); err != nil {
+			t.Fatalf("%s json: %v", name, err)
+		}
+		if strings.Contains(out.String(), "skillUpdated") {
+			t.Errorf("%s json names a skill update that did not happen: %s", name, out.String())
 		}
 	}
 }

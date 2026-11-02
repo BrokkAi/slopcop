@@ -209,6 +209,13 @@ Other bounds in the report:
 - `emptyChange`: `true` only when the patch was empty because the working tree
   matches the base. Nothing was checked; rerun with `--base` if you meant to
   check committed work.
+- `skillUpdated`: present only when this run installed or replaced this
+  skill. Each entry names the skill `dir`, the version it replaced (`from`),
+  the new one (`to`) and the `changed` files. Your loaded copy of these
+  instructions is out of date: reread `SKILL.md` in that directory before you
+  act on the report. A `backup` is where a copy of a skill with local edits
+  went; tell the user. The failed and pending reports carry it too, and stderr
+  says the same in a `slopcop: updated the slopcop skill` line.
 
 ## Act on the findings
 

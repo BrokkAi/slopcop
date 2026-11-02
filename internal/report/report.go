@@ -33,6 +33,24 @@ type Options struct {
 	// matched the base, so no change was checked. The human format leaves it
 	// to the CLI's note on stderr.
 	EmptyChange bool
+	// SkillUpdated lists the skills directories whose slopcop skill this run
+	// installed or replaced, so an agent knows to reread its instructions.
+	// The human format leaves it to the CLI's note on stderr.
+	SkillUpdated []SkillUpdate
+}
+
+// SkillUpdate is one skills directory whose slopcop skill a run wrote.
+type SkillUpdate struct {
+	Dir string `json:"dir"`
+	// From is the version that was there: a release, "unknown" for a skill
+	// that matches none, or empty when there was no skill.
+	From string `json:"from,omitempty"`
+	To   string `json:"to"`
+	// Changed names the files, relative to Dir, that were added, rewritten or
+	// removed.
+	Changed []string `json:"changed"`
+	// Backup is where a copy of a skill with local edits was kept.
+	Backup string `json:"backup,omitempty"`
 }
 
 // Write renders the response to w.
@@ -236,41 +254,46 @@ type jsonReport struct {
 	Failure    string                     `json:"failure,omitempty"`
 	// EmptyChange is set only when the patch was empty.
 	EmptyChange bool `json:"emptyChange,omitempty"`
+	// SkillUpdated is set only when this run wrote the skill.
+	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
-		Status:      response.Status,
-		BaseCommit:  response.BaseCommit,
-		Summary:     response.Summary,
-		Findings:    listed(response, options),
-		Incomplete:  response.Incomplete,
-		Failure:     response.Failure,
-		EmptyChange: options.EmptyChange,
+		Status:       response.Status,
+		BaseCommit:   response.BaseCommit,
+		Summary:      response.Summary,
+		Findings:     listed(response, options),
+		Incomplete:   response.Incomplete,
+		Failure:      response.Failure,
+		EmptyChange:  options.EmptyChange,
+		SkillUpdated: options.SkillUpdated,
 	}, "json report")
 }
 
 // pendingReport is the document `--format json` prints for a check that was
 // still running when --timeout ran out.
 type pendingReport struct {
-	Status     string `json:"status"`
-	RetryAfter int    `json:"retryAfter"`
-	Message    string `json:"message"`
-	Remedy     string `json:"remedy"`
+	Status       string        `json:"status"`
+	RetryAfter   int           `json:"retryAfter"`
+	Message      string        `json:"message"`
+	Remedy       string        `json:"remedy"`
+	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // WritePending renders a check that is still running. The human format
 // prints nothing on stdout: the message is on stderr and the exit code is 3.
-func WritePending(w io.Writer, pending service.Pending, format string) error {
+func WritePending(w io.Writer, pending service.Pending, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
 		return nil
 	case FormatJSON:
 		return encode(w, pendingReport{
-			Status:     service.StatusPending,
-			RetryAfter: pending.RetryAfter,
-			Message:    pending.Message,
-			Remedy:     pending.Remedy,
+			Status:       service.StatusPending,
+			RetryAfter:   pending.RetryAfter,
+			Message:      pending.Message,
+			Remedy:       pending.Remedy,
+			SkillUpdated: options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLog(sarifRun{
@@ -285,7 +308,7 @@ func WritePending(w io.Writer, pending service.Pending, format string) error {
 					Properties: map[string]any{"slopcop.retryAfter": pending.RetryAfter},
 				}},
 			}},
-			Properties: map[string]any{"slopcop.status": service.StatusPending},
+			Properties: runProperties(map[string]any{"slopcop.status": service.StatusPending}, options),
 		}), "sarif report")
 	default:
 		return fmt.Errorf("unknown format %q (expected human, json, or sarif)", format)
@@ -296,31 +319,33 @@ func WritePending(w io.Writer, pending service.Pending, format string) error {
 // service refused: its closed error code, verbatim message and remedy, and
 // whether the same request may succeed later.
 type failureReport struct {
-	Status     string `json:"status"`
-	Code       string `json:"code"`
-	Message    string `json:"message"`
-	Remedy     string `json:"remedy"`
-	Retryable  bool   `json:"retryable"`
-	InstallURL string `json:"installUrl,omitempty"`
-	TopUpURL   string `json:"topUpUrl,omitempty"`
+	Status       string        `json:"status"`
+	Code         string        `json:"code"`
+	Message      string        `json:"message"`
+	Remedy       string        `json:"remedy"`
+	Retryable    bool          `json:"retryable"`
+	InstallURL   string        `json:"installUrl,omitempty"`
+	TopUpURL     string        `json:"topUpUrl,omitempty"`
+	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // WriteFailure renders a check the service refused. The human format prints
 // nothing on stdout: the code, message, and remedy are on stderr and the exit
 // code is 2.
-func WriteFailure(w io.Writer, failure *service.Error, format string) error {
+func WriteFailure(w io.Writer, failure *service.Error, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
 		return nil
 	case FormatJSON:
 		return encode(w, failureReport{
-			Status:     service.StatusFailed,
-			Code:       failure.Body.Code,
-			Message:    failure.Error(),
-			Remedy:     failure.Body.Remedy,
-			Retryable:  failure.Body.Retryable,
-			InstallURL: failure.Body.InstallURL,
-			TopUpURL:   failure.Body.TopUpURL,
+			Status:       service.StatusFailed,
+			Code:         failure.Body.Code,
+			Message:      failure.Error(),
+			Remedy:       failure.Body.Remedy,
+			Retryable:    failure.Body.Retryable,
+			InstallURL:   failure.Body.InstallURL,
+			TopUpURL:     failure.Body.TopUpURL,
+			SkillUpdated: options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		id := failure.Body.Code
@@ -339,11 +364,22 @@ func WriteFailure(w io.Writer, failure *service.Error, format string) error {
 					Properties: map[string]any{"slopcop.retryable": failure.Body.Retryable},
 				}},
 			}},
-			Properties: map[string]any{"slopcop.status": service.StatusFailed},
+			Properties: runProperties(map[string]any{"slopcop.status": service.StatusFailed}, options),
 		}), "sarif report")
 	default:
 		return fmt.Errorf("unknown format %q (expected human, json, or sarif)", format)
 	}
+}
+
+// runProperties adds what the options mark to a SARIF run's properties.
+func runProperties(properties map[string]any, options Options) map[string]any {
+	if options.EmptyChange {
+		properties["slopcop.emptyChange"] = true
+	}
+	if len(options.SkillUpdated) > 0 {
+		properties["slopcop.skillUpdated"] = options.SkillUpdated
+	}
+	return properties
 }
 
 func sarifLog(run sarifRun) sarifDocument {
@@ -515,17 +551,14 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		})
 	}
 
-	properties := map[string]any{
+	properties := runProperties(map[string]any{
 		"slopcop.status":           response.Status,
 		"slopcop.baseCommit":       response.BaseCommit,
 		"slopcop.failOn":           response.Summary.FailOn,
 		"slopcop.newFindings":      response.Summary.NewFindings,
 		"slopcop.existingFindings": response.Summary.ExistingFindings,
 		"slopcop.inconclusive":     response.Summary.Inconclusive,
-	}
-	if options.EmptyChange {
-		properties["slopcop.emptyChange"] = true
-	}
+	}, options)
 
 	return encode(w, sarifLog(sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
