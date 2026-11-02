@@ -94,8 +94,9 @@ stdout or the exit code; mention it to the user rather than upgrading on your
 own. `SLOPCOP_NO_UPDATE_NOTICE=1` turns it off.
 
 In Claude Code and Codex, `slopcop init` can install a `Stop` hook that checks
-the change when you stop and hands back new findings in files you wrote. It does
-not send a check whose result your session already has, so a check you ran by
+the change when you stop and hands back new findings in files you wrote. A
+dependency manifest or lockfile a package manager changed, such as after
+`npm install` or `cargo add`, counts as one you wrote. It does not send a check whose result your session already has, so a check you ran by
 hand is not repeated. Keep running checks as described above; the hook is a
 backstop, not a replacement.
 

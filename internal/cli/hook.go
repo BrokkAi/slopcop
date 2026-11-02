@@ -104,7 +104,8 @@ func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output ho
 }
 
 // stopHook checks the change when this session wrote files in the
-// repository, and hands the agent the new findings in those files. It sends
+// repository, or the working tree has a changed dependency manifest or
+// lockfile, and hands the agent the new findings in those files. It sends
 // nothing when no one is signed in, when the session wrote nothing here,
 // when the workspace does not check the repository, or when it already has
 // the result for this tree; and it says nothing unless there is something to
@@ -132,6 +133,9 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 		time.Sleep(rolloutSettle)
 		attributed = attribution.DetectHook(input.Harness, repoRoot, input.SessionID, input.TranscriptPath)
 		written = writtenFiles(attributed)
+	}
+	for path := range changedDependencyFiles(repoRoot) {
+		written[path] = true
 	}
 	if len(written) == 0 {
 		return hookOutput{}
