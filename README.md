@@ -145,9 +145,22 @@ present, and names what it did:
 A skill that is already there is left alone by init, so running it again is
 safe. `slopcop login` and every check also install the skill in those
 directories, rewriting one that differs from the skill bundled into the binary,
-so an agent follows the instructions of the slopcop version it runs; local
-edits to an installed skill do not survive them. `slopcop init --no-skill`
-skips the install and any update of it.
+so an agent follows the instructions of the slopcop version it runs. Each
+install records the version that wrote it, and what each file held, in
+`.slopcop-skill.json` in the skill folder. An update names the version it
+replaces, the new one and the files that changed, for example:
+
+```
+slopcop: updated the slopcop skill at ~/.claude/skills/slopcop from v0.0.9 to v0.0.10 (changed: SKILL.md). Reread it if you loaded the old one.
+```
+
+It removes the files the new skill no longer has. A skill with local edits,
+one that matches neither its record nor any release, is copied first to
+`skill-backups/<harness>-<time>` next to the slopcop configuration, outside
+every skills directory so no harness loads it as a second skill, and the
+notice says where. A check's `json` and `sarif` reports carry the same update
+(see below). `slopcop init --no-skill` skips the install and any update of
+it.
 
 Init also adds a `Stop` hook for each harness installed here, and leaves
 everything else in the file as it was:
@@ -385,7 +398,12 @@ Analysis complete`, and any omitted new findings or
 incomplete checks. `json` prints `status`, `baseCommit`, `summary`
 (`newFindings` and `existingFindings` count the split), `findings` (each with
 `new` and its `id`), `incomplete`, `inconclusive`, `failure` when the analysis did not
-complete, and `emptyChange` when the patch was empty. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
+complete, and `emptyChange` when the patch was empty. When the check
+installed or updated the skill, `skillUpdated` lists each skill directory it
+wrote: `dir`, `from` (a release, `unknown`, or absent for a fresh install),
+`to`, `changed` and, for a skill with local edits, `backup`; the failed and
+pending reports carry it too, and `sarif` puts it in
+`properties["slopcop.skillUpdated"]`. `sarif` prints a SARIF 2.1.0 log whose results carry `baselineState`
 `new` and the finding id in `properties["slopcop.findingId"]`. `--format` only
 changes the rendering, never the request, so the service answers the same check
 whichever is used.

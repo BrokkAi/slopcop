@@ -65,7 +65,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintln(cmd.ErrOrStderr(), showExistingNotice)
 	}
 	// The installed skill follows the binary that runs.
-	syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr())
+	// The machine reports carry what it wrote, for an agent that reads only
+	// stdout.
+	reportOptions := report.Options{
+		ShowExisting: opts.showExisting,
+		Verbose:      opts.verbose,
+		SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), version),
+	}
 	stdout := cmd.OutOrStdout()
 	cfg, err := config.Load()
 	if err != nil {
@@ -86,7 +92,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	prepared.request.Attribution = attribution.Detect(prepared.repoRoot)
 	client, request := prepared.client, prepared.request
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
-		return checkFailure(cmd, err, format)
+		return checkFailure(cmd, err, format, reportOptions)
 	}
 	if opts.verbose {
 		fmt.Fprintf(
@@ -128,19 +134,19 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		var pending *service.Pending
 		if errors.As(err, &pending) {
 			fmt.Fprintln(cmd.ErrOrStderr(), pending.RemedyText())
-			if err := report.WritePending(stdout, *pending, format); err != nil {
+			if err := report.WritePending(stdout, *pending, format, reportOptions); err != nil {
 				return err
 			}
 			return silentExit{service.ExitPending}
 		}
-		return checkFailure(cmd, err, format)
+		return checkFailure(cmd, err, format, reportOptions)
 	}
 	emptyChange := prepared.bytes == 0
 	if emptyChange {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
 	}
-	options := report.Options{ShowExisting: opts.showExisting, EmptyChange: emptyChange, Verbose: opts.verbose}
-	if err := report.Write(stdout, response, format, options); err != nil {
+	reportOptions.EmptyChange = emptyChange
+	if err := report.Write(stdout, response, format, reportOptions); err != nil {
 		return err
 	}
 	if !response.KnownStatus() {
@@ -158,7 +164,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 // stderr, writes the failure report for machine formats on stdout, and exits
 // 4 when only a person can clear it, otherwise 2, the exit of a check that
 // did not complete. Any other error is returned as is.
-func checkFailure(cmd *cobra.Command, err error, format string) error {
+func checkFailure(cmd *cobra.Command, err error, format string, options report.Options) error {
 	var serviceError *service.Error
 	if errors.As(err, &serviceError) {
 		text := remedyText(serviceError)
@@ -172,7 +178,7 @@ func checkFailure(cmd *cobra.Command, err error, format string) error {
 			text = "slopcop: " + code + ": " + text
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), text)
-		if err := report.WriteFailure(cmd.OutOrStdout(), serviceError, format); err != nil {
+		if err := report.WriteFailure(cmd.OutOrStdout(), serviceError, format, options); err != nil {
 			return err
 		}
 		if serviceError.NeedsPerson() {

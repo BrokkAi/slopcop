@@ -1,7 +1,6 @@
 package cli
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 
 	agenthooks "github.com/BrokkAi/slopcop/internal/hooks"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/skills"
 )
 
@@ -64,7 +64,7 @@ type skillInstall struct {
 // installBundledSkill writes the bundled skill into every well-known skills
 // directory whose harness is installed here. A skill that is already in place
 // is never rewritten, so local edits survive.
-func installBundledSkill() (skillInstall, error) {
+func installBundledSkill(version string) (skillInstall, error) {
 	var result skillInstall
 	files, err := bundledSkillFiles()
 	if err != nil {
@@ -79,7 +79,7 @@ func installBundledSkill() (skillInstall, error) {
 			continue
 		}
 		dir := filepath.Join(root.dir, skillName)
-		written, err := installSkillAt(root.dir, files)
+		written, err := installSkillAt(root.dir, files, version)
 		if err != nil {
 			return result, err
 		}
@@ -94,21 +94,22 @@ func installBundledSkill() (skillInstall, error) {
 
 // installSkillAt writes the bundled skill into a skills directory unless a
 // skill is already there. The boolean reports whether it wrote.
-func installSkillAt(root string, files []skillFile) (bool, error) {
+func installSkillAt(root string, files []skillFile, version string) (bool, error) {
 	dir := filepath.Join(root, skillName)
 	if _, err := os.Stat(filepath.Join(dir, skillFileName)); err == nil {
 		return false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return false, fmt.Errorf("stat %s: %w", dir, err)
 	}
-	if err := writeSkill(dir, files); err != nil {
+	if err := writeSkill(dir, files, version); err != nil {
 		return false, err
 	}
 	return true, nil
 }
 
-// writeSkill writes the bundled skill files into dir.
-func writeSkill(dir string, files []skillFile) error {
+// writeSkill writes the bundled skill files into dir, and the stamp that
+// records them as this version's.
+func writeSkill(dir string, files []skillFile, version string) error {
 	for _, file := range files {
 		path := filepath.Join(dir, file.relative)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -118,78 +119,106 @@ func writeSkill(dir string, files []skillFile) error {
 			return fmt.Errorf("write %s: %w", path, err)
 		}
 	}
-	return nil
+	return writeSkillStamp(dir, version, files)
 }
 
 // syncBundledSkill writes the bundled skill into every well-known skills
 // directory whose harness is installed here, wherever it is missing or
 // differs from the bundled one, so agents follow the instructions of the
-// version that runs. A skill that differs is replaced, local edits included.
-// It returns the directories it wrote: installed ones held no skill, updated
-// ones held a different one.
-func syncBundledSkill() (skillSync, error) {
-	var result skillSync
+// version that runs. A skill that differs is replaced, and files the bundle
+// no longer has are removed; a copy of one with local edits is kept first.
+// It returns what it wrote, one entry per directory.
+func syncBundledSkill(version string) ([]report.SkillUpdate, error) {
+	var updates []report.SkillUpdate
 	files, err := bundledSkillFiles()
 	if err != nil {
-		return result, err
+		return updates, err
 	}
 	roots, err := skillRoots()
 	if err != nil {
-		return result, err
+		return updates, err
 	}
 	for _, root := range roots {
 		if !isDirectory(root.marker) {
 			continue
 		}
-		dir := filepath.Join(root.dir, skillName)
-		if skillMatches(dir, files) {
-			continue
+		update, wrote, err := syncSkillAt(filepath.Join(root.dir, skillName), files, version)
+		if wrote {
+			updates = append(updates, update)
 		}
-		_, statErr := os.Stat(filepath.Join(dir, skillFileName))
-		if err := writeSkill(dir, files); err != nil {
-			return result, err
-		}
-		if statErr == nil {
-			result.updated = append(result.updated, dir)
-		} else {
-			result.installed = append(result.installed, dir)
+		if err != nil {
+			return updates, err
 		}
 	}
-	return result, nil
+	return updates, nil
 }
 
-// skillSync is what one sync pass wrote, as skill directories.
-type skillSync struct {
-	installed []string
-	updated   []string
-}
-
-// syncSkillAndReport runs syncBundledSkill and names each directory it wrote
-// on out. A failed install is reported on errOut and never fails the command
-// that asked for it.
-func syncSkillAndReport(out, errOut io.Writer) {
-	result, err := syncBundledSkill()
-	for _, dir := range result.installed {
-		fmt.Fprintf(out, "slopcop: installed the slopcop skill at %s\n", dir)
+// syncSkillAt brings the skill in dir to the bundled one. The boolean
+// reports whether it wrote any skill file; a skill that already matches only
+// has its stamp brought to this version.
+func syncSkillAt(dir string, files []skillFile, version string) (report.SkillUpdate, bool, error) {
+	update := report.SkillUpdate{Dir: dir, To: version}
+	present, err := readSkillDir(dir)
+	if err != nil {
+		return update, false, err
 	}
-	for _, dir := range result.updated {
-		fmt.Fprintf(out, "slopcop: updated the slopcop skill at %s to this version's, replacing what was there\n", dir)
+	stamp, stamped := readSkillStamp(dir)
+	update.Changed = changedSkillFiles(present, files)
+	if len(update.Changed) == 0 {
+		if stamped && stamp.Version == version {
+			return update, false, nil
+		}
+		return update, false, writeSkillStamp(dir, version, files)
+	}
+	from, edited := skillOrigin(present, stamp, stamped)
+	if _, ok := present[skillFileName]; ok {
+		update.From = from
+	}
+	if edited {
+		if update.Backup, err = backupSkill(dir, present); err != nil {
+			return update, false, err
+		}
+	}
+	if err := removeUnbundled(dir, present, files); err != nil {
+		return update, true, err
+	}
+	return update, true, writeSkill(dir, files, version)
+}
+
+// syncSkillAndReport runs syncBundledSkill and says on out what it wrote,
+// which it also returns for the machine reports. A failed install is reported
+// on errOut and never fails the command that asked for it.
+func syncSkillAndReport(out, errOut io.Writer, version string) []report.SkillUpdate {
+	updates, err := syncBundledSkill(version)
+	for _, update := range updates {
+		fmt.Fprintln(out, skillNotice(update))
 	}
 	if err != nil {
 		fmt.Fprintf(errOut, "slopcop: could not install the slopcop skill: %v\n", err)
 	}
+	return updates
 }
 
-// skillMatches reports whether every bundled file is in dir with the bundled
-// content.
-func skillMatches(dir string, files []skillFile) bool {
-	for _, file := range files {
-		data, err := os.ReadFile(filepath.Join(dir, file.relative))
-		if err != nil || !bytes.Equal(data, file.data) {
-			return false
-		}
+// skillNotice says what one sync wrote: the versions, the files, and where a
+// copy of local edits went, so an agent that loaded the old skill knows to
+// reread it.
+func skillNotice(update report.SkillUpdate) string {
+	if update.From == "" {
+		return fmt.Sprintf("slopcop: installed the slopcop skill at %s", update.Dir)
 	}
-	return true
+	from := update.From
+	if from == skillVersionUnknown {
+		from = "an unrecognised version"
+	}
+	text := fmt.Sprintf("slopcop: updated the slopcop skill at %s from %s to %s (changed: %s). Reread it if you loaded the old one.",
+		update.Dir, from, update.To, strings.Join(update.Changed, ", "))
+	if releaseTag.MatchString(update.To) {
+		text += " Release notes: " + releaseNotesURL + update.To
+	}
+	if update.Backup != "" {
+		text += fmt.Sprintf("\nslopcop: the replaced skill had local edits; a copy is at %s", update.Backup)
+	}
+	return text
 }
 
 // skillFile is one file of the bundled skill, named relative to the skill
@@ -231,7 +260,7 @@ func isDirectory(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func newInitCommand() *cobra.Command {
+func newInitCommand(version string) *cobra.Command {
 	var noSkill, noHooks, removeHooks bool
 	command := &cobra.Command{
 		Use:   "init",
@@ -244,8 +273,10 @@ The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
 Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
 there is left alone. Login and every check also install the skill, and
-rewrite one that differs from the bundled skill. Pass --no-skill to leave the
-skill install and any update of it undone.
+rewrite one that differs from the bundled skill, naming the versions and files
+that changed and keeping a copy of local edits under skill-backups next to
+the slopcop configuration. Pass --no-skill to leave the skill install and any
+update of it undone.
 
 A Stop hook goes into Claude Code's settings.json, under CLAUDE_CONFIG_DIR or
 ~/.claude, and Codex's hooks.json, under CODEX_HOME or ~/.codex, for each
@@ -270,7 +301,7 @@ Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 			if noSkill {
 				fmt.Fprintln(stdout, "slopcop: left the slopcop skill alone (--no-skill)")
 			} else {
-				result, err := installBundledSkill()
+				result, err := installBundledSkill(version)
 				if err != nil {
 					return err
 				}

@@ -63,7 +63,7 @@ whose harness is installed here, as every check does.`,
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: logged in to %s (%s)\n", target, path)
 			// Signing in is the one step every user takes, so it also puts
 			// the agent skill in place; every check keeps it current.
-			syncSkillAndReport(cmd.OutOrStdout(), cmd.ErrOrStderr())
+			syncSkillAndReport(cmd.OutOrStdout(), cmd.ErrOrStderr(), version)
 			return nil
 		},
 	}

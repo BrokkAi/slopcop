@@ -41,6 +41,18 @@ func NoticePath() (string, error) {
 	return filepath.Join(filepath.Dir(path), "update-notice"), nil
 }
 
+// SkillBackupDir returns the directory, next to the configuration, that
+// keeps a copy of a skill with local edits before an update replaces it.
+// It is outside every skills directory, so no harness loads a copy as a
+// second slopcop skill.
+func SkillBackupDir() (string, error) {
+	path, err := Path()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(filepath.Dir(path), "skill-backups"), nil
+}
+
 // Load reads the configuration. A missing file is not an error.
 func Load() (Config, error) {
 	var cfg Config
