@@ -268,15 +268,18 @@ remedy otherwise, as `ignore` does.
 ```console
 slopcop                          # check the change in the current checkout
 slopcop check --format json      # same, machine-readable
-slopcop --root ../repo --base HEAD~1
+slopcop --root ../repo --base origin/main
 ```
 
 The base commit defaults to the merge base with the branch upstream, then the
 merge base with `origin/HEAD`, then `HEAD` when neither is known. When the
 upstream merge base yields an empty patch, as on a branch whose commits are all
 pushed, the CLI uses the merge base with `origin/HEAD` instead, so a check
-right after a push still covers the branch. The service must already have the
-base commit in its clone; a missing one comes back as the service's
+right after a push still covers the branch. `--base REV` names the branch the
+change started from and, like `git diff REV...HEAD`, uses the merge base of
+`REV` and `HEAD`, so commits that landed on `REV` after the branch point are not
+sent as reverse edits. `--base-exact REV` diffs against `REV` itself. The
+service must already have the base commit in its clone; a missing one comes back as the service's
 `base_not_found` message and remedy.
 
 Every run sends one check request, even when the working tree matches the base
@@ -291,7 +294,8 @@ Flags:
 | Flag | Meaning |
 | --- | --- |
 | `--root PATH` | repository to check (default `.`) |
-| `--base REV` | base commit or revision for the change |
+| `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` |
+| `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
