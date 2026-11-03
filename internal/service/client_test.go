@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -254,8 +255,12 @@ func TestCheckReadsTheNewFindingSplit(t *testing.T) {
 
 func TestCheckAsksAgainUntilTheCheckFinishes(t *testing.T) {
 	requests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests++
+		// A service from before checkId is asked with the same request.
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/check" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if requests < 3 {
 			w.Header().Set("Retry-After", "7")
@@ -298,6 +303,81 @@ func TestCheckAsksAgainUntilTheCheckFinishes(t *testing.T) {
 	}
 }
 
+func TestCheckWaitsByIDWithoutSendingTheChangeAgain(t *testing.T) {
+	const checkID = "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		seen = append(seen, r.Method+" "+r.URL.RequestURI())
+		if r.Method == http.MethodGet && len(body) != 0 {
+			t.Errorf("a wait by id sent a body: %q", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if len(seen) < 3 {
+			w.Header().Set("Retry-After", "5")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code": "check_running", "message": "Still running.", "remedy": "Wait.", "retryable": true, "checkId": "` + checkID + `"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"checkId": "` + checkID + `", "status": "clean", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "summary": {}}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.wait = func(context.Context, time.Duration) error { return nil }
+	response, err := client.Check(context.Background(), Request{Change: "ZGlmZg==", FailOn: "error"})
+	if err != nil || response.Status != StatusClean || response.CheckID != checkID {
+		t.Fatalf("Check = %+v, %v", response, err)
+	}
+	want := []string{
+		"POST /v1/check",
+		"GET /v1/check/" + checkID + "?failOn=error",
+		"GET /v1/check/" + checkID + "?failOn=error",
+	}
+	if strings.Join(seen, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %q", seen)
+	}
+}
+
+func TestCheckSendsTheChangeAgainWhenTheServiceLosesTheID(t *testing.T) {
+	const checkID = "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b"
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"code": "check_not_found", "retryable": false}`))
+		case len(seen) < 4:
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"code": "check_running", "message": "Still running.", "remedy": "Wait.", "retryable": true, "checkId": "` + checkID + `"}`))
+		default:
+			_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "summary": {}}`))
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	client.wait = func(context.Context, time.Duration) error { return nil }
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil || response.Status != StatusClean {
+		t.Fatalf("Check = %+v, %v", response, err)
+	}
+	// The lost id sends the change at once, and the rest of the wait keeps
+	// sending it.
+	want := []string{"POST /v1/check", "GET /v1/check/" + checkID, "POST /v1/check", "POST /v1/check"}
+	if strings.Join(seen, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("requests = %q", seen)
+	}
+}
+
 func TestNewValidatesTheServiceURL(t *testing.T) {
 	for _, raw := range []string{"", "ftp://example.com", "http://example.com", "not a url"} {
 		if _, err := New(raw, "", "", 0); err == nil {
@@ -333,6 +413,50 @@ func TestIgnoreFillsInAnUnexplainedFindingNotFound(t *testing.T) {
 	want := "SlopCop has no such finding for this login.\nUse a finding id from a check you ran with this login."
 	if serviceError.Body.Code != "finding_not_found" || serviceError.RemedyText() != want {
 		t.Errorf("error = %+v", serviceError)
+	}
+}
+
+func TestUnignoreFillsInAnUnexplainedFindingNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/unignore" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code": "finding_not_found", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Unignore(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e")
+	var serviceError *Error
+	if !errors.As(err, &serviceError) {
+		t.Fatalf("expected *Error, got %v", err)
+	}
+	want := "SlopCop has no such finding for this login.\nUse a finding id from a check you ran with this login."
+	if serviceError.Body.Code != "finding_not_found" || serviceError.RemedyText() != want {
+		t.Errorf("error = %+v", serviceError)
+	}
+}
+
+func TestUnignoreFillsInAnOmittedFindingID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status": "unignored"}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Unignore(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e")
+	if err != nil {
+		t.Fatalf("Unignore: %v", err)
+	}
+	if response.FindingID != "0f8fad5b-d9cb-469f-a165-70867728950e" || response.Status != "unignored" {
+		t.Errorf("response = %+v", response)
 	}
 }
 

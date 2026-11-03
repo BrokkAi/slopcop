@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -39,36 +40,51 @@ the repository never report it again. Ignoring a finding twice is fine.`,
 }
 
 func runIgnore(cmd *cobra.Command, serviceFlag, version, workspace, findingID string) error {
-	findingID = strings.TrimSpace(findingID)
-	if !uuidPattern.MatchString(findingID) {
-		return fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
-	}
-	cfg, err := config.Load()
+	response, err := sendFinding(cmd, serviceFlag, version, workspace, findingID, (*service.Client).Ignore)
 	if err != nil {
 		return err
 	}
-	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, ignoreTimeout)
-	if err != nil {
-		return err
-	}
-	noticeUpdates(client, cmd.ErrOrStderr(), version)
-	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
-		return serviceFailure(cmd, err)
-	}
-	response, err := client.Ignore(cmd.Context(), findingID)
-	if err != nil {
-		var serviceError *service.Error
-		if errors.As(err, &serviceError) {
-			fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
-			return silentExit{service.ExitIncomplete}
-		}
-		return err
-	}
-	forgetFinding(".", findingID)
+	forgetFinding(".", strings.TrimSpace(findingID))
 	fmt.Fprintf(
 		cmd.OutOrStdout(),
 		"slopcop: ignored finding %s; later checks of this repository will not report it\n",
 		response.FindingID,
 	)
 	return nil
+}
+
+// sendFinding checks the finding id, then sends it with send in the
+// workspace named. A service failure prints its message and remedy and exits
+// incomplete.
+func sendFinding(
+	cmd *cobra.Command,
+	serviceFlag, version, workspace, findingID string,
+	send func(*service.Client, context.Context, string) (service.IgnoreResponse, error),
+) (service.IgnoreResponse, error) {
+	findingID = strings.TrimSpace(findingID)
+	if !uuidPattern.MatchString(findingID) {
+		return service.IgnoreResponse{}, fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return service.IgnoreResponse{}, err
+	}
+	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, ignoreTimeout)
+	if err != nil {
+		return service.IgnoreResponse{}, err
+	}
+	noticeUpdates(client, cmd.ErrOrStderr(), version)
+	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
+		return service.IgnoreResponse{}, serviceFailure(cmd, err)
+	}
+	response, err := send(client, cmd.Context(), findingID)
+	if err != nil {
+		var serviceError *service.Error
+		if errors.As(err, &serviceError) {
+			fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
+			return service.IgnoreResponse{}, silentExit{service.ExitIncomplete}
+		}
+		return service.IgnoreResponse{}, err
+	}
+	return response, nil
 }

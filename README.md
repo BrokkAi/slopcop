@@ -242,7 +242,7 @@ Precedence:
 | --- | --- |
 | Service URL | `--service`, `$SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
 | Token | `$SLOPCOP_TOKEN`, stored value |
-| Workspace (`check`, `ignore`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
+| Workspace (`check`, `ignore`, `unignore`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
 
 ## Workspace and repositories
 
@@ -269,8 +269,8 @@ login, and the service cannot tell it from you, so changing what the workspace
 pays stays a step you take yourself.
 `workspace use` moves every agent and script using this login, not only the
 one that runs it, so it asks `[y/N]` and refuses when stdin is not a terminal.
-To check in another workspace without moving anyone, `check`, `ignore` and
-`repo` take `-w`/`--workspace <name|id>` (or `$SLOPCOP_WORKSPACE`) for that one
+To check in another workspace without moving anyone, `check`, `ignore`,
+`unignore` and `repo` take `-w`/`--workspace <name|id>` (or `$SLOPCOP_WORKSPACE`) for that one
 command; the login stays where it was. Give agents that share a login their
 own `--workspace` instead of switching it.
 
@@ -410,6 +410,11 @@ with a one-line confirmation, and otherwise exits `2` with the service's
 message and remedy; `finding_not_found` means the id is unknown or comes from a
 check outside your workspace.
 
+To undo a mistaken ignore, run `slopcop unignore <id>` with the id it was
+ignored from, or the same finding's id from any later check of the repository.
+Later checks of the repository report the finding again. Unignoring a finding
+that is not ignored is fine; it exits and fails like `ignore`.
+
 ### Output and exit codes
 
 The service answers structured data; the CLI renders it. `human` prints one
@@ -469,8 +474,10 @@ New findings that cross `--fail-on` exit `1` even when some check did not
 complete.
 
 While the service answers `check_running`, the CLI waits the `Retry-After` it
-names and asks again until `--timeout` runs out; every ask attaches to the same
-running check. If it is still running then, the CLI exits `3`, prints the
+names and asks again until `--timeout` runs out. It asks by the `checkId` the
+answer carries (`GET /v1/check/{checkId}`), so the change is uploaded once; a
+service that sends no `checkId`, or no longer knows it, gets the same request
+again, which attaches to the same running check. If it is still running then, the CLI exits `3`, prints the
 service's message and remedy on stderr, and in `json` prints
 `{"status": "pending", "retryAfter": 5, "message": …, "remedy": …}` on stdout
 (`sarif` prints a run with `slopcop.status` `pending`). Running the same check
@@ -533,7 +540,10 @@ could be ignored omits it.
 `slopcop ignore <id>` calls `POST <service>/v1/ignore` with the same bearer
 token and `{"findingId": "<id>"}`, and gets back
 `{"findingId": "<id>", "status": "ignored"}`. Failures use the same closed
-contract, including `finding_not_found`.
+contract, including `finding_not_found`. `slopcop unignore <id>` calls
+`POST <service>/v1/unignore` the same way and gets back
+`{"findingId": "<id>", "status": "unignored"}`, also when the finding was not
+ignored.
 
 The account commands use the same bearer token. `GET <service>/v1/whoami`
 answers `account`, `workspace` (`id`, `name`, `kind`, `role`, `current`),

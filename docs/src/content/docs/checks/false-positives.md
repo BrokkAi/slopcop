@@ -46,6 +46,19 @@ An ignore is tied to the finding's identity, which follows the code: an
 unrelated edit elsewhere in the file keeps it, while changing the flagged code
 itself gives a new finding that is reported again.
 
+## Undo an ignore
+
+Ignored the wrong finding? Unignore it:
+
+```console
+slopcop unignore 0f8fad5b-d9cb-469f-a165-70867728950e
+```
+
+Later checks of the repository report it again. The id can be the one it was
+ignored from, or the same finding's id from any later check of the repository.
+Unignoring a finding that is not ignored is fine. It takes `-w`/`--workspace`
+and exits like `ignore`.
+
 ## Alternatives
 
 - **Pre-existing findings** need no ignore: they never fail a check and are not

@@ -94,6 +94,8 @@ func (s Selection) IsEmpty() bool {
 // Response is the successful POST /v1/check body, mirrored from
 // CheckResponse. The service answers structure only; the client renders it.
 type Response struct {
+	// CheckID is the check that answered. A service from before it omits it.
+	CheckID    string             `json:"checkId,omitempty"`
 	Status     string             `json:"status"`
 	BaseCommit string             `json:"baseCommit"`
 	Applied    bool               `json:"applied"`

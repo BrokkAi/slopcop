@@ -107,6 +107,7 @@ report, so a check never needs a Bifrost install.`,
 	root.AddCommand(
 		newCheckCommand(opts, &serviceURL, version),
 		newIgnoreCommand(&serviceURL, version),
+		newUnignoreCommand(&serviceURL, version),
 		newInitCommand(version),
 		newHookCommand(&serviceURL, version),
 		newLoginCommand(&serviceURL, version),

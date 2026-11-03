@@ -148,7 +148,7 @@ the usual codes mean:
 | `no_access` | The account needs access to the repository. |
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. Follow that line. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
-| `finding_not_found` | `slopcop ignore` got an id that is not from a check run with this login; use one a check printed. |
+| `finding_not_found` | `slopcop ignore` or `unignore` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
@@ -236,7 +236,8 @@ fix pre-existing findings unless asked: they are not this change's, and they
 never stop the loop.
 
 When a finding is a false positive, run `slopcop ignore <id>` with its id.
-That finding is not reported again for this repository.
+That finding is not reported again for this repository. Undo a mistaken ignore
+with `slopcop unignore <id>`.
 
 A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
 the change, so a new rule is picked up by the next check with no extra setup.

@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	checkPath  = "/v1/check"
-	ignorePath = "/v1/ignore"
+	checkPath    = "/v1/check"
+	ignorePath   = "/v1/ignore"
+	unignorePath = "/v1/unignore"
 	// workspaceHeader names, for one request, the workspace of the login's
 	// account it runs in instead of the one the login is bound to.
 	workspaceHeader = "SlopCop-Workspace"
@@ -28,6 +29,9 @@ const (
 	defaultTimeout      = 10 * time.Minute
 	// checkRunning is the retryable answer to a check that is still running.
 	checkRunning = "check_running"
+	// checkNotFound answers a read by id that the service cannot match to a
+	// check of this login.
+	checkNotFound = "check_not_found"
 	// defaultRetryAfter is the wait when check_running names none, and
 	// maxRetryAfter bounds a wait the service names.
 	defaultRetryAfter = 5 * time.Second
@@ -97,8 +101,11 @@ func isLoopback(host string) bool {
 }
 
 // Check posts one change and returns the report, asking again while the
-// service answers check_running until ctx ends. An identical request attaches
-// to the running check, so asking again never starts a second one. When ctx's
+// service answers check_running until ctx ends. It asks again by the checkId
+// the service answered, without sending the change; a service from before
+// checkId, or one that no longer knows the id, gets the same request again,
+// which attaches to the running check, so asking again never starts a second
+// one. When ctx's
 // deadline passes first, Check returns a *Pending; when ctx is canceled, as by
 // an interrupt, it returns ctx's error. Other service failures come back as
 // *Error so callers can print the closed code, message, and remedy.
@@ -108,9 +115,26 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 		Message:    pendingMessage,
 		Remedy:     pendingRemedy,
 	}
+	// checkID is the running check to ask for by id; empty sends the change.
+	// byID turns off once the service doesn't know an id it gave, so a
+	// service that loses ids is asked the old way for the rest of the wait.
+	checkID, byID := "", true
 	for {
-		response, retryAfter, err := c.checkOnce(ctx, request)
+		var (
+			response   Response
+			retryAfter time.Duration
+			err        error
+		)
+		if checkID != "" {
+			response, retryAfter, err = c.pollOnce(ctx, checkID, request.FailOn)
+		} else {
+			response, retryAfter, err = c.checkOnce(ctx, request)
+		}
 		var serviceError *Error
+		if checkID != "" && errors.As(err, &serviceError) && serviceError.Body.Code == checkNotFound {
+			checkID, byID = "", false
+			continue
+		}
 		switch {
 		case err == nil:
 			return response, nil
@@ -122,6 +146,9 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 			return Response{}, ctx.Err()
 		case !errors.As(err, &serviceError) || serviceError.Body.Code != checkRunning:
 			return Response{}, err
+		}
+		if byID {
+			checkID = serviceError.Body.CheckID
 		}
 		pending.RetryAfter = int((retryAfter + time.Second - 1) / time.Second)
 		if serviceError.Body.Message != "" {
@@ -148,6 +175,25 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 	if err != nil {
 		return Response{}, 0, err
 	}
+	return checkAnswer(status, header, payload)
+}
+
+// pollOnce asks for a running check by its id once, without the change. The
+// service rebuilds the answer for failOn, as it would for the change.
+func (c *Client) pollOnce(ctx context.Context, checkID, failOn string) (Response, time.Duration, error) {
+	path := checkPath + "/" + url.PathEscape(checkID)
+	if failOn != "" {
+		path += "?" + url.Values{"failOn": {failOn}}.Encode()
+	}
+	status, header, payload, err := c.getJSON(ctx, path)
+	if err != nil {
+		return Response{}, 0, err
+	}
+	return checkAnswer(status, header, payload)
+}
+
+// checkAnswer decodes one answer to a check, posted or asked for by id.
+func checkAnswer(status int, header http.Header, payload []byte) (Response, time.Duration, error) {
 	if status < 200 || status >= 300 {
 		return Response{}, retryAfter(header), decodeError(status, payload)
 	}
@@ -258,12 +304,13 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 	return response.StatusCode, response.Header, responseBody, nil
 }
 
-// IgnoreRequest is the POST /v1/ignore body.
+// IgnoreRequest is the POST /v1/ignore and POST /v1/unignore body.
 type IgnoreRequest struct {
 	FindingID string `json:"findingId"`
 }
 
-// IgnoreResponse is the successful POST /v1/ignore body.
+// IgnoreResponse is the successful POST /v1/ignore and POST /v1/unignore
+// body.
 type IgnoreResponse struct {
 	FindingID string `json:"findingId"`
 	Status    string `json:"status"`
@@ -272,7 +319,18 @@ type IgnoreResponse struct {
 // Ignore asks the service to stop reporting one finding in its repository.
 // Ignoring a finding twice succeeds. Service failures come back as *Error.
 func (c *Client) Ignore(ctx context.Context, findingID string) (IgnoreResponse, error) {
-	status, _, payload, err := c.postJSON(ctx, ignorePath, IgnoreRequest{FindingID: findingID})
+	return c.postFinding(ctx, ignorePath, "ignore", findingID)
+}
+
+// Unignore asks the service to report one ignored finding again in its
+// repository. Unignoring a finding that is not ignored succeeds. Service
+// failures come back as *Error.
+func (c *Client) Unignore(ctx context.Context, findingID string) (IgnoreResponse, error) {
+	return c.postFinding(ctx, unignorePath, "unignore", findingID)
+}
+
+func (c *Client) postFinding(ctx context.Context, path, name, findingID string) (IgnoreResponse, error) {
+	status, _, payload, err := c.postJSON(ctx, path, IgnoreRequest{FindingID: findingID})
 	if err != nil {
 		return IgnoreResponse{}, err
 	}
@@ -281,7 +339,7 @@ func (c *Client) Ignore(ctx context.Context, findingID string) (IgnoreResponse, 
 	}
 	var decoded IgnoreResponse
 	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return IgnoreResponse{}, fmt.Errorf("decode ignore response: %w", err)
+		return IgnoreResponse{}, fmt.Errorf("decode %s response: %w", name, err)
 	}
 	if decoded.FindingID == "" {
 		decoded.FindingID = findingID

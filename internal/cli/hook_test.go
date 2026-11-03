@@ -79,10 +79,11 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			response.Summary.NewFindings = len(response.Findings)
 			response.Summary.FailOn = failOnFinding
 			_ = json.NewEncoder(w).Encode(response)
-		case "/v1/ignore":
+		case "/v1/ignore", "/v1/unignore":
 			var body service.IgnoreRequest
 			_ = json.NewDecoder(r.Body).Decode(&body)
-			_ = json.NewEncoder(w).Encode(service.IgnoreResponse{FindingID: body.FindingID, Status: "ignored"})
+			status := strings.TrimPrefix(r.URL.Path, "/v1/") + "d"
+			_ = json.NewEncoder(w).Encode(service.IgnoreResponse{FindingID: body.FindingID, Status: status})
 		default:
 			t.Errorf("path = %s", r.URL.Path)
 		}
@@ -534,6 +535,35 @@ func TestAnIgnoredFindingIsNotHandedBack(t *testing.T) {
 	}
 	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
 		t.Fatalf("output after the ignore = %+v", output)
+	}
+}
+
+func TestAnUnignoredFindingIsHandedBack(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("first output = %+v", output)
+	}
+	t.Chdir(repo)
+	if code, _, stderr := runCLI(t, "ignore", fakeFindingID(0), "--service", server.URL); code != 0 {
+		t.Fatalf("ignore exit = %d, stderr = %s", code, stderr)
+	}
+	if code, _, stderr := runCLI(t, "unignore", fakeFindingID(0), "--service", server.URL); code != 0 {
+		t.Fatalf("unignore exit = %d, stderr = %s", code, stderr)
+	}
+	// The tree is unchanged, so only a fresh check can say the finding is back.
+	checks := fake.checks
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output.Decision != "block" {
+		t.Fatalf("output after the unignore = %+v", output)
+	}
+	if fake.checks != checks+1 {
+		t.Fatalf("checks = %d, want a fresh check after the unignore", fake.checks)
 	}
 }
 

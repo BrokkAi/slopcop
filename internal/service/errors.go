@@ -14,6 +14,9 @@ type ErrorBody struct {
 	InstallURL string `json:"installUrl,omitempty"`
 	// TopUpURL is where to add credits, for a workspace out of credits.
 	TopUpURL string `json:"topUpUrl,omitempty"`
+	// CheckID names the check an answer is about, such as check_running, so
+	// the caller can wait for it by id. A service from before it omits it.
+	CheckID string `json:"checkId,omitempty"`
 }
 
 // knownErrors fills in the message and remedy of a closed code the service
@@ -22,6 +25,10 @@ var knownErrors = map[string]ErrorBody{
 	"client_outdated": {
 		Message: "This version of slopcop is older than the check service accepts.",
 		Remedy:  "Upgrade slopcop to the latest release, then retry: https://github.com/BrokkAi/slopcop#install",
+	},
+	"check_not_found": {
+		Message: "SlopCop has no recent check with this id for this login.",
+		Remedy:  "Send the change again to check it.",
 	},
 	"finding_not_found": {
 		Message: "SlopCop has no such finding for this login.",
