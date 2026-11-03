@@ -108,8 +108,9 @@ rule did not complete.
 ## Waiting for the result
 
 While the analysis runs, the service answers `check_running` and the CLI waits
-the interval it names and asks again, until `--timeout` runs out. Every ask
-attaches to the same running check. If it is still running then, the CLI exits
+the interval it names and asks again, until `--timeout` runs out. It asks by
+the check's id, so the change is sent only once, and every ask attaches to the
+same running check. If it is still running then, the CLI exits
 `3`, prints the service's message and remedy on stderr, and in `json` prints a
 `pending` report. Running the same check again picks up the same analysis: an
 identical request by the same login within an hour attaches to it rather than

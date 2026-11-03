@@ -469,8 +469,10 @@ New findings that cross `--fail-on` exit `1` even when some check did not
 complete.
 
 While the service answers `check_running`, the CLI waits the `Retry-After` it
-names and asks again until `--timeout` runs out; every ask attaches to the same
-running check. If it is still running then, the CLI exits `3`, prints the
+names and asks again until `--timeout` runs out. It asks by the `checkId` the
+answer carries (`GET /v1/check/{checkId}`), so the change is uploaded once; a
+service that sends no `checkId`, or no longer knows it, gets the same request
+again, which attaches to the same running check. If it is still running then, the CLI exits `3`, prints the
 service's message and remedy on stderr, and in `json` prints
 `{"status": "pending", "retryAfter": 5, "message": …, "remedy": …}` on stdout
 (`sarif` prints a run with `slopcop.status` `pending`). Running the same check

@@ -38,6 +38,7 @@ slopcop check --format json
 
 ```json
 {
+  "checkId": "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
   "status": "findings",
   "baseCommit": "0123456789abcdef0123456789abcdef01234567",
   "applied": true,
