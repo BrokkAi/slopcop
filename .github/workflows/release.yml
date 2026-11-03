@@ -44,7 +44,7 @@ jobs:
           if-no-files-found: error
       # The wheels are packed here, where GoReleaser left the binaries, and
       # the jobs below check them on every platform that can run them before
-      # anything reaches PyPI. See docs/pypi-publishing.md.
+      # anything reaches PyPI. See docs/src/content/docs/contribute/pypi-publishing.md.
       - name: Pack the PyPI wheels
         if: startsWith(github.ref, 'refs/tags/')
         run: make wheels PYPI_FLAGS='--dist dist' PYPI_VERSION="$GITHUB_REF_NAME"

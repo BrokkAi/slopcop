@@ -1,0 +1,124 @@
+---
+title: Gate a change in CI
+description: "Run slopcop in GitHub Actions or any CI with a stored token, pick the base the change targets, act on the exit code, and upload SARIF to code scanning."
+sidebar:
+  order: 7
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The same command that an agent runs gates a change in CI: no prompts, one
+request, and the [exit code](/checks/exit-codes/) says what happened. A check
+of unpushed or branch work is free and never uses credits.
+
+## Sign in without a browser
+
+Store a token once, then give CI the token rather than a login:
+
+```console
+slopcop login --token "$SLOPCOP_TOKEN"    # on a machine, stores it
+```
+
+In CI, set `SLOPCOP_TOKEN` in the job's environment from a secret; no login
+step is needed. The token runs checks in, and bills, the workspace it was
+approved in. Pass `-w`/`--workspace` (or set `SLOPCOP_WORKSPACE`) to use another
+one; see [Workspaces](/account/workspaces/).
+
+<Aside type="caution" title="Repositories are added by the first check">
+The first check of a repository adds it to the workspace. When the workspace
+would then pay for it, a check with no terminal exits `4` with
+`repository_add_unconfirmed` rather than adding it. Run the first check from a
+terminal, or once a person has approved it, pass
+`--add-repository --workspace <name>`. See [Repositories](/account/repositories/).
+</Aside>
+
+## GitHub Actions
+
+```yaml
+name: SlopCop
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write   # only for the SARIF upload
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # the merge base must be in the clone
+
+      - name: Install slopcop
+        run: npm install --global @brokkai/slopcop
+
+      - name: Check the change
+        env:
+          SLOPCOP_TOKEN: ${{ secrets.SLOPCOP_TOKEN }}
+        run: |
+          slopcop check --base "origin/${{ github.base_ref }}" --format sarif > slopcop.sarif
+          echo "exit=$?" >> "$GITHUB_OUTPUT"
+        id: slopcop
+        continue-on-error: true
+
+      - name: Upload to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: slopcop.sarif
+
+      - name: Fail on new findings or an incomplete check
+        if: steps.slopcop.outputs.exit != '0'
+        run: |
+          echo "slopcop exited ${{ steps.slopcop.outputs.exit }}"
+          exit 1
+```
+
+Three things matter in that workflow:
+
+- **`fetch-depth: 0`.** The CLI needs the merge base with the target branch in
+  its clone, and the service needs that commit in its own; a shallow clone
+  gives neither.
+- **`--base origin/<target branch>`.** A pull request's head may have its
+  commits pushed, and the runner's checkout has no upstream, so name the base
+  rather than relying on the default. Like `git diff REV...HEAD`, the base is
+  the merge base, so commits that landed on the target after the branch point
+  are not sent as reverse edits.
+- **Act on the exit code, not the SARIF.** `1` means new findings; `2` means
+  some rule did not complete or the check failed, which is not a pass; `3`
+  means run it again; `4` means a person must act. Treat anything but `0` as a
+  failed gate, and read the code to know which.
+
+The SARIF upload is optional. It puts each new finding on the pull request's
+Files changed tab as a code-scanning alert, with `baselineState: new` so GitHub
+shows it as introduced by the change. Without `security-events: write` drop
+that step and read the `human` output in the job log instead.
+
+## Other CI
+
+Any runner works the same way: install from [any channel](/get-started/install/),
+export `SLOPCOP_TOKEN`, check with `--base` naming the target branch, and act on
+the exit code.
+
+```console
+slopcop check --base origin/main --format json > slopcop.json
+```
+
+`--timeout` bounds the whole wait (default ten minutes); a check still running
+then exits `3`, and running the same command again picks up the same analysis
+rather than starting over.
+
+## Threshold
+
+By default any new finding fails the check (`--fail-on finding`). To fail only
+on warnings and errors, pass `--fail-on warning`; to always exit `0` on a
+completed check and read the report yourself, `--fail-on never`. Incomplete
+checks still exit `2` whatever the threshold.
+
+## Repository rules in CI
+
+Rules under `.slopcop/policies/**/*.rqlp` travel with the change and run in CI
+like anywhere else. See [Repository rules](/checks/repository-rules/).

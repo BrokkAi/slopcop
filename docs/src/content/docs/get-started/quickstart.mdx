@@ -1,0 +1,126 @@
+---
+title: Quickstart
+description: "Install the slopcop CLI, add its skill to your coding agent, sign in, and run a first check."
+sidebar:
+  order: 2
+---
+
+import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
+
+Once per machine: install the CLI, add its skill to your agents, sign in, then
+check from any repository. You need a [slopcop.com](https://slopcop.com) account
+only to approve the sign-in. Checks are free, and so is your first repository.
+
+<Steps>
+
+1. **Install the CLI.** Every channel installs the same release binary for
+   macOS, Linux, and Windows on x64 and arm64.
+
+   <Tabs syncKey="install">
+     <TabItem label="npm">
+       ```console
+       npm install --global @brokkai/slopcop
+       ```
+     </TabItem>
+     <TabItem label="pip">
+       ```console
+       pip install brokk-slopcop
+       ```
+     </TabItem>
+     <TabItem label="Shell">
+       ```console
+       curl -fsSL https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.sh | sh
+       ```
+     </TabItem>
+     <TabItem label="PowerShell">
+       ```powershell
+       irm https://raw.githubusercontent.com/BrokkAi/slopcop/master/install.ps1 | iex
+       ```
+     </TabItem>
+     <TabItem label="Go">
+       ```console
+       go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
+       ```
+     </TabItem>
+   </Tabs>
+
+   [Install the CLI](/get-started/install/) covers the release archive,
+   checksums, and upgrades.
+
+2. **Teach your agent.** `slopcop init` installs the SlopCop skill into the
+   skills directory of every agent it finds on this machine (Claude Code, Codex,
+   opencode), and a Stop hook for Claude Code and Codex that checks what a
+   session wrote when the agent stops.
+
+   ```console
+   slopcop init
+   ```
+
+   It names what it did. A skill that is already there is left alone, so running
+   it again is safe.
+
+3. **Sign in.** The browser device flow prints a link that opens the approval
+   page with the code filled in. Approve it while signed in to SlopCop, and only
+   if the page shows the code your terminal printed.
+
+   ```console
+   slopcop login
+   ```
+
+   For CI and agents that cannot open a browser, store a token instead:
+   `slopcop login --token "$SLOPCOP_TOKEN"`. See [Sign in](/account/sign-in/).
+
+4. **Check a change.** From any repository with a GitHub, GitLab, or Bitbucket
+   remote:
+
+   ```console
+   slopcop
+   ```
+
+   The first check of a repository adds it to your workspace. A public
+   repository works at once; a private one needs the
+   [SlopCop GitHub App](/account/private-repositories/) or a GitLab or Bitbucket
+   connection.
+
+</Steps>
+
+## What you will see
+
+A check prints one block per new finding, then a summary line:
+
+```text
+src/main/java/orders/ExportServlet.java:48  request parameter reaches SQL text  definite · error
+  ID: 0f8fad5b-d9cb-469f-a165-70867728950e
+  bifrost.security.java.servlet-parameter-to-jdbc: req.getParameter("q") reaches
+  Statement.executeQuery(String) through OrderQuery.build (OrderQuery.java:21).
+
+1 new finding across 1 file(s); 72 already in the code | Analysis complete
+```
+
+The exit code is `1` because the change added a finding. Fix it and run
+`slopcop` again; a change that introduces nothing exits `0`. A check that ran
+but could not finish every rule exits `2` and says which rules did not complete,
+so silence is never mistaken for safety. [Exit codes](/checks/exit-codes/) lists
+them all.
+
+<Aside type="tip" title="Checked work you already committed?">
+On a branch whose commits are all pushed, the default base can be `HEAD` and
+the patch empty. Pass the branch the change targets:
+`slopcop --base origin/main`. [Run a check](/checks/run-a-check/) explains how
+the base is chosen.
+</Aside>
+
+## Then let the agent do it
+
+In Claude Code, ask it to check its change or run `/slopcop`. In Codex, mention
+`$slopcop`. To have the agent check every change without being asked, add one
+line to your project's `CLAUDE.md` or `AGENTS.md`:
+
+```text
+Run slopcop before you finish and fix what it reports.
+```
+
+The Stop hook that `slopcop init` installed is a backstop: when the agent stops
+after writing files, the hook checks the working tree and hands new findings in
+those files back to the agent. [SlopCop in your agent](/agents/overview/) has
+the details for each agent.

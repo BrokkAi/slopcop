@@ -27,5 +27,5 @@ make npm-pack NPM_TAG=v0.0.0-fixture
 make npm-smoke NPM_TAG=v0.0.0-fixture
 ```
 
-See [npm publishing](../docs/npm-publishing.md) for the release flow, the
+See [npm publishing](../docs/src/content/docs/contribute/npm-publishing.md) for the release flow, the
 trusted publisher configuration, and the first-publication steps.

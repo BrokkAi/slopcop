@@ -1,0 +1,98 @@
+name: Docs
+
+# Builds the Starlight site under docs/ and deploys it to GitHub Pages, which
+# serves it at docs.slopcop.com (the custom domain is set in the repository's
+# Pages settings; an Actions deployment needs no CNAME file).
+#
+# The site documents both the CLI and the hosted service, so it has triggers
+# of its own: a docs change on master, a CLI release tag, a repository_dispatch
+# the service's release can send (`gh api repos/BrokkAi/slopcop/dispatches
+# -f event_type=deploy-docs`), and the Actions tab. A pull request that touches
+# docs/ builds without deploying.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+    tags: ['v*.*.*']
+  pull_request:
+    paths:
+      - 'docs/**'
+      - '.github/workflows/docs.yml'
+  repository_dispatch:
+    types: [deploy-docs]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs dependencies
+        run: npm ci
+        working-directory: docs
+
+      - name: Render social card
+        run: npm run social-card
+        working-directory: docs
+
+      - name: Build docs
+        run: npm run build
+        working-directory: docs
+        env:
+          ASTRO_TELEMETRY_DISABLED: 1
+          PUBLIC_DOCS_SITE: ${{ vars.DOCS_SITE || 'https://docs.slopcop.com' }}
+          PUBLIC_DOCS_BASE: ${{ vars.DOCS_BASE || '/' }}
+
+      - name: Prove links hold below a path prefix
+        if: github.event_name == 'pull_request'
+        run: npm run build
+        working-directory: docs
+        env:
+          ASTRO_TELEMETRY_DISABLED: 1
+          PUBLIC_DOCS_SITE: https://brokkai.github.io
+          PUBLIC_DOCS_BASE: /slopcop
+
+      - name: Upload Pages artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: docs/dist
+
+  deploy:
+    name: Deploy docs
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

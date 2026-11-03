@@ -1,0 +1,92 @@
+---
+title: SlopCop documentation
+description: "Static analysis deep enough for CI, fast enough for your coding agent to run on every edit. How to install slopcop, wire it into Claude Code and Codex, read a report, and gate a change."
+template: splash
+hero:
+  title: Catch what your agent wrote, before you push.
+  tagline: SlopCop checks a change with static analysis that proves its findings, from inside your coding agent's loop. These docs cover the <code>slopcop</code> CLI, the agents it runs in, the hosted check service, and the web app.
+  actions:
+    - text: Quickstart
+      link: get-started/quickstart/
+      icon: right-arrow
+      variant: primary
+    - text: What is SlopCop?
+      link: get-started/overview/
+      icon: open-book
+      variant: minimal
+---
+
+import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
+
+<section class="sc-section">
+  <p class="sc-eyebrow">How a check works</p>
+  <h2>One command, one request, one report.</h2>
+  <p>There is no local analyzer. The CLI sends one git patch to the hosted service, the service applies it to your base commit and runs <a href="https://github.com/BrokkAi/bifrost">Bifrost</a> over the files the change writes, and your agent reads the result.</p>
+  <div class="sc-flow not-content">
+    <article>
+      <small>01 / your machine</small>
+      <h3>Your coding agent runs <code>slopcop</code></h3>
+      <p>Claude Code, Codex, opencode, or anything with a shell. The bundled skill tells it how.</p>
+    </article>
+    <article>
+      <small>02 / the patch</small>
+      <h3>The CLI diffs the working tree</h3>
+      <p>From the merge base with your upstream branch: unpushed commits, unstaged edits, untracked files.</p>
+    </article>
+    <article>
+      <small>03 / the service</small>
+      <h3>Its own clone, Bifrost on top</h3>
+      <p>The patch is applied at the base commit. Your code is read, never run, and never sent to a language model.</p>
+    </article>
+    <article>
+      <small>04 / the loop</small>
+      <h3>New findings fail the check</h3>
+      <p>The agent fixes them and checks again until none are left. Findings already in the code never fail it.</p>
+    </article>
+  </div>
+</section>
+
+<section class="sc-section">
+  <p class="sc-eyebrow">Start here</p>
+  <h2>Pick where you are.</h2>
+  <CardGrid>
+    <LinkCard title="Quickstart" description="Install the CLI, add the skill to your agent, sign in, and run your first check in five minutes." href="get-started/quickstart/" />
+    <LinkCard title="Claude Code" description="Where the skill lives, the Stop hook that checks what a session wrote, and the one line to add to CLAUDE.md." href="agents/claude-code/" />
+    <LinkCard title="Codex" description="The same for Codex: skills folders, trusting the hook, and what the CLI reads from the thread." href="agents/codex/" />
+    <LinkCard title="Gate a change in CI" description="Run slopcop in GitHub Actions with a token, pick the base, and upload SARIF to code scanning." href="checks/ci/" />
+    <LinkCard title="Read a report" description="Status, certainty, new versus existing findings, and what incomplete and inconclusive mean." href="checks/read-a-report/" />
+    <LinkCard title="Credits and what it costs" description="Checks are free, and so is your first repository. What an active repository costs after that." href="account/credits/" />
+  </CardGrid>
+</section>
+
+<section class="sc-section">
+  <p class="sc-eyebrow">What to expect</p>
+  <h2>Answers it can prove.</h2>
+  <CardGrid stagger>
+    <Card title="Traced to a rule" icon="approve-check">
+      Each finding names the rule that raised it, its severity, its certainty, and the file and line. The analysis is static, deterministic, and runs the same way twice.
+    </Card>
+    <Card title="Across files" icon="random">
+      Data flow is traced through the files the change writes: a request parameter that reaches a SQL query three files later is one finding, with the path that proves it.
+    </Card>
+    <Card title="Never a false all-clear" icon="warning">
+      A rule that cannot finish makes the check incomplete, never clean. The report says what was not covered, so your agent never reads silence as safety.
+    </Card>
+    <Card title="Built for agents" icon="seti:shell">
+      No prompts, one request, a closed exit-code contract, and JSON or SARIF output. An agent can run it after every edit without a human in the loop.
+    </Card>
+  </CardGrid>
+</section>
+
+<section class="sc-section">
+  <p class="sc-eyebrow">Exit codes</p>
+  <h2>The contract an agent reads.</h2>
+  <div class="sc-exit not-content">
+    <div><b>0</b><span>Clean. The check completed and the change added no finding.</span></div>
+    <div><b>1</b><span>Findings. The change added one. Fix it and check again.</span></div>
+    <div><b>2</b><span>Incomplete, or the CLI or service failed. Never an all-clear.</span></div>
+    <div><b>3</b><span>Still running when the timeout ran out. Run the same check again.</span></div>
+    <div><b>4</b><span>Refused, and only a person can clear it. Read the code and remedy.</span></div>
+  </div>
+  <p style="margin-top:1rem"><a href="checks/exit-codes/">Every exit code, and what to do about each.</a></p>
+</section>

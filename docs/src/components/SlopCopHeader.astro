@@ -1,0 +1,102 @@
+---
+import LanguageSelect from '@astrojs/starlight/components/LanguageSelect.astro';
+import Search from '@astrojs/starlight/components/Search.astro';
+import SiteTitle from '@astrojs/starlight/components/SiteTitle.astro';
+import SocialIcons from '@astrojs/starlight/components/SocialIcons.astro';
+import ThemeSelect from './SlopCopThemeSelect.astro';
+import type { StarlightRouteData } from '@astrojs/starlight/route-data';
+
+const { siteTitleHref } = (Astro.locals as { starlightRoute: StarlightRouteData }).starlightRoute;
+const root = siteTitleHref.endsWith('/') ? siteTitleHref : `${siteTitleHref}/`;
+const navItems = [
+  { label: 'Quickstart', slug: 'get-started/quickstart/' },
+  { label: 'Agents', slug: 'agents/overview/' },
+  { label: 'Checks', slug: 'checks/run-a-check/' },
+  { label: 'Reference', slug: 'reference/cli/' },
+];
+const currentPath = Astro.url.pathname.replace(/\/+$/, '/');
+---
+
+<div class="sc-header">
+  <div class="sc-brand sl-flex"><SiteTitle /></div>
+
+  <nav class="sc-nav print:hidden" aria-label="Primary">
+    {
+      navItems.map(({ label, slug }) => {
+        const href = `${root}${slug}`;
+        const current = currentPath === href || currentPath.startsWith(href.replace(/[^/]+\/$/, ''));
+        return <a href={href} aria-current={current ? 'page' : undefined}>{label}</a>;
+      })
+    }
+    <a href="https://slopcop.com" class="sc-nav__site">slopcop.com <span aria-hidden="true">↗</span></a>
+  </nav>
+
+  <div class="sc-search sl-flex print:hidden"><Search /></div>
+  <div class="sc-tools sl-hidden md:sl-flex print:hidden">
+    <div class="sl-flex social-icons"><SocialIcons /></div>
+    <ThemeSelect />
+    <LanguageSelect />
+  </div>
+</div>
+
+<style>
+  @layer starlight.user {
+    .sc-header {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      align-items: center;
+      gap: clamp(0.75rem, 2vw, 2rem);
+      height: 100%;
+      max-width: 96rem;
+      margin-inline: auto;
+    }
+    .sc-brand { align-items: center; min-width: 0; }
+    .sc-nav { display: none; align-items: center; gap: 0.25rem; }
+    .sc-nav a {
+      position: relative;
+      padding: 0.45rem 0.7rem;
+      color: var(--sc-text-3);
+      font-family: var(--sc-font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.1em;
+      text-decoration: none;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .sc-nav a::after {
+      position: absolute;
+      inset: auto 0.7rem 0.15rem;
+      height: 1px;
+      background: var(--sc-accent);
+      content: '';
+      transform: scaleX(0);
+      transform-origin: left;
+      transition: transform 140ms ease;
+    }
+    .sc-nav a:hover, .sc-nav a:focus-visible, .sc-nav a[aria-current='page'] { color: var(--sc-text); }
+    .sc-nav a[aria-current='page']::after { transform: scaleX(1); }
+    .sc-nav__site { margin-inline-start: 0.5rem; }
+    .sc-search { justify-self: end; width: clamp(12rem, 18vw, 22rem); min-width: 0; }
+    .sc-search :global(button[data-open-modal]) { max-width: none; }
+    .sc-tools, .social-icons { align-items: center; gap: 0.25rem; }
+    /* Every tool is a 2rem square with a centered icon, so the gaps read evenly. */
+    .social-icons :global(a) {
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      margin: 0;
+      align-items: center;
+      justify-content: center;
+      color: var(--sl-color-gray-2);
+      font-size: 1.05rem;
+    }
+    .social-icons :global(a:hover) { color: var(--sc-accent-text); }
+    @media (min-width: 64rem) {
+      .sc-nav { display: flex; }
+    }
+    @media (max-width: 50rem) {
+      .sc-header { grid-template-columns: 1fr auto; }
+      .sc-search { width: auto; }
+    }
+  }
+</style>

@@ -1,4 +1,9 @@
-# Publishing to npm
+---
+title: Publishing to npm
+description: "How the @brokkai/slopcop package is packed from a published GitHub release and published to npm with trusted publishing, and the one-time setup."
+sidebar:
+  order: 3
+---
 
 The public package is `@brokkai/slopcop` and its executable is `slopcop`. The
 tarball carries the Node launcher in `npm/bin/slopcop.cjs` and the release

@@ -1,0 +1,198 @@
+---
+// A purpose-built theme menu in place of Starlight's native <select>. It keeps
+// Starlight's contract: the `starlight-theme-select` element, the
+// `starlight-theme` storage key, and an `svg.label-icon` that
+// `StarlightThemeProvider.updatePickers` swaps for the current theme's icon.
+import { Icon } from '@astrojs/starlight/components';
+
+const options = [
+  { value: 'dark', label: Astro.locals.t('themeSelect.dark'), icon: 'moon' },
+  { value: 'light', label: Astro.locals.t('themeSelect.light'), icon: 'sun' },
+  { value: 'auto', label: Astro.locals.t('themeSelect.auto'), icon: 'laptop' },
+] as const;
+---
+
+<starlight-theme-select class="sc-theme">
+  <button
+    type="button"
+    class="sc-theme__button"
+    aria-haspopup="menu"
+    aria-expanded="false"
+    aria-label={Astro.locals.t('themeSelect.accessibleLabel')}
+  >
+    <Icon name="laptop" class="label-icon" />
+  </button>
+  <div class="sc-theme__menu" role="menu" hidden>
+    {
+      options.map(({ value, label, icon }) => (
+        <button type="button" role="menuitemradio" aria-checked="false" data-theme-value={value}>
+          <Icon name={icon} />
+          <span>{label}</span>
+        </button>
+      ))
+    }
+  </div>
+</starlight-theme-select>
+
+{/* Inlined to avoid FOUC. Uses global scope from `ThemeProvider.astro`. */}
+<script is:inline>
+  StarlightThemeProvider.updatePickers();
+</script>
+
+<script>
+  type Theme = 'auto' | 'dark' | 'light';
+
+  const storageKey = 'starlight-theme';
+  const parseTheme = (theme: unknown): Theme =>
+    theme === 'auto' || theme === 'dark' || theme === 'light' ? theme : 'auto';
+  const loadTheme = (): Theme =>
+    parseTheme(typeof localStorage !== 'undefined' && localStorage.getItem(storageKey));
+  function storeTheme(theme: Theme): void {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(storageKey, theme === 'light' || theme === 'dark' ? theme : '');
+    }
+  }
+  const getPreferredColorScheme = (): Theme =>
+    matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+
+  function onThemeChange(theme: Theme): void {
+    StarlightThemeProvider.updatePickers(theme);
+    document.documentElement.dataset.theme = theme === 'auto' ? getPreferredColorScheme() : theme;
+    storeTheme(theme);
+    document.querySelectorAll<HTMLElement>('starlight-theme-select [role="menuitemradio"]').forEach((item) => {
+      item.setAttribute('aria-checked', String(item.dataset.themeValue === theme));
+    });
+  }
+
+  matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => {
+    if (loadTheme() === 'auto') onThemeChange('auto');
+  });
+
+  class StarlightThemeSelect extends HTMLElement {
+    #button: HTMLButtonElement | null;
+    #menu: HTMLElement | null;
+
+    constructor() {
+      super();
+      this.#button = this.querySelector('.sc-theme__button');
+      this.#menu = this.querySelector('[role="menu"]');
+      onThemeChange(loadTheme());
+
+      this.#button?.addEventListener('click', () => this.#toggle());
+      this.#menu?.addEventListener('click', (event) => {
+        const item = (event.target as HTMLElement).closest<HTMLElement>('[role="menuitemradio"]');
+        if (!item) return;
+        onThemeChange(parseTheme(item.dataset.themeValue));
+        this.#close();
+        this.#button?.focus();
+      });
+      this.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+          this.#close();
+          this.#button?.focus();
+          return;
+        }
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          if (!this.#isOpen()) this.#open();
+          const items = this.#items();
+          const index = items.indexOf(document.activeElement as HTMLElement);
+          const next = event.key === 'ArrowDown' ? (index + 1) % items.length : (index - 1 + items.length) % items.length;
+          items[next]?.focus();
+        }
+      });
+      document.addEventListener('click', (event) => {
+        if (this.#isOpen() && !this.contains(event.target as Node)) this.#close();
+      });
+      this.addEventListener('focusout', (event) => {
+        const next = event.relatedTarget as Node | null;
+        if (this.#isOpen() && !(next && this.contains(next))) this.#close();
+      });
+    }
+
+    #items(): HTMLElement[] {
+      return Array.from(this.querySelectorAll<HTMLElement>('[role="menuitemradio"]'));
+    }
+    #isOpen(): boolean {
+      return this.#button?.getAttribute('aria-expanded') === 'true';
+    }
+    #open(): void {
+      this.#button?.setAttribute('aria-expanded', 'true');
+      this.#menu?.removeAttribute('hidden');
+    }
+    #close(): void {
+      this.#button?.setAttribute('aria-expanded', 'false');
+      this.#menu?.setAttribute('hidden', '');
+    }
+    #toggle(): void {
+      if (this.#isOpen()) this.#close();
+      else {
+        this.#open();
+        (this.querySelector('[aria-checked="true"]') as HTMLElement | null)?.focus();
+      }
+    }
+  }
+  customElements.define('starlight-theme-select', StarlightThemeSelect);
+</script>
+
+<style>
+  @layer starlight.user {
+    .sc-theme { position: relative; display: block; }
+    .sc-theme__button {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 2rem;
+      height: 2rem;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--sl-color-gray-2);
+      cursor: pointer;
+      font-size: 1.05rem;
+    }
+    .sc-theme__button:hover,
+    .sc-theme__button[aria-expanded='true'] { color: var(--sc-accent-text); }
+    .sc-theme__menu {
+      position: absolute;
+      top: calc(100% + 0.5rem);
+      inset-inline-end: 0;
+      z-index: var(--sl-z-index-navbar);
+      display: grid;
+      min-width: 9.5rem;
+      padding: 0.3rem;
+      border: 1px solid var(--sc-line);
+      background: var(--sc-surface);
+      box-shadow: 0 16px 40px rgb(0 0 0 / 0.35);
+      clip-path: var(--sc-chamfer-sm);
+    }
+    .sc-theme__menu[hidden] { display: none; }
+    .sc-theme__menu [role='menuitemradio'] {
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      width: 100%;
+      padding: 0.5rem 0.65rem;
+      border: 0;
+      background: transparent;
+      color: var(--sl-color-gray-2);
+      font-family: var(--sc-font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      text-align: start;
+      cursor: pointer;
+    }
+    .sc-theme__menu [role='menuitemradio'] :global(svg) { font-size: 1rem; }
+    .sc-theme__menu [role='menuitemradio']:hover,
+    .sc-theme__menu [role='menuitemradio']:focus-visible { background: var(--sc-surface-hover); color: var(--sc-text); outline: none; }
+    .sc-theme__menu [role='menuitemradio'][aria-checked='true'] { color: var(--sc-accent-text); }
+    .sc-theme__menu [role='menuitemradio'][aria-checked='true']::after {
+      content: '';
+      margin-inline-start: auto;
+      width: 0.4rem;
+      height: 0.4rem;
+      background: var(--sc-accent);
+    }
+  }
+</style>
