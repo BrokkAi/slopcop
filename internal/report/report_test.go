@@ -205,13 +205,24 @@ func TestHumanSaysWhyTheAnalysisDidNotComplete(t *testing.T) {
 		3,
 		service.IncompletePolicy{PolicyID: "a.first", Reason: "timed_out"},
 		service.IncompletePolicy{PolicyID: "evil\x1b[2J", Reason: "base_comparison_failed"},
-		service.IncompletePolicy{PolicyID: "z.last", Reason: "other"},
+		service.IncompletePolicy{PolicyID: "z.last", Reason: "unsupported", Detail: "type=taint_evaluation\x1b[2J"},
 	)
 	got = render(t, partial, FormatHuman)
 	want := "| Analysis incomplete: 3 check(s) did not complete\n" +
-		"Incomplete: a.first (timed_out), evil�[2J (base_comparison_failed), z.last (other)\n"
+		"Incomplete: a.first (timed_out), evil�[2J (base_comparison_failed), z.last (unsupported: type=taint_evaluation�[2J)\n"
 	if !strings.HasSuffix(got, want) {
 		t.Errorf("incomplete = %q", got)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, partial, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	incomplete := document["incomplete"].([]any)
+	if first := incomplete[0].(map[string]any); first["detail"] != nil {
+		t.Errorf("a check without a detail = %v", first)
+	}
+	if last := incomplete[2].(map[string]any); last["detail"] != "type=taint_evaluation\x1b[2J" {
+		t.Errorf("json detail = %v", last)
 	}
 
 	many := withIncomplete(
@@ -587,6 +598,11 @@ func TestSARIFSaysWhatDidNotComplete(t *testing.T) {
 		1,
 		service.IncompletePolicy{PolicyID: "acme.slow", Reason: "timed_out"},
 	)
+	unsupported := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		1,
+		service.IncompletePolicy{PolicyID: "acme.taint", Reason: "unsupported", Detail: "type=taint_evaluation"},
+	)
 	cases := []struct {
 		name     string
 		response service.Response
@@ -602,6 +618,18 @@ func TestSARIFSaysWhatDidNotComplete(t *testing.T) {
 				"message":    map[string]any{"text": "acme.slow did not complete (timed_out)"},
 				"descriptor": map[string]any{"id": "acme.slow"},
 				"properties": map[string]any{"slopcop.reason": "timed_out"},
+			},
+		}},
+		{"unsupported", unsupported, []any{
+			map[string]any{
+				"level":   "warning",
+				"message": map[string]any{"text": "Analysis incomplete: 1 check(s) did not complete"},
+			},
+			map[string]any{
+				"level":      "warning",
+				"message":    map[string]any{"text": "acme.taint did not complete (unsupported: type=taint_evaluation)"},
+				"descriptor": map[string]any{"id": "acme.taint"},
+				"properties": map[string]any{"slopcop.reason": "unsupported", "slopcop.detail": "type=taint_evaluation"},
 			},
 		}},
 		{"failed", failed(), []any{
