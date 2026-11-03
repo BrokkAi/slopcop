@@ -144,6 +144,31 @@ func forgetFinding(dir, findingID string) {
 	}
 }
 
+// forgetCheck drops the last completed check from the state of the session
+// that unignored a finding, in the repository at dir, so its next Stop hook
+// checks again and hands the unignored finding back instead of answering from
+// a state that no longer lists it.
+func forgetCheck(dir string) {
+	sessions := attribution.HookSessions()
+	if len(sessions) == 0 {
+		return
+	}
+	repoRoot, err := gitx.Toplevel(dir)
+	if err != nil {
+		return
+	}
+	for harness, session := range sessions {
+		path := hookStatePath(harness, session, repoRoot)
+		state, loaded := loadHookState(path)
+		if !loaded || state.Fingerprint == "" {
+			continue
+		}
+		state.Fingerprint = ""
+		state.Handed = false
+		saveHookState(path, state)
+	}
+}
+
 // hookStatePath is where the state of one repository in one session is
 // kept, or empty when there is no cache directory to keep it in.
 func hookStatePath(harness, sessionID, repoRoot string) string {

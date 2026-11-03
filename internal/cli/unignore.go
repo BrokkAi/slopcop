@@ -33,6 +33,7 @@ func runUnignore(cmd *cobra.Command, serviceFlag, version, workspace, findingID 
 	if err != nil {
 		return err
 	}
+	forgetCheck(".")
 	fmt.Fprintf(
 		cmd.OutOrStdout(),
 		"slopcop: finding %s is no longer ignored; later checks of this repository report it again\n",
