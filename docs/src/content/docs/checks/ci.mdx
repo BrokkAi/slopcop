@@ -11,6 +11,10 @@ The same command that an agent runs gates a change in CI: no prompts, one
 request, and the [exit code](/checks/exit-codes/) says what happened. A check
 of unpushed or branch work is free and never uses credits.
 
+On GitHub, [pull request checks](/checks/pull-requests/) give each pull request
+the same check with no workflow or token: the SlopCop GitHub App posts it. Run
+the CLI in CI when you want your own `--fail-on`, rules, or output formats.
+
 ## Sign in without a browser
 
 Store a token once, then give CI the token rather than a login:

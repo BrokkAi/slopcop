@@ -16,8 +16,10 @@ allowed to.
 Install the [SlopCop GitHub App](https://github.com/apps/slop-cop) on the
 account or organization that owns the repository, and select the repositories
 it may read. The App asks for read-only access to contents and metadata; it
-never writes to your repository. Optionally it can be granted issues access so
-the web app can file findings as issues.
+never writes to your repository's code. It can also post a **SlopCop** check
+on pull requests, which needs its Checks permission (see
+[Check pull requests](/checks/pull-requests/)), and optionally it can be
+granted issues access so the web app can file findings as issues.
 
 The workspace connects to the App from its settings in the web app. Each member
 who checks a private repository also authorizes SlopCop with their own GitHub
