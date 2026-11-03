@@ -1,4 +1,9 @@
-# Publishing to PyPI
+---
+title: Publishing to PyPI
+description: "How the brokk-slopcop wheels are packed from the release binaries and published to PyPI with trusted publishing, and the one-time setup."
+sidebar:
+  order: 4
+---
 
 The public package is `brokk-slopcop` and its executable is `slopcop`. It is
 not `slopcop` because PyPI already has an unrelated project by that name, and

@@ -1,0 +1,103 @@
+---
+import { LinkButton } from '@astrojs/starlight/components';
+import type { StarlightRouteData } from '@astrojs/starlight/route-data';
+
+const { entry } = (Astro.locals as { starlightRoute: StarlightRouteData }).starlightRoute;
+const { title = entry.data.title, tagline, actions = [] } = entry.data.hero ?? {};
+---
+
+<div class="sc-hero">
+  <div class="sc-hero__copy">
+    <p class="sc-eyebrow">SlopCop documentation</p>
+    <h1 id="_top" data-page-title set:html={title} />
+    {tagline && <p class="sc-hero__tagline" set:html={tagline} />}
+    {
+      actions.length > 0 && (
+        <div class="sc-hero__actions">
+          {actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
+            <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+              {text}
+              {icon?.html && <Fragment set:html={icon.html} />}
+            </LinkButton>
+          ))}
+        </div>
+      )
+    }
+  </div>
+  <figure class="sc-hero__terminal" aria-label="A SlopCop check run from a terminal">
+    <figcaption><span></span><span></span><span></span><b>terminal</b></figcaption>
+    <pre><code><i>$</i> slopcop
+<em>orders/ExportServlet.java:48</em>  <u>definite · error</u>
+  request parameter reaches SQL text
+  ID: 0f8fad5b-d9cb-469f-a165-70867728950e
+  bifrost.security.java.servlet-parameter-to-jdbc:
+  req.getParameter("q") reaches Statement.executeQuery
+  through OrderQuery.build (OrderQuery.java:21)
+
+1 new finding across 1 file(s); 72 already in the code
+Analysis complete
+<i>$</i> echo $?
+1</code></pre>
+  </figure>
+</div>
+
+<style>
+  @layer starlight.user {
+    .sc-hero {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
+      gap: clamp(1.5rem, 4vw, 4rem);
+      align-items: center;
+      padding-block: clamp(1rem, 4vw, 3rem) 1rem;
+    }
+    .sc-hero h1 {
+      font-size: clamp(2.4rem, 5vw, 3.9rem);
+      line-height: 1.02;
+      letter-spacing: -0.03em;
+      font-weight: 800;
+      color: var(--sc-text);
+      margin: 0;
+    }
+    .sc-hero__tagline { font-size: clamp(1.05rem, 1.6vw, 1.25rem); line-height: 1.55; color: var(--sl-color-gray-2); margin: 1.25rem 0 0; max-width: 46ch; }
+    .sc-hero__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
+    .sc-hero__actions :global(.sl-link-button) { border-radius: 0; clip-path: var(--sc-chamfer-sm); font-weight: 650; }
+    .sc-hero__actions :global(.sl-link-button.primary) { background: var(--sc-accent); border-color: var(--sc-accent); color: #f4f1ec; }
+    .sc-hero__actions :global(.sl-link-button.primary:hover) { background: #d8372c; }
+    .sc-hero__actions :global(.sl-link-button.minimal) { color: var(--sc-text); }
+    .sc-hero__terminal {
+      margin: 0;
+      border: 1px solid var(--sc-line);
+      background: var(--sc-well);
+      clip-path: var(--sc-chamfer);
+      min-width: 0;
+    }
+    .sc-hero__terminal figcaption {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.6rem 0.9rem;
+      border-bottom: 1px solid var(--sc-line-soft);
+      background: var(--sc-surface);
+    }
+    .sc-hero__terminal figcaption span { width: 0.55rem; height: 0.55rem; border: 1px solid var(--sc-line-strong); }
+    .sc-hero__terminal figcaption b { margin-inline-start: auto; font-family: var(--sc-font-mono); font-weight: 400; font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-text-3); }
+    .sc-hero__terminal pre {
+      margin: 0;
+      padding: 1rem 1.1rem 1.2rem;
+      font-family: var(--sc-font-mono);
+      font-size: 0.78rem;
+      line-height: 1.6;
+      color: #c9c6c0;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    :root[data-theme='light'] .sc-hero__terminal pre { color: #2a2b2a; }
+    .sc-hero__terminal pre i { font-style: normal; color: var(--sc-text-3); }
+    .sc-hero__terminal pre em { font-style: normal; color: var(--sc-text); font-weight: 700; }
+    .sc-hero__terminal pre u { text-decoration: none; color: var(--sc-accent-text); }
+    @media (max-width: 64rem) {
+      .sc-hero { grid-template-columns: 1fr; }
+    }
+  }
+</style>

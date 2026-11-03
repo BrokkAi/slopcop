@@ -18,6 +18,8 @@ and the certainty behind it. The analysis is
 engine rather than a language model, so a finding traces back to a rule instead
 of to a guess.
 
+The full documentation is at <https://docs.slopcop.com>.
+
 There is no local analyzer and nothing to install per language: the CLI ships
 the change and prints what comes back, and it never decides on its own that
 there is nothing to check. The command is built for agents and one-shot CI: no
@@ -571,13 +573,13 @@ linux, darwin, and windows for amd64 and arm64, packages `tar.gz` archives
 and a snapshot build on every change, and `make release-check` runs the same
 locally when GoReleaser is installed. The same tag push then packs
 `@brokkai/slopcop` from those release archives and publishes it to npm with
-[trusted publishing](docs/npm-publishing.md), so the package needs no npm
+[trusted publishing](docs/src/content/docs/contribute/npm-publishing.md), so the package needs no npm
 token.
 
 The same tag also packs a wheel per release target from the binaries GoReleaser
 just built, installs the wheel for every platform GitHub can run, and
 publishes `brokk-slopcop` to PyPI with
-[trusted publishing](docs/pypi-publishing.md), so that package needs no PyPI
+[trusted publishing](docs/src/content/docs/contribute/pypi-publishing.md), so that package needs no PyPI
 token either.
 
 Layout:
@@ -594,6 +596,5 @@ Layout:
 | `npm` | launcher, packer, and tests of the `@brokkai/slopcop` package |
 | `packaging/pypi` | wheel packer and launcher of the `brokk-slopcop` package |
 | `skills/slopcop` | the agent skill the binary embeds and installs |
-| `docs/npm-publishing.md` | npm release flow and trusted publisher setup |
-| `docs/pypi-publishing.md` | PyPI release flow and trusted publisher setup |
+| `docs` | the documentation site at <https://docs.slopcop.com> (Astro Starlight), including the npm and PyPI release flows |
 | `.goreleaser.yaml` | tag release build, archives, and checksums |
