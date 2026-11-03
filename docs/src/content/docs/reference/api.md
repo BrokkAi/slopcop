@@ -66,6 +66,18 @@ contract, including `finding_not_found`. 300 per hour per token.
 ignored. The id may be the one the finding was ignored from or its id from any
 later check of the repository. Failures are as for `/v1/ignore`.
 
+## Ignored findings
+
+`GET /v1/ignores?repoUrl=<url>&page=<n>` lists the findings the workspace
+ignored in the repository `repoUrl` names (the URL a check sends), newest
+first, 25 per page. `page` is optional, zero-based, at most 10000. It answers
+`repository` (`fullName`), `total`, `page`, `pageSize` and `ignores`, each with
+`id`, `policyId`, `findingId`, `title`, `path`, `startLine`, `severity`,
+`ignoredAt` and `ignoredBy` (`username`, `displayName`, or null).
+`findingId`, `title`, `path` and `startLine` are null when the finding is no
+longer recorded. A repository the workspace does not have answers
+`workspace_repository_not_found`.
+
 ## Account
 
 | Route | Answer |

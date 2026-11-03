@@ -34,7 +34,8 @@ read the report.
 - Exit 1: the change added findings. Fix each one and run the check again.
   Read a finding whose certainty is "possible" or "heuristic" before changing
   code; if it is a false positive, run `slopcop ignore <id>` with its id.
-  Undo a mistaken ignore with `slopcop unignore <id>`.
+  Undo a mistaken ignore with `slopcop unignore <id>`; `slopcop ignored`
+  lists the repository's ignored findings and their ids.
 - Exit 2: some rule could not finish, or the check failed. Say which; never
   treat it as clean.
 - Exit 3: still running. Run the same command again.

@@ -31,7 +31,7 @@ So it asks `[y/N]` and refuses when stdin is not a terminal. An agent cannot
 do it for you.
 
 To check, ignore, or list repositories in another workspace without moving
-anyone, `check`, `ignore`, `unignore`, and `repo` take `-w`/`--workspace <name|id>` (or
+anyone, `check`, `ignore`, `unignore`, `ignored`, and `repo` take `-w`/`--workspace <name|id>` (or
 `SLOPCOP_WORKSPACE`). It applies to that command only. Give agents that share a
 login their own `--workspace` instead of switching it.
 
