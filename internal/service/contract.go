@@ -149,11 +149,16 @@ type Summary struct {
 }
 
 // IncompletePolicy mirrors IncompletePolicy: a check that did not complete
-// and why (timed_out, unreliable, base_comparison_failed, or other; a service
-// from before unreliable says inconclusive).
+// and why (timed_out, unreliable, base_comparison_failed, unsupported, or
+// other; a service from before unreliable says inconclusive).
 type IncompletePolicy struct {
 	PolicyID string `json:"policyId"`
 	Reason   string `json:"reason"`
+	// Detail names, for an unsupported or other check, Bifrost's identifiers
+	// for why it did not complete as key=value pairs, such as
+	// `type=failed reasons=source_read_failed`. A service from before
+	// BrokkAi/bifrost-service#993 omits it.
+	Detail string `json:"detail,omitempty"`
 }
 
 // Finding mirrors CheckFinding. Text fields come from the analyzed repository

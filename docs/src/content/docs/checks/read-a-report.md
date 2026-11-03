@@ -54,14 +54,16 @@ Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 ## Incomplete checks
 
 `incomplete` lists the rules that could not answer for the changed files, each
-with a `reason`:
+with a `reason`, and for `unsupported` and `other` a `detail` that `human`
+prints after the reason and `sarif` carries in `properties["slopcop.detail"]`:
 
 | Reason | Meaning | What to do |
 | --- | --- | --- |
 | `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. The findings it did report keep their certainty. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `timed_out` | The rule ran out of time and has no verdict. | Run the check again once. A smaller change may finish. |
 | `base_comparison_failed` | The change could not be compared with its base commit, so findings that were already there may be reported as new. The risk is extra findings, not missed ones. | Check that the change really introduced each finding before fixing it. |
-| `other` | It did not complete for a reason the service does not classify. | Report it. |
+| `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
+| `other` | It did not complete for a reason the service does not classify. `detail`, when present, gives Bifrost's completion type and reason codes, such as `type=failed reasons=source_read_failed`. | Report it, with its `detail`. |
 
 A report with incomplete checks exits `2` unless a new finding crossed
 `--fail-on`, in which case it exits `1`: the findings come first.

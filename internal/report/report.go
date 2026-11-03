@@ -225,18 +225,28 @@ func omittedNotice(response service.Response) string {
 
 // incompleteLine names the incomplete checks, such as
 // `Incomplete: acme.slow (timed_out), and 3 more`.
+// A check with a detail says it after the reason:
+// `acme.rule (unsupported: type=taint_evaluation)`.
 func incompleteLine(response service.Response) string {
 	if len(response.Incomplete) == 0 {
 		return ""
 	}
 	named := make([]string, 0, len(response.Incomplete)+1)
 	for _, policy := range response.Incomplete {
-		named = append(named, fmt.Sprintf("%s (%s)", printable(policy.PolicyID), printable(policy.Reason)))
+		named = append(named, fmt.Sprintf("%s (%s)", printable(policy.PolicyID), printable(incompleteWhy(policy))))
 	}
 	if unnamed := response.Summary.IncompletePolicies - len(response.Incomplete); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
 	}
 	return "Incomplete: " + strings.Join(named, ", ")
+}
+
+// incompleteWhy is a check's reason, followed by its detail when it has one.
+func incompleteWhy(policy service.IncompletePolicy) string {
+	if policy.Detail == "" {
+		return policy.Reason
+	}
+	return policy.Reason + ": " + policy.Detail
 }
 
 // inconclusiveCheck is one inconclusive check as the reports name it.
@@ -651,11 +661,15 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		})
 	}
 	for _, policy := range response.Incomplete {
+		properties := map[string]any{"slopcop.reason": policy.Reason}
+		if policy.Detail != "" {
+			properties["slopcop.detail"] = policy.Detail
+		}
 		notifications = append(notifications, sarifNotification{
 			Level:      "warning",
-			Message:    sarifMessage{Text: fmt.Sprintf("%s did not complete (%s)", policy.PolicyID, policy.Reason)},
+			Message:    sarifMessage{Text: fmt.Sprintf("%s did not complete (%s)", policy.PolicyID, incompleteWhy(policy))},
 			Descriptor: &sarifDescriptor{ID: policy.PolicyID},
-			Properties: map[string]any{"slopcop.reason": policy.Reason},
+			Properties: properties,
 		})
 	}
 	// Inconclusive checks are notes: they never change the status or the

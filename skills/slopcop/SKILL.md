@@ -188,7 +188,8 @@ Why a check is `incomplete` (`incomplete[].reason`):
 | `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. The findings it did report keep their certainty. A service from before this code says `inconclusive`. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `timed_out` | The check ran out of time and has no verdict. | Run it again once. A smaller change may finish. |
 | `base_comparison_failed` | The change could not be compared with its base commit, so findings that were already there may be reported as new. Here the risk is extra findings, not missed ones. | Check that the change really introduced each finding before fixing it. |
-| `other` | It did not complete for a reason the service does not classify. | Report it. |
+| `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
+| `other` | It did not complete for a reason the service does not classify. `detail`, when present, gives Bifrost's completion type and reason codes, such as `type=failed reasons=source_read_failed`. | Report it, with its `detail`. |
 
 Other bounds in the report:
 
