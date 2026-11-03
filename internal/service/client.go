@@ -16,8 +16,9 @@ import (
 )
 
 const (
-	checkPath  = "/v1/check"
-	ignorePath = "/v1/ignore"
+	checkPath    = "/v1/check"
+	ignorePath   = "/v1/ignore"
+	unignorePath = "/v1/unignore"
 	// workspaceHeader names, for one request, the workspace of the login's
 	// account it runs in instead of the one the login is bound to.
 	workspaceHeader = "SlopCop-Workspace"
@@ -303,12 +304,13 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 	return response.StatusCode, response.Header, responseBody, nil
 }
 
-// IgnoreRequest is the POST /v1/ignore body.
+// IgnoreRequest is the POST /v1/ignore and POST /v1/unignore body.
 type IgnoreRequest struct {
 	FindingID string `json:"findingId"`
 }
 
-// IgnoreResponse is the successful POST /v1/ignore body.
+// IgnoreResponse is the successful POST /v1/ignore and POST /v1/unignore
+// body.
 type IgnoreResponse struct {
 	FindingID string `json:"findingId"`
 	Status    string `json:"status"`
@@ -317,7 +319,18 @@ type IgnoreResponse struct {
 // Ignore asks the service to stop reporting one finding in its repository.
 // Ignoring a finding twice succeeds. Service failures come back as *Error.
 func (c *Client) Ignore(ctx context.Context, findingID string) (IgnoreResponse, error) {
-	status, _, payload, err := c.postJSON(ctx, ignorePath, IgnoreRequest{FindingID: findingID})
+	return c.postFinding(ctx, ignorePath, "ignore", findingID)
+}
+
+// Unignore asks the service to report one ignored finding again in its
+// repository. Unignoring a finding that is not ignored succeeds. Service
+// failures come back as *Error.
+func (c *Client) Unignore(ctx context.Context, findingID string) (IgnoreResponse, error) {
+	return c.postFinding(ctx, unignorePath, "unignore", findingID)
+}
+
+func (c *Client) postFinding(ctx context.Context, path, name, findingID string) (IgnoreResponse, error) {
+	status, _, payload, err := c.postJSON(ctx, path, IgnoreRequest{FindingID: findingID})
 	if err != nil {
 		return IgnoreResponse{}, err
 	}
@@ -326,7 +339,7 @@ func (c *Client) Ignore(ctx context.Context, findingID string) (IgnoreResponse, 
 	}
 	var decoded IgnoreResponse
 	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return IgnoreResponse{}, fmt.Errorf("decode ignore response: %w", err)
+		return IgnoreResponse{}, fmt.Errorf("decode %s response: %w", name, err)
 	}
 	if decoded.FindingID == "" {
 		decoded.FindingID = findingID

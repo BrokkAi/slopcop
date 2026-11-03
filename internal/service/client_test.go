@@ -416,6 +416,50 @@ func TestIgnoreFillsInAnUnexplainedFindingNotFound(t *testing.T) {
 	}
 }
 
+func TestUnignoreFillsInAnUnexplainedFindingNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/unignore" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code": "finding_not_found", "retryable": false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Unignore(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e")
+	var serviceError *Error
+	if !errors.As(err, &serviceError) {
+		t.Fatalf("expected *Error, got %v", err)
+	}
+	want := "SlopCop has no such finding for this login.\nUse a finding id from a check you ran with this login."
+	if serviceError.Body.Code != "finding_not_found" || serviceError.RemedyText() != want {
+		t.Errorf("error = %+v", serviceError)
+	}
+}
+
+func TestUnignoreFillsInAnOmittedFindingID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status": "unignored"}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Unignore(context.Background(), "0f8fad5b-d9cb-469f-a165-70867728950e")
+	if err != nil {
+		t.Fatalf("Unignore: %v", err)
+	}
+	if response.FindingID != "0f8fad5b-d9cb-469f-a165-70867728950e" || response.Status != "unignored" {
+		t.Errorf("response = %+v", response)
+	}
+}
+
 func TestCheckReadsTheFindingID(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{
