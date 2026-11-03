@@ -39,9 +39,14 @@ the repository to the workspace. [Output formats](/checks/output-formats/) shows
 the `json` rendering, which is this response plus `emptyChange` and
 `skillUpdated` added by the CLI.
 
-While the analysis runs, the service answers `503` with code `check_running`
-and a `Retry-After`; the client asks again with the identical request, which
-attaches to the same analysis for an hour. Non-2xx responses carry `code`,
+Every answer about a check carries its `checkId`. While the analysis runs, the
+service answers `503` with code `check_running`, a `Retry-After` and the
+`checkId`; the client then asks `GET /v1/check/{checkId}` (with `?failOn=` if
+it set one), which waits for the same check without the change and answers what
+the original request would. Only the token that started the check, in the same
+workspace, can read it by id, for 24 hours; anything else answers `404
+check_not_found`, and the client sends the change again. Sending the identical
+request again also still attaches to the same analysis for an hour. Non-2xx responses carry `code`,
 `message`, `remedy`, `retryable`, and optionally `installUrl` or `topUpUrl`.
 See [Error codes](/reference/error-codes/).
 

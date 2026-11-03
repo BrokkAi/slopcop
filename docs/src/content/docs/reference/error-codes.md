@@ -59,7 +59,8 @@ as `slopcop login` when the remedy is to sign in.
 
 | Code | Exit | What to do |
 | --- | --- | --- |
-| `check_running` | handled | The analysis is still running. The CLI waits the `Retry-After` and asks again until `--timeout`; then exit `3`. |
+| `check_running` | handled | The analysis is still running. The CLI waits the `Retry-After` and asks again by the check's id until `--timeout`; then exit `3`. |
+| `check_not_found` | handled | The service has no recent check with that id for this login. The CLI sends the change again. |
 | `indexing_in_progress` | 2 | The service is still indexing the repository. Run the check again later. |
 | `client_outdated` | 2 | This slopcop is older than the service accepts. [Upgrade](/get-started/install/#upgrade) and run the check again. |
 | `rate_limited` | 2, retryable | Too many requests; wait the `Retry-After`. |
