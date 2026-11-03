@@ -33,8 +33,9 @@ with the harness, its version, the session id, and each model and effort with
 the files it wrote. The service rejects any other field.
 
 The response carries `status`, `baseCommit`, `applied`, `summary`, `findings`
-(each with an `id` and `new`), `incomplete`, `inconclusive`, and `failure` when
-the analysis did not complete. [Output formats](/checks/output-formats/) shows
+(each with an `id` and `new`), `incomplete`, `inconclusive`, `failure` when
+the analysis did not complete, and `repositoryAdded: true` when the check added
+the repository to the workspace. [Output formats](/checks/output-formats/) shows
 the `json` rendering, which is this response plus `emptyChange` and
 `skillUpdated` added by the CLI.
 

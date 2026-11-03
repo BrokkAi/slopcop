@@ -76,6 +76,7 @@ slopcop check --format json
 | `incomplete` | rules that did not complete, each with a `reason` |
 | `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `elsewhere` |
 | `failure` | present when the analysis as a whole did not complete |
+| `repositoryAdded` | `true` when this check added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
 

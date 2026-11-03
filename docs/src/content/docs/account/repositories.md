@@ -22,7 +22,9 @@ workspace. The web app has no way to add one either. A public repository works
 at once; a private one needs the workspace's
 [GitHub App, GitLab, or Bitbucket connection](/account/private-repositories/).
 
-A workspace's first repository is added without asking. When the workspace
+A workspace's first repository is added without asking, and the check says
+`added owner/name to "Workspace"` on stderr, and `"repositoryAdded": true` in
+`json`, so you know which workspace it joined. When the workspace
 would then pay for a repository (it already has an active repository and is
 charged), the service refuses the check with `repository_add_unconfirmed` until
 a person confirms:

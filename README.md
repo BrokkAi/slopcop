@@ -290,7 +290,9 @@ Once the person has approved it, `check --add-repository --workspace
 flag itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one
 workspace cannot add the repository to the one the login happens to point at.
 The flag changes nothing for a repository already in that workspace. A
-workspace's first repository is added without asking. Deleting repositories,
+workspace's first repository is added without asking; the check still says
+`added owner/name to "Workspace"` on stderr, and `json` reports
+`"repositoryAdded": true`. Deleting repositories,
 archiving workspaces, members, credits and repository settings stay in the web
 app. The commands exit `0` on success and `2` with the service's message and
 remedy otherwise, as `ignore` does.
