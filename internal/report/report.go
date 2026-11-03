@@ -355,6 +355,9 @@ type jsonReport struct {
 	// service's bound. They never change the status.
 	Inconclusive []inconclusiveCheck `json:"inconclusive"`
 	Failure      string              `json:"failure,omitempty"`
+	// RepositoryAdded is set only when the check added the repository to
+	// the workspace.
+	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
 	// EmptyChange is set only when the patch was empty.
 	EmptyChange bool `json:"emptyChange,omitempty"`
 	// SkillUpdated is set only when this run wrote the skill.
@@ -363,15 +366,16 @@ type jsonReport struct {
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
-		Status:       response.Status,
-		BaseCommit:   response.BaseCommit,
-		Summary:      response.Summary,
-		Findings:     listed(response, options),
-		Incomplete:   response.Incomplete,
-		Inconclusive: inconclusiveChecks(response),
-		Failure:      response.Failure,
-		EmptyChange:  options.EmptyChange,
-		SkillUpdated: options.SkillUpdated,
+		Status:          response.Status,
+		BaseCommit:      response.BaseCommit,
+		Summary:         response.Summary,
+		Findings:        listed(response, options),
+		Incomplete:      response.Incomplete,
+		Inconclusive:    inconclusiveChecks(response),
+		Failure:         response.Failure,
+		RepositoryAdded: response.RepositoryAdded,
+		EmptyChange:     options.EmptyChange,
+		SkillUpdated:    options.SkillUpdated,
 	}, "json report")
 }
 

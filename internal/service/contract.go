@@ -108,6 +108,10 @@ type Response struct {
 	InconclusiveElsewhere []IncompletePolicy `json:"inconclusiveElsewhere"`
 	// Failure says why the analysis did not complete, when it failed.
 	Failure string `json:"failure,omitempty"`
+	// RepositoryAdded says the check added the repository to the workspace,
+	// as a workspace's first repository is without asking. A service from
+	// before it omits it.
+	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
 }
 
 // Summary mirrors CheckSummary.

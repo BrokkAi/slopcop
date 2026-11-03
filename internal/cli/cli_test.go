@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -1119,7 +1120,7 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 			t.Fatalf("exit = %d, stderr = %s", code, stderr)
 		}
 		if !strings.Contains(stderr, "where it uses 100 credits every 30 days.\nAdd BrokkAi/slopcop to \"Acme team\"? [y/N] ") ||
-			!strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") {
+			strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") != 1 {
 			t.Errorf("stderr = %q", stderr)
 		}
 		// Both in the workspace --workspace named.
@@ -1190,7 +1191,7 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("exit = %d, stderr = %s", code, stderr)
 		}
-		if strings.Contains(stderr, "[y/N]") || !strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") {
+		if strings.Contains(stderr, "[y/N]") || strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") != 1 {
 			t.Errorf("stderr = %q", stderr)
 		}
 		want := []map[string]any{
@@ -1229,6 +1230,50 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		if code != service.ExitNeedsPerson || document["status"] != "failed" || document["code"] != "repository_add_unconfirmed" ||
 			document["retryable"] != false || !strings.HasPrefix(document["remedy"].(string), "Run the check yourself") {
 			t.Errorf("exit = %d, stdout = %v", code, document)
+		}
+	})
+}
+
+func TestCheckSaysWhenItAddedTheWorkspacesFirstRepository(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	// added is whether the service answers that the check added the
+	// repository, as it does for a workspace's first, which is free.
+	answer := func(t *testing.T, added bool) *httptest.Server {
+		t.Helper()
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/v1/whoami" {
+				_, _ = w.Write([]byte(whoamiBody))
+				return
+			}
+			_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "` + base + `", "applied": true,
+				"summary": {"files": 0, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
+				"findings": [], "incomplete": [], "repositoryAdded": ` + strconv.FormatBool(added) + `}`))
+		}))
+		t.Cleanup(server.Close)
+		return server
+	}
+	notice := "slopcop: added BrokkAi/slopcop to \"Dave\"\n"
+
+	t.Run("an added repository is named with its workspace", func(t *testing.T) {
+		pipedStdin(t, "")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", answer(t, true).URL)
+		var document map[string]any
+		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
+		}
+		if code != 0 || strings.Count(stderr, notice) != 1 || document["repositoryAdded"] != true {
+			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
+		}
+	})
+
+	t.Run("a repository the workspace had is not mentioned", func(t *testing.T) {
+		pipedStdin(t, "")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", answer(t, false).URL)
+		if code != 0 || strings.Contains(stderr, "slopcop: added") || strings.Contains(stdout, "repositoryAdded") {
+			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 		}
 	})
 }

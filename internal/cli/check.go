@@ -141,6 +141,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}
 		return checkFailure(cmd, err, format, reportOptions)
 	}
+	if response.RepositoryAdded {
+		// A workspace's first repository is added without asking, so this
+		// is the only word of it the person gets.
+		workspace, known := resolvedWorkspace(cmd.Context(), client)
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n",
+			repositoryName(request.RepoURL), workspaceName(workspace, known))
+	}
 	emptyChange := prepared.bytes == 0
 	if emptyChange {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
@@ -222,9 +229,9 @@ func addRepositoryOnConfirm(cmd *cobra.Command, client *service.Client, opts *ch
 	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
 	defer cancel()
 	response, err := client.Check(ctx, request)
-	if err == nil {
-		fmt.Fprintf(stderr, "slopcop: added %s to %s\n", repository, workspaceName(workspace, known))
-	}
+	// A confirmed check always adds the repository, whether or not the
+	// service says so.
+	response.RepositoryAdded = err == nil
 	return response, err
 }
 

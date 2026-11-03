@@ -95,6 +95,9 @@ result covers.
 - **`failure`**: the analysis as a whole did not complete, and the report
   makes no claim about the code, even if it lists findings. `applied` is
   `false` whenever the analysis did not complete.
+- **`repositoryAdded`**: `true` only when this check added the repository to
+  the workspace, as the first check of a workspace's first repository does
+  without asking. See [Repositories](/account/repositories/).
 - **`emptyChange`**: `true` only when the patch was empty because the working
   tree matches the base. Nothing was checked; rerun with `--base` if you meant
   to check committed work.

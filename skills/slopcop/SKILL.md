@@ -41,8 +41,10 @@ the workspace (name, kind, role), its plan (Pro or Free) and the service URL
   charged. A check of a disabled repository answers `repository_disabled`.
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
-- A first check adds the repository to the workspace. When the workspace would
-  then pay for it, the check exits `4` with `repository_add_unconfirmed`, and
+- A first check adds the repository to the workspace. A workspace's first
+  repository is added without asking: stderr says `added owner/name to
+  "Workspace"` and the `json` report has `"repositoryAdded": true`. Tell the
+  user which workspace it joined. When the workspace would then pay for it, the check exits `4` with `repository_add_unconfirmed`, and
   stderr names the workspace it would add to. Stop and tell the user: the
   repository, the workspace, and the cost from the message. Only when the
   user has approved adding it to that workspace, run the check again with
