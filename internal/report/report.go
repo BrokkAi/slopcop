@@ -340,6 +340,10 @@ func writeInconclusive(out *strings.Builder, response service.Response) {
 	}
 }
 
+// Printable keeps control and bidirectional-override characters from hostile
+// repository content off the terminal, as a report does.
+func Printable(value string) string { return printable(value) }
+
 // printable keeps control and bidirectional-override characters from hostile
 // repository content off the terminal.
 func printable(value string) string {

@@ -59,6 +59,10 @@ ignored from, or the same finding's id from any later check of the repository.
 Unignoring a finding that is not ignored is fine. It takes `-w`/`--workspace`
 and exits like `ignore`.
 
+Lost the id? `slopcop ignored` lists the findings your workspace ignored in
+this repository, newest first, with each one's id, location, rule, and when and
+by whom it was ignored. It shows 25 at a time; pass `--page 2` for the next.
+
 ## Alternatives
 
 - **Pre-existing findings** need no ignore: they never fail a check and are not

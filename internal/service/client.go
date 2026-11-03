@@ -19,6 +19,7 @@ const (
 	checkPath    = "/v1/check"
 	ignorePath   = "/v1/ignore"
 	unignorePath = "/v1/unignore"
+	ignoresPath  = "/v1/ignores"
 	// workspaceHeader names, for one request, the workspace of the login's
 	// account it runs in instead of the one the login is bound to.
 	workspaceHeader = "SlopCop-Workspace"
@@ -343,6 +344,65 @@ func (c *Client) postFinding(ctx context.Context, path, name, findingID string) 
 	}
 	if decoded.FindingID == "" {
 		decoded.FindingID = findingID
+	}
+	return decoded, nil
+}
+
+// IgnoreList is the GET /v1/ignores body: one page, newest first, of the
+// findings the workspace ignored in one repository.
+type IgnoreList struct {
+	Repository IgnoredRepository `json:"repository"`
+	Total      int               `json:"total"`
+	// Page is zero-based.
+	Page     int              `json:"page"`
+	PageSize int              `json:"pageSize"`
+	Ignores  []IgnoredFinding `json:"ignores"`
+}
+
+// IgnoredRepository names the repository an IgnoreList is about.
+type IgnoredRepository struct {
+	FullName string `json:"fullName"`
+}
+
+// IgnoredFinding is one ignore. FindingID, the id `slopcop unignore` takes,
+// and the finding's title, path and line are nil when the service no longer
+// records the finding. Text fields come from the analyzed repository and are
+// hostile.
+type IgnoredFinding struct {
+	ID        string  `json:"id"`
+	PolicyID  string  `json:"policyId"`
+	FindingID *string `json:"findingId"`
+	Title     *string `json:"title"`
+	Path      *string `json:"path"`
+	StartLine *int    `json:"startLine"`
+	Severity  string  `json:"severity"`
+	// IgnoredAt is an RFC 3339 time.
+	IgnoredAt string `json:"ignoredAt"`
+	// IgnoredBy is nil when the service has no record of who ignored it.
+	IgnoredBy *IgnoredBy `json:"ignoredBy"`
+}
+
+// IgnoredBy is the account that ignored a finding.
+type IgnoredBy struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+}
+
+// Ignores lists one zero-based page of the findings the workspace ignored in
+// the repository repoURL names, the canonical URL a check sends. Service
+// failures come back as *Error.
+func (c *Client) Ignores(ctx context.Context, repoURL string, page int) (IgnoreList, error) {
+	query := url.Values{"repoUrl": {repoURL}, "page": {strconv.Itoa(page)}}
+	status, _, payload, err := c.getJSON(ctx, ignoresPath+"?"+query.Encode())
+	if err != nil {
+		return IgnoreList{}, err
+	}
+	var decoded IgnoreList
+	if err := decodeAnswer(status, ignoresPath, payload, &decoded); err != nil {
+		return IgnoreList{}, err
+	}
+	if decoded.Ignores == nil {
+		decoded.Ignores = []IgnoredFinding{}
 	}
 	return decoded, nil
 }

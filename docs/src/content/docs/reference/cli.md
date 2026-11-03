@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every slopcop command and flag. Check, login, logout, whoami, workspace, repo, ignore, unignore, init, hook, and version."
+description: "Every slopcop command and flag. Check, login, logout, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
 sidebar:
   order: 1
 ---
@@ -115,6 +115,15 @@ is the one it was ignored from, or the same finding's id from any later check.
 Unignoring a finding that is not ignored is fine. Takes `-w`/`--workspace`, and
 exits like `ignore`. See [False positives](/checks/false-positives/#undo-an-ignore).
 
+## `slopcop ignored`
+
+List the findings your workspace ignored in this repository (the one `origin`
+names), newest first, 25 per page: each one's finding id for `unignore`,
+severity, location, rule, title, and when and by whom. A finding the service no
+longer records has no id. Flags: `--page <n>` (from 1), `--format human|json`,
+`--root <path>`, `-w`/`--workspace`. Exits `0`, or `2` with the service's
+message.
+
 ## `slopcop init`
 
 Install the agent skill that ships inside this binary, and a Claude Code and
@@ -145,7 +154,7 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | --- | --- |
 | `SLOPCOP_TOKEN` | a token for this run; wins over the stored credential |
 | `SLOPCOP_SERVICE` | the service URL; `--service` wins over it |
-| `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, and `repo`; `-w` wins over it |
+| `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, and `repo`; `-w` wins over it |
 | `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
 | `CODEX_THREAD_ID`, `CODEX_HOME` | set by Codex; the same |
