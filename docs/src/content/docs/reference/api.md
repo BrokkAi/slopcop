@@ -59,6 +59,13 @@ the service decides (`payload_too_large`).
 `{"findingId": "<id>", "status": "ignored"}`. Failures use the same closed
 contract, including `finding_not_found`. 300 per hour per token.
 
+## Unignore
+
+`POST /v1/unignore` with `{"findingId": "<id>"}` answers
+`{"findingId": "<id>", "status": "unignored"}`, also when the finding was not
+ignored. The id may be the one the finding was ignored from or its id from any
+later check of the repository. Failures are as for `/v1/ignore`.
+
 ## Account
 
 | Route | Answer |

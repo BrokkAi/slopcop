@@ -53,7 +53,7 @@ as `slopcop login` when the remedy is to sign in.
 
 | Code | Exit | What to do |
 | --- | --- | --- |
-| `finding_not_found` | 2 | `slopcop ignore` got an id that is not from a check run in your workspace; use one a check printed. |
+| `finding_not_found` | 2 | `slopcop ignore` or `unignore` got an id that is not from a check run in your workspace; use one a check printed. |
 
 ## Service
 
