@@ -25,7 +25,21 @@ const { title = entry.data.title, tagline, actions = [] } = entry.data.hero ?? {
     }
   </div>
   <figure class="sc-hero__terminal" aria-label="A SlopCop check run from a terminal">
-    <figcaption><span></span><span></span><span></span><b>terminal</b></figcaption>
+    <figcaption data-os="generic">
+      <span class="sc-wc sc-wc--mac" aria-hidden="true"><i class="close"></i><i class="min"></i><i class="max"></i></span>
+      <span class="sc-wc sc-wc--generic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <b>terminal</b>
+      <span class="sc-wc sc-wc--windows" aria-hidden="true">
+        <i class="min"><svg viewBox="0 0 10 10"><path d="M0 5h10" /></svg></i>
+        <i class="max"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" /></svg></i>
+        <i class="close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" /></svg></i>
+      </span>
+      <span class="sc-wc sc-wc--linux" aria-hidden="true">
+        <i class="min"><svg viewBox="0 0 10 10"><path d="M2 7h6" /></svg></i>
+        <i class="max"><svg viewBox="0 0 10 10"><rect x="2" y="2" width="6" height="6" /></svg></i>
+        <i class="close"><svg viewBox="0 0 10 10"><path d="M2.5 2.5l5 5M7.5 2.5l-5 5" /></svg></i>
+      </span>
+    </figcaption>
     <pre><code><i>$</i> slopcop
 <em>orders/ExportServlet.java:48</em>  <u>definite · error</u>
   request parameter reaches SQL text
@@ -40,6 +54,18 @@ Analysis complete
 1</code></pre>
   </figure>
 </div>
+
+{/* Inlined so the controls match the visitor's OS before the figure paints. */}
+<script is:inline>
+  (() => {
+    const caption = document.querySelector('.sc-hero__terminal figcaption');
+    if (!caption) return;
+    const hint = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '';
+    const text = hint.toLowerCase();
+    caption.dataset.os =
+      /mac|iphone|ipad|ipod/.test(text) ? 'mac' : /win/.test(text) ? 'windows' : /linux|cros|x11|android/.test(text) ? 'linux' : 'generic';
+  })();
+</script>
 
 <style>
   @layer starlight.user {
@@ -79,8 +105,27 @@ Analysis complete
       border-bottom: 1px solid var(--sc-line-soft);
       background: var(--sc-surface);
     }
-    .sc-hero__terminal figcaption span { width: 0.55rem; height: 0.55rem; border: 1px solid var(--sc-line-strong); }
     .sc-hero__terminal figcaption b { margin-inline-start: auto; font-family: var(--sc-font-mono); font-weight: 400; font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-text-3); }
+    /* Window controls follow the visitor's OS (data-os is set by the inline script; generic until then). */
+    .sc-wc { display: none; align-items: center; gap: 0.5rem; }
+    figcaption[data-os='generic'] .sc-wc--generic,
+    figcaption[data-os='mac'] .sc-wc--mac,
+    figcaption[data-os='windows'] .sc-wc--windows,
+    figcaption[data-os='linux'] .sc-wc--linux { display: flex; }
+    .sc-wc i { display: block; }
+    .sc-wc--generic i { width: 0.55rem; height: 0.55rem; border: 1px solid var(--sc-line-strong); }
+    .sc-wc--mac { gap: 0.45rem; }
+    .sc-wc--mac i { width: 0.7rem; height: 0.7rem; border-radius: 50%; }
+    .sc-wc--mac .close { background: #ff5f57; }
+    .sc-wc--mac .min { background: #febc2e; }
+    .sc-wc--mac .max { background: #28c840; }
+    .sc-wc--windows, .sc-wc--linux { margin-inline-start: 0.9rem; }
+    .sc-wc--windows { gap: 0.9rem; }
+    .sc-wc--windows i, .sc-wc--linux i { width: 0.6rem; height: 0.6rem; color: var(--sc-text-2); }
+    .sc-wc--windows svg, .sc-wc--linux svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.1; }
+    .sc-wc--linux { gap: 0.4rem; }
+    .sc-wc--linux i { width: 1rem; height: 1rem; padding: 0.2rem; border-radius: 50%; background: var(--sc-surface-hover); color: var(--sc-text); box-sizing: border-box; }
+    .sc-wc--linux svg { stroke-width: 1.4; }
     .sc-hero__terminal pre {
       margin: 0;
       padding: 1rem 1.1rem 1.2rem;
