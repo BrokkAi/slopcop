@@ -59,6 +59,7 @@ A team workspace has one **owner**, and any number of **managers** and
 | --- | --- | --- | --- |
 | Run checks, and add a repository with a first check (within the workspace's limits) | yes | yes | yes |
 | Ignore a false positive | yes | yes | yes |
+| Unignore a finding | yes | yes | yes |
 | Read repository settings, rules, suppressions, and run history | yes | yes | yes |
 | Report false positives and manage suppressions and custom rules in the web app | no | yes | yes |
 | Choose which repositories are active: `repo enable`, `repo disable` | no | no | yes |
