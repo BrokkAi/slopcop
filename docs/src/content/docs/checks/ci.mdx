@@ -28,11 +28,10 @@ step is needed. The token runs checks in, and bills, the workspace it was
 approved in. Pass `-w`/`--workspace` (or set `SLOPCOP_WORKSPACE`) to use another
 one; see [Workspaces](/account/workspaces/).
 
-<Aside type="caution" title="Repositories are added by the first check">
-The first check of a repository adds it to the workspace. When the workspace
-would then pay for it, a check with no terminal exits `4` with
-`repository_add_unconfirmed` rather than adding it. Run the first check from a
-terminal, or once a person has approved it, pass
+<Aside type="caution" title="A check never adds a repository">
+A check of a repository the workspace has not added exits `4` with
+`repository_not_enabled` and sends nothing. Add it first with `slopcop enable`
+from the checkout at a terminal, or once a person has approved it, pass
 `--add-repository --workspace <name>`. See [Repositories](/account/repositories/).
 </Aside>
 

@@ -69,7 +69,7 @@ slopcop check --format json
 
 | Field | Meaning |
 | --- | --- |
-| `status` | `clean`, `findings`, `incomplete`, `pending`, or `failed` |
+| `status` | `clean`, `findings`, `incomplete`, `pending`, `failed`, or, for `--if-enabled` with an inactive repository, `skipped` |
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
 | `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `inconclusive` |
@@ -77,14 +77,17 @@ slopcop check --format json
 | `incomplete` | rules that did not complete, each with a `reason` |
 | `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `elsewhere` |
 | `failure` | present when the analysis as a whole did not complete |
-| `repositoryAdded` | `true` when this check added the repository to the workspace |
+| `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
 
 A failed check prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the service
 sent one. A check still running at `--timeout` prints `{"status": "pending",
-"retryAfter": 5, "message": …, "remedy": …}`.
+"retryAfter": 5, "message": …, "remedy": …}`. `--if-enabled` with an inactive
+repository prints `{"status": "skipped", "code": "repository_not_enabled",
+"state": …, "repository": …, "message": …}` and exits `0`, because it sent
+nothing.
 
 [Read a report](/checks/read-a-report/) explains what each field claims.
 
@@ -102,7 +105,8 @@ an empty change sets `properties["slopcop.emptyChange"]`; a skill update sits in
 
 A failed check prints a run with `slopcop.status` `failed`, whose invocation is
 unsuccessful and carries an `error` notification whose descriptor id is the
-code. A pending check prints a run with `slopcop.status` `pending`.
+code. A pending check prints a run with `slopcop.status` `pending`; a skipped
+one prints `skipped` with a `note` notification.
 
 SARIF is what GitHub code scanning and most CI annotators read; see
 [Gate a change in CI](/checks/ci/).

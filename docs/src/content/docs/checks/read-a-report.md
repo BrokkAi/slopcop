@@ -21,10 +21,12 @@ completed.
 | `incomplete` | No new finding crossed `--fail-on`, but some rule could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. Exit `2`. |
 | `pending` | Not a result yet: the check was still running when `--timeout` ran out. Run the same check again. Exit `3`. |
 | `failed` | The service refused or could not run the check. Carries a `code`, `message`, and `remedy`. Exit `4` when only a person can clear it, `2` otherwise. |
+| `skipped` | The CLI sent nothing because `--if-enabled` found the repository not active. Carries `code: repository_not_enabled`, the repository, and its state. Exit `0`; this is not a check result. |
 
 The service sets the status and the CLI follows it. Only `clean` exits `0`; a
 status this CLI does not know exits `2` with the status named on stderr, so a
-newer service can never pass a check by accident.
+newer service can never pass a check by accident. `skipped` comes from the CLI
+itself and is the one status that means no check ran on purpose.
 
 ## New and existing findings
 
@@ -97,9 +99,9 @@ result covers.
 - **`failure`**: the analysis as a whole did not complete, and the report
   makes no claim about the code, even if it lists findings. `applied` is
   `false` whenever the analysis did not complete.
-- **`repositoryAdded`**: `true` only when this check added the repository to
-  the workspace, as the first check of a workspace's first repository does
-  without asking. See [Repositories](/account/repositories/).
+- **`repositoryAdded`**: `true` only when this check carried an approved add,
+  as `slopcop enable` or `--add-repository` does. A check never adds a
+  repository by itself. See [Repositories](/account/repositories/).
 - **`emptyChange`**: `true` only when the patch was empty because the working
   tree matches the base. Nothing was checked; rerun with `--base` if you meant
   to check committed work.

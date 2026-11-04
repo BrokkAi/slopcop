@@ -106,6 +106,7 @@ report, so a check never needs a Bifrost install.`,
 	registerCheckFlags(root, opts)
 	root.AddCommand(
 		newCheckCommand(opts, &serviceURL, version),
+		newEnableCommand(&serviceURL, version),
 		newStatusCommand(&serviceURL, version),
 		newIgnoreCommand(&serviceURL, version),
 		newUnignoreCommand(&serviceURL, version),
@@ -150,6 +151,9 @@ type checkOptions struct {
 	// addRepository carries the user's approval of adding the repository to
 	// the workspace --workspace names, which then pays for it.
 	addRepository bool
+	// ifEnabled makes an automatic check skip, rather than refuse, a
+	// repository the workspace does not have active.
+	ifEnabled bool
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
@@ -172,6 +176,8 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "how long to wait for the result; a check still running then exits 3")
 	addWorkspaceFlag(command, false, &opts.workspace)
 	flags.BoolVar(&opts.addRepository, "add-repository", false, "add the repository to the workspace --workspace names, which then pays for it, without asking at a terminal; pass it once the user has approved that")
+	flags.BoolVar(&opts.ifEnabled, "if-enabled", false, "check only when the repository is active in the workspace; otherwise exit 0 without sending a check")
+	command.MarkFlagsMutuallyExclusive("if-enabled", "add-repository")
 }
 
 func newVersionCommand(version string) *cobra.Command {

@@ -11,6 +11,7 @@ active in the browser when the login was approved.
 ```console
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
 slopcop status                     # this checkout's repository, and the workspace that bills it
+slopcop enable                     # add this checkout's repository to that workspace, at a terminal
 slopcop workspace list             # the account's workspaces; * marks this login's
 slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
 slopcop check -w "Acme team"       # check in, and bill, another workspace this once
@@ -59,7 +60,7 @@ A team workspace has one **owner**, and any number of **managers** and
 
 | Capability | Member | Manager | Owner |
 | --- | --- | --- | --- |
-| Run checks, and add a repository with a first check (within the workspace's limits) | yes | yes | yes |
+| Run checks, and add this checkout's repository with `slopcop enable` (within the workspace's limits) | yes | yes | yes |
 | Ignore a false positive | yes | yes | yes |
 | Unignore a finding | yes | yes | yes |
 | Read repository settings, rules, suppressions, and run history | yes | yes | yes |

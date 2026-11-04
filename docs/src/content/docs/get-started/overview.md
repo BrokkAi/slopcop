@@ -25,8 +25,10 @@ push. The same command gates a change in CI.
 | **The web app** | Where you sign in, approve a CLI login, see what your agents' checks found and ignored, manage workspace members and repositories, and add credits. |
 
 There is no local analyzer and nothing to install per language. The CLI never
-decides on its own that there is nothing to check: every run sends one request,
-and a clean result always comes from the service.
+reports a check as passed without the service: every check it sends makes one
+request, and a clean result always comes from the service. `--if-enabled` can
+skip a repository the workspace has not enabled, and marks that as `skipped`,
+never as clean.
 
 ## What a check reports
 

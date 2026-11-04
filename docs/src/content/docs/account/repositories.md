@@ -1,12 +1,13 @@
 ---
 title: Repositories
-description: "A first check adds a repository to the workspace. Listing, enabling, and disabling repositories, the active-repository limit, and the confirmation an agent cannot give."
+description: "`slopcop enable` adds a repository to the workspace. Listing, enabling, and disabling repositories, the active-repository limit, and the confirmation an agent cannot give."
 sidebar:
   order: 3
 ---
 
 ```console
 slopcop status                     # this checkout's repository, and whether the workspace checks it
+slopcop enable                     # add this checkout's repository to the workspace, at a terminal
 slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
 slopcop repo disable acme/widgets  # stop checking and charging for one (owner only)
 slopcop repo enable acme/widgets   # turn it back on, within the workspace's active limit
@@ -21,38 +22,35 @@ another workspace, and `--format human|json` the output.
 `repo disable` for their answer. All three take `-w`/`--workspace` for another
 workspace of the account.
 
-## A first check adds a repository
+## `slopcop enable` adds a repository
 
-There is no `repo add`: the first check of a repository adds it to the
-workspace. The web app has no way to add one either. A public repository works
-at once; a private one needs the workspace's
+Run `slopcop enable` in a checkout to add the repository its `origin` remote
+names to the workspace that checks and bills it. It names the workspace and
+what adding the repository costs, asks you to type the repository's
+`owner/name`, and refuses when stdin is not a terminal. It then runs the
+repository's first check and exits with that check's result. A public
+repository works at once; a private one needs the workspace's
 [GitHub App, GitLab, or Bitbucket connection](/account/private-repositories/).
 
-A workspace's first repository is added without asking, and the check says
-`added owner/name to "Workspace"` on stderr, and `"repositoryAdded": true` in
-`json`, so you know which workspace it joined. When the workspace
-would then pay for a repository (it already has an active repository and is
-charged), the service refuses the check with `repository_add_unconfirmed` until
-a person confirms:
+A repository that is already added but disabled is enabled again. One that is
+already active is left alone. `slopcop status` shows which of these a checkout
+is in.
 
-- **At a terminal**, `check` prints what it costs, asks
-  `Add owner/name to "Workspace"? [y/N]`, and on a yes sends the check again and
-  says `added owner/name to "Workspace"` on stderr. A no ends with exit `4`.
-- **With no terminal**, as for an agent or CI (a pipe or the null device is not
-  one), nothing is asked: the check exits `4` with the service's remedy, a line
-  naming the command that confirms it, and, in `json`, a `failed` report naming
-  the code.
+A check never adds a repository by itself. A check of one the workspace has
+not added exits `4` with `repository_not_enabled` and sends nothing. An
+automatic check can pass `--if-enabled` to exit `0` and send nothing instead.
+The agent skill uses it, and the Stop hook makes the same check before it
+sends anything.
 
-Once the person has approved it, `check --add-repository --workspace <name|id>`
-confirms without a terminal. The flag needs `--workspace` (the flag itself, not
-`SLOPCOP_WORKSPACE`), so an approval given for one workspace cannot add the
-repository to the one the login happens to point at. The flag changes nothing
-for a repository already in that workspace.
+Once a person has approved adding a repository, `check --add-repository
+--workspace <name|id>` carries that approval without a terminal. The flag needs
+`--workspace` (the flag itself, not `SLOPCOP_WORKSPACE`), so an approval given
+for one workspace cannot add the repository to the one the login happens to
+point at. The flag changes nothing for a repository already in that workspace.
 
-An agent following the skill stops at `repository_add_unconfirmed` and tells
-you the repository, the workspace, and the cost. It never passes
-`--add-repository` without your approval, and never picks a workspace you did
-not name.
+An agent following the skill never adds a repository. When a check reports
+`repository_not_enabled`, it tells you the repository is not enabled and that
+`slopcop enable` is the step only you can take.
 
 ## Active and disabled
 

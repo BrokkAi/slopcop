@@ -7,9 +7,10 @@ sidebar:
 
 import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-Once per machine: install the CLI, add its skill to your agents, sign in, then
-check from any repository. You need a [slopcop.com](https://slopcop.com) account
-only to approve the sign-in. Checks are free, and so is your first repository.
+Once per machine: install the CLI, add its skill to your agents, and sign in.
+Then enable each repository you want checked, at a terminal. You need a
+[slopcop.com](https://slopcop.com) account only to approve the sign-in. Checks
+are free, and so is your first repository.
 
 <Steps>
 
@@ -70,17 +71,18 @@ only to approve the sign-in. Checks are free, and so is your first repository.
    For CI and agents that cannot open a browser, store a token instead:
    `slopcop login --token "$SLOPCOP_TOKEN"`. See [Sign in](/account/sign-in/).
 
-4. **Check a change.** From any repository with a GitHub, GitLab, or Bitbucket
-   remote:
+4. **Enable the repository, then check a change.** From any repository with a
+   GitHub, GitLab, or Bitbucket remote, add it to your workspace at a terminal:
 
    ```console
-   slopcop
+   slopcop enable
+   slopcop          # check later changes
    ```
 
-   The first check of a repository adds it to your workspace. A public
-   repository works at once; a private one needs the
+   `enable` names the workspace and cost, asks you to confirm, and runs the
+   first check. A public repository works at once; a private one needs the
    [SlopCop GitHub App](/account/private-repositories/) or a GitLab or Bitbucket
-   connection.
+   connection. A check never adds a repository by itself.
 
 </Steps>
 
@@ -113,14 +115,15 @@ the base is chosen.
 ## Then let the agent do it
 
 In Claude Code, ask it to check its change or run `/slopcop`. In Codex, mention
-`$slopcop`. To have the agent check every change without being asked, add one
-line to your project's `CLAUDE.md` or `AGENTS.md`:
+`$slopcop`. In an enabled repository, to have the agent check every change
+without being asked, add one line to your project's `CLAUDE.md` or `AGENTS.md`:
 
 ```text
-Run slopcop before you finish and fix what it reports.
+Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
 The Stop hook that `slopcop init` installed is a backstop: when the agent stops
-after writing files, the hook checks the working tree and hands new findings in
-those files back to the agent. [SlopCop in your agent](/agents/overview/) has
-the details for each agent.
+after writing files in an enabled repository, the hook checks the working tree
+and hands new findings in those files back to the agent. It sends nothing for
+a repository that is not enabled. [SlopCop in your agent](/agents/overview/)
+has the details for each agent.

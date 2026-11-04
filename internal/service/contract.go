@@ -48,10 +48,11 @@ type Request struct {
 	// Attribution is optional and advisory: the service validates each field
 	// on its own and drops what fails, so it never refuses a check.
 	Attribution *Attribution `json:"attribution,omitempty"`
-	// AddRepository confirms adding the repository to a workspace that then
-	// pays for it. Without it such a check answers
-	// repository_add_unconfirmed. It is sent only after a person confirms, at
-	// a terminal or by --add-repository for a named workspace.
+	// AddRepository confirms adding the repository to the workspace that
+	// then checks and bills it. The CLI sends it only for an explicit,
+	// approved add: `slopcop enable` at a terminal, or --add-repository for
+	// the workspace a person named. A check never adds a repository by
+	// itself.
 	AddRepository bool `json:"addRepository,omitempty"`
 }
 
@@ -110,9 +111,9 @@ type Response struct {
 	InconclusiveElsewhere []IncompletePolicy `json:"inconclusiveElsewhere"`
 	// Failure says why the analysis did not complete, when it failed.
 	Failure string `json:"failure,omitempty"`
-	// RepositoryAdded says the check added the repository to the workspace,
-	// as a workspace's first repository is without asking. A service from
-	// before it omits it.
+	// RepositoryAdded says the check carried an approved add and the service
+	// added the repository to the workspace. A service from before it omits
+	// it.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
 }
 

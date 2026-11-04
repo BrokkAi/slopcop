@@ -408,6 +408,54 @@ func TestPendingIsAParseableReport(t *testing.T) {
 	}
 }
 
+func TestSkippedIsNeverMistakenForACleanCheck(t *testing.T) {
+	skipped := Skipped{
+		Code:       "repository_not_enabled",
+		State:      "not_added",
+		Repository: "Acme/widgets",
+		Message:    "Acme/widgets is not enabled in your SlopCop workspace, so nothing was checked.",
+	}
+	write := func(format string) string {
+		var out bytes.Buffer
+		if err := WriteSkipped(&out, skipped, format, Options{}); err != nil {
+			t.Fatalf("WriteSkipped(%s): %v", format, err)
+		}
+		return out.String()
+	}
+	if got := write(FormatHuman); got != "" {
+		t.Errorf("human skip writes stdout: %q", got)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(write(FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	want := map[string]any{
+		"status":     "skipped",
+		"code":       "repository_not_enabled",
+		"state":      "not_added",
+		"repository": "Acme/widgets",
+		"message":    skipped.Message,
+	}
+	if !reflect.DeepEqual(document, want) {
+		t.Errorf("json = %v", document)
+	}
+	var log map[string]any
+	if err := json.Unmarshal([]byte(write(FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	if run["properties"].(map[string]any)["slopcop.status"] != "skipped" || len(run["results"].([]any)) != 0 {
+		t.Errorf("run = %v", run)
+	}
+	invocation := run["invocations"].([]any)[0].(map[string]any)
+	notification := invocation["toolExecutionNotifications"].([]any)[0].(map[string]any)
+	if invocation["executionSuccessful"] != false ||
+		notification["descriptor"].(map[string]any)["id"] != "repository_not_enabled" ||
+		notification["properties"].(map[string]any)["slopcop.state"] != "not_added" {
+		t.Errorf("invocation = %v", invocation)
+	}
+}
+
 func TestFailureIsAParseableReport(t *testing.T) {
 	failure := &service.Error{StatusCode: 402, Body: service.ErrorBody{
 		Code:     "insufficient_credits",

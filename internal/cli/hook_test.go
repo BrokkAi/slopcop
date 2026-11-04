@@ -321,6 +321,7 @@ func TestHookSendsNothingWhenSignedOut(t *testing.T) {
 
 func TestHookUsesTheResultOfACheckRunByHand(t *testing.T) {
 	isolateHook(t)
+	realRepositoryCheck(t)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
@@ -338,8 +339,8 @@ func TestHookUsesTheResultOfACheckRunByHand(t *testing.T) {
 	if output.Decision != "block" || !strings.Contains(output.Reason, "Fix demo.go") {
 		t.Fatalf("output = %+v", output)
 	}
-	if fake.checks != 1 || fake.lists != 0 {
-		t.Fatalf("checks = %d, lists = %d, want 1 and 0", fake.checks, fake.lists)
+	if fake.checks != 1 || fake.lists != 1 {
+		t.Fatalf("checks = %d, lists = %d, want 1 and 1", fake.checks, fake.lists)
 	}
 }
 
@@ -497,6 +498,7 @@ func TestACheckByHandOfTheSameTreeDoesNotHoldAgain(t *testing.T) {
 
 func TestACheckByHandInAnotherWorkspaceDoesNotOpenTheGate(t *testing.T) {
 	isolateHook(t)
+	realRepositoryCheck(t)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
@@ -505,15 +507,17 @@ func TestACheckByHandInAnotherWorkspaceDoesNotOpenTheGate(t *testing.T) {
 	server := fake.start(t, repo)
 
 	const other = "6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b"
-	if code, _, stderr := runCLI(t, "check", "--root", repo, "-w", other, "--service", server.URL); code != 0 {
+	code, _, stderr := runCLI(t, "check", "--root", repo, "-w", other, "--service", server.URL)
+	if code != service.ExitNeedsPerson || !strings.Contains(stderr, repositoryNotEnabledCode) {
 		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
 	}
-	// The login's own workspace does not have the repository.
+	// The login's own workspace does not have the repository either, so the
+	// check by hand in another workspace opens no gate.
 	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
 		t.Fatalf("output = %+v", output)
 	}
-	if fake.lists != 1 || fake.checks != 1 {
-		t.Fatalf("lists = %d, checks = %d, want 1 and only the check by hand", fake.lists, fake.checks)
+	if fake.lists != 2 || fake.checks != 0 {
+		t.Fatalf("lists = %d, checks = %d, want 2 and none", fake.lists, fake.checks)
 	}
 }
 

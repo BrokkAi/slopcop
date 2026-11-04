@@ -22,11 +22,17 @@ skill](/agents/skill/) explains the update and backup rules.
 
 ## Check every change
 
-To have Codex check every change without being asked, add a line to your
+First add the repository to the workspace from its checkout, at a terminal:
+
+```console
+slopcop enable
+```
+
+Then, to have Codex check every change without being asked, add a line to your
 project's `AGENTS.md`:
 
 ```text
-Run slopcop before you finish and fix what it reports.
+Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
 ## The Stop hook

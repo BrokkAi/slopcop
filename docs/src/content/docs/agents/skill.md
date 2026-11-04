@@ -13,6 +13,15 @@ file at
 in the repository, with a small `agents/openai.yaml` beside it that gives Codex
 the skill's display name and default prompt.
 
+## What it tells an agent
+
+The skill checks only repositories the workspace has enabled. Before an
+automatic check it uses `slopcop check --if-enabled`, which sends nothing and
+exits `0` when the repository is not active. It never adds a repository and
+never asks the user to add one as a side effect of a check; `slopcop enable`
+is the step a person takes at a terminal, and the skill only points to it when
+the user explicitly asks for a check of a repository that is not enabled.
+
 ## Where it goes
 
 `slopcop init` installs the skill into each well-known skills directory whose

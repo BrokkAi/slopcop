@@ -12,7 +12,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -21,6 +20,26 @@ import (
 	"github.com/BrokkAi/slopcop/internal/service"
 	"github.com/BrokkAi/slopcop/internal/update"
 )
+
+// TestMain makes a check in the tests that do not exercise the repository
+// gate see an active repository, as the service would for a repository the
+// workspace already checks. Tests about the gate stand the lookup in
+// themselves.
+func TestMain(m *testing.M) {
+	checkRepository = func(context.Context, *service.Client, string) (statusRepository, error) {
+		return statusRepository{State: statusActive, Enabled: true, Active: true}, nil
+	}
+	os.Exit(m.Run())
+}
+
+// realRepositoryCheck makes a check use the real repository gate, for tests
+// about whether a check is sent.
+func realRepositoryCheck(t *testing.T) {
+	t.Helper()
+	original := checkRepository
+	checkRepository = lookupRepositoryStatus
+	t.Cleanup(func() { checkRepository = original })
+}
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
@@ -1069,123 +1088,129 @@ func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
 	}
 }
 
-// addService answers a check of a repository its workspace would pay for:
-// refused until the request confirms adding it, then clean. It records each
-// check's workspace header and addRepository, and answers whoami.
-func addService(t *testing.T, base string) (*httptest.Server, *[]map[string]any) {
-	t.Helper()
-	checks := &[]map[string]any{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		if r.URL.Path == "/v1/whoami" {
-			_, _ = w.Write([]byte(whoamiBody))
-			return
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode request: %v", err)
-		}
-		*checks = append(*checks, map[string]any{
-			"workspace":     r.Header.Get("SlopCop-Workspace"),
-			"addRepository": body["addRepository"],
-		})
-		if body["addRepository"] != true {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write([]byte(`{
-				"code": "repository_add_unconfirmed",
-				"message": "This check would add the repository to your workspace, where it uses 100 credits every 30 days.",
-				"remedy": "Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.",
-				"retryable": false
-			}`))
-			return
-		}
-		_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "` + base + `", "applied": true,
-			"summary": {"files": 0, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
-			"findings": [], "incomplete": []}`))
-	}))
-	t.Cleanup(server.Close)
-	return server, checks
+// enableService answers the account routes and a check, and records what a
+// call asked for. It starts with the repositories named in the test.
+type enableService struct {
+	repositories []service.Repository
+	lists        int
+	checks       []map[string]any
+	states       []map[string]any
+	workspaces   []string
+	base         string
+	added        bool
 }
 
-func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
+func (s *enableService) start(t *testing.T, repo string) *httptest.Server {
+	t.Helper()
+	s.base = runGit(t, repo, "rev-parse", "HEAD")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/v1/whoami":
+			_, _ = w.Write([]byte(whoamiBody))
+		case "/v1/repositories":
+			s.lists++
+			s.workspaces = append(s.workspaces, r.Header.Get("SlopCop-Workspace"))
+			_ = json.NewEncoder(w).Encode(service.RepositoryList{Repositories: s.repositories})
+		case "/v1/check":
+			s.workspaces = append(s.workspaces, r.Header.Get("SlopCop-Workspace"))
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			s.checks = append(s.checks, body)
+			if body["addRepository"] == true {
+				s.added = true
+			}
+			_ = json.NewEncoder(w).Encode(service.Response{
+				Status:          service.StatusClean,
+				BaseCommit:      s.base,
+				Applied:         true,
+				Findings:        []service.Finding{},
+				Incomplete:      []service.IncompletePolicy{},
+				RepositoryAdded: s.added,
+			})
+		case "/v1/repositories/state":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			s.states = append(s.states, body)
+			id, _ := body["repositoryId"].(string)
+			enabled, _ := body["enabled"].(bool)
+			state := service.RepositoryState{RepositoryID: id, Enabled: enabled, Active: enabled}
+			for index := range s.repositories {
+				if s.repositories[index].ID == id {
+					s.repositories[index].Enabled = enabled
+					s.repositories[index].Active = enabled
+					state.FullName = s.repositories[index].FullName
+				}
+			}
+			_ = json.NewEncoder(w).Encode(state)
+		default:
+			t.Errorf("path = %s", r.URL.Path)
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func TestCheckNeverAddsARepository(t *testing.T) {
 	isolateUserConfig(t)
+	realRepositoryCheck(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
-	base := runGit(t, repo, "rev-parse", "HEAD")
 
-	t.Run("a yes sends the check again, confirmed", func(t *testing.T) {
-		server, checks := addService(t, base)
-		typed(t, "y\n")
-		code, _, stderr := runCLI(t, "check", "--root", repo, "-w", "Acme team", "--service", server.URL)
-		if code != 0 {
-			t.Fatalf("exit = %d, stderr = %s", code, stderr)
-		}
-		if !strings.Contains(stderr, "where it uses 100 credits every 30 days.\nAdd BrokkAi/slopcop to \"Acme team\"? [y/N] ") ||
-			strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") != 1 {
-			t.Errorf("stderr = %q", stderr)
-		}
-		// Both in the workspace --workspace named.
-		want := []map[string]any{
-			{"workspace": teamID, "addRepository": nil},
-			{"workspace": teamID, "addRepository": true},
-		}
-		if !reflect.DeepEqual(*checks, want) {
-			t.Errorf("checks = %v, want %v", *checks, want)
-		}
-	})
-
-	// refused is the stderr of the refusal when no one confirms, in the
-	// login's own workspace: the service's text, then the command that
-	// confirms it for that workspace.
-	refused := "slopcop: repository_add_unconfirmed: This check would add the repository to your workspace, where it uses 100 credits every 30 days.\n" +
-		"Run the check yourself at a terminal to confirm adding it, or add it on the Repositories page in SlopCop, then retry.\n" +
-		"Once the user approves adding it there, run the check again with `--add-repository --workspace \"Dave\"`.\n"
-
-	t.Run("anything but yes adds nothing, and the refusal stands", func(t *testing.T) {
-		server, checks := addService(t, base)
-		typed(t, "\n")
-		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-		if code != service.ExitNeedsPerson || stdout != "" || !strings.Contains(stderr, `Add BrokkAi/slopcop to "Dave"? [y/N] `) ||
-			!strings.HasSuffix(stderr, "slopcop: nothing was added, so the check did not run\n"+refused) {
-			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if len(*checks) != 1 {
-			t.Errorf("checks = %v, want the one refused", *checks)
-		}
-	})
-
-	t.Run("with no terminal the refusal stands", func(t *testing.T) {
-		server, checks := addService(t, base)
-		pipedStdin(t, "y\n")
-		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
-		if code != service.ExitNeedsPerson || stdout != "" || stderr != refused {
-			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if len(*checks) != 1 {
-			t.Errorf("checks = %v, want the one refused", *checks)
-		}
-	})
-
-	t.Run("the null device is not a terminal", func(t *testing.T) {
-		// An agent's shell often runs a command with stdin on the null
-		// device, which is a character device but not a terminal: the
-		// check must not ask there, and must fail as any unconfirmed add.
-		server, checks := addService(t, base)
-		nullStdin(t)
+	t.Run("a plain check refuses without sending one", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
 		var document map[string]any
 		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
 			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
 		}
-		if code != service.ExitNeedsPerson || document["code"] != "repository_add_unconfirmed" || stderr != refused {
+		if code != service.ExitNeedsPerson || document["status"] != "failed" ||
+			document["code"] != repositoryNotEnabledCode || document["retryable"] != false {
 			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
 		}
-		if len(*checks) != 1 {
-			t.Errorf("checks = %v, want the one refused", *checks)
+		if len(svc.checks) != 0 || svc.lists != 1 {
+			t.Errorf("checks = %d, lists = %d, want 0 and 1", len(svc.checks), svc.lists)
 		}
 	})
 
-	t.Run("--add-repository carries the approval for the workspace named", func(t *testing.T) {
-		server, checks := addService(t, base)
+	t.Run("--if-enabled skips without sending a check", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
+		var document map[string]any
+		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
+		}
+		if code != 0 || document["status"] != "skipped" || document["code"] != repositoryNotEnabledCode ||
+			document["state"] != statusNotAdded || !strings.Contains(stderr, "is not enabled in your SlopCop workspace, so nothing was checked") {
+			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
+		}
+		if len(svc.checks) != 0 {
+			t.Errorf("checks = %v, want none", svc.checks)
+		}
+	})
+
+	t.Run("--if-enabled checks an active repository", func(t *testing.T) {
+		svc := &enableService{repositories: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+		}}}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
+		if code != 0 || len(svc.checks) != 1 {
+			t.Errorf("exit = %d, checks = %d, stderr = %q", code, len(svc.checks), stderr)
+		}
+	})
+
+	t.Run("--add-repository sends one confirmed check", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
 		pipedStdin(t, "")
 		code, _, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "-w", "Acme team", "--service", server.URL)
 		if code != 0 {
@@ -1194,88 +1219,142 @@ func TestCheckAsksBeforeAddingARepositoryTheWorkspacePaysFor(t *testing.T) {
 		if strings.Contains(stderr, "[y/N]") || strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") != 1 {
 			t.Errorf("stderr = %q", stderr)
 		}
-		want := []map[string]any{
-			{"workspace": teamID, "addRepository": nil},
-			{"workspace": teamID, "addRepository": true},
+		if len(svc.checks) != 1 || svc.checks[0]["addRepository"] != true {
+			t.Errorf("checks = %v, want one confirmed check", svc.checks)
 		}
-		if !reflect.DeepEqual(*checks, want) {
-			t.Errorf("checks = %v, want %v", *checks, want)
+		if len(svc.workspaces) != 1 || svc.workspaces[0] != teamID {
+			t.Errorf("workspaces = %v, want the named workspace", svc.workspaces)
 		}
 	})
 
 	t.Run("--add-repository without --workspace sends nothing", func(t *testing.T) {
-		// The approval is for one workspace, so the flag names it; the
-		// workspace the login points at, or $SLOPCOP_WORKSPACE, is not
-		// what the user approved.
-		server, checks := addService(t, base)
+		svc := &enableService{}
+		server := svc.start(t, repo)
 		t.Setenv("SLOPCOP_WORKSPACE", "Acme team")
-		pipedStdin(t, "")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "--format", "json", "--service", server.URL)
 		if code != 2 || stdout != "" || !strings.HasPrefix(stderr, "slopcop: --add-repository needs --workspace <name|id>: ") {
 			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 		}
-		if len(*checks) != 0 {
-			t.Errorf("checks = %v, want none", *checks)
-		}
-	})
-
-	t.Run("json prints the refusal on stdout", func(t *testing.T) {
-		server, _ := addService(t, base)
-		pipedStdin(t, "")
-		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
-		var document map[string]any
-		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
-			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
-		}
-		if code != service.ExitNeedsPerson || document["status"] != "failed" || document["code"] != "repository_add_unconfirmed" ||
-			document["retryable"] != false || !strings.HasPrefix(document["remedy"].(string), "Run the check yourself") {
-			t.Errorf("exit = %d, stdout = %v", code, document)
+		if len(svc.checks) != 0 {
+			t.Errorf("checks = %v, want none", svc.checks)
 		}
 	})
 }
 
-func TestCheckSaysWhenItAddedTheWorkspacesFirstRepository(t *testing.T) {
+func TestEnableAddsARepositoryAfterConfirmation(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
-	base := runGit(t, repo, "rev-parse", "HEAD")
-	// added is whether the service answers that the check added the
-	// repository, as it does for a workspace's first, which is free.
-	answer := func(t *testing.T, added bool) *httptest.Server {
-		t.Helper()
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			if r.URL.Path == "/v1/whoami" {
-				_, _ = w.Write([]byte(whoamiBody))
-				return
-			}
-			_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "` + base + `", "applied": true,
-				"summary": {"files": 0, "findings": 0, "incompletePolicies": 0, "failOn": "finding"},
-				"findings": [], "incomplete": [], "repositoryAdded": ` + strconv.FormatBool(added) + `}`))
-		}))
-		t.Cleanup(server.Close)
-		return server
+	svc := &enableService{}
+	server := svc.start(t, repo)
+	typed(t, "BrokkAi/slopcop\n")
+
+	code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	notice := "slopcop: added BrokkAi/slopcop to \"Dave\"\n"
+	for _, want := range []string{
+		"lets that workspace check and bill it",
+		"Type BrokkAi/slopcop to add it:",
+		"slopcop: added BrokkAi/slopcop to \"Dave\"",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	}
+	if !strings.Contains(stdout, "No new findings") {
+		t.Errorf("stdout = %q, want the first check's report", stdout)
+	}
+	if len(svc.checks) != 1 || svc.checks[0]["addRepository"] != true {
+		t.Errorf("checks = %v, want one confirmed check", svc.checks)
+	}
+}
 
-	t.Run("an added repository is named with its workspace", func(t *testing.T) {
-		pipedStdin(t, "")
-		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", answer(t, true).URL)
-		var document map[string]any
-		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
-			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
-		}
-		if code != 0 || strings.Count(stderr, notice) != 1 || document["repositoryAdded"] != true {
-			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
-		}
-	})
+func TestEnableRefusesWithoutATerminal(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	svc := &enableService{}
+	server := svc.start(t, repo)
+	pipedStdin(t, "BrokkAi/slopcop\n")
 
-	t.Run("a repository the workspace had is not mentioned", func(t *testing.T) {
-		pipedStdin(t, "")
-		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", answer(t, false).URL)
-		if code != 0 || strings.Contains(stderr, "slopcop: added") || strings.Contains(stdout, "repositoryAdded") {
-			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-	})
+	code, _, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+	if code != 2 || !strings.Contains(stderr, "must be confirmed at a terminal") {
+		t.Errorf("exit = %d, stderr = %q", code, stderr)
+	}
+	if len(svc.checks) != 0 || len(svc.states) != 0 || svc.lists != 1 {
+		t.Errorf("checks = %d, states = %d, lists = %d, want none but the listing",
+			len(svc.checks), len(svc.states), svc.lists)
+	}
+}
+
+func TestEnableNamesAnAlreadyEnabledRepository(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	svc := &enableService{repositories: []service.Repository{{
+		ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+	}}}
+	server := svc.start(t, repo)
+
+	code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+	if code != 0 || !strings.Contains(stdout, "slopcop: BrokkAi/slopcop is already enabled in \"Dave\"") {
+		t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	if len(svc.checks) != 0 || len(svc.states) != 0 {
+		t.Errorf("checks = %d, states = %d, want none", len(svc.checks), len(svc.states))
+	}
+}
+
+func TestEnableTurnsADisabledRepositoryBackOn(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	svc := &enableService{repositories: []service.Repository{{
+		ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: false, Active: false,
+	}}}
+	server := svc.start(t, repo)
+	typed(t, "BrokkAi/slopcop\n")
+
+	code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+	if code != 0 || !strings.Contains(stdout, "slopcop: enabled BrokkAi/slopcop in \"Dave\"") {
+		t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	if len(svc.states) != 1 || svc.states[0]["enabled"] != true {
+		t.Errorf("states = %v, want the repository enabled", svc.states)
+	}
+}
+
+func TestEnableUsesTheWorkspaceFlag(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	svc := &enableService{}
+	server := svc.start(t, repo)
+	typed(t, "BrokkAi/slopcop\n")
+
+	code, _, stderr := runCLI(t, "enable", "--root", repo, "-w", "Acme team", "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if len(svc.workspaces) != 2 || svc.workspaces[0] != teamID || svc.workspaces[1] != teamID {
+		t.Errorf("workspaces = %v, want the listing and the check in Acme team", svc.workspaces)
+	}
+	if !strings.Contains(stderr, `slopcop: added BrokkAi/slopcop to "Acme team"`) {
+		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestCheckSaysWhenItAddedARepositoryThroughTheFlag(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	svc := &enableService{}
+	server := svc.start(t, repo)
+	pipedStdin(t, "")
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "-w", "Acme team", "--format", "json", "--service", server.URL)
+	var document map[string]any
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
+	}
+	if code != 0 || strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") != 1 ||
+		document["repositoryAdded"] != true {
+		t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
+	}
 }
 
 func TestAnUpgradeNoticeGoesToStderrOnceADay(t *testing.T) {
