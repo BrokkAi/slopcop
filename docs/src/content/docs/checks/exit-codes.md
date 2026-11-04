@@ -29,8 +29,8 @@ report](/checks/read-a-report/#inconclusive-checks)).
 
 In JSON, top-level `status` matches the exit code. `staticStatus` keeps
 the service status when it differs. `review.status` is `clean`, `findings`,
-`failed`, or `empty`; `review.reviewers` and `review.unavailable` explain the
-outcome. Review findings count toward exit `1` unless `--fail-on never` is
+`failed`, or `empty`; `review.reviewers` explain the outcome, with an error on
+each reviewer that could not run. Review findings count toward exit `1` unless `--fail-on never` is
 set. A complete review is reused when its inputs have not changed.
 
 ## Exit 1: findings

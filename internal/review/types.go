@@ -15,6 +15,8 @@ type Family string
 const (
 	// Terra is GPT Terra through the Codex ACP adapter.
 	Terra Family = "terra"
+	// Sol is GPT Sol through the Codex ACP adapter.
+	Sol Family = "sol"
 	// Flash is DeepSeek Flash through the dsh ACP adapter.
 	Flash Family = "flash"
 	// Haiku is Claude Haiku through the Claude ACP adapter.
@@ -22,14 +24,11 @@ const (
 )
 
 // Families lists every family in priority order.
-var Families = []Family{Terra, Flash, Haiku}
+var Families = []Family{Terra, Sol, Flash, Haiku}
 
 const (
-	// MinCount and MaxCount bound the number of reviewers.
-	MinCount = 1
-	MaxCount = 3
-	// DefaultCount is the number of reviewers when none is configured.
-	DefaultCount = 2
+	MaxReviewers         = 4
+	DefaultReviewerCount = 2
 	// DefaultTimeout bounds each reviewer, from adapter launch to its reply.
 	DefaultTimeout = 20 * time.Minute
 	// CleanReply is the exact reply that approves the change.
@@ -45,9 +44,8 @@ const (
 	// StatusFindings: at least one reviewer reported findings and none
 	// failed.
 	StatusFindings Status = "findings"
-	// StatusFailed: a reviewer failed, timed out, replied empty, or fewer
-	// reviewers were available than the count asks for. Partial findings
-	// may still be present in Reviewers.
+	// StatusFailed: a reviewer failed, timed out, or replied empty.
+	// Partial findings may still be present in Reviewers.
 	StatusFailed Status = "failed"
 	// StatusEmpty: the base tree and the working-tree snapshot are the same,
 	// so there was nothing to review and no reviewer ran.
@@ -56,13 +54,12 @@ const (
 
 // Settings choose and bound the reviewers.
 type Settings struct {
-	// Count is how many reviewers run, MinCount to MaxCount.
-	Count int
+	Reviewers []Family
 	// Timeout bounds each reviewer.
 	Timeout time.Duration
-	// Adapters overrides the argv that starts a family's ACP adapter. A
-	// family without an entry uses its pinned npx package.
-	Adapters map[Family][]string
+	// Adapters overrides argv by adapter name. An adapter without an entry
+	// uses its pinned npx package.
+	Adapters map[string][]string
 }
 
 // Capture names exactly what was reviewed.
@@ -95,23 +92,15 @@ type Reviewer struct {
 	Log string `json:"log,omitempty"`
 }
 
-// Unavailable is a family that could not serve as a reviewer, and why.
-type Unavailable struct {
-	Family Family `json:"family"`
-	Reason string `json:"reason"`
-}
-
 // Verdict is the outcome of one review.
 type Verdict struct {
-	Status       Status        `json:"status"`
-	Capture      Capture       `json:"capture"`
-	IntentSource string        `json:"intentSource,omitempty"`
-	LogDir       string        `json:"logDir,omitempty"`
-	Reviewers    []Reviewer    `json:"reviewers,omitempty"`
-	Unavailable  []Unavailable `json:"unavailable,omitempty"`
-	// Error says why a failed review failed when no single reviewer or
-	// family is the reason, such as fewer families available than the count
-	// asks for, or state that could not be written.
+	Status       Status     `json:"status"`
+	Capture      Capture    `json:"capture"`
+	IntentSource string     `json:"intentSource,omitempty"`
+	LogDir       string     `json:"logDir,omitempty"`
+	Reviewers    []Reviewer `json:"reviewers,omitempty"`
+	// Error says why a failed review failed when no single reviewer is
+	// responsible, such as missing configuration or unwritable state.
 	Error string `json:"error,omitempty"`
 	// Reused is set when the verdict is an earlier complete review of the
 	// same capture by the same reviewers, returned without running again.
@@ -133,11 +122,8 @@ type Options struct {
 	BaseCommit string
 	// Intent is the --intent fallback, used only when no transcript names
 	// the user's own messages.
-	Intent string
-	// AuthorModels are the model ids that wrote the change, from the
-	// session's attribution. Their families are chosen last.
-	AuthorModels []string
-	Settings     Settings
+	Intent   string
+	Settings Settings
 	// Progress, when set, receives one-line progress notes for a person.
 	Progress io.Writer
 }

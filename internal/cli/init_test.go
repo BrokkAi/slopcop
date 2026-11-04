@@ -48,7 +48,7 @@ func TestInitRepositoryFilesAndExclude(t *testing.T) {
 	makeHarness(t, filepath.Join(home, ".claude"))
 	repo := testInitRepo(t)
 	for i := 0; i < 2; i++ {
-		code, _, stderr := runCLI(t, "init", "--root", repo)
+		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 		if code != 0 {
 			t.Fatalf("init %d: %s", code, stderr)
 		}
@@ -87,7 +87,7 @@ func TestInitTrackedTargetAndSyncExistingOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitAt(t, repo, "add", "-f", ".claude/settings.local.json")
-	code, out, stderr := runCLI(t, "init", "--root", repo)
+	code, out, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatalf("%s", stderr)
 	}
@@ -226,7 +226,7 @@ func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	if err := os.WriteFile(path, []byte("mine\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr := runCLI(t, "init", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -240,7 +240,7 @@ func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 func TestInitNoSkillWritesNothing(t *testing.T) {
 	isolateAgentHome(t)
 	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--root", repo, "--no-skill")
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-skill")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -248,14 +248,14 @@ func TestInitNoSkillWritesNothing(t *testing.T) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("--no-skill wrote skill: %v", err)
 	}
-	code, _, stderr = runCLI(t, "init", "--root", repo)
+	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
 	if err := os.WriteFile(path, []byte("mine\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr = runCLI(t, "init", "--root", repo, "--no-skill")
+	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-skill")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -271,7 +271,7 @@ func TestInitInstallsForEveryHarnessFound(t *testing.T) {
 	makeHarness(t, filepath.Join(home, ".claude"))
 	makeHarness(t, filepath.Join(home, ".codex"))
 	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -290,7 +290,7 @@ func TestInitInstallsForEveryHarnessFound(t *testing.T) {
 func TestInitWithoutAHarnessInstallsTheNeutralSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -311,7 +311,7 @@ func TestInitWithAHarnessSkipsTheNeutralSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
 	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}

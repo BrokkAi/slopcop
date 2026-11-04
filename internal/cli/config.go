@@ -2,7 +2,7 @@ package cli
 
 import (
 	"fmt"
-	"strconv"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -12,7 +12,7 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.count, review.timeout"
+const configKeys = "mode, review.reviewers, review.timeout"
 
 // newConfigCommand builds the user config commands.
 func newConfigCommand() *cobra.Command {
@@ -100,11 +100,11 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return cfg.Mode, nil
 		}
 		return modeBoth, nil
-	case "review.count":
-		if cfg.Review != nil && cfg.Review.Count != 0 {
-			return strconv.Itoa(cfg.Review.Count), nil
+	case "review.reviewers":
+		if cfg.Review != nil && len(cfg.Review.Reviewers) > 0 {
+			return strings.Join(cfg.Review.Reviewers, ","), nil
 		}
-		return strconv.Itoa(review.DefaultCount), nil
+		return "(not set)", nil
 	case "review.timeout":
 		if cfg.Review != nil && cfg.Review.Timeout != "" {
 			return cfg.Review.Timeout, nil
@@ -129,12 +129,17 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("invalid mode %q (want both, static, or ai)", value)
 		}
 		cfg.Mode = value
-	case "review.count":
-		n, err := strconv.Atoi(value)
-		if err != nil || n < review.MinCount || n > review.MaxCount {
-			return fmt.Errorf("invalid review.count %q (want %d-%d)", value, review.MinCount, review.MaxCount)
+	case "review.reviewers":
+		names := strings.Split(value, ",")
+		if len(names) > review.MaxReviewers {
+			return fmt.Errorf("invalid review.reviewers %q (want 1-%d known families)", value, review.MaxReviewers)
 		}
-		ensureReview(cfg).Count = n
+		for _, name := range names {
+			if _, err := review.ParseFamily(name); err != nil {
+				return fmt.Errorf("invalid review.reviewers %q: %w", value, err)
+			}
+		}
+		ensureReview(cfg).Reviewers = names
 	case "review.timeout":
 		d, err := time.ParseDuration(value)
 		if err != nil || d <= 0 {
@@ -158,9 +163,9 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 		return fmt.Errorf("gate.blockOn is edited by hand in %s", path)
 	case "mode":
 		cfg.Mode = ""
-	case "review.count":
+	case "review.reviewers":
 		if cfg.Review != nil {
-			cfg.Review.Count = 0
+			cfg.Review.Reviewers = nil
 		}
 	case "review.timeout":
 		if cfg.Review != nil {
@@ -169,7 +174,7 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
-	if cfg.Review != nil && cfg.Review.Count == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
 		cfg.Review = nil
 	}
 	return nil

@@ -62,17 +62,25 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 		return path, err
 	}
 	var err error
-	settings := review.Settings{Count: review.DefaultCount, Timeout: review.DefaultTimeout}
+	settings := review.Settings{Timeout: review.DefaultTimeout}
 	if cfg.Review != nil {
-		if cfg.Review.Count != 0 {
-			settings.Count = cfg.Review.Count
-		}
-		if settings.Count < review.MinCount || settings.Count > review.MaxCount {
+		if len(cfg.Review.Reviewers) > review.MaxReviewers {
 			path, err = configPath()
 			if err != nil {
 				return review.Settings{}, err
 			}
-			return review.Settings{}, fmt.Errorf("invalid review.count in %s: want %d-%d", path, review.MinCount, review.MaxCount)
+			return review.Settings{}, fmt.Errorf("invalid review.reviewers in %s: want 1-%d families", path, review.MaxReviewers)
+		}
+		for _, name := range cfg.Review.Reviewers {
+			family, parseErr := review.ParseFamily(name)
+			if parseErr != nil {
+				path, err = configPath()
+				if err != nil {
+					return review.Settings{}, err
+				}
+				return review.Settings{}, fmt.Errorf("invalid review.reviewers in %s: %w", path, parseErr)
+			}
+			settings.Reviewers = append(settings.Reviewers, family)
 		}
 		if cfg.Review.Timeout != "" {
 			settings.Timeout, err = time.ParseDuration(cfg.Review.Timeout)
@@ -85,24 +93,16 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			}
 		}
 		if len(cfg.Review.Adapters) > 0 {
-			settings.Adapters = make(map[review.Family][]string, len(cfg.Review.Adapters))
+			settings.Adapters = make(map[string][]string, len(cfg.Review.Adapters))
 			for name, adapter := range cfg.Review.Adapters {
-				family := review.Family(name)
-				valid := false
-				for _, supported := range review.Families {
-					if family == supported {
-						valid = true
-						break
-					}
-				}
-				if !valid || len(adapter.Command) == 0 || adapter.Command[0] == "" {
+				if (name != "codex" && name != "dsh" && name != "claude") || len(adapter.Command) == 0 || adapter.Command[0] == "" {
 					path, err = configPath()
 					if err != nil {
 						return review.Settings{}, err
 					}
-					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use terra, flash, or haiku", name, path)
+					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, or claude", name, path)
 				}
-				settings.Adapters[family] = append([]string(nil), adapter.Command...)
+				settings.Adapters[name] = append([]string(nil), adapter.Command...)
 			}
 		}
 	}

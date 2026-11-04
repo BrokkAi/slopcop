@@ -6,8 +6,8 @@ sidebar:
 ---
 
 The CLI stores settings in the user config. `slopcop config get|set|unset`
-manages `mode`, `review.count`, and `review.timeout`. Adapter commands are
-edited by hand.
+manages `mode`, `review.reviewers`, and `review.timeout`. Adapter commands are
+edited in the config file.
 
 ## Precedence
 
@@ -55,13 +55,18 @@ The review needs no supported origin.
 
 ## Review settings and state
 
-The config's `mode` is `both`, `static`, or `ai`. `review.count` is 1–3
-(default 2) and `review.timeout` defaults to `20m`. Set these with
-`slopcop config set <key> <value>`, or inspect and remove them with `get`
-and `unset`. Adapter argv arrays under
-`review.adapters.<terra|flash|haiku>.command` are edited by hand. The
-default commands use pinned packages through `npx`: Codex ACP 2.5.0,
-dsh ACP 0.6.0, and Claude agent ACP 0.100.0.
+The config's `mode` is `both`, `static`, or `ai`. `review.reviewers` is an
+ordered list of 1–4 family names; duplicates are allowed. Set it with
+`slopcop config set review.reviewers terra,sol`, or inspect and remove it with
+`get` and `unset`. `review.timeout` defaults to `20m`. Adapter command overrides
+are keyed by adapter at `review.adapters.<codex|dsh|claude>.command`. For
+example, keep a DeepSeek key in a file with:
+
+```json
+"dsh": {"command": ["npx", "--yes", "@brokkai/dsh-acp@0.6.0", "--api-key-file", "/path/to/deepseek_api_key"]}
+```
+
+Otherwise dsh reads `DEEPSEEK_API_KEY`.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Checks that

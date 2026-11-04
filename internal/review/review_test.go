@@ -18,10 +18,6 @@ func TestVerdictAndSelection(t *testing.T) {
 	if parseVerdict(Reviewer{Text: CleanReply}) != StatusClean || parseVerdict(Reviewer{Text: "bug"}) != StatusFindings || parseVerdict(Reviewer{}) != StatusFailed {
 		t.Fatal("verdict")
 	}
-	o := familyOrder([]string{"gpt-6.9-terra"})
-	if o[0] != Flash || o[1] != Haiku || o[2] != Terra {
-		t.Fatal(o)
-	}
 	m, ok := bestModel(Terra, []acp.SessionConfigSelectOption{{Value: "gpt-6.9-terra"}, {Value: "gpt-6.10-terra"}})
 	if !ok || m != "gpt-6.10-terra" {
 		t.Fatal(m)
@@ -111,7 +107,7 @@ func TestRunFakeACP(t *testing.T) {
 	}
 	defer s.Close()
 	t.Setenv("SLOPCOP_FAKE_ACP", "1")
-	o := Options{Root: root, Intent: "test", Settings: Settings{Count: 1, Adapters: map[Family][]string{Terra: {os.Args[0], "-test.run=^TestFakeAgent$"}}}}
+	o := Options{Root: root, Intent: "test", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": {os.Args[0], "-test.run=^TestFakeAgent$"}}}}
 	v := Run(context.Background(), s, c, o)
 	if v.Status != StatusClean {
 		t.Fatalf("%+v", v)

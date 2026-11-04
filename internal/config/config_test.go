@@ -11,7 +11,7 @@ func TestSaveLoadReviewConfig(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CONFIG_HOME", home+"/config")
-	cfg := Config{Token: "kept", Mode: "ai", Review: &Review{Count: 3, Timeout: "5m", Adapters: map[string]Adapter{"terra": {Command: []string{"runner", "--x"}}}}}
+	cfg := Config{Token: "kept", Mode: "ai", Review: &Review{Reviewers: []string{"terra", "sol", "haiku"}, Timeout: "5m", Adapters: map[string]Adapter{"codex": {Command: []string{"runner", "--x"}}}}}
 	if _, err := Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -19,7 +19,7 @@ func TestSaveLoadReviewConfig(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Token != cfg.Token || got.Mode != cfg.Mode || got.Review == nil || got.Review.Count != 3 || got.Review.Timeout != "5m" || got.Review.Adapters["terra"].Command[1] != "--x" {
+	if got.Token != cfg.Token || got.Mode != cfg.Mode || got.Review == nil || len(got.Review.Reviewers) != 3 || got.Review.Timeout != "5m" || got.Review.Adapters["codex"].Command[1] != "--x" {
 		t.Fatalf("loaded config = %+v", got)
 	}
 	cfg.Review = &Review{}

@@ -25,8 +25,8 @@ completed.
 
 The CLI merges static and review statuses. Top-level JSON `status` matches
 the exit code; `staticStatus` keeps the service status when it differs.
-Review details are in `review`, including each reviewer, unavailable family,
-error, and log path. Exit `0` can include a static skip or empty review;
+Review details are in `review`, including each configured reviewer, its error
+if it could not run, and its log path. Exit `0` can include a static skip or empty review;
 inspect those statuses before calling the change checked.
 
 ## New and existing findings

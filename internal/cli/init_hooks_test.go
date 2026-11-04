@@ -20,7 +20,7 @@ func TestInitMigratesUserHooksAndSkill(t *testing.T) {
 	if err := os.WriteFile(skill, []byte("---\nname: slopcop\n---\nlocal edit\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	code, out, stderr := runCLI(t, "init", "--root", repo)
+	code, out, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -34,7 +34,7 @@ func TestInitMigratesUserHooksAndSkill(t *testing.T) {
 	if strings.Contains(string(data), "slopcop hook") {
 		t.Fatal(string(data))
 	}
-	code, _, stderr = runCLI(t, "init", "--root", repo, "--remove-hooks")
+	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo, "--remove-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -50,7 +50,7 @@ func TestInitInstallsAndRemovesHooksWithoutRemovingTheSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
 	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -62,7 +62,7 @@ func TestInitInstallsAndRemovesHooksWithoutRemovingTheSkill(t *testing.T) {
 			t.Errorf("%s: %s %v", path, data, err)
 		}
 	}
-	code, _, stderr = runCLI(t, "init", "--root", repo, "--remove-hooks")
+	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo, "--remove-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -94,7 +94,7 @@ func TestInitHookAndSkillOptOutsAreIndependent(t *testing.T) {
 		home := isolateAgentHome(t)
 		makeHarness(t, filepath.Join(home, ".claude"))
 		repo := testInitRepo(t)
-		code, _, stderr := runCLI(t, "init", "--root", repo, "--no-hooks")
+		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-hooks")
 		if code != 0 {
 			t.Fatal(stderr)
 		}
@@ -111,7 +111,7 @@ func TestInitHookAndSkillOptOutsAreIndependent(t *testing.T) {
 		home := isolateAgentHome(t)
 		makeHarness(t, filepath.Join(home, ".claude"))
 		repo := testInitRepo(t)
-		code, _, stderr := runCLI(t, "init", "--root", repo, "--no-skill")
+		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-skill")
 		if code != 0 {
 			t.Fatal(stderr)
 		}

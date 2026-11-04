@@ -5,15 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"sync"
 	"time"
-
-	acp "github.com/coder/acp-go-sdk"
 )
 
 // Run performs or reuses a review; setup failures become a failed Verdict.
@@ -26,31 +23,32 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 			v.Error = "save state: " + err.Error()
 		}
 	}
+	if len(opts.Settings.Reviewers) == 0 {
+		v.Error = "no reviewers are configured: run `slopcop init` in a repository to pick them from what is available, or set review.reviewers in the user config"
+		save()
+		return v
+	}
 	if capture.Empty() {
 		v.Status = StatusEmpty
 		save()
 		return v
 	}
-	count := opts.Settings.Count
-	if count == 0 {
-		count = DefaultCount
-	}
 	timeout := opts.Settings.Timeout
 	if timeout == 0 {
 		timeout = DefaultTimeout
 	}
-	order := familyOrder(opts.AuthorModels)
+	order := opts.Settings.Reviewers
 	in := discoverIntent(opts.Intent)
 	v.IntentSource = in.Source
 	commands := map[Family][]string{}
 	for _, f := range order {
-		cmd := opts.Settings.Adapters[f]
+		cmd := opts.Settings.Adapters[AdapterName(f)]
 		if len(cmd) == 0 {
 			cmd = DefaultCommand(f)
 		}
 		commands[f] = cmd
 	}
-	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, in.Text, opts.Version, count, order, commands})
+	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, in.Text, opts.Version, order, commands})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
 	previous, err := store.Last()
@@ -88,94 +86,46 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	var ready []*runner
-	next := 0
-	for next < len(order) {
-		if len(ready) >= count {
-			break
-		}
-		f := order[next]
-		next++
-		cmd := commands[f]
-		name := fmt.Sprintf("%d-%s", len(ready)+1, f)
-		s, err := startRunner(ctx, opts.Root, cmd, f, name, dir, timeout)
+	ready := make([]*runner, 0, len(order))
+	v.Reviewers = make([]Reviewer, len(order))
+	failed := false
+	for i, f := range order {
+		name := fmt.Sprintf("%d-%s", i+1, f)
+		s, err := startRunner(ctx, opts.Root, commands[f], f, name, dir, timeout)
 		if err == nil {
 			err = s.prepare(opts.Root)
 		}
 		if err != nil {
-			v.Unavailable = append(v.Unavailable, Unavailable{f, err.Error()})
+			failed = true
+			v.Reviewers[i] = Reviewer{Name: name, Family: f, Status: StatusFailed, Error: err.Error()}
 			if s != nil {
+				v.Reviewers[i] = s.result
+				v.Reviewers[i].Status = StatusFailed
+				v.Reviewers[i].Error = err.Error()
 				s.stop()
 			}
 			continue
 		}
 		ready = append(ready, s)
 	}
-	if len(ready) < count {
+	if failed {
 		for _, s := range ready {
 			s.stop()
 		}
-		v.Error = fmt.Sprintf("only %d of %d reviewers available", len(ready), count)
+		for i, r := range v.Reviewers {
+			if r.Name == "" {
+				v.Reviewers[i] = Reviewer{Name: fmt.Sprintf("%d-%s", i+1, order[i]), Family: order[i], Status: StatusFailed, Error: "review stopped because another reviewer could not start"}
+			}
+		}
 		save()
 		return v
 	}
-	v.Reviewers = make([]Reviewer, len(ready))
-	promptErrors := make([]error, len(ready))
 	var wg sync.WaitGroup
 	for i, s := range ready {
 		wg.Add(1)
-		go func() { defer wg.Done(); v.Reviewers[i], promptErrors[i] = s.prompt(prompt) }()
+		go func() { defer wg.Done(); v.Reviewers[i], _ = s.prompt(prompt) }()
 	}
 	wg.Wait()
-	for i, promptErr := range promptErrors {
-		var requestErr *acp.RequestError
-		if !errors.As(promptErr, &requestErr) || requestErr.Code != -32000 {
-			continue
-		}
-		v.Unavailable = append(v.Unavailable, Unavailable{ready[i].result.Family, promptErr.Error()})
-		v.Reviewers[i] = Reviewer{}
-		for next < len(order) {
-			f := order[next]
-			next++
-			name := fmt.Sprintf("%d-%s", i+1, f)
-			s, startErr := startRunner(ctx, opts.Root, commands[f], f, name, dir, timeout)
-			if startErr == nil {
-				startErr = s.prepare(opts.Root)
-			}
-			if startErr != nil {
-				v.Unavailable = append(v.Unavailable, Unavailable{f, startErr.Error()})
-				if s != nil {
-					s.stop()
-				}
-				continue
-			}
-			result, err := s.prompt(prompt)
-			if errors.As(err, &requestErr) && requestErr.Code == -32000 {
-				v.Unavailable = append(v.Unavailable, Unavailable{f, err.Error()})
-				continue
-			}
-			v.Reviewers[i] = result
-			break
-		}
-	}
-	available := 0
-	for _, r := range v.Reviewers {
-		if r.Name != "" {
-			available++
-		}
-	}
-	if available < count {
-		var completed []Reviewer
-		for _, r := range v.Reviewers {
-			if r.Name != "" {
-				completed = append(completed, r)
-			}
-		}
-		v.Reviewers = completed
-		v.Error = fmt.Sprintf("only %d of %d reviewers available", available, count)
-		save()
-		return v
-	}
 	v.Status = groupVerdict(v.Reviewers)
 	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}
 	if err = store.Save(r); err != nil {

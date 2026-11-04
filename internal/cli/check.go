@@ -116,18 +116,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	attr := attribution.Detect(prepared.repoRoot)
 	prepared.request.Attribution = attr
-	var models []string
-	if attr != nil {
-		for _, m := range attr.Models {
-			models = append(models, m.Model)
-		}
-	}
 	var store *review.Store
 	var verdict review.Verdict
 	var reviewDone chan review.Verdict
 	if mode != modeStatic {
 		reviewDone = make(chan review.Verdict, 1)
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: starting %d local reviewers; this can take several minutes.\n", settings.Count)
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: reviewing with %s; this can take several minutes.\n", reviewerNames(settings.Reviewers))
 		go func() {
 			v := review.Verdict{Status: review.StatusFailed}
 			var err error
@@ -144,14 +138,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 				return
 			}
 			v = review.Run(cmd.Context(), store, capture, review.Options{
-				Mode:         mode,
-				Version:      version,
-				Root:         prepared.repoRoot,
-				BaseCommit:   prepared.request.BaseCommit,
-				Intent:       opts.intent,
-				AuthorModels: models,
-				Settings:     settings,
-				Progress:     cmd.ErrOrStderr(),
+				Mode:       mode,
+				Version:    version,
+				Root:       prepared.repoRoot,
+				BaseCommit: prepared.request.BaseCommit,
+				Intent:     opts.intent,
+				Settings:   settings,
+				Progress:   cmd.ErrOrStderr(),
 			})
 			reviewDone <- v
 		}()
@@ -935,4 +928,15 @@ func approvalReason(empty, reviewPassed bool, verdict review.Verdict, static sta
 		}
 	}
 	return "the static check did not complete (failed, pending, or unknown status)"
+}
+
+func reviewerNames(families []review.Family) string {
+	if len(families) == 0 {
+		return "no configured reviewers"
+	}
+	names := make([]string, len(families))
+	for i, f := range families {
+		names[i] = string(f)
+	}
+	return strings.Join(names, ", ")
 }

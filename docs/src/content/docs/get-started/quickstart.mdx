@@ -88,9 +88,9 @@ are free, and so is your first repository.
 </Steps>
 
 By default, a check also runs local review. It needs Node.js with `npx`
-and your existing harness logins; DeepSeek Flash needs `DEEPSEEK_API_KEY`.
-A family whose adapter reports authentication required is skipped for the next
-one.
+and your existing harness logins. `slopcop init` probes reviewer families when
+none are configured and saves the first two that work (or one). Probe prompts
+use your own logins. Use `slopcop init --no-reviewers` to skip probing.
 Use `--mode ai` for review without SlopCop login or repository enablement.
 The Claude Code push gate installed by init requires HEAD's tree to match a
 passing check or valid override. No Codex push gate is installed.

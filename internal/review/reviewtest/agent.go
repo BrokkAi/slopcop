@@ -17,8 +17,8 @@ import (
 
 type agent struct {
 	acp.Agent
-	conn               *acp.AgentSideConnection
-	mode, model, trace string
+	conn                       *acp.AgentSideConnection
+	mode, model, models, trace string
 }
 
 func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -27,7 +27,10 @@ func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.Initiali
 	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber}, nil
 }
 func options(model, mode string) []acp.SessionConfigOption {
-	m := acp.SessionConfigSelectOptionsUngrouped{{Value: acp.SessionConfigValueId(model), Name: model}}
+	m := acp.SessionConfigSelectOptionsUngrouped{}
+	for _, value := range strings.Split(model, ",") {
+		m = append(m, acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId(value), Name: value})
+	}
 	err := acp.SessionConfigSelectOptionsUngrouped{{Value: "high", Name: "High"}}
 	if mode == "no-high" {
 		err = acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
@@ -39,6 +42,9 @@ func (a *agent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessi
 		return acp.NewSessionResponse{}, fmt.Errorf("fake session failure")
 	}
 	model := a.model
+	if a.models != "" {
+		model = a.models
+	}
 	if model == "" {
 		model = "gpt-6.10-terra"
 	}
@@ -46,6 +52,9 @@ func (a *agent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessi
 }
 func (a *agent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
 	model := a.model
+	if a.models != "" {
+		model = a.models
+	}
 	if model == "" {
 		model = "gpt-6.10-terra"
 	}
@@ -76,6 +85,9 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		}
 	}
 	text := "No findings."
+	if len(p.Prompt) == 1 && p.Prompt[0].Text != nil && p.Prompt[0].Text.Text == "Reply with exactly the word ok and nothing else. Do not use any tools." {
+		text = "ok"
+	}
 	if a.mode == "hang" {
 		<-ctx.Done()
 		return acp.PromptResponse{}, ctx.Err()
@@ -116,6 +128,9 @@ func Main() {
 	for _, arg := range os.Args {
 		if v, ok := strings.CutPrefix(arg, "--fake-mode="); ok {
 			a.mode = v
+		}
+		if v, ok := strings.CutPrefix(arg, "--fake-models="); ok {
+			a.models = v
 		}
 		if v, ok := strings.CutPrefix(arg, "--fake-model="); ok {
 			a.model = v

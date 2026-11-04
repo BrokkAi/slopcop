@@ -49,103 +49,32 @@ func reviewRepo(t *testing.T) (string, Capture, *Store) {
 func fakeAdapter(mode, model, trace string) []string {
 	return []string{os.Args[0], "-test.run=^TestFakeAgent$", "--", "--fake-mode=" + mode, "--fake-model=" + model, "--fake-trace=" + trace}
 }
-func TestFallbackFamilies(t *testing.T) {
-	for _, mode := range []string{"new-error", "no-high"} {
-		t.Run(mode, func(t *testing.T) {
-			root, c, s := reviewRepo(t)
-			trace := filepath.Join(t.TempDir(), "trace")
-			o := Options{Root: root, Intent: "request", Settings: Settings{Count: 1, Adapters: map[Family][]string{Terra: fakeAdapter(mode, "gpt-6.10-terra", trace), Flash: fakeAdapter("clean", "deepseek-flash", trace)}}}
-			v := Run(context.Background(), s, c, o)
-			if v.Status != StatusClean || len(v.Reviewers) != 1 || v.Reviewers[0].Family != Flash || len(v.Unavailable) != 1 || v.Unavailable[0].Family != Terra {
-				t.Fatalf("%+v", v)
-			}
-		})
-	}
-}
-func TestPromptAuthenticationFallback(t *testing.T) {
-	for _, tc := range []struct {
-		name                string
-		count               int
-		terra, flash, haiku string
-		want                Status
-		families            []Family
-		unavailable         Family
-		available           int
-	}{
-		{"replacement-findings", 1, "auth-required", "findings", "clean", StatusFindings, []Family{Flash}, Terra, 1},
-		{"exhausted", 1, "auth-required", "auth-required", "auth-required", StatusFailed, nil, Terra, 0},
-		{"other-error", 1, "prompt-error", "clean", "clean", StatusFailed, []Family{Terra}, "", 1},
-		{"second-slot", 2, "clean", "auth-required", "clean", StatusClean, []Family{Terra, Haiku}, Flash, 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			root, c, s := reviewRepo(t)
-			trace := filepath.Join(t.TempDir(), "trace")
-			o := Options{Root: root, Intent: "request", Settings: Settings{Count: tc.count, Adapters: map[Family][]string{
-				Terra: fakeAdapter(tc.terra, "gpt-6.10-terra", trace),
-				Flash: fakeAdapter(tc.flash, "deepseek-flash", trace),
-				Haiku: fakeAdapter(tc.haiku, "claude-4-haiku", trace),
-			}}}
-			v := Run(context.Background(), s, c, o)
-			if v.Status != tc.want || len(v.Reviewers) != len(tc.families) {
-				t.Fatalf("%+v", v)
-			}
-			for i, family := range tc.families {
-				if v.Reviewers[i].Family != family || v.Reviewers[i].Name != string('1'+rune(i))+"-"+string(family) {
-					t.Fatalf("reviewer %d: %+v", i, v.Reviewers[i])
-				}
-			}
-			if tc.unavailable != "" && (len(v.Unavailable) == 0 || v.Unavailable[0].Family != tc.unavailable) {
-				t.Fatalf("unavailable: %+v", v.Unavailable)
-			}
-			if tc.available == 0 && !strings.Contains(v.Error, "only 0 of 1 reviewers available") {
-				t.Fatal(v.Error)
-			}
-			data, _ := os.ReadFile(trace)
-			if tc.name == "other-error" && strings.Count(string(data), "prompt\n") != 1 {
-				t.Fatalf("unexpected fallback: %s", data)
-			}
-			if tc.name == "second-slot" {
-				if _, err := os.Stat(filepath.Join(v.LogDir, "2-flash.jsonl")); err != nil {
-					t.Fatal(err)
-				}
-			}
-		})
-	}
-}
-func TestPromptAuthenticationKeepsPartialFindings(t *testing.T) {
-	root, c, s := reviewRepo(t)
-	o := Options{Root: root, Intent: "request", Settings: Settings{Count: 2, Adapters: map[Family][]string{
-		Terra: fakeAdapter("findings", "gpt-6.10-terra", ""),
-		Flash: fakeAdapter("auth-required", "deepseek-flash", ""),
-		Haiku: fakeAdapter("auth-required", "haiku", ""),
-	}}}
-	v := Run(context.Background(), s, c, o)
-	if v.Status != StatusFailed || v.Error != "only 1 of 2 reviewers available" || len(v.Reviewers) != 1 || v.Reviewers[0].Name != "1-terra" || !strings.Contains(v.Reviewers[0].Text, "fake defect") {
-		t.Fatalf("%+v", v)
-	}
-	b, err := os.ReadFile(filepath.Join(s.dir, "findings.json"))
-	if err != nil || !strings.Contains(string(b), "fake defect") {
-		t.Fatalf("findings: %s, %v", b, err)
-	}
-}
-func TestNotEnoughReviewersSendsNoPrompts(t *testing.T) {
-	root, c, s := reviewRepo(t)
+func TestConfiguredReviewersNoFallback(t *testing.T) {
+	root, c, store := reviewRepo(t)
 	trace := filepath.Join(t.TempDir(), "trace")
-	bad := []string{"/missing/slopcop-fake"}
-	o := Options{Root: root, Intent: "request", Settings: Settings{Count: 2, Adapters: map[Family][]string{Terra: fakeAdapter("clean", "gpt-6.10-terra", trace), Flash: bad, Haiku: bad}}}
-	v := Run(context.Background(), s, c, o)
-	if v.Status != StatusFailed || !strings.Contains(v.Error, "only 1 of 2") || len(v.Reviewers) != 0 {
+	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Flash}, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6-terra", trace), "dsh": fakeAdapter("new-error", "deepseek-flash", trace)}}}
+	v := Run(context.Background(), store, c, o)
+	if v.Status != StatusFailed || len(v.Reviewers) != 2 || v.Reviewers[1].Status != StatusFailed {
 		t.Fatalf("%+v", v)
 	}
-	b, _ := os.ReadFile(trace)
-	if strings.Contains(string(b), "prompt") {
-		t.Fatal("prompt sent to ready reviewer")
+	data, _ := os.ReadFile(trace)
+	if strings.Contains(string(data), "prompt") {
+		t.Fatal(string(data))
 	}
-	assertStopped(t, trace)
-	for _, u := range v.Unavailable {
-		if u.Family == "" {
-			t.Fatal(u)
-		}
+}
+func TestAuthFailureKeepsPartial(t *testing.T) {
+	root, c, store := reviewRepo(t)
+	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Flash}, Adapters: map[string][]string{"codex": fakeAdapter("findings", "gpt-6-terra", ""), "dsh": fakeAdapter("auth-required", "deepseek-flash", "")}}}
+	v := Run(context.Background(), store, c, o)
+	if v.Status != StatusFailed || len(v.Reviewers) != 2 || !strings.Contains(v.Reviewers[0].Text, "fake defect") || v.Reviewers[1].Status != StatusFailed {
+		t.Fatalf("%+v", v)
+	}
+}
+func TestEmptyReviewers(t *testing.T) {
+	root, c, store := reviewRepo(t)
+	v := Run(context.Background(), store, c, Options{Root: root})
+	if v.Status != StatusFailed || !strings.Contains(v.Error, "slopcop init") {
+		t.Fatalf("%+v", v)
 	}
 }
 func TestNoEchoAndNoAllow(t *testing.T) {
@@ -155,7 +84,7 @@ func TestNoEchoAndNoAllow(t *testing.T) {
 	}{{"no-echo", StatusClean}, {"no-allow", StatusFailed}} {
 		t.Run(tc.mode, func(t *testing.T) {
 			root, c, s := reviewRepo(t)
-			o := Options{Root: root, Intent: "request", Settings: Settings{Count: 1, Adapters: map[Family][]string{Terra: fakeAdapter(tc.mode, "gpt-6.10-terra", "")}}}
+			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter(tc.mode, "gpt-6.10-terra", "")}}}
 			v := Run(context.Background(), s, c, o)
 			if v.Status != tc.want {
 				t.Fatalf("%+v", v)
@@ -166,7 +95,7 @@ func TestNoEchoAndNoAllow(t *testing.T) {
 func TestReuseAndInvalidation(t *testing.T) {
 	root, c, s := reviewRepo(t)
 	trace := filepath.Join(t.TempDir(), "trace")
-	o := Options{Root: root, Intent: "request", Settings: Settings{Count: 1, Adapters: map[Family][]string{Terra: fakeAdapter("findings", "gpt-6.10-terra", trace)}}}
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("findings", "gpt-6.10-terra", trace)}}}
 	v := Run(context.Background(), s, c, o)
 	if v.Status != StatusFindings {
 		t.Fatal(v)
@@ -180,9 +109,9 @@ func TestReuseAndInvalidation(t *testing.T) {
 	if v.Reused {
 		t.Fatal("reused different intent")
 	}
-	o.Settings.Count = 2
-	o.Settings.Adapters[Flash] = []string{"/missing/slopcop-fake"}
-	o.Settings.Adapters[Haiku] = []string{"/missing/slopcop-fake"}
+	o.Settings.Reviewers = []Family{Terra, Flash}
+	o.Settings.Adapters["dsh"] = []string{"/missing/slopcop-fake"}
+	o.Settings.Adapters["claude"] = []string{"/missing/slopcop-fake"}
 	v = Run(context.Background(), s, c, o)
 	if v.Status != StatusFailed || v.Reused {
 		t.Fatal(v)
@@ -194,8 +123,8 @@ func TestReuseAndInvalidation(t *testing.T) {
 	if err != nil || !strings.Contains(string(b), "fake defect") {
 		t.Fatal(err)
 	}
-	o.Settings.Count = 1
-	o.Settings.Adapters[Terra] = fakeAdapter("clean", "gpt-6.10-terra", trace)
+	o.Settings.Reviewers = []Family{Terra}
+	o.Settings.Adapters["codex"] = fakeAdapter("clean", "gpt-6.10-terra", trace)
 	v = Run(context.Background(), s, c, o)
 	if v.Status != StatusClean {
 		t.Fatal(v)
@@ -297,7 +226,7 @@ func TestTimeoutAndCancel(t *testing.T) {
 				go func() { time.Sleep(150 * time.Millisecond); cancel() }()
 				limit = 5 * time.Second
 			}
-			o := Options{Root: root, Intent: "request", Settings: Settings{Count: 1, Timeout: limit, Adapters: map[Family][]string{Terra: fakeAdapter(mode, "gpt-6.10-terra", trace)}}}
+			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: limit, Adapters: map[string][]string{"codex": fakeAdapter(mode, "gpt-6.10-terra", trace)}}}
 			start := time.Now()
 			v := Run(ctx, s, c, o)
 			if v.Status != StatusFailed || time.Since(start) > 3*time.Second {
@@ -323,7 +252,7 @@ func TestCancelStopsAllAdapters(t *testing.T) {
 	trace2 := filepath.Join(t.TempDir(), "flash")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	opts := Options{Root: root, Intent: "request", Settings: Settings{Count: 2, Timeout: 5 * time.Second, Adapters: map[Family][]string{Terra: fakeAdapter("hang", "gpt-6.10-terra", trace1), Flash: fakeAdapter("hang", "deepseek-flash", trace2)}}}
+	opts := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra, Flash}, Timeout: 5 * time.Second, Adapters: map[string][]string{"codex": fakeAdapter("hang", "gpt-6.10-terra", trace1), "dsh": fakeAdapter("hang", "deepseek-flash", trace2)}}}
 	done := make(chan Verdict, 1)
 	go func() { done <- Run(ctx, store, capture, opts) }()
 	deadline := time.After(3 * time.Second)
@@ -360,7 +289,7 @@ func TestCancelStopsAllAdapters(t *testing.T) {
 func TestSerialInitializeParallelPrompts(t *testing.T) {
 	root, capture, store := reviewRepo(t)
 	trace := filepath.Join(t.TempDir(), "trace")
-	opts := Options{Root: root, Intent: "request", Settings: Settings{Count: 2, Timeout: 3 * time.Second, Adapters: map[Family][]string{Terra: fakeAdapter("barrier", "gpt-6.10-terra", trace), Flash: fakeAdapter("barrier", "deepseek-flash", trace)}}}
+	opts := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra, Flash}, Timeout: 3 * time.Second, Adapters: map[string][]string{"codex": fakeAdapter("barrier", "gpt-6.10-terra", trace), "dsh": fakeAdapter("barrier", "deepseek-flash", trace)}}}
 	v := Run(context.Background(), store, capture, opts)
 	if v.Status != StatusClean {
 		t.Fatalf("%+v", v)

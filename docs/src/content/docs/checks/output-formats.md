@@ -32,7 +32,7 @@ A static-only failed check prints nothing on stdout; stderr starts with
 any install or top-up link. `--verbose` names each inconclusive rule.
 
 After the static report, human output includes a Review section with each
-reviewer's verdict, text, log path, unavailable families, and intent source.
+reviewer's verdict, text, log path, and intent source.
 Review progress goes to stderr. Reviewers run in the repository root with
 their own tools and permissions; they can edit files.
 
@@ -76,7 +76,7 @@ slopcop check --format json
 | Field | Meaning |
 | --- | --- |
 | `staticStatus` | service status when it differs from merged `status` |
-| `review` | `status`, `reviewers`, `unavailable`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
+| `review` | `status`, `reviewers`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
 | `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result matching the exit code: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped` |
 | `baseCommit` | the commit the patch was applied to |

@@ -46,7 +46,7 @@ func TestNamespacedFamily(t *testing.T) {
 	for _, tc := range []struct {
 		model  string
 		family Family
-	}{{"openai/gpt-6.10-terra", Terra}, {"brokkai/deepseek-flash", Flash}, {"anthropic/claude-haiku-5-5", Haiku}, {"haiku", Haiku}} {
+	}{{"openai/gpt-6.10-terra", Terra}, {"brokkai/deepseek-flash", Flash}, {"anthropic/claude-haiku-5-5", Haiku}, {"haiku", Haiku}, {"openai/gpt-6.1-sol", Sol}} {
 		family, ok := FamilyOf(tc.model)
 		if !ok || family != tc.family {
 			t.Fatalf("%q: %q", tc.model, family)
@@ -77,5 +77,13 @@ func TestBestModelUsesDisplayVersion(t *testing.T) {
 	got, ok = bestModel(Haiku, options)
 	if !ok || got != "claude-haiku-5-5-20251001" {
 		t.Fatalf("model %q, want explicit id", got)
+	}
+}
+
+func TestFamilyOfRejectsOtherModels(t *testing.T) {
+	for _, m := range []string{"gpt-6-astra", "gpt-6-luna", "deepseek-v4-pro", "gpt-6-solar", "claude-haikuish"} {
+		if f, ok := FamilyOf(m); ok {
+			t.Fatalf("%s: %s", m, f)
+		}
 	}
 }

@@ -1556,7 +1556,7 @@ func TestAILocalReviewAndOverride(t *testing.T) {
 			repo := newRepo(t, "")
 			writeFile(t, repo, "README.md", "changed\n")
 			t.Setenv("SLOPCOP_FAKE_ACP", "1")
-			cfg := config.Config{Mode: "ai", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + tc.mode}}}}}
+			cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + tc.mode}}}}}
 			if _, err := config.Save(cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -1606,7 +1606,7 @@ func TestBothReviewRunsWhenStaticCannotStart(t *testing.T) {
 	repo := newRepo(t, "")
 	writeFile(t, repo, "README.md", "changed\n")
 	t.Setenv("SLOPCOP_FAKE_ACP", "1")
-	cfg := config.Config{Mode: "both", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$"}}}}}
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$"}}}}}
 	if _, err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -1649,7 +1649,7 @@ func TestCombinedExitAndStatus(t *testing.T) {
 			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 			writeFile(t, repo, "README.md", "changed\n")
 			t.Setenv("SLOPCOP_FAKE_ACP", "1")
-			cfg := config.Config{Mode: "both", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + tc.agent}}}}}
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + tc.agent}}}}}
 			if _, err := config.Save(cfg); err != nil {
 				t.Fatal(err)
 			}
@@ -1705,7 +1705,7 @@ func TestReviewInterruptStopsAdapter(t *testing.T) {
 	writeFile(t, repo, "README.md", "changed\n")
 	trace := filepath.Join(t.TempDir(), "agent.trace")
 	t.Setenv("SLOPCOP_FAKE_ACP", "1")
-	cfg := config.Config{Mode: "ai", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=hang", "--fake-trace=" + trace}}}}}
+	cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=hang", "--fake-trace=" + trace}}}}}
 	if _, err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -1787,7 +1787,7 @@ func TestOverrideAfterStaticIncomplete(t *testing.T) {
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "README.md", "changed\n")
 	t.Setenv("SLOPCOP_FAKE_ACP", "1")
-	cfg := config.Config{Mode: "both", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
 	if _, err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -1832,7 +1832,7 @@ func TestPushApprovalLevel(t *testing.T) {
 			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 			writeFile(t, repo, "README.md", "changed\n")
 			t.Setenv("SLOPCOP_FAKE_ACP", "1")
-			cfg := config.Config{Mode: "both", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=clean"}}}}}
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=clean"}}}}}
 			if tc.level != "" {
 				cfg.Gate = &config.Gate{BlockOn: tc.level}
 			}
@@ -1916,7 +1916,7 @@ func TestOverrideStaticPushLevel(t *testing.T) {
 			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 			writeFile(t, repo, "README.md", "changed\n")
 			t.Setenv("SLOPCOP_FAKE_ACP", "1")
-			cfg := config.Config{Mode: "both", Review: &config.Review{Count: 1, Adapters: map[string]config.Adapter{"terra": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
 			if _, err := config.Save(cfg); err != nil {
 				t.Fatal(err)
 			}

@@ -91,15 +91,21 @@ hook and `slopcop enable` remain static-only. A single captured snapshot
 includes committed, uncommitted, and untracked work, excluding ignored
 files. Reviewers read `git diff <baseTree> <snapshotTree>` themselves.
 
-Reviewers are chosen from GPT Terra (Codex ACP), DeepSeek Flash (dsh ACP),
-and Claude Haiku (Claude ACP), in that order, with author families moved
-last. Default count is two, at high effort. Every reviewer must reply
-exactly `No findings.` for a clean review. Default adapters use Node.js
-with pinned `npx` packages and your existing harness logins; Flash needs
-`DEEPSEEK_API_KEY`. A family whose adapter reports authentication required is
-skipped for the next one. Reviewers use their own tools and permissions in the
+Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
+through Claude ACP. Each uses the newest model of its family at high effort.
+Every reviewer must reply exactly `No findings.` for a clean review. `slopcop
+init` probes each family once when reviewers are not configured and the mode is
+not static, then saves the first two that work (or one). Probe prompts use your
+logins. Already configured reviewers are left alone; unset `review.reviewers`
+and run init to pick again. `slopcop init --no-reviewers` skips probing.
+A check runs exactly the configured reviewers. It never reorders or replaces
+them. If one cannot run, review fails with exit `2` and names the reviewer and
+reason. With no reviewers configured, run `slopcop init` or set
+`review.reviewers`. Do not change reviewers or adapters to get past a failure;
+report it to the user. Reviewers use their own tools and permissions in the
 repository root. They can edit files and run commands; there is no read-only
-isolation. Do not switch reviewers or lower the count to get past other failures.
+isolation.
 
 For intent, the CLI reads the user's own messages from the Claude Code
 transcript or Codex rollout when found, then uses `--intent TEXT`, else
@@ -193,7 +199,7 @@ Each finding also carries its
 The CLI prioritizes interrupt, findings, a static refusal needing a person,
 failure or incompleteness, static pending, then clean. JSON `status` matches
 the exit code; `staticStatus` keeps a different service status. Read
-`review.status`, `review.reviewers`, `review.unavailable`, `review.error`,
+`review.status`, `review.reviewers`, `review.error`,
 and `review.logDir`. Prompt and reviewer logs are under `<git-dir>/slopcop/`.
 
 The static service sets its own status; the CLI merges it with review. A failed
@@ -354,7 +360,8 @@ gate checks HEAD in the directory the command runs from and does not follow
 Run `slopcop init` inside each repository to install local skills, static
 Stop hooks, and the Claude Code gate. A check updates existing skill
 copies but creates none; login does not install them. Set `mode`,
-`review.count` (1–3, default 2), and `review.timeout` (default `20m`) with
-`slopcop config get|set|unset`. Edit
-`review.adapters.<terra|flash|haiku>.command` by hand in user config. In
+`review.reviewers` (1–4 entries, in order; duplicates are allowed), and
+`review.timeout` (default `20m`) with `slopcop config get|set|unset`. Set
+reviewers as a comma-separated list. Adapter commands are keyed by adapter at
+`review.adapters.<codex|dsh|claude>.command`. In
 CI, use `--mode static` unless the runner has Node and harness logins.

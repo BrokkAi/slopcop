@@ -12,7 +12,7 @@ import (
 // DefaultCommand returns the pinned ACP adapter argv for a reviewer family.
 func DefaultCommand(f Family) []string {
 	switch f {
-	case Terra:
+	case Terra, Sol:
 		return []string{"npx", "--yes", "@agentclientprotocol/codex-acp@2.5.0"}
 	case Flash:
 		return []string{"npx", "--yes", "@brokkai/dsh-acp@0.6.0"}
@@ -20,6 +20,19 @@ func DefaultCommand(f Family) []string {
 		return []string{"npx", "--yes", "@agentclientprotocol/claude-agent-acp@0.100.0"}
 	}
 	return nil
+}
+
+// AdapterName identifies the ACP adapter used by a family.
+func AdapterName(f Family) string {
+	switch f {
+	case Terra, Sol:
+		return "codex"
+	case Flash:
+		return "dsh"
+	case Haiku:
+		return "claude"
+	}
+	return ""
 }
 
 // ParseFamily accepts only the supported reviewer families.
@@ -37,37 +50,26 @@ func FamilyOf(model string) (Family, bool) {
 	if i := strings.LastIndexByte(m, '/'); i >= 0 {
 		m = m[i+1:]
 	}
+	tokens := strings.Split(m, "-")
+	has := func(token string) bool {
+		for _, part := range tokens[1:] {
+			if part == token {
+				return true
+			}
+		}
+		return false
+	}
 	switch {
-	case strings.HasPrefix(m, "gpt-") && strings.Contains(m, "terra"):
+	case strings.HasPrefix(m, "gpt-") && has("terra"):
 		return Terra, true
-	case strings.HasPrefix(m, "deepseek-") && strings.Contains(m, "flash"):
+	case strings.HasPrefix(m, "gpt-") && has("sol"):
+		return Sol, true
+	case strings.HasPrefix(m, "deepseek-") && has("flash"):
 		return Flash, true
-	case m == "haiku" || strings.HasPrefix(m, "claude-") && strings.Contains(m, "haiku"):
+	case m == "haiku" || strings.HasPrefix(m, "claude-") && has("haiku"):
 		return Haiku, true
 	}
 	return "", false
-}
-
-// familyOrder demotes the model families that authored the change.
-func familyOrder(authors []string) []Family {
-	used := map[Family]bool{}
-	for _, m := range authors {
-		if f, ok := FamilyOf(m); ok {
-			used[f] = true
-		}
-	}
-	var out []Family
-	for _, f := range Families {
-		if !used[f] {
-			out = append(out, f)
-		}
-	}
-	for _, f := range Families {
-		if used[f] {
-			out = append(out, f)
-		}
-	}
-	return out
 }
 
 // configOption locates grouped or ungrouped ACP selectors by id or category.

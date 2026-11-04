@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -10,12 +11,15 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	agenthooks "github.com/BrokkAi/slopcop/internal/hooks"
 	"github.com/BrokkAi/slopcop/internal/report"
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/skills"
 )
 
@@ -436,7 +440,7 @@ func slopcopSkill(data []byte) bool {
 }
 
 func newInitCommand(version string) *cobra.Command {
-	var noSkill, noHooks, removeHooks bool
+	var noSkill, noHooks, removeHooks, noReviewers bool
 	var root string
 	command := &cobra.Command{Use: "init", Short: "Install repository-local skills and hooks", Long: `Install SlopCop's skill and hooks in the current Git repository. The skill
 is written to .agents/skills/slopcop and, when Claude Code is installed,
@@ -446,7 +450,7 @@ Codex's shell hook blocking protocol is not established, so no Codex push gate
 is installed. Codex requires /hooks trust. Written paths are added to the
 repository's info/exclude. Tracked targets are left untouched. Existing
 user-level SlopCop hooks and skills are removed. --remove-hooks removes both
-repository and user-level hooks.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+repository and user-level hooks. Init probes available reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		repo, err := gitx.Toplevel(root)
 		if err != nil {
 			return fmt.Errorf("slopcop init requires a Git repository: %w", err)
@@ -537,12 +541,80 @@ repository and user-level hooks.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Com
 				fmt.Fprintln(out, "slopcop: Claude Code now blocks git push and gh pr create until HEAD's tree passed a check; Codex has no push gate")
 			}
 		}
-		return excludeInitPaths(repo, excluded)
+		if err := excludeInitPaths(repo, excluded); err != nil {
+			return err
+		}
+		if !noReviewers {
+			return initReviewers(cmd.Context(), out, repo)
+		}
+		return nil
 	}}
 	command.Flags().StringVar(&root, "root", ".", "Git repository directory")
+	command.Flags().BoolVar(&noReviewers, "no-reviewers", false, "skip reviewer probing")
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install the agent skill")
 	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install repository hooks")
 	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove repository and user-level SlopCop hooks")
 	command.MarkFlagsMutuallyExclusive("no-hooks", "remove-hooks")
 	return command
+}
+
+func initReviewers(ctx context.Context, out io.Writer, repo string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	if cfg.Mode == modeStatic {
+		return nil
+	}
+	path, err := config.Path()
+	if err != nil {
+		return err
+	}
+	if cfg.Review != nil && len(cfg.Review.Reviewers) > 0 {
+		fmt.Fprintf(out, "slopcop: reviewers are %s (from %s); to pick again, run `slopcop config unset review.reviewers` and then `slopcop init`\n", strings.Join(cfg.Review.Reviewers, ", "), path)
+		return nil
+	}
+	settings, err := reviewSettings(cfg, 0)
+	if err != nil {
+		return err
+	}
+	gitDir, err := exec.Command("git", "-C", repo, "rev-parse", "--absolute-git-dir").Output()
+	if err != nil {
+		return err
+	}
+	probeParent := filepath.Join(strings.TrimSpace(string(gitDir)), "slopcop")
+	if err := os.MkdirAll(probeParent, 0700); err != nil {
+		return err
+	}
+	logDir, err := os.MkdirTemp(probeParent, "probe-"+time.Now().UTC().Format("20060102T150405")+"-")
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt")
+	results := review.Probe(ctx, repo, logDir, review.Families, settings)
+	var names []string
+	for _, r := range results {
+		if r.Available {
+			fmt.Fprintf(out, "slopcop: %s available (%s)\n", r.Family, r.Model)
+			if len(names) < review.DefaultReviewerCount {
+				names = append(names, string(r.Family))
+			}
+		} else {
+			fmt.Fprintf(out, "slopcop: %s unavailable: %s\n", r.Family, r.Reason)
+		}
+	}
+	if len(names) == 0 {
+		fmt.Fprintln(out, "slopcop: no reviewers available; log in to Codex or Claude Code, set DEEPSEEK_API_KEY or configure the dsh adapter with --api-key-file, then rerun init; or set review.reviewers by hand, or use mode static")
+		return nil
+	}
+	if cfg.Review == nil {
+		cfg.Review = &config.Review{}
+	}
+	cfg.Review.Reviewers = names
+	path, err = config.Save(cfg)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(out, "slopcop: reviewers set to %s in %s\n", strings.Join(names, ", "), path)
+	return nil
 }

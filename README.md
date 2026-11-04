@@ -376,15 +376,19 @@ by default. Use `--mode static` or `--static` for only the hosted check; use
 includes committed, uncommitted, and untracked work, except ignored files.
 Reviewers read `git diff <baseTree> <snapshotTree>` themselves.
 
-The default two reviewers are chosen from GPT Terra, DeepSeek Flash, and
-Claude Haiku in that order, moving families that wrote the change last. They
-run at high effort and must reply exactly `No findings.` for a clean review.
-Default adapters use pinned packages through `npx`; DeepSeek Flash needs
-`DEEPSEEK_API_KEY`. Reviewers use their own tools and permissions in the
-repository root: they can run commands and edit files. There is no read-only
-isolation. Set `review.count` (1–3, default 2), `review.timeout` (default
-`20m`), or `mode` with `slopcop config set`; use `--review-timeout` or
-`--intent TEXT` for one check. CI normally uses `--mode static`.
+Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
+through Claude ACP. Each uses the newest model of its family at high effort.
+`slopcop init` probes each family once when reviewers are not configured and
+mode is not static, then saves the first two that work (or one). Configured
+reviewers are left alone; unset `review.reviewers` and run init to pick again.
+`slopcop init --no-reviewers` skips probing. A check runs exactly the configured
+reviewers and fails with exit `2` if one cannot run. Set the ordered list (1–4
+entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol`.
+Set `review.timeout` (default `20m`) or `mode` with `slopcop config set`;
+adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
+Reviewers use their own tools and permissions in the repository root: they can
+run commands and edit files. CI normally uses `--mode static`.
 
 Review state and logs are under `<git-dir>/slopcop/`. A complete review is
 reused when nothing relevant changed. A nonempty check with a clean review

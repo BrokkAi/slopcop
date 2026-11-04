@@ -934,8 +934,6 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
-	// Unavailable is the local review's Unavailable field.
-	Unavailable []review.Unavailable `json:"unavailable"`
 	// Error is the local review's Error field.
 	Error string `json:"error"`
 	// Reused is the local review's Reused field.
@@ -955,12 +953,9 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Unavailable: v.Unavailable, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
-	}
-	if result.Unavailable == nil {
-		result.Unavailable = []review.Unavailable{}
 	}
 	return result
 }
@@ -1013,9 +1008,6 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		if r.Log != "" {
 			fmt.Fprintf(w, "    Log: %s\n", printable(r.Log))
 		}
-	}
-	for _, u := range v.Unavailable {
-		fmt.Fprintf(w, "  %s unavailable: %s\n", u.Family, printable(u.Reason))
 	}
 	if v.Error != "" {
 		fmt.Fprintf(w, "  Error: %s\n", printable(v.Error))

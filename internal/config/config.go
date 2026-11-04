@@ -27,9 +27,9 @@ type Config struct {
 
 // Review contains local reviewer settings.
 type Review struct {
-	Count    int                `json:"count,omitempty"`
-	Timeout  string             `json:"timeout,omitempty"`
-	Adapters map[string]Adapter `json:"adapters,omitempty"`
+	Reviewers []string           `json:"reviewers,omitempty"`
+	Timeout   string             `json:"timeout,omitempty"`
+	Adapters  map[string]Adapter `json:"adapters,omitempty"`
 }
 
 // Gate controls which hosted findings block push approval.
@@ -102,7 +102,7 @@ func Save(cfg Config) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
-	if cfg.Review != nil && cfg.Review.Count == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
 		cfg.Review = nil
 	}
 	if cfg.Gate != nil && cfg.Gate.BlockOn == "" {

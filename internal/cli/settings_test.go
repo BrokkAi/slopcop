@@ -34,16 +34,16 @@ func TestResolveMode(t *testing.T) {
 
 func TestReviewSettingsValidation(t *testing.T) {
 	got, err := reviewSettings(config.Config{}, 0)
-	if err != nil || got.Count != review.DefaultCount || got.Timeout != review.DefaultTimeout {
+	if err != nil || len(got.Reviewers) != 0 || got.Timeout != review.DefaultTimeout {
 		t.Fatalf("defaults = %+v, %v", got, err)
 	}
-	for _, cfg := range []config.Config{{Review: &config.Review{Count: 4}}, {Review: &config.Review{Timeout: "0s"}}, {Review: &config.Review{Adapters: map[string]config.Adapter{"bad": {Command: []string{"x"}}}}}} {
+	for _, cfg := range []config.Config{{Review: &config.Review{Reviewers: []string{"terra", "sol", "flash", "haiku", "terra"}}}, {Review: &config.Review{Timeout: "0s"}}, {Review: &config.Review{Adapters: map[string]config.Adapter{"bad": {Command: []string{"x"}}}}}} {
 		if _, err := reviewSettings(cfg, 0); err == nil || !strings.Contains(err.Error(), "config") {
 			t.Errorf("expected config validation error; got %v", err)
 		}
 	}
-	got, err = reviewSettings(config.Config{Review: &config.Review{Count: 1, Timeout: "3s", Adapters: map[string]config.Adapter{"terra": {Command: []string{"runner"}}}}}, 5*time.Second)
-	if err != nil || got.Timeout != 5*time.Second || got.Adapters[review.Terra][0] != "runner" {
+	got, err = reviewSettings(config.Config{Review: &config.Review{Reviewers: []string{"terra"}, Timeout: "3s", Adapters: map[string]config.Adapter{"codex": {Command: []string{"runner"}}}}}, 5*time.Second)
+	if err != nil || got.Timeout != 5*time.Second || got.Adapters["codex"][0] != "runner" {
 		t.Fatalf("override = %+v, %v", got, err)
 	}
 }

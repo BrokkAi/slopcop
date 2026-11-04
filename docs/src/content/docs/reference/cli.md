@@ -191,9 +191,9 @@ to be run by hand.
 ## `slopcop config` and `slopcop override`
 
 `slopcop config get|set|unset <key> [value]` manages `mode` (`both`,
-`static`, `ai`), `review.count` (1–3, default 2), and `review.timeout`
-(default `20m`). Edit `review.adapters.<terra|flash|haiku>.command` arrays
-by hand in the user config.
+`static`, `ai`), `review.reviewers` (1–4 comma-separated entries, in order;
+duplicates allowed), and `review.timeout` (default `20m`). Adapter command
+overrides are under `review.adapters.<codex|dsh|claude>.command`.
 
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided

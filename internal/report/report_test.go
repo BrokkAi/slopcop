@@ -1008,3 +1008,13 @@ func TestReviewHumanKeepsLines(t *testing.T) {
 		t.Fatalf("review lines: %q", out.String())
 	}
 }
+
+func TestReviewJSONHasNoUnavailableField(t *testing.T) {
+	data, err := json.Marshal(reviewValue(&review.Verdict{Status: review.StatusFailed}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), `"unavailable"`) {
+		t.Fatal(string(data))
+	}
+}
