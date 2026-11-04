@@ -110,6 +110,7 @@ export default defineConfig({
             { label: 'False positives', slug: 'checks/false-positives' },
             { label: 'Repository rules', slug: 'checks/repository-rules' },
             { label: 'Gate a change in CI', slug: 'checks/ci' },
+            { label: 'Check pull requests', slug: 'checks/pull-requests' },
           ],
         },
         {
