@@ -26,7 +26,7 @@ command can run it.
 Once per machine:
 
 ```console
-slopcop init     # skill into every agent found here, plus the hook
+slopcop init     # skill into ~/.agents/skills and each harness here, plus the hook
 slopcop login    # approve the code in your browser
 slopcop          # check from any repository
 ```

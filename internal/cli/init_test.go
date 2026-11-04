@@ -219,20 +219,46 @@ func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	}
 }
 
-func TestInitWithoutAHarnessInstallsNothing(t *testing.T) {
+// With no harness configuration directory yet, init still puts the skill in
+// the vendor-neutral ~/.agents/skills, which every agent that reads skills
+// checks. It must not create the directories of harnesses that are absent.
+func TestInitWithoutAHarnessInstallsTheNeutralSkill(t *testing.T) {
 	home := isolateAgentHome(t)
 
 	code, stdout, stderr := runCLI(t, "init")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "nothing to install") {
-		t.Errorf("stdout = %q", stdout)
+	dir := filepath.Join(home, ".agents", "skills", "slopcop")
+	if !strings.Contains(stdout, "installed the slopcop skill at "+dir) {
+		t.Errorf("stdout = %q, want it to name %s", stdout, dir)
 	}
-	for _, dir := range []string{".agents", ".claude", ".codex"} {
-		if _, err := os.Stat(filepath.Join(home, dir)); err == nil {
-			t.Errorf("init created %s for a harness that is not installed", dir)
+	if got := readSkillFile(t, filepath.Join(dir, "SKILL.md")); got != readEmbeddedSkill(t, "SKILL.md") {
+		t.Error("the installed SKILL.md does not match the bundled one")
+	}
+	for _, name := range []string{".claude", ".codex"} {
+		if _, err := os.Stat(filepath.Join(home, name)); err == nil {
+			t.Errorf("init created %s for a harness that is not installed", name)
 		}
+	}
+}
+
+// A harness that is present is the only place init writes; it does not also
+// create the vendor-neutral directory beside it.
+func TestInitWithAHarnessSkipsTheNeutralSkill(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+
+	code, stdout, stderr := runCLI(t, "init")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	dir := filepath.Join(home, ".claude", "skills", "slopcop")
+	if !strings.Contains(stdout, "installed the slopcop skill at "+dir) {
+		t.Errorf("stdout = %q, want it to name %s", stdout, dir)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".agents")); err == nil {
+		t.Errorf("init created %s for a harness that is not installed", filepath.Join(home, ".agents"))
 	}
 }
 

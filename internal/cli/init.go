@@ -27,11 +27,14 @@ const skillFileName = "SKILL.md"
 type skillRoot struct {
 	marker string
 	dir    string
+	// neutral marks the vendor-neutral directory, which init uses when no
+	// harness directory is present.
+	neutral bool
 }
 
 // skillRoots are the well-known places the agent harnesses read skills from:
 //
-//	~/.agents/skills             Codex user skills, and the opencode universal directory
+//	~/.agents/skills             the vendor-neutral directory, read by Codex, opencode, Cursor and others
 //	~/.claude/skills             Claude Code personal skills, also read by opencode
 //	$CODEX_HOME/skills           the Codex home, or ~/.codex/skills when unset
 func skillRoots() ([]skillRoot, error) {
@@ -46,10 +49,36 @@ func skillRoots() ([]skillRoot, error) {
 	agents := filepath.Join(home, ".agents")
 	claude := filepath.Join(home, ".claude")
 	return []skillRoot{
-		{marker: agents, dir: filepath.Join(agents, "skills")},
+		{marker: agents, dir: filepath.Join(agents, "skills"), neutral: true},
 		{marker: claude, dir: filepath.Join(claude, "skills")},
 		{marker: codexHome, dir: filepath.Join(codexHome, "skills")},
 	}, nil
+}
+
+// skillTargets are the skills directories init writes: one for every harness
+// installed here, or the vendor-neutral ~/.agents/skills when none is. That
+// directory is read by Codex, opencode, Cursor and other agents, so init has
+// somewhere to put the skill on a machine whose harness has not created its
+// configuration directory yet.
+func skillTargets() ([]skillRoot, error) {
+	roots, err := skillRoots()
+	if err != nil {
+		return nil, err
+	}
+	var found []skillRoot
+	for _, root := range roots {
+		if isDirectory(root.marker) {
+			found = append(found, root)
+		}
+	}
+	if len(found) == 0 {
+		for _, root := range roots {
+			if root.neutral {
+				return []skillRoot{root}, nil
+			}
+		}
+	}
+	return found, nil
 }
 
 // skillInstall is what one install pass did, as skill directories.
@@ -70,14 +99,11 @@ func installBundledSkill(version string) (skillInstall, error) {
 	if err != nil {
 		return result, err
 	}
-	roots, err := skillRoots()
+	targets, err := skillTargets()
 	if err != nil {
 		return result, err
 	}
-	for _, root := range roots {
-		if !isDirectory(root.marker) {
-			continue
-		}
+	for _, root := range targets {
 		dir := filepath.Join(root.dir, skillName)
 		written, err := installSkillAt(root.dir, files, version)
 		if err != nil {
@@ -271,12 +297,14 @@ session wrote when the agent stops.
 
 The skill goes into every well-known skills directory whose harness is
 installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
-Code), and $CODEX_HOME/skills or ~/.codex/skills. A skill that is already
-there is left alone. Login and every check also install the skill, and
-rewrite one that differs from the bundled skill, naming the versions and files
-that changed and keeping a copy of local edits under skill-backups next to
-the slopcop configuration. Pass --no-skill to leave the skill install and any
-update of it undone.
+Code), and $CODEX_HOME/skills or ~/.codex/skills. When no harness is found it
+goes into ~/.agents/skills, the vendor-neutral directory those agents read, so
+a fresh machine has the skill before its harness creates its own directory. A
+skill that is already there is left alone. Login and every check also install
+the skill, and rewrite one that differs from the bundled skill, naming the
+versions and files that changed and keeping a copy of local edits under
+skill-backups next to the slopcop configuration. Pass --no-skill to leave the
+skill install and any update of it undone.
 
 A Stop hook goes into Claude Code's settings.json, under CLAUDE_CONFIG_DIR or
 ~/.claude, and Codex's hooks.json, under CODEX_HOME or ~/.codex, for each
@@ -310,9 +338,6 @@ Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 				}
 				for _, dir := range result.present {
 					fmt.Fprintf(stdout, "slopcop: the slopcop skill is already at %s\n", dir)
-				}
-				if len(result.installed) == 0 && len(result.present) == 0 {
-					fmt.Fprintln(stdout, "slopcop: no agent skills directory found, nothing to install")
 				}
 			}
 
