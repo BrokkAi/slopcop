@@ -1,6 +1,6 @@
 ---
 name: slopcop
-description: Check a working-tree change with the slopcop CLI, which sends the change to the hosted SlopCop check API. Use when asked to run slopcop, to check a change for policy findings, to fix what a check reported, or to gate a change in CI.
+description: Check a working-tree change with the slopcop CLI, which sends the change to the hosted SlopCop check API. Use when the user asks to run slopcop or fix what it reported, or when this repository is already enabled in the workspace and a change is ready to check.
 ---
 
 # SlopCop
@@ -8,10 +8,30 @@ description: Check a working-tree change with the slopcop CLI, which sends the c
 `slopcop` checks a change through the hosted check API. The CLI sends one git
 patch from the base commit to the working tree; the service applies it, runs
 the hosted policy catalog plus the repository rules selected, and returns the
-report. There is no local analyzer, and the CLI never decides on its own that
-there is nothing to check. Run from a Claude Code or Codex session, a check
-also sends which models wrote each changed file, read from the session's own
-record; `--verbose` prints it.
+report. There is no local analyzer, and the CLI never reports a check as
+passed without the service. `--if-enabled` can skip a repository the workspace
+has not enabled; that is a skip, not a check result. Run from a Claude Code or
+Codex session, a check also sends which models wrote each changed file, read
+from the session's own record; `--verbose` prints it.
+
+## Check only an enabled repository
+
+SlopCop checks only repositories enabled in the workspace. `slopcop status`
+says whether this checkout is added and active. `slopcop enable` adds it, and
+only a person at a terminal can run it; it shows the workspace and what adding
+the repository costs.
+
+Before an automatic or routine check, run `slopcop check --if-enabled`. It
+sends nothing and exits `0` when the repository is not active, with
+`"status": "skipped"` in `json`. When a check says the repository is not
+active, do nothing: do not run `slopcop enable`, do not ask the user to add it,
+and do not describe the change as checked. Mention it only when the user asks
+about SlopCop.
+
+When the user explicitly asks you to check a repository that is not enabled,
+stop and tell them to run `slopcop enable` at a terminal. Never run `slopcop
+enable` yourself, and never pass `--add-repository` without the user's explicit
+approval for the workspace they named.
 
 ## Sign in
 
@@ -43,34 +63,37 @@ names, whether the workspace has it and whether it is active.
   charged. A check of a disabled repository answers `repository_disabled`.
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
-- A first check adds the repository to the workspace. A workspace's first
-  repository is added without asking: stderr says `added owner/name to
-  "Workspace"` and the `json` report has `"repositoryAdded": true`. Tell the
-  user which workspace it joined. When the workspace would then pay for it, the check exits `4` with `repository_add_unconfirmed`, and
-  stderr names the workspace it would add to. Stop and tell the user: the
-  repository, the workspace, and the cost from the message. Only when the
-  user has approved adding it to that workspace, run the check again with
-  `--add-repository --workspace <name|id>`, naming the workspace they
-  approved; the flag refuses to run without `--workspace`. Do not pass it
-  without that approval, pick a workspace they did not name, or pipe an
-  answer into the check. Without the flag, a check that is not at a terminal
-  asks nothing and exits `4` the same way.
+- A check never adds a repository. The only ways a repository joins a
+  workspace are `slopcop enable`, run by a person at a terminal, or
+  `check --add-repository --workspace <name|id>` after a person approved
+  adding it to that workspace. `slopcop enable` runs the first check and says
+  `added owner/name to "Workspace"` on stderr; `json` carries
+  `"repositoryAdded": true`.
+- A plain check of a repository the workspace has not added exits `4` with
+  `repository_not_enabled` and sends nothing. Tell the user to run `slopcop
+  enable` at a terminal when they asked for a check; otherwise continue
+  without checking, as `--if-enabled` says.
+- Do not pass `--add-repository` without the user's explicit approval, do not
+  pick a workspace they did not name, and do not pipe an answer into a
+  command that asks at a terminal.
 
 ## Run a check
 
 ```console
-slopcop                        # check the current checkout
-slopcop check --format json    # machine-readable report
+slopcop                            # check the current checkout
+slopcop check --if-enabled         # automatic check: skip an inactive repository
+slopcop check --format json        # machine-readable report
 slopcop --root ../repo --base origin/main
 ```
 
 The base commit defaults to the merge base with the branch upstream, then the
 merge base with `origin/HEAD`, then `HEAD` when neither is known. If the
 upstream merge base gives an empty patch, as on a pushed branch, the CLI uses
-the `origin/HEAD` merge base instead. One request goes out per run, even when
-nothing changed: an empty patch is a real check, not a skip. Its report has
-`"emptyChange": true` and stderr says so; a `clean` status then means nothing
-was checked, not that the work passed.
+the `origin/HEAD` merge base instead. One request goes out per check, even
+when nothing changed: an empty patch is a real check, not a skip. Its report
+has `"emptyChange": true` and stderr says so; a `clean` status then means
+nothing was checked, not that the work passed. `--if-enabled` is the one skip:
+it sends nothing when the repository is not active.
 
 When you check work you have already committed, pass `--base` with the branch
 the change targets, such as the PR's base (`--base origin/main`), instead of
@@ -89,8 +112,10 @@ PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
-stderr. `--add-repository`, with `--workspace`, confirms adding the
-repository once the user has approved it (see above).
+stderr. `--if-enabled` is the automatic path: it exits `0` and sends nothing
+when the repository is not active. `--add-repository`, with `--workspace`,
+adds the repository once the user has approved it (see above); prefer
+`slopcop enable`, which asks the person directly.
 
 When the service reports a newer release, the CLI prints one line on stderr,
 at most once a day, starting `slopcop vX.Y.Z is available`. It never touches
@@ -98,11 +123,13 @@ stdout or the exit code; mention it to the user rather than upgrading on your
 own. `SLOPCOP_NO_UPDATE_NOTICE=1` turns it off.
 
 In Claude Code and Codex, `slopcop init` can install a `Stop` hook that checks
-the change when you stop and hands back new findings in files you wrote. A
-dependency manifest or lockfile a package manager changed, such as after
-`npm install` or `cargo add`, counts as one you wrote. It does not send a check whose result your session already has, so a check you ran by
-hand is not repeated. Keep running checks as described above; the hook is a
-backstop, not a replacement.
+the change when you stop and hands back new findings in files you wrote. It
+sends nothing for a repository the workspace does not have active, so it never
+adds one. A dependency manifest or lockfile a package manager changed, such as
+after `npm install` or `cargo add`, counts as one you wrote. It does not send a
+check whose result your session already has, so a check you ran by hand is not
+repeated. Keep running checks as described above; the hook is a backstop, not
+a replacement.
 
 ## New and pre-existing findings
 
@@ -153,8 +180,9 @@ the usual codes mean:
 | `finding_not_found` | `slopcop ignore` or `unignore` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
+| `repository_not_enabled` | The repository is not added to this workspace, so nothing was checked. When the user asked for the check, tell them to run `slopcop enable` at a terminal; when the check was automatic, continue without mentioning it. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
-| `repository_add_unconfirmed` | The check would add a repository the workspace then pays for. Tell the user which workspace and what it costs. Once they approve it, run the check again with `--add-repository --workspace <name|id>` for that workspace; otherwise they confirm at a terminal or on the Repositories page. |
+| `repository_add_unconfirmed` | The check tried to add a repository the workspace then pays for. Do not retry with `--add-repository` unless the user approved it for the workspace named; otherwise tell them to run `slopcop enable` at a terminal. |
 | `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
 

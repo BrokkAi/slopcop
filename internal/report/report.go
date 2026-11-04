@@ -437,6 +437,62 @@ func WritePending(w io.Writer, pending service.Pending, format string, options O
 	}
 }
 
+// Skipped is a check the CLI did not send because the repository is not active
+// in the workspace: nothing was checked, and that must not read as a pass.
+type Skipped struct {
+	Code       string
+	State      string
+	Repository string
+	Message    string
+}
+
+// skippedReport is the document `--format json` prints for a skipped check.
+type skippedReport struct {
+	Status       string        `json:"status"`
+	Code         string        `json:"code"`
+	State        string        `json:"state"`
+	Repository   string        `json:"repository"`
+	Message      string        `json:"message"`
+	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+}
+
+// WriteSkipped renders a check that was not sent because the repository is not
+// active. The human format prints nothing on stdout: the CLI says why on
+// stderr and exits 0, as an automatic path asked it to. The machine formats
+// carry the skip, so it cannot be mistaken for a clean check.
+func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) error {
+	switch format {
+	case "", FormatHuman:
+		return nil
+	case FormatJSON:
+		return encode(w, skippedReport{
+			Status:       "skipped",
+			Code:         skipped.Code,
+			State:        skipped.State,
+			Repository:   skipped.Repository,
+			Message:      skipped.Message,
+			SkillUpdated: options.SkillUpdated,
+		}, "json report")
+	case FormatSARIF:
+		return encode(w, sarifLog(sarifRun{
+			Tool:    sarifTool{Driver: sarifDriver{Name: "SlopCop", InformationURI: "https://slopcop.com", Rules: []sarifRule{}}},
+			Results: []sarifResult{},
+			Invocations: []sarifInvocation{{
+				ExecutionSuccessful: false,
+				ToolExecutionNotifications: []sarifNotification{{
+					Level:      "note",
+					Message:    sarifMessage{Text: skipped.Message},
+					Descriptor: &sarifDescriptor{ID: skipped.Code},
+					Properties: map[string]any{"slopcop.state": skipped.State},
+				}},
+			}},
+			Properties: runProperties(map[string]any{"slopcop.status": "skipped"}, options),
+		}), "sarif report")
+	default:
+		return fmt.Errorf("unknown format %q (expected human, json, or sarif)", format)
+	}
+}
+
 // failureReport is the document `--format json` prints for a check the
 // service refused: its closed error code, verbatim message and remedy, and
 // whether the same request may succeed later.

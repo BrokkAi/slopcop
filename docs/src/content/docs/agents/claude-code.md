@@ -22,11 +22,17 @@ explains the update and backup rules.
 
 ## Check every change
 
-To have Claude check every change without being asked, add a line to your
+First add the repository to the workspace from its checkout, at a terminal:
+
+```console
+slopcop enable
+```
+
+Then, to have Claude check every change without being asked, add a line to your
 project's `CLAUDE.md`:
 
 ```text
-Run slopcop before you finish and fix what it reports.
+Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
 Claude runs the check, reads the report, fixes the new findings, and runs it

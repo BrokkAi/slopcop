@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"net/url"
@@ -58,10 +59,10 @@ func newStatusCommand(serviceURL *string, version string) *cobra.Command {
 		Long: `Show the account and workspace that bill checks, and whether the repository
 the origin remote names is added to that workspace and active.
 
-A repository that is not added is added by its first check. A disabled one is
-not checked or charged; the workspace's owner enables it with
-'slopcop repo enable'. SlopCop checks repositories on github.com, gitlab.com
-and bitbucket.org.`,
+A repository that is not added is added by 'slopcop enable' from its checkout,
+at a terminal. A disabled one is not checked or charged; the workspace's owner
+enables it with 'slopcop repo enable'. SlopCop checks repositories on
+github.com, gitlab.com and bitbucket.org.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runStatus(cmd, opts, *serviceURL, version)
@@ -106,22 +107,9 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 		}
 		client.Workspace = workspace.ID
 	}
-	repository := localRepository(repoURL)
-	if repository.Provider != "" {
-		listed, err := client.Repositories(cmd.Context())
-		if err != nil {
-			return serviceFailure(cmd, err)
-		}
-		for _, candidate := range listed.Repositories {
-			if strings.EqualFold(candidate.Provider, repository.Provider) &&
-				strings.EqualFold(candidate.FullName, repository.FullName) {
-				repository.ID = candidate.ID
-				repository.Enabled = candidate.Enabled
-				repository.Active = candidate.Active
-				repository.State = statusState(candidate)
-				break
-			}
-		}
+	repository, err := repositoryStatus(cmd.Context(), client, repoURL)
+	if err != nil {
+		return serviceFailure(cmd, err)
 	}
 	answer := statusReport{
 		Service:    client.BaseURL,
@@ -135,6 +123,44 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 	}
 	writeStatus(cmd.OutOrStdout(), answer)
 	return nil
+}
+
+// lookupRepositoryStatus describes the repository the checkout's origin remote
+// names, and its state in the workspace client points at.
+func lookupRepositoryStatus(ctx context.Context, client *service.Client, repoRoot string) (statusRepository, error) {
+	origin, err := gitx.OriginURL(repoRoot)
+	if err != nil {
+		return statusRepository{}, err
+	}
+	repoURL, err := gitx.CanonicalRepoURL(origin)
+	if err != nil {
+		return statusRepository{}, err
+	}
+	return repositoryStatus(ctx, client, repoURL)
+}
+
+// repositoryStatus describes repoURL in the workspace client points at. A
+// provider SlopCop does not check is unsupported and is not listed.
+func repositoryStatus(ctx context.Context, client *service.Client, repoURL string) (statusRepository, error) {
+	repository := localRepository(repoURL)
+	if repository.Provider == "" {
+		return repository, nil
+	}
+	listed, err := client.Repositories(ctx)
+	if err != nil {
+		return repository, err
+	}
+	for _, candidate := range listed.Repositories {
+		if strings.EqualFold(candidate.Provider, repository.Provider) &&
+			strings.EqualFold(candidate.FullName, repository.FullName) {
+			repository.ID = candidate.ID
+			repository.Enabled = candidate.Enabled
+			repository.Active = candidate.Active
+			repository.State = statusState(candidate)
+			break
+		}
+	}
+	return repository, nil
 }
 
 // localRepository describes the checkout from its canonical URL before the
@@ -193,7 +219,7 @@ func writeStatus(out io.Writer, answer statusReport) {
 func statusText(repository statusRepository) string {
 	switch repository.State {
 	case statusNotAdded:
-		return "not added (a first check adds it to the workspace)"
+		return "not added (run 'slopcop enable' from the checkout to add it)"
 	case statusUnsupported:
 		return "unsupported (SlopCop checks github.com, gitlab.com and bitbucket.org)"
 	case statusOverLimit:

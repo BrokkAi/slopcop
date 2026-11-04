@@ -31,10 +31,14 @@ API, but only when all of these hold:
   manifest or lockfile (below);
 - slopcop is signed in, and the workspace a check would use
   (`SLOPCOP_WORKSPACE`, or the login's) has the repository active, so nothing is
-  sent from other repositories;
+  sent from other repositories and the hook never adds one;
 - the tree differs from the last check in the session, including a check the
   agent ran by hand. A check whose result the session already has is not sent
   again.
+
+The hook is therefore dormant in a repository until someone runs `slopcop
+enable` there. It stays quiet otherwise; it does not ask to enable the
+repository.
 
 ### Dependency changes
 

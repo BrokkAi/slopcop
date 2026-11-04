@@ -21,9 +21,11 @@ of to a guess.
 The full documentation is at <https://docs.slopcop.com>.
 
 There is no local analyzer and nothing to install per language: the CLI ships
-the change and prints what comes back, and it never decides on its own that
-there is nothing to check. The command is built for agents and one-shot CI: no
-prompts, one request, and the analyzer's exit contract.
+the change and prints what comes back, and it never reports a check as passed
+without the service. The command is built for agents and one-shot CI: no
+prompts, one request, and the analyzer's exit contract. A check never adds a
+repository; `--if-enabled` skips one the workspace has not enabled, and says it
+was skipped.
 
 ## Install
 
@@ -131,7 +133,7 @@ go install github.com/BrokkAi/slopcop/cmd/slopcop@latest
 Go 1.25 or newer is required to build. A plain `go install` reports `dev` as
 its version; in a clone, `make install` stamps the version from `git describe`.
 
-## Enable it in an agent
+## Set it up in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
 slopcop, plus an automatic check hook for Claude Code and Codex. `slopcop init`
@@ -225,6 +227,11 @@ Use `slopcop init --no-hooks` to install only the skill, or
 Ordinary checks do not reinstall a removed hook. The skill remains the way to
 check from other harnesses.
 
+The hook is dormant in a repository until it is enabled in the workspace. Run
+`slopcop enable` in the checkout, at a terminal, to add it and run its first
+check. The hook then checks what an agent writes and hands findings back; it
+never adds a repository and sends nothing for one that is not active.
+
 ## Sign in
 
 ```console
@@ -247,7 +254,7 @@ Precedence:
 | --- | --- |
 | Service URL | `--service`, `$SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
 | Token | `$SLOPCOP_TOKEN`, stored value |
-| Workspace (`check`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
+| Workspace (`check`, `enable`, `status`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
 
 ## Workspace and repositories
 
@@ -257,6 +264,7 @@ active in the browser when the login was approved.
 ```console
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
 slopcop status                     # this checkout's repository, and whether the workspace checks it
+slopcop enable                     # add this checkout's repository to the workspace, at a terminal
 slopcop workspace list             # the account's workspaces; * marks this login's
 slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
 slopcop check -w "Acme team"       # check in, and bill, another workspace this once
@@ -281,32 +289,36 @@ To check in another workspace without moving anyone, `check`, `status`,
 own `--workspace` instead of switching it.
 
 Names match without regard to case; when two workspaces share a name, or two
-providers a repository name, pass the id the listing prints. There is no `repo
-add`: a first check adds a repository. When the workspace would then pay for
-it (it already has an active repository and is charged), the service refuses
-the check with `repository_add_unconfirmed` until a person confirms: at a
-terminal `check` prints what it costs, asks `Add owner/name to "Workspace"?
-[y/N]`, and on a yes sends the check again and says `added owner/name to
-"Workspace"` on stderr. With no terminal, as for an agent or CI (a pipe or the
-null device is not one), nothing is asked: the check exits `4` with the
-service's remedy, a line naming the command that confirms it, and, in `json`,
-a `failed` report naming the code. A no at the terminal ends the same way.
-Once the person has approved it, `check --add-repository --workspace
-<name|id>` confirms without a terminal; the flag needs `--workspace` (the
-flag itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one
-workspace cannot add the repository to the one the login happens to point at.
-The flag changes nothing for a repository already in that workspace. A
-workspace's first repository is added without asking; the check still says
-`added owner/name to "Workspace"` on stderr, and `json` reports
-`"repositoryAdded": true`. Deleting repositories,
-archiving workspaces, members, credits and repository settings stay in the web
-app. The commands exit `0` on success and `2` with the service's message and
-remedy otherwise, as `ignore` does.
+providers a repository name, pass the id the listing prints.
+
+`slopcop enable`, run inside a checkout at a terminal, adds the repository the
+`origin` remote names to the workspace that checks and bills it, and runs its
+first check. It names the workspace and what adding the repository costs, asks
+you to type the repository's `owner/name`, and refuses when stdin is not a
+terminal. A repository that is already added but disabled is enabled again;
+one that is already active is left alone. An agent runs with your login and
+the service cannot tell it from you, so adding a repository stays a step you
+take yourself.
+
+A check never adds a repository. A check of one the workspace has not added
+exits `4` with `repository_not_enabled` and sends nothing; `status` shows the
+same state, and a check that is not at a terminal asks nothing. Once a person
+has approved adding one, `check --add-repository --workspace <name|id>`
+carries that approval without a terminal; the flag needs `--workspace` (the
+flag itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one workspace
+cannot add the repository to the one the login happens to point at. The flag
+changes nothing for a repository already in that workspace. `slopcop enable`
+says `added owner/name to "Workspace"` on stderr, and `json` reports
+`"repositoryAdded": true`. Deleting repositories, archiving workspaces,
+members, credits and repository settings stay in the web app. `enable` exits
+with its first check's result; the other account commands exit `0` on success
+and `2` with the service's message and remedy otherwise, as `ignore` does.
 
 ## Check
 
 ```console
 slopcop                          # check the change in the current checkout
+slopcop check --if-enabled       # automatic check: skip a repository not enabled here
 slopcop check --format json      # same, machine-readable
 slopcop --root ../repo --base origin/main
 ```
@@ -346,7 +358,8 @@ Flags:
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it |
+| `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` without sending a check |
+| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 ### What is sent
@@ -501,23 +514,23 @@ rewrite them. The remedies name no client, so the CLI adds its own command
 after some: `slopcop login` when the remedy is to sign in, the listing to
 choose from after `workspace_not_found` or `workspace_repository_not_found`,
 and `slopcop whoami` after `repository_disabled`, since the workspace that
-disabled it is the one this login is bound to, `--workspace` after
-`owner_required`, and `--add-repository --workspace "Name"`, with the
-workspace the check would have added the repository to, after
-`repository_add_unconfirmed`. A failed check exits `4` when only a person can
-clear the refusal (`auth_required`, `auth_expired`, `account_required`,
+disabled it is the one this login is bound to, and `--workspace` after
+`owner_required`. A failed check exits `4` when only a person can clear the
+refusal (`auth_required`, `auth_expired`, `account_required`,
 `repo_not_indexed`, `app_not_installed`, `app_no_repo_access`,
 `gitlab_not_connected`, `no_access`, `insufficient_credits`,
-`repository_disabled`, `repository_add_unconfirmed`,
-`workspace_repository_limit_reached`, `active_repository_limit_reached`,
-`owner_required`, and `browser_required`), so a script can stop instead of
-retrying, and `2` otherwise. Stderr starts with the code, as in `slopcop:
-repository_add_unconfirmed: …`. `human` prints nothing on stdout; `json`
-prints `{"status": "failed", "code": …, "message": …, "remedy": …,
-"retryable": …}`, plus `installUrl` or `topUpUrl` when the service sent one;
-`sarif` prints a run with `slopcop.status` `failed`, whose invocation is
-unsuccessful and carries an `error` notification whose descriptor id is the
-code.
+`repository_disabled`, `repository_not_enabled`,
+`repository_add_unconfirmed`, `workspace_repository_limit_reached`,
+`active_repository_limit_reached`, `owner_required`, and `browser_required`),
+so a script can stop instead of retrying, and `2` otherwise. The CLI refuses a
+check of a repository the workspace has not added locally, as
+`repository_not_enabled`, before sending anything. Stderr starts with the
+code, as in `slopcop: repository_not_enabled: …`. `human` prints nothing on
+stdout; `json` prints `{"status": "failed", "code": …, "message": …,
+"remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the
+service sent one; `sarif` prints a run with `slopcop.status` `failed`, whose
+invocation is unsuccessful and carries an `error` notification whose
+descriptor id is the code.
 
 ## API
 

@@ -27,17 +27,15 @@ const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
 	invalidChange   = "invalid_change"
-	// repositoryAddUnconfirmed is the service's refusal of a check that would
-	// add a repository its workspace then pays for.
-	repositoryAddUnconfirmed = "repository_add_unconfirmed"
-	baseNotFound             = "base_not_found"
+	baseNotFound    = "base_not_found"
 	// addRepositoryNeedsWorkspace is the usage error for --add-repository
 	// without --workspace: the approval is for one workspace, so the flag
 	// names it rather than trusting wherever the login points.
 	addRepositoryNeedsWorkspace = "--add-repository needs --workspace <name|id>: name the workspace the user approved adding the repository to, so it cannot be added to another"
-	// nothingAddedText is printed when the person at the terminal does not
-	// confirm, before the refusal that stands.
-	nothingAddedText = "slopcop: nothing was added, so the check did not run"
+	// repositoryNotEnabledCode is the CLI's refusal of a check of a repository
+	// the workspace has not added. The CLI refuses locally so a check never
+	// adds, and bills for, a repository by itself.
+	repositoryNotEnabledCode = "repository_not_enabled"
 	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
 	// was sent: a service that received it keeps it, so asking again picks up
 	// its result.
@@ -94,6 +92,26 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
 		return checkFailure(cmd, err, format, reportOptions)
 	}
+	if opts.addRepository {
+		// The flag carries the user's approval, so the request says so on
+		// its first send. A check without it never adds a repository.
+		request.AddRepository = true
+	} else {
+		repository, err := checkRepository(cmd.Context(), client, prepared.repoRoot)
+		if err != nil {
+			return checkFailure(cmd, err, format, reportOptions)
+		}
+		if !repository.Active {
+			if opts.ifEnabled {
+				return skipInactiveCheck(cmd, repository, format, reportOptions)
+			}
+			if repository.State == statusNotAdded {
+				return checkFailure(cmd, repositoryNotEnabled(repository), format, reportOptions)
+			}
+			// A disabled or over-limit repository is already known to the
+			// workspace; let the service give its own refusal and remedy.
+		}
+	}
 	if opts.verbose {
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
@@ -120,9 +138,6 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	response, err := sendCheck(ctx, client, &request, verbose)
 	var rejected *service.Error
-	if errors.As(err, &rejected) && rejected.Body.Code == repositoryAddUnconfirmed {
-		response, err = addRepositoryOnConfirm(cmd, client, opts, request, rejected)
-	}
 	if errors.As(err, &rejected) && rejected.Body.Code == baseNotFound {
 		err = &baseRefusal{refusal: rejected, text: baseNotFoundHint(cmd.Context(), prepared.repoRoot, request.BaseCommit)}
 	}
@@ -142,8 +157,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return checkFailure(cmd, err, format, reportOptions)
 	}
 	if response.RepositoryAdded {
-		// A workspace's first repository is added without asking, so this
-		// is the only word of it the person gets.
+		// The add was approved before the check, so name the workspace the
+		// person approved when the service says it added the repository.
 		workspace, known := resolvedWorkspace(cmd.Context(), client)
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n",
 			repositoryName(request.RepoURL), workspaceName(workspace, known))
@@ -196,43 +211,56 @@ func checkFailure(cmd *cobra.Command, err error, format string, options report.O
 	return err
 }
 
-// addRepositoryOnConfirm sends the check again, confirmed, once adding the
-// repository to the workspace, which then pays for it, is approved: by
-// --add-repository, which carries the user's approval for the workspace
-// --workspace names, or by the person at the terminal. The service cannot
-// tell a person from an agent using the same login, so with neither, as for
-// an agent or CI without the flag, the refusal stands, and its remedy names
-// the flag with that workspace. A no at the terminal leaves the same refusal,
-// so every way the check does not run reports alike.
-func addRepositoryOnConfirm(cmd *cobra.Command, client *service.Client, opts *checkOptions, request service.Request, refusal *service.Error) (service.Response, error) {
-	stderr := cmd.ErrOrStderr()
-	repository := repositoryName(request.RepoURL)
-	workspace, known := resolvedWorkspace(cmd.Context(), client)
-	if !opts.addRepository {
-		stands := &addRefusal{refusal: refusal, workspace: workspace, known: known}
-		if _, ok := confirmInput(cmd); !ok {
-			return service.Response{}, stands
-		}
-		fmt.Fprintln(stderr, refusal.Error())
-		question := fmt.Sprintf("Add %s to %s?", repository, workspaceName(workspace, known))
-		yes, err := confirmYes(cmd, question)
-		if err != nil {
-			return service.Response{}, err
-		}
-		if !yes {
-			fmt.Fprintln(stderr, nothingAddedText)
-			return service.Response{}, stands
-		}
+// checkRepository is lookupRepositoryStatus, a variable so tests can stand in
+// for the service when a check only needs to be told the repository is active.
+var checkRepository = lookupRepositoryStatus
+
+// repositoryNotEnabled is the local refusal of a check of a repository the
+// workspace has not added. It is local so the check never sends the request
+// that would add, and bill for, the repository.
+func repositoryNotEnabled(repository statusRepository) *service.Error {
+	name := repository.FullName
+	if name == "" {
+		name = repository.URL
 	}
-	request.AddRepository = true
-	// The wait for the person is not part of the check's own.
-	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
-	defer cancel()
-	response, err := client.Check(ctx, request)
-	// A confirmed check always adds the repository, whether or not the
-	// service says so.
-	response.RepositoryAdded = err == nil
-	return response, err
+	return &service.Error{Body: service.ErrorBody{
+		Code:      repositoryNotEnabledCode,
+		Message:   fmt.Sprintf("%s is not enabled in your SlopCop workspace, so the check did not run.", name),
+		Remedy:    "Run `slopcop enable` in the repository at a terminal to add it to the workspace, then check again.",
+		Retryable: false,
+	}}
+}
+
+// skipInactiveCheck is --if-enabled's answer for a repository the workspace
+// does not have active: say on stderr why nothing ran, carry the skip in the
+// machine formats, and exit 0 so an automatic check is not a failure.
+func skipInactiveCheck(cmd *cobra.Command, repository statusRepository, format string, options report.Options) error {
+	name := repository.FullName
+	if name == "" {
+		name = repository.URL
+	}
+	why := "is not active in your SlopCop workspace"
+	switch repository.State {
+	case statusNotAdded:
+		why = "is not enabled in your SlopCop workspace"
+	case statusDisabled:
+		why = "is disabled in your SlopCop workspace"
+	case statusOverLimit:
+		why = "is over your SlopCop workspace's active-repository limit"
+	case statusUnsupported:
+		why = "is on a host SlopCop does not check"
+	}
+	message := fmt.Sprintf("%s %s, so nothing was checked.", name, why)
+	fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+message)
+	if err := report.WriteSkipped(cmd.OutOrStdout(), report.Skipped{
+		Code:       repositoryNotEnabledCode,
+		State:      repository.State,
+		Repository: name,
+		Message:    message,
+	}, format, options); err != nil {
+		return err
+	}
+	return silentExit{service.ExitClean}
 }
 
 // hinted is a service refusal the CLI adds a line of its own to, after the
@@ -285,29 +313,6 @@ func describeBase(root, base, branch string) string {
 		)
 	}
 	return ""
-}
-
-// addRefusal is repository_add_unconfirmed when no one confirmed it: the
-// service's refusal, which it stands in for, plus the workspace the check
-// would have added the repository to, for the remedy's hint.
-type addRefusal struct {
-	refusal   *service.Error
-	workspace string
-	known     bool
-}
-
-func (r *addRefusal) Error() string { return r.refusal.Error() }
-
-func (r *addRefusal) Unwrap() error { return r.refusal }
-
-// hint names the command that confirms the add without a terminal, with the
-// workspace the approval must be for.
-func (r *addRefusal) hint() string {
-	workspace := "<name|id>"
-	if r.known {
-		workspace = fmt.Sprintf("%q", r.workspace)
-	}
-	return fmt.Sprintf("Once the user approves adding it there, run the check again with `--add-repository --workspace %s`.", workspace)
 }
 
 // repositoryName is owner/name of a canonical repository URL, for a

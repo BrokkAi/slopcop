@@ -34,6 +34,10 @@ var knownErrors = map[string]ErrorBody{
 		Message: "SlopCop has no such finding for this login.",
 		Remedy:  "Use a finding id from a check you ran with this login.",
 	},
+	"repository_not_enabled": {
+		Message: "This repository is not enabled in your SlopCop workspace, so the check did not run.",
+		Remedy:  "Run `slopcop enable` in the repository at a terminal to add it to the workspace, then check again.",
+	},
 }
 
 // personCodes are the refusals only a person can clear: signing in, paying,
@@ -50,6 +54,7 @@ var personCodes = map[string]bool{
 	"no_access":                          true,
 	"insufficient_credits":               true,
 	"repository_disabled":                true,
+	"repository_not_enabled":             true,
 	"repository_add_unconfirmed":         true,
 	"workspace_repository_limit_reached": true,
 	"active_repository_limit_reached":    true,

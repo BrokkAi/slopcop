@@ -8,11 +8,12 @@ sidebar:
 ## opencode
 
 opencode reads both `~/.agents/skills` and `~/.claude/skills`, so
-`slopcop init` covers it too. Ask it to check its change, or add the usual line
-to your project's `AGENTS.md`:
+`slopcop init` covers it too. Add the repository to the workspace from its
+checkout with `slopcop enable` at a terminal, then ask it to check its change,
+or add the usual line to your project's `AGENTS.md`:
 
 ```text
-Run slopcop before you finish and fix what it reports.
+Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
 There is no Stop hook for opencode; the skill is how it knows to check.
@@ -20,17 +21,20 @@ There is no Stop hook for opencode; the skill is how it knows to check.
 ## Any agent with a shell
 
 Any agent that can run a shell command can run `slopcop`: it never prompts,
-sends one request, and answers with an exit code. Run outside Claude Code or
-Codex, a check sends nothing about the session, only the repository URL, the
-base commit, and the patch.
+every check it sends makes one request, and it answers with an exit code. Run
+outside Claude Code or Codex, a check sends nothing about the session, only the
+repository URL, the base commit, and the patch.
 
 If the agent cannot load skills, give it the essentials in its instructions
 file:
 
 ```text
-Before you finish, run `slopcop --format json` from the repository root and
-read the report.
-- Exit 0: clean.
+Before you finish, run `slopcop check --if-enabled --format json` from the
+repository root and read the report. It sends nothing when this repository is
+not enabled in the workspace.
+- Exit 0: clean, or skipped because the repository is not enabled. A skip is
+  not a pass; do not ask the user to add the repository unless they asked you
+  to check it. They enable it with `slopcop enable` at a terminal.
 - Exit 1: the change added findings. Fix each one and run the check again.
   Read a finding whose certainty is "possible" or "heuristic" before changing
   code; if it is a false positive, run `slopcop ignore <id>` with its id.

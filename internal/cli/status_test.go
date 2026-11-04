@@ -118,7 +118,7 @@ func TestStatusShowsARepositoryThatIsNotAdded(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "State:      not added (a first check adds it to the workspace)\n") {
+	if !strings.Contains(stdout, "State:      not added (run 'slopcop enable' from the checkout to add it)\n") {
 		t.Errorf("stdout = %q", stdout)
 	}
 }

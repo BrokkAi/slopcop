@@ -29,8 +29,8 @@ prints opens it with the code filled in.
 
 ## Repositories
 
-Lists every repository of the active workspace. Repositories join when an agent
-checks one with `slopcop check`; the page has no way to add one. Each row links
+Lists every repository of the active workspace. Repositories join when someone
+runs `slopcop enable` in their checkout; the page has no way to add one. Each row links
 to the repository's page and its settings, says whether it is disabled, and for
 the owner offers **Disable** and **Enable**. When the
 [active-repository limit](/account/repositories/#the-active-repository-limit)
