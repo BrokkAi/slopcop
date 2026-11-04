@@ -27,6 +27,8 @@ A login runs its checks and ignores in, and bills, one workspace. When it
 matters which one, run `slopcop whoami` before a check: it prints the account,
 the workspace (name, kind, role), its plan (Pro or Free) and the service URL
 (`--format json` for `service`, `account`, `workspace` and `plan`).
+`slopcop status` shows the same for this checkout: the repository `origin`
+names, whether the workspace has it and whether it is active.
 
 - `slopcop workspace list` lists the account's workspaces; `*` marks this
   login's. `slopcop workspace use <name|id>` moves this login to another one,

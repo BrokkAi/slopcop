@@ -297,7 +297,7 @@ func TestRepoRefusesAnUnknownRepository(t *testing.T) {
 
 func TestAccountCommandsRejectAnUnknownFormat(t *testing.T) {
 	isolateUserConfig(t)
-	for _, args := range [][]string{{"whoami"}, {"workspace", "list"}, {"repo", "list"}} {
+	for _, args := range [][]string{{"whoami"}, {"workspace", "list"}, {"repo", "list"}, {"status"}} {
 		code, _, stderr := runCLI(t, append(args, "--format", "sarif", "--service", "https://example.invalid")...)
 		if code != 2 || !strings.Contains(stderr, "use human or json") {
 			t.Errorf("%v: exit = %d, stderr = %q", args, code, stderr)
