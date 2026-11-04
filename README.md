@@ -140,9 +140,14 @@ present, and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `~/.agents/skills/slopcop/` | Codex, opencode |
+| `~/.agents/skills/slopcop/` | Codex, opencode, Cursor, and other agents |
 | `~/.claude/skills/slopcop/` | Claude Code, opencode |
 | `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
+
+When none of those harness directories is present, init writes the
+vendor-neutral `~/.agents/skills/slopcop/` instead, which Codex, opencode,
+Cursor and other agents read. A fresh machine therefore has the skill before
+any harness has created its configuration directory.
 
 A skill that is already there is left alone by init, so running it again is
 safe. `slopcop login` and every check also install the skill in those
