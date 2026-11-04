@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every slopcop command and flag. Check, login, logout, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
+description: "Every slopcop command and flag. Check, status, login, logout, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
 sidebar:
   order: 1
 ---
@@ -50,6 +50,26 @@ slopcop --root ../repo --base origin/main
 Exit codes: `0` clean, `1` new findings, `2` incomplete or failed, `3` still
 running, `4` refused and a person must act, `130`/`143` interrupted. See
 [Exit codes](/checks/exit-codes/).
+
+## `slopcop status`
+
+Show the account and workspace that bill checks, and whether the repository the
+`origin` remote names is added to that workspace and active. It is the quick
+way to answer whether a checkout is handled by SlopCop. See
+[Repositories](/account/repositories/).
+
+| Flag | Meaning |
+| --- | --- |
+| `--root PATH` | repository path (default `.`) |
+| `--format human\|json` | output format (default `human`) |
+| `-w`, `--workspace NAME\|ID` | workspace to inspect, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
+
+States: `active`; `disabled`; `enabled, over the limit`; `not added` (a first
+check adds it); and `unsupported` (SlopCop checks repositories on github.com,
+gitlab.com and bitbucket.org). `json` carries the same state as `active`,
+`disabled`, `over_limit`, `not_added`, or `unsupported`, with the repository's
+`url`, `fullName`, `provider`, `id`, `enabled`, and `active`. Exits `2` when
+the checkout has no `origin`, or the service cannot answer.
 
 ## `slopcop login`
 

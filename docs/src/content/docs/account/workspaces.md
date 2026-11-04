@@ -10,12 +10,13 @@ active in the browser when the login was approved.
 
 ```console
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
+slopcop status                     # this checkout's repository, and the workspace that bills it
 slopcop workspace list             # the account's workspaces; * marks this login's
 slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
 slopcop check -w "Acme team"       # check in, and bill, another workspace this once
 ```
 
-`whoami` and `workspace list` take `--format human|json`, as does
+`whoami`, `status` and `workspace list` take `--format human|json`, as does
 `workspace use` for its answer.
 
 ## Which workspace pays
@@ -31,9 +32,10 @@ So it asks `[y/N]` and refuses when stdin is not a terminal. An agent cannot
 do it for you.
 
 To check, ignore, or list repositories in another workspace without moving
-anyone, `check`, `ignore`, `unignore`, `ignored`, and `repo` take `-w`/`--workspace <name|id>` (or
-`SLOPCOP_WORKSPACE`). It applies to that command only. Give agents that share a
-login their own `--workspace` instead of switching it.
+anyone, `check`, `status`, `ignore`, `unignore`, `ignored`, and `repo` take
+`-w`/`--workspace <name|id>` (or `SLOPCOP_WORKSPACE`). It applies to that
+command only. Give agents that share a login their own `--workspace` instead
+of switching it.
 
 Names match without regard to case; when two workspaces share a name, pass the
 id the listing prints. A name that matches nothing answers

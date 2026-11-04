@@ -109,6 +109,6 @@ SARIF is what GitHub code scanning and most CI annotators read; see
 
 ## Account commands
 
-`whoami`, `workspace list`, and `repo list` take `--format human|json`, as do
-`workspace use` and `repo enable|disable` for their answer. See the
+`whoami`, `status`, `workspace list`, and `repo list` take `--format human|json`,
+as do `workspace use` and `repo enable|disable` for their answer. See the
 [CLI reference](/reference/cli/).

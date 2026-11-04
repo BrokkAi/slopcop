@@ -6,10 +6,16 @@ sidebar:
 ---
 
 ```console
+slopcop status                     # this checkout's repository, and whether the workspace checks it
 slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
 slopcop repo disable acme/widgets  # stop checking and charging for one (owner only)
 slopcop repo enable acme/widgets   # turn it back on, within the workspace's active limit
 ```
+
+`slopcop status` shows the checkout's repository (the one `origin` names),
+whether it is added to the workspace, and its state, beside the account and
+workspace that bill checks. `--root` names another checkout, `-w`/`--workspace`
+another workspace, and `--format human|json` the output.
 
 `repo list` takes `--format human|json`, as do `repo enable` and
 `repo disable` for their answer. All three take `-w`/`--workspace` for another
