@@ -5,7 +5,8 @@ sidebar:
   order: 4
 ---
 
-The service answers structured data; the CLI renders it. `--format` only
+The hosted service and local review answer separately; the CLI merges
+and renders their results. `--format` only
 changes the rendering, never the request, so the service answers the same check
 whichever is used, and running the same check again in another format picks up
 the same analysis.
@@ -26,9 +27,14 @@ src/main/java/orders/ExportServlet.java:48  request parameter reaches SQL text  
 Inconclusive: 3 (2 elsewhere)
 ```
 
-A failed check prints nothing on stdout; stderr starts with
+A static-only failed check prints nothing on stdout; stderr starts with
 `slopcop: <code>:` followed by the service's message and remedy, verbatim, and
 any install or top-up link. `--verbose` names each inconclusive rule.
+
+After the static report, human output includes a Review section with each
+reviewer's verdict, text, log path, unavailable families, and intent source.
+Review progress goes to stderr. Reviewers run in the repository root with
+their own tools and permissions; they can edit files.
 
 ## json
 
@@ -69,7 +75,9 @@ slopcop check --format json
 
 | Field | Meaning |
 | --- | --- |
-| `status` | `clean`, `findings`, `incomplete`, `pending`, `failed`, or, for `--if-enabled` with an inactive repository, `skipped` |
+| `staticStatus` | service status when it differs from merged `status` |
+| `review` | `status`, `reviewers`, `unavailable`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
+| `status` | merged result matching the exit code: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped` |
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
 | `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `inconclusive` |
@@ -97,7 +105,9 @@ nothing.
 slopcop check --format sarif > slopcop.sarif
 ```
 
-A SARIF 2.1.0 log whose results carry `baselineState` `new` and the finding id
+A SARIF 2.1.0 log with a second run, `slopcop-review`, containing
+reviewer findings as location-free results and failures as notifications.
+The static results carry `baselineState` `new` and the finding id
 in `properties["slopcop.findingId"]`. Inconclusive rules appear as `note`
 notifications with `slopcop.inconclusive` and `slopcop.elsewhere` properties;
 an empty change sets `properties["slopcop.emptyChange"]`; a skill update sits in

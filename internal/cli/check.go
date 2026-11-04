@@ -20,6 +20,7 @@ import (
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/report"
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -48,8 +49,25 @@ const (
 	// patch, so a clean result is not read as a pass for work never sent.
 	emptyChangeNotice = "slopcop: the working tree matches the base %s, so the patch is empty and no change was checked. " +
 		"To check committed work, pass --base with the branch it targets, for example --base origin/main."
-	showExistingNotice = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
+	reviewInterruptedText = "slopcop: local reviewers were stopped before the review finished; run the same check again to retry it."
+	showExistingNotice    = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
+
+// staticOutcome holds one terminal result of the hosted half.
+type staticOutcome struct {
+	// response is the completed service response.
+	response *service.Response
+	// failure is a refused or locally failed static check.
+	failure *service.Error
+	// pending means the service is still running.
+	pending *service.Pending
+	// skipped is an inactive repository bypassed by --if-enabled.
+	skipped *report.Skipped
+	// exit is the static half's exit code.
+	exit int
+	// status is the static half's own status.
+	status string
+}
 
 func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version string) error {
 	format, failOn, err := resolveEnums(opts)
@@ -62,22 +80,28 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if opts.showExisting {
 		fmt.Fprintln(cmd.ErrOrStderr(), showExistingNotice)
 	}
-	// The installed skill follows the binary that runs.
-	// The machine reports carry what it wrote, for an agent that reads only
-	// stdout.
-	reportOptions := report.Options{
-		ShowExisting: opts.showExisting,
-		Verbose:      opts.verbose,
-		SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), version),
-	}
-	stdout := cmd.OutOrStdout()
+	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	prepared, err := prepareCheck(opts, cfg, serviceFlag, version, failOn)
-	// An interrupt during the git work stops git too, which then fails;
-	// either way nothing reached the service.
+	mode, err := resolveMode(opts.mode, opts.static, opts.ai, cfg)
+	if err != nil {
+		return err
+	}
+	var settings review.Settings
+	if mode != modeStatic {
+		if opts.reviewTimeout < 0 {
+			return fmt.Errorf("--review-timeout must be nonnegative")
+		}
+		settings, err = reviewSettings(cfg, opts.reviewTimeout)
+		if err != nil {
+			return err
+		}
+	}
+	effectiveOpts := *opts
+	effectiveOpts.mode = mode
+	prepared, err := prepareCheck(&effectiveOpts, cfg, serviceFlag, version, failOn)
 	if cmd.Context().Err() != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), interruptedBeforeSendText)
 		return silentExit{interruptCode(cmd.Context())}
@@ -85,51 +109,224 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
-	// A hook run leaves this out: its stderr is not a person's terminal.
-	noticeUpdates(prepared.client, cmd.ErrOrStderr(), version)
-	prepared.request.Attribution = attribution.Detect(prepared.repoRoot)
+	attr := attribution.Detect(prepared.repoRoot)
+	prepared.request.Attribution = attr
+	var models []string
+	if attr != nil {
+		for _, m := range attr.Models {
+			models = append(models, m.Model)
+		}
+	}
+	var store *review.Store
+	var verdict review.Verdict
+	var reviewDone chan review.Verdict
+	if mode != modeStatic {
+		reviewDone = make(chan review.Verdict, 1)
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: starting %d local reviewers; this can take several minutes.\n", settings.Count)
+		go func() {
+			v := review.Verdict{Status: review.StatusFailed}
+			var err error
+			store, err = review.OpenStore(prepared.repoRoot)
+			if err != nil {
+				v.Error = err.Error()
+				reviewDone <- v
+				return
+			}
+			capture, err := review.NewCapture(prepared.repoRoot, prepared.request.BaseCommit, prepared.snapshot.Tree)
+			if err != nil {
+				v.Error = err.Error()
+				reviewDone <- v
+				return
+			}
+			v = review.Run(cmd.Context(), store, capture, review.Options{
+				Mode:         mode,
+				Version:      version,
+				Root:         prepared.repoRoot,
+				BaseCommit:   prepared.request.BaseCommit,
+				Intent:       opts.intent,
+				AuthorModels: models,
+				Settings:     settings,
+				Progress:     cmd.ErrOrStderr(),
+			})
+			reviewDone <- v
+		}()
+	}
+	var static staticOutcome
+	if mode != modeAI {
+		static = runStaticCheck(cmd, opts, prepared, failOn, version)
+	} else {
+		static = staticOutcome{exit: 0, status: "clean"}
+	}
+	reviewRunning := false
+	if reviewDone != nil {
+		select {
+		case verdict = <-reviewDone:
+		default:
+			reviewRunning = true
+			verdict = <-reviewDone
+		}
+	}
+	if store != nil {
+		if mode == modeBoth {
+			if err := store.SetStatic(static.exit, static.status); err != nil {
+				verdict.Status = review.StatusFailed
+				verdict.Error = err.Error()
+			}
+		}
+		if err := store.Close(); err != nil {
+			verdict.Status = review.StatusFailed
+			verdict.Error = err.Error()
+		}
+	}
+	if cmd.Context().Err() != nil {
+		if static.exit == service.ExitInterrupted {
+			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
+			if reviewRunning {
+				fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: the local review was stopped.")
+			}
+		} else {
+			fmt.Fprintln(cmd.ErrOrStderr(), reviewInterruptedText)
+		}
+		return silentExit{interruptCode(cmd.Context())}
+	}
+
+	exit := static.exit
+	if mode != modeStatic {
+		if verdict.Status == review.StatusFindings && failOn != "never" {
+			exit = service.ExitFindings
+		} else if static.exit != service.ExitFindings && static.exit != service.ExitNeedsPerson && verdict.Status == review.StatusFailed {
+			exit = service.ExitIncomplete
+		}
+	}
+	status := static.status
+	switch exit {
+	case service.ExitFindings:
+		status = "findings"
+	case service.ExitNeedsPerson:
+		status = "failed"
+	case service.ExitIncomplete:
+		if static.status == "failed" {
+			status = "failed"
+		} else {
+			status = "incomplete"
+		}
+	case service.ExitPending:
+		status = "pending"
+	}
+	reportOptions.Status = status
+	if mode != modeAI && status != static.status {
+		reportOptions.StaticStatus = static.status
+	}
+	if mode != modeStatic {
+		reportOptions.Review = &verdict
+	}
+	reportOptions.EmptyChange = prepared.bytes == 0
+	if prepared.bytes == 0 {
+		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(prepared.request.BaseCommit))
+	}
+	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean
+	staticPassed := mode == modeAI || static.skipped != nil || (static.response != nil && (static.response.Status == service.StatusClean || static.response.Status == service.StatusIncomplete))
+	nonempty := prepared.bytes > 0 && (static.response != nil || verdict.Status == review.StatusClean)
+	if reviewPassed && staticPassed && nonempty && exit != service.ExitFindings {
+		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
+			return err
+		}
+	}
+	var writeErr error
+	switch {
+	case mode == modeAI:
+		writeErr = report.WriteAI(cmd.OutOrStdout(), format, reportOptions)
+	case static.response != nil:
+		writeErr = report.Write(cmd.OutOrStdout(), *static.response, format, reportOptions)
+	case static.failure != nil:
+		writeErr = report.WriteFailure(cmd.OutOrStdout(), static.failure, format, reportOptions)
+	case static.pending != nil:
+		writeErr = report.WritePending(cmd.OutOrStdout(), *static.pending, format, reportOptions)
+	case static.skipped != nil:
+		writeErr = report.WriteSkipped(cmd.OutOrStdout(), *static.skipped, format, reportOptions)
+	default:
+		writeErr = report.WriteFailure(cmd.OutOrStdout(), &service.Error{Body: service.ErrorBody{Message: "static check failed"}}, format, reportOptions)
+	}
+	if writeErr != nil {
+		return writeErr
+	}
+	return silentExit{exit}
+}
+
+// runStaticCheck runs only the hosted half and returns its outcome.
+func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedCheck, failOn, version string) staticOutcome {
+	failed := func(err error) staticOutcome {
+		var serviceError *service.Error
+		if !errors.As(err, &serviceError) {
+			serviceError = &service.Error{Body: service.ErrorBody{Message: err.Error()}}
+		}
+		text := remedyText(serviceError)
+		var withHint hinted
+		if errors.As(err, &withHint) {
+			if hint := withHint.hint(); hint != "" {
+				text += "\n" + hint
+			}
+		}
+		if code := serviceError.Body.Code; code != "" {
+			text = "slopcop: " + code + ": " + text
+		}
+		fmt.Fprintln(cmd.ErrOrStderr(), text)
+		code := service.ExitIncomplete
+		if serviceError.NeedsPerson() {
+			code = service.ExitNeedsPerson
+		}
+		return staticOutcome{failure: serviceError, exit: code, status: "failed"}
+	}
+	if prepared.staticErr != nil {
+		return failed(prepared.staticErr)
+	}
 	client, request := prepared.client, prepared.request
+	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
-		return checkFailure(cmd, err, format, reportOptions)
+		return failed(err)
 	}
 	if opts.addRepository {
-		// The flag carries the user's approval, so the request says so on
-		// its first send. A check without it never adds a repository.
 		request.AddRepository = true
 	} else {
 		repository, err := checkRepository(cmd.Context(), client, prepared.repoRoot)
 		if err != nil {
-			return checkFailure(cmd, err, format, reportOptions)
+			return failed(err)
 		}
 		if !repository.Active {
 			if opts.ifEnabled {
-				return skipInactiveCheck(cmd, repository, format, reportOptions)
+				name := repository.FullName
+				if name == "" {
+					name = repository.URL
+				}
+				why := "is not active in your SlopCop workspace"
+				switch repository.State {
+				case statusNotAdded:
+					why = "is not enabled in your SlopCop workspace"
+				case statusDisabled:
+					why = "is disabled in your SlopCop workspace"
+				case statusOverLimit:
+					why = "is over your SlopCop workspace's active-repository limit"
+				case statusUnsupported:
+					why = "is on a host SlopCop does not check"
+				}
+				message := fmt.Sprintf("%s %s, so nothing was checked.", name, why)
+				fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+message)
+				return staticOutcome{skipped: &report.Skipped{Code: repositoryNotEnabledCode, State: repository.State, Repository: name, Message: message}, status: "skipped"}
 			}
 			if repository.State == statusNotAdded {
-				return checkFailure(cmd, repositoryNotEnabled(repository), format, reportOptions)
+				return failed(repositoryNotEnabled(repository))
 			}
-			// A disabled or over-limit repository is already known to the
-			// workspace; let the service give its own refusal and remedy.
 		}
 	}
 	if opts.verbose {
-		fmt.Fprintf(
-			cmd.ErrOrStderr(),
-			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
-			client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn,
-		)
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n", client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn)
 		if attributed := request.Attribution; attributed != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: attribution %s session %s\n", attributed.Harness, attributed.SessionID)
 			for _, model := range attributed.Models {
-				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop:   %s effort %s wrote %s\n",
-					model.Model, valueOr(model.Effort, "unknown"), strings.Join(model.Files, ", "))
+				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop:   %s effort %s wrote %s\n", model.Model, valueOr(model.Effort, "unknown"), strings.Join(model.Files, ", "))
 			}
 		}
 	}
-
-	// --timeout bounds the whole wait for a result: the client asks again
-	// while the service answers check_running, and every ask attaches to the
-	// same running check.
 	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
 	defer cancel()
 	var verbose io.Writer
@@ -142,44 +339,26 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		err = &baseRefusal{refusal: rejected, text: baseNotFoundHint(cmd.Context(), prepared.repoRoot, request.BaseCommit)}
 	}
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			fmt.Fprintln(cmd.ErrOrStderr(), interruptedText)
-			return silentExit{interruptCode(cmd.Context())}
-		}
 		var pending *service.Pending
 		if errors.As(err, &pending) {
 			fmt.Fprintln(cmd.ErrOrStderr(), pending.RemedyText())
-			if err := report.WritePending(stdout, *pending, format, reportOptions); err != nil {
-				return err
-			}
-			return silentExit{service.ExitPending}
+			return staticOutcome{pending: pending, exit: service.ExitPending, status: "pending"}
 		}
-		return checkFailure(cmd, err, format, reportOptions)
+		if errors.Is(err, context.Canceled) {
+			return staticOutcome{exit: service.ExitInterrupted, status: "failed"}
+		}
+		return failed(err)
 	}
 	if response.RepositoryAdded {
-		// The add was approved before the check, so name the workspace the
-		// person approved when the service says it added the repository.
 		workspace, known := resolvedWorkspace(cmd.Context(), client)
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n",
-			repositoryName(request.RepoURL), workspaceName(workspace, known))
-	}
-	emptyChange := prepared.bytes == 0
-	if emptyChange {
-		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
-	}
-	reportOptions.EmptyChange = emptyChange
-	if err := report.Write(stdout, response, format, reportOptions); err != nil {
-		return err
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n", repositoryName(request.RepoURL), workspaceName(workspace, known))
 	}
 	if !response.KnownStatus() {
-		// The report alone could read as a pass; say why the exit is 2.
-		fmt.Fprintf(cmd.ErrOrStderr(),
-			"slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n",
-			response.Status)
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n", response.Status)
 	} else {
 		rememberCheck(prepared, response)
 	}
-	return silentExit{response.ExitCode()}
+	return staticOutcome{response: &response, exit: response.ExitCode(), status: response.Status}
 }
 
 // checkFailure prints a service failure's code, message, and remedy on
@@ -345,9 +524,11 @@ func sendCheck(ctx context.Context, client *service.Client, request *service.Req
 // preparedCheck is a check request ready to send, and the client to send it.
 // The caller adds the attribution.
 type preparedCheck struct {
-	client   *service.Client
-	request  service.Request
-	repoRoot string
+	client    *service.Client
+	snapshot  gitx.Snapshot
+	staticErr error
+	request   service.Request
+	repoRoot  string
 	// workspace is the workspace the check is asked to run in, by the name
 	// it was given.
 	workspace string
@@ -379,11 +560,15 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	// A default base that yields an empty patch, such as the upstream of a
 	// branch with nothing unpushed, gives way to the next default, so a check
 	// right after a push still covers the branch's work.
+	snapshot, err := gitx.CaptureWorkingTree(repoRoot, selection.Files)
+	if err != nil {
+		return prepared, err
+	}
 	var base string
 	var change gitx.WorkingChange
 	for _, candidate := range bases {
 		base = candidate
-		change, err = gitx.WorkingTreePatch(repoRoot, base, selection.Files)
+		change, err = gitx.TreePatch(repoRoot, base, snapshot.PatchTree)
 		if err != nil {
 			return prepared, err
 		}
@@ -391,19 +576,35 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 			break
 		}
 	}
+	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, files: change.Files, bytes: len(change.Patch), request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
+	if opts.mode == modeAI || opts.ai {
+		return prepared, nil
+	}
 	origin, err := gitx.OriginURL(repoRoot)
 	if err != nil {
-		return prepared, err
+		if opts.mode == "" {
+			return prepared, err
+		}
+		prepared.staticErr = err
+		return prepared, nil
 	}
 	repoURL, err := gitx.CanonicalRepoURL(origin)
 	if err != nil {
-		return prepared, err
+		if opts.mode == "" {
+			return prepared, err
+		}
+		prepared.staticErr = err
+		return prepared, nil
 	}
 	target := resolveServiceURL(cfg, serviceFlag)
 	token := resolveToken(cfg)
 	client, err := service.New(target, token, "slopcop/"+version, opts.timeout)
 	if err != nil {
-		return prepared, err
+		if opts.mode == "" {
+			return prepared, err
+		}
+		prepared.staticErr = err
+		return prepared, nil
 	}
 	request := service.Request{
 		RepoURL:    repoURL,
@@ -417,6 +618,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	workspace := resolveWorkspaceName(opts.workspace)
 	return preparedCheck{
 		client:      client,
+		snapshot:    snapshot,
 		request:     request,
 		repoRoot:    repoRoot,
 		workspace:   workspace,

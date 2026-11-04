@@ -91,6 +91,12 @@ build that binary from source instead.
   </TabItem>
 </Tabs>
 
+## Local review requirements
+
+The default check needs Node.js with `npx` and existing reviewer harness
+logins. DeepSeek Flash also needs `DEEPSEEK_API_KEY`. Use `--mode static` to
+run only the hosted check, including in CI without reviewer logins.
+
 ## Check the install
 
 ```console
@@ -132,6 +138,6 @@ Use the channel you installed from:
 | Release archive | download the new archive and replace the binary |
 | Go | `go install github.com/BrokkAi/slopcop/cmd/slopcop@latest` |
 
-The next `slopcop login` or check updates the agent skill to the one bundled in
+A check updates an existing agent skill copy to the one bundled in
 the new binary, and tells you which files changed. See
 [The agent skill](/agents/skill/).

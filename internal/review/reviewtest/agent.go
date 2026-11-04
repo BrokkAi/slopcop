@@ -1,0 +1,142 @@
+// Package reviewtest provides a re-exec ACP agent for review integration tests.
+// A test process can call Main when SLOPCOP_FAKE_ACP=1, and point an adapter
+// command at its test binary with that environment set.
+package reviewtest
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	acp "github.com/coder/acp-go-sdk"
+)
+
+type agent struct {
+	acp.Agent
+	conn               *acp.AgentSideConnection
+	mode, model, trace string
+}
+
+func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
+	a.record(fmt.Sprintf("pid=%d", os.Getpid()))
+	a.record("initialize")
+	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber}, nil
+}
+func options(model, mode string) []acp.SessionConfigOption {
+	m := acp.SessionConfigSelectOptionsUngrouped{{Value: acp.SessionConfigValueId(model), Name: model}}
+	err := acp.SessionConfigSelectOptionsUngrouped{{Value: "high", Name: "High"}}
+	if mode == "no-high" {
+		err = acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
+	}
+	return []acp.SessionConfigOption{{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "model", Name: "Model", CurrentValue: acp.SessionConfigValueId(model), Options: acp.SessionConfigSelectOptions{Ungrouped: &m}}}, {Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "effort", Name: "Effort", CurrentValue: "high", Options: acp.SessionConfigSelectOptions{Ungrouped: &err}}}}
+}
+func (a *agent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if a.mode == "new-error" {
+		return acp.NewSessionResponse{}, fmt.Errorf("fake session failure")
+	}
+	model := a.model
+	if model == "" {
+		model = "gpt-6.10-terra"
+	}
+	return acp.NewSessionResponse{SessionId: "fake", ConfigOptions: options(model, a.mode)}, nil
+}
+func (a *agent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	model := a.model
+	if model == "" {
+		model = "gpt-6.10-terra"
+	}
+	if a.mode == "no-echo" {
+		return acp.SetSessionConfigOptionResponse{ConfigOptions: []acp.SessionConfigOption{}}, nil
+	}
+	return acp.SetSessionConfigOptionResponse{ConfigOptions: options(model, a.mode)}, nil
+}
+func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
+	a.record("prompt")
+	if a.mode == "auth-required" {
+		return acp.PromptResponse{}, &acp.RequestError{Code: -32000, Message: "Authentication required"}
+	}
+	if a.mode == "prompt-error" {
+		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "Prompt failed"}
+	}
+	if a.mode == "barrier" {
+		for {
+			data, _ := os.ReadFile(a.trace)
+			if strings.Count(string(data), "prompt\n") >= 2 {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return acp.PromptResponse{}, ctx.Err()
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
+	text := "No findings."
+	if a.mode == "hang" {
+		<-ctx.Done()
+		return acp.PromptResponse{}, ctx.Err()
+	}
+	if a.mode == "timeout" {
+		child := exec.Command("sh", "-c", `sleep 1; printf survived > "$1"`, "sh", a.trace+".survived")
+		if err := child.Start(); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		a.record("grandchild-started")
+		<-ctx.Done()
+		return acp.PromptResponse{}, ctx.Err()
+	}
+	if a.mode == "no-allow" {
+		_, _ = a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake"}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "reject"}}})
+	}
+	if a.mode == "findings" {
+		text = "- [P1] fake defect"
+	}
+	if a.mode == "empty" {
+		text = ""
+	}
+	if text != "" {
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText(text)}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+	}
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+// Main runs the fake agent and exits the process when SLOPCOP_FAKE_ACP=1.
+// Call at the start of TestMain or a dedicated re-exec Test function.
+func Main() {
+	if os.Getenv("SLOPCOP_FAKE_ACP") != "1" {
+		return
+	}
+	a := &agent{}
+	for _, arg := range os.Args {
+		if v, ok := strings.CutPrefix(arg, "--fake-mode="); ok {
+			a.mode = v
+		}
+		if v, ok := strings.CutPrefix(arg, "--fake-model="); ok {
+			a.model = v
+		}
+		if v, ok := strings.CutPrefix(arg, "--fake-trace="); ok {
+			a.trace = v
+		}
+	}
+	a.conn = acp.NewAgentSideConnection(a, os.Stdout, os.Stdin)
+	<-a.conn.Done()
+	os.Exit(0)
+}
+
+func (a *agent) record(event string) {
+	if a.trace == "" {
+		return
+	}
+	_ = os.MkdirAll(filepath.Dir(a.trace), 0700)
+	f, err := os.OpenFile(a.trace, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	if err == nil {
+		_, _ = f.WriteString(event + "\n")
+		_ = f.Close()
+	}
+}

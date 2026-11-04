@@ -18,8 +18,22 @@ const DefaultServiceURL = "https://slopcop.com"
 // Config is the per-user slopcop configuration. It lives outside any
 // repository because it contains a credential.
 type Config struct {
-	ServiceURL string `json:"serviceUrl,omitempty"`
-	Token      string `json:"token,omitempty"`
+	ServiceURL string  `json:"serviceUrl,omitempty"`
+	Token      string  `json:"token,omitempty"`
+	Mode       string  `json:"mode,omitempty"`
+	Review     *Review `json:"review,omitempty"`
+}
+
+// Review contains local reviewer settings.
+type Review struct {
+	Count    int                `json:"count,omitempty"`
+	Timeout  string             `json:"timeout,omitempty"`
+	Adapters map[string]Adapter `json:"adapters,omitempty"`
+}
+
+// Adapter overrides an ACP adapter command.
+type Adapter struct {
+	Command []string `json:"command"`
 }
 
 // Path returns the configuration file location.
@@ -81,6 +95,9 @@ func Save(cfg Config) (string, error) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	if cfg.Review != nil && cfg.Review.Count == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+		cfg.Review = nil
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -950,5 +951,57 @@ func TestSkillUpdateIsInEveryMachineReport(t *testing.T) {
 		if strings.Contains(out.String(), "skillUpdated") {
 			t.Errorf("%s json names a skill update that did not happen: %s", name, out.String())
 		}
+	}
+}
+
+func TestCombinedReviewFormats(t *testing.T) {
+	verdict := review.Verdict{Status: review.StatusFindings, Capture: review.Capture{BaseTree: "base", Tree: "tree"}, Reviewers: []review.Reviewer{{Name: "1-terra", Family: review.Terra, Model: "gpt-6.10-terra", Effort: "high", Status: review.StatusFindings, Text: "defect"}}}
+	options := Options{Review: &verdict, Status: "findings", EmptyChange: false}
+	for _, format := range []string{FormatHuman, FormatJSON, FormatSARIF} {
+		var out bytes.Buffer
+		if err := WriteAI(&out, format, options); err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(out.String(), "defect") {
+			t.Fatalf("%s missing review: %s", format, out.String())
+		}
+		if format == FormatJSON {
+			var doc map[string]any
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc["status"] != "findings" {
+				t.Fatal(doc)
+			}
+		}
+		if format == FormatSARIF {
+			var doc map[string]any
+			if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if len(doc["runs"].([]any)) != 2 {
+				t.Fatal(doc)
+			}
+		}
+	}
+}
+
+func TestStaticJSONFieldOrderIsUnchanged(t *testing.T) {
+	response := service.Response{Status: service.StatusClean, BaseCommit: "base"}
+	var out bytes.Buffer
+	if err := Write(&out, response, FormatJSON, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	want := `{\n  "status": "clean",\n  "baseCommit": "base",\n  "summary":`
+	if !strings.HasPrefix(out.String(), strings.ReplaceAll(want, `\n`, "\n")) {
+		t.Fatalf("field order changed: %s", out.String())
+	}
+}
+func TestReviewHumanKeepsLines(t *testing.T) {
+	verdict := review.Verdict{Status: review.StatusFindings, Reviewers: []review.Reviewer{{Name: "1-terra", Status: review.StatusFindings, Text: "first\nsecond"}}}
+	var out bytes.Buffer
+	writeReviewHuman(&out, verdict)
+	if !strings.Contains(out.String(), "    first\n    second\n") {
+		t.Fatalf("review lines: %q", out.String())
 	}
 }

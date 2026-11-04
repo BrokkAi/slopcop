@@ -5,12 +5,22 @@ sidebar:
   order: 4
 ---
 
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. Reviewers can run commands and edit files in the
+repository; they have no read-only isolation. A review finding is a model's
+judgment, while a static finding traces to a rule.
+
 ## opencode
 
-opencode reads both `~/.agents/skills` and `~/.claude/skills`, so
-`slopcop init` covers it too. Add the repository to the workspace from its
-checkout with `slopcop enable` at a terminal, then ask it to check its change,
-or add the usual line to your project's `AGENTS.md`:
+opencode reads `.agents/skills` and `.claude/skills` in the repository, so
+`slopcop init` covers it too when run there. Add the repository to the workspace
+from its checkout with `slopcop enable` at a terminal, then ask it to check its
+change, or add the usual line to your project's `AGENTS.md`:
 
 ```text
 Run `slopcop check --if-enabled` before you finish and fix what it reports.
@@ -20,10 +30,12 @@ There is no Stop hook for opencode; the skill is how it knows to check.
 
 ## Any agent with a shell
 
-Any agent that can run a shell command can run `slopcop`: it never prompts,
-every check it sends makes one request, and it answers with an exit code. Run
-outside Claude Code or Codex, a check sends nothing about the session, only the
-repository URL, the base commit, and the patch.
+Any agent that can run a shell command can run `slopcop`: it never prompts, the
+static half sends one request, and it answers with an exit code. Run outside
+Claude Code or Codex, a check sends nothing about the session, the static half
+sends only the repository URL, base commit, patch, and selected policies. The
+review half sends the diff and supplied intent to reviewer model providers
+through your harness logins. Use `--mode static` to avoid that review.
 
 If the agent cannot load skills, give it the essentials in its instructions
 file:

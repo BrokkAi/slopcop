@@ -1,4 +1,4 @@
 interface:
   display_name: "SlopCop"
-  short_description: "Run hosted SlopCop checks from an agent"
-  default_prompt: "Use $slopcop to check this change and fix what it reports."
+  short_description: "Run static checks and local LLM review"
+  default_prompt: "Use $slopcop to check this change, resolve findings, and wait for the review to finish."

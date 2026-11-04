@@ -6,11 +6,14 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/gitx"
 	agenthooks "github.com/BrokkAi/slopcop/internal/hooks"
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/skills"
@@ -47,7 +50,10 @@ func skillRoots() ([]skillRoot, error) {
 		codexHome = filepath.Join(home, ".codex")
 	}
 	agents := filepath.Join(home, ".agents")
-	claude := filepath.Join(home, ".claude")
+	claude := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
+	if claude == "" {
+		claude = filepath.Join(home, ".claude")
+	}
 	return []skillRoot{
 		{marker: agents, dir: filepath.Join(agents, "skills"), neutral: true},
 		{marker: claude, dir: filepath.Join(claude, "skills")},
@@ -148,14 +154,25 @@ func writeSkill(dir string, files []skillFile, version string) error {
 	return writeSkillStamp(dir, version, files)
 }
 
-// syncBundledSkill writes the bundled skill into every well-known skills
-// directory whose harness is installed here, wherever it is missing or
-// differs from the bundled one, so agents follow the instructions of the
-// version that runs. A skill that differs is replaced, and files the bundle
-// no longer has are removed; a copy of one with local edits is kept first.
-// It returns what it wrote, one entry per directory.
-func syncBundledSkill(version string) ([]report.SkillUpdate, error) {
+// skillRepoRoot resolves the check's repository before syncing its installed
+// skill copies. A failed lookup makes the best-effort sync a no-op.
+func skillRepoRoot(path string) string {
+	root, err := gitx.Toplevel(path)
+	if err != nil {
+		return ""
+	}
+	return root
+}
+
+// syncBundledSkill updates only copies that already exist in the checked
+// repository or the legacy user locations. Missing copies are left for init
+// to install, and tracked repository copies stay under the user's control.
+// Local edits are backed up before replacement.
+func syncBundledSkill(repoRoot, version string) ([]report.SkillUpdate, error) {
 	var updates []report.SkillUpdate
+	if repoRoot == "" {
+		return updates, nil
+	}
 	files, err := bundledSkillFiles()
 	if err != nil {
 		return updates, err
@@ -164,11 +181,20 @@ func syncBundledSkill(version string) ([]report.SkillUpdate, error) {
 	if err != nil {
 		return updates, err
 	}
+	dirs := []string{filepath.Join(repoRoot, ".claude", "skills", skillName), filepath.Join(repoRoot, ".agents", "skills", skillName)}
 	for _, root := range roots {
-		if !isDirectory(root.marker) {
+		dirs = append(dirs, filepath.Join(root.dir, skillName))
+	}
+	for _, dir := range dirs {
+		if _, err := os.Stat(filepath.Join(dir, skillFileName)); errors.Is(err, fs.ErrNotExist) {
+			continue
+		} else if err != nil {
+			return updates, err
+		}
+		if strings.HasPrefix(dir, repoRoot+string(filepath.Separator)) && gitTracked(repoRoot, dir) {
 			continue
 		}
-		update, wrote, err := syncSkillAt(filepath.Join(root.dir, skillName), files, version)
+		update, wrote, err := syncSkillAt(dir, files, version)
 		if wrote {
 			updates = append(updates, update)
 		}
@@ -214,8 +240,8 @@ func syncSkillAt(dir string, files []skillFile, version string) (report.SkillUpd
 // syncSkillAndReport runs syncBundledSkill and says on out what it wrote,
 // which it also returns for the machine reports. A failed install is reported
 // on errOut and never fails the command that asked for it.
-func syncSkillAndReport(out, errOut io.Writer, version string) []report.SkillUpdate {
-	updates, err := syncBundledSkill(version)
+func syncSkillAndReport(out, errOut io.Writer, repoRoot, version string) []report.SkillUpdate {
+	updates, err := syncBundledSkill(repoRoot, version)
 	for _, update := range updates {
 		fmt.Fprintln(out, skillNotice(update))
 	}
@@ -286,86 +312,237 @@ func isDirectory(path string) bool {
 	return err == nil && info.IsDir()
 }
 
-func newInitCommand(version string) *cobra.Command {
-	var noSkill, noHooks, removeHooks bool
-	command := &cobra.Command{
-		Use:   "init",
-		Short: "Install the bundled agent skill and the automatic check hook",
-		Long: `Install the agent skill that ships inside this binary, so a coding agent
-knows how to run slopcop, and a Claude Code and Codex hook that checks what a
-session wrote when the agent stops.
+// gitTracked reports whether Git tracks a target or any file under a skill directory.
+func gitTracked(root, path string) bool {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return false
+	}
+	cmd := exec.Command("git", "-C", root, "ls-files", "--cached", "--", rel)
+	out, err := cmd.Output()
+	return err == nil && len(out) > 0
+}
 
-The skill goes into every well-known skills directory whose harness is
-installed here: ~/.agents/skills (Codex, opencode), ~/.claude/skills (Claude
-Code), and $CODEX_HOME/skills or ~/.codex/skills. When no harness is found it
-goes into ~/.agents/skills, the vendor-neutral directory those agents read, so
-a fresh machine has the skill before its harness creates its own directory. A
-skill that is already there is left alone. Login and every check also install
-the skill, and rewrite one that differs from the bundled skill, naming the
-versions and files that changed and keeping a copy of local edits under
-skill-backups next to the slopcop configuration. Pass --no-skill to leave the
-skill install and any update of it undone.
+func excludeInitPaths(root string, paths []string) error {
+	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
+	if err != nil {
+		return err
+	}
+	path := strings.TrimSpace(string(out))
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(root, path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	lines := map[string]bool{}
+	for _, line := range strings.Split(string(data), "\n") {
+		lines[line] = true
+	}
+	var add []string
+	for _, p := range paths {
+		if !lines[p] {
+			add = append(add, p)
+			lines[p] = true
+		}
+	}
+	if len(add) == 0 {
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		if _, err = f.WriteString("\n"); err != nil {
+			return err
+		}
+	}
+	if !lines["# slopcop init"] {
+		if _, err = f.WriteString("# slopcop init\n"); err != nil {
+			return err
+		}
+	}
+	for _, p := range add {
+		if _, err = f.WriteString(p + "\n"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
-A Stop hook goes into Claude Code's settings.json, under CLAUDE_CONFIG_DIR or
-~/.claude, and Codex's hooks.json, under CODEX_HOME or ~/.codex, for each
-harness installed here. Codex runs it only once you trust it with /hooks.
-Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
-		Args: cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			stdout := cmd.OutOrStdout()
-			if removeHooks {
-				// Each harness is updated on its own, so what changed is
-				// said even when another harness failed.
-				result, err := agenthooks.Remove()
-				for _, path := range result.ChangedPaths {
-					fmt.Fprintf(stdout, "slopcop: removed the automatic check hook from %s\n", path)
-				}
-				if len(result.ChangedPaths) == 0 && err == nil {
-					fmt.Fprintln(stdout, "slopcop: no automatic check hook found, nothing to remove")
-				}
+func removeUserSkills(out io.Writer) error {
+	roots, err := skillRoots()
+	if err != nil {
+		return err
+	}
+	seen := map[string]bool{}
+	for _, root := range roots {
+		dir := filepath.Join(root.dir, skillName)
+		if seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		data, err := os.ReadFile(filepath.Join(dir, skillFileName))
+		if errors.Is(err, fs.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if !slopcopSkill(data) {
+			continue
+		}
+		present, err := readSkillDir(dir)
+		if err != nil {
+			return err
+		}
+		stamp, stamped := readSkillStamp(dir)
+		if _, edited := skillOrigin(present, stamp, stamped); edited {
+			backup, err := backupSkill(dir, present)
+			if err != nil {
 				return err
 			}
+			fmt.Fprintf(out, "slopcop: backed up the edited skill at %s\n", backup)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "slopcop: removed the user-level skill at %s\n", dir)
+	}
+	return nil
+}
 
-			if noSkill {
-				fmt.Fprintln(stdout, "slopcop: left the slopcop skill alone (--no-skill)")
-			} else {
-				result, err := installBundledSkill(version)
+func slopcopSkill(data []byte) bool {
+	lines := strings.Split(string(data), "\n")
+	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
+		return false
+	}
+	found := false
+	for _, line := range lines[1:] {
+		if strings.TrimSpace(line) == "---" {
+			return found
+		}
+		if strings.TrimSpace(line) == "name: slopcop" || strings.TrimSpace(line) == `name: "slopcop"` || strings.TrimSpace(line) == "name: 'slopcop'" {
+			found = true
+		}
+	}
+	return false
+}
+
+func newInitCommand(version string) *cobra.Command {
+	var noSkill, noHooks, removeHooks bool
+	var root string
+	command := &cobra.Command{Use: "init", Short: "Install repository-local skills and hooks", Long: `Install SlopCop's skill and hooks in the current Git repository. The skill
+is written to .agents/skills/slopcop and, when Claude Code is installed,
+.claude/skills/slopcop. Claude Code gets a Stop hook and a Bash push gate in
+.claude/settings.local.json. Codex gets a Stop hook in .codex/hooks.json;
+Codex's shell hook blocking protocol is not established, so no Codex push gate
+is installed. Codex requires /hooks trust. Written paths are added to the
+repository's info/exclude. Tracked targets are left untouched. Existing
+user-level SlopCop hooks and skills are removed. --remove-hooks removes both
+repository and user-level hooks.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+		repo, err := gitx.Toplevel(root)
+		if err != nil {
+			return fmt.Errorf("slopcop init requires a Git repository: %w", err)
+		}
+		out := cmd.OutOrStdout()
+		skip := func(path string) bool {
+			if gitTracked(repo, path) {
+				fmt.Fprintf(out, "slopcop: left tracked target %s alone\n", path)
+				return true
+			}
+			return false
+		}
+		user, err := agenthooks.Remove()
+		for _, p := range user.ChangedPaths {
+			fmt.Fprintf(out, "slopcop: removed the user-level hook from %s\n", p)
+		}
+		if err != nil {
+			return err
+		}
+		if removeHooks {
+			r, err := agenthooks.Repository(repo, false, skip)
+			for _, p := range dedupe(r.ChangedPaths) {
+				fmt.Fprintf(out, "slopcop: removed SlopCop's hooks from %s\n", p)
+			}
+			return err
+		}
+		if err := removeUserSkills(out); err != nil {
+			return err
+		}
+		var excluded []string
+		if !noSkill {
+			files, err := bundledSkillFiles()
+			if err != nil {
+				return err
+			}
+			targets := []string{filepath.Join(repo, ".agents", "skills")}
+			home, _ := os.UserHomeDir()
+			claude := os.Getenv("CLAUDE_CONFIG_DIR")
+			if claude == "" {
+				claude = filepath.Join(home, ".claude")
+			}
+			if isDirectory(claude) {
+				targets = append(targets, filepath.Join(repo, ".claude", "skills"))
+			}
+			for _, target := range targets {
+				dir := filepath.Join(target, skillName)
+				if skip(dir) {
+					continue
+				}
+				written, err := installSkillAt(target, files, version)
 				if err != nil {
 					return err
 				}
-				for _, dir := range result.installed {
-					fmt.Fprintf(stdout, "slopcop: installed the slopcop skill at %s\n", dir)
+				if written {
+					fmt.Fprintf(out, "slopcop: installed the slopcop skill at %s\n", dir)
 				}
-				for _, dir := range result.present {
-					fmt.Fprintf(stdout, "slopcop: the slopcop skill is already at %s\n", dir)
-				}
+				rel, _ := filepath.Rel(repo, dir)
+				excluded = append(excluded, "/"+filepath.ToSlash(rel)+"/")
 			}
-
-			if noHooks {
-				fmt.Fprintln(stdout, "slopcop: left the automatic check hook alone (--no-hooks)")
-				return nil
+		}
+		if !noHooks {
+			r, err := agenthooks.Repository(repo, true, skip)
+			if err != nil {
+				return err
 			}
-			hookResult, err := agenthooks.Install()
-			for _, path := range hookResult.ChangedPaths {
-				fmt.Fprintf(stdout, "slopcop: installed the automatic check hook in %s\n", path)
+			// The Stop hook and the push gate share Claude Code's settings
+			// file, so each file is named once.
+			for _, p := range dedupe(r.ChangedPaths) {
+				fmt.Fprintf(out, "slopcop: installed SlopCop's hooks in %s\n", p)
 			}
-			// Codex says nothing when it skips a hook it does not trust,
-			// so this is said every time, not only when the hook changed.
-			if hookResult.NeedsTrust {
-				fmt.Fprintln(stdout, "slopcop: Codex runs the hook only once you trust it; if you have not, open Codex and review it with /hooks")
-			}
-			if len(hookResult.Installed) > 0 {
-				if problem := agenthooks.CommandProblem(hookResult.Installed); problem != "" {
-					fmt.Fprintf(cmd.ErrOrStderr(),
-						"slopcop: warning: %s. Put this slopcop first on PATH, or run 'slopcop init --remove-hooks'.\n", problem)
+			for _, p := range []string{filepath.Join(repo, ".claude", "settings.local.json"), filepath.Join(repo, ".codex", "hooks.json")} {
+				if !gitTracked(repo, p) {
+					rel, _ := filepath.Rel(repo, p)
+					excluded = append(excluded, "/"+filepath.ToSlash(rel))
 				}
 			}
-			return err
-		},
-	}
-	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install or update the agent skill")
-	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install or update the automatic check hook")
-	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove SlopCop's automatic check hook")
+			if r.NeedsTrust {
+				fmt.Fprintln(out, "slopcop: Codex runs the Stop hook only after you trust it with /hooks")
+			}
+			if problem := agenthooks.CommandProblem(r.Installed); problem != "" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: warning: %s\n", problem)
+			}
+			// Only Claude Code gets the gate: Codex's PreToolUse payload and
+			// blocking exit were not established. Say so only when Claude
+			// Code's settings were written, not when a tracked file was left
+			// alone.
+			if slices.Contains(r.Installed, "claude") {
+				fmt.Fprintln(out, "slopcop: Claude Code now blocks git push and gh pr create until HEAD's tree passed a check; Codex has no push gate")
+			}
+		}
+		return excludeInitPaths(repo, excluded)
+	}}
+	command.Flags().StringVar(&root, "root", ".", "Git repository directory")
+	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install the agent skill")
+	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install repository hooks")
+	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove repository and user-level SlopCop hooks")
 	command.MarkFlagsMutuallyExclusive("no-hooks", "remove-hooks")
 	return command
 }

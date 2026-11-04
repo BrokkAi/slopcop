@@ -1,0 +1,4 @@
+slopcop includes internal/review/rubric.md, reproduced verbatim from the Codex /review rubric, as supplied in Mjolnir's mj-review/templates/review_rubric.md.
+The Codex rubric is Copyright OpenAI and licensed under the Apache License, Version 2.0. See LICENSE.
+
+slopcop's review engine is a port of checkpoint. No Mjolnir implementation code is included.

@@ -154,3 +154,24 @@ func claudeEdits(path string) []fileEdit {
 	}
 	return edits
 }
+
+// ClaudeTranscript finds the uniquely identified current session transcript.
+func ClaudeTranscript(getenv func(string) string) (string, bool) {
+	id := strings.TrimSpace(getenv("CLAUDE_CODE_SESSION_ID"))
+	if !sessionIDPattern.MatchString(id) || strings.Trim(id, ".") == "" {
+		return "", false
+	}
+	dir := strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR"))
+	if dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", false
+		}
+		dir = filepath.Join(home, ".claude")
+	}
+	matches, _ := filepath.Glob(filepath.Join(dir, "projects", "*", id+".jsonl"))
+	if len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
+}

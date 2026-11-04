@@ -5,8 +5,9 @@ sidebar:
   order: 2
 ---
 
-The CLI has no configuration file to edit. Everything is a flag, an environment
-variable, or a value `slopcop login` stored.
+The CLI stores settings in the user config. `slopcop config get|set|unset`
+manages `mode`, `review.count`, and `review.timeout`. Adapter commands are
+edited by hand.
 
 ## Precedence
 
@@ -26,7 +27,7 @@ Support/slopcop/` on macOS, `%AppData%\slopcop\` on Windows.
 
 | File | Purpose |
 | --- | --- |
-| `config.json` | the stored service URL and token, written owner-only; `slopcop logout` clears it |
+| `config.json` | service URL, token, mode (default `both`), and review settings, written owner-only; logout clears the token |
 | `update-notice` | the time of the last [upgrade notice](/get-started/install/#upgrade-notices), so it prints at most once a day |
 | `skill-backups/<harness>-<time>/` | a copy of a skill with local edits that an update replaced; see [The agent skill](/agents/skill/) |
 
@@ -35,9 +36,11 @@ version that wrote the skill and what each file held.
 
 ## Files the CLI edits
 
-`slopcop init` adds a Stop hook to Claude Code's `settings.json` (under
-`CLAUDE_CONFIG_DIR` or `~/.claude`) and Codex's `hooks.json` (under
-`CODEX_HOME` or `~/.codex`), leaving everything else in those files as it was.
+`slopcop init` runs in the repository. It edits `.claude/settings.local.json`
+(static Stop hook and Claude push gate), `.codex/hooks.json` (static Stop
+hook), and `.git/info/exclude`. It installs the skills in `.claude/skills/`
+and `.agents/skills/`, leaving tracked targets alone. It removes old
+user-level SlopCop hooks and skills. No Codex push gate is installed.
 `slopcop init --remove-hooks` removes SlopCop's hook and nothing else. See
 [The Stop hook](/agents/stop-hook/).
 
@@ -47,8 +50,23 @@ version that wrote the skill and what each file held.
 | --- | --- |
 | `.slopcop/policies/**/*.rqlp` | [repository rules](/checks/repository-rules/), evaluated by every check |
 
-Nothing else in the repository is read for configuration. The repository's URL
-comes from the `origin` remote.
+The repository's URL for the static half comes from the `origin` remote.
+The review needs no supported origin.
+
+## Review settings and state
+
+The config's `mode` is `both`, `static`, or `ai`. `review.count` is 1–3
+(default 2) and `review.timeout` defaults to `20m`. Set these with
+`slopcop config set <key> <value>`, or inspect and remove them with `get`
+and `unset`. Adapter argv arrays under
+`review.adapters.<terra|flash|haiku>.command` are edited by hand. The
+default commands use pinned packages through `npx`: Codex ACP 2.5.0,
+dsh ACP 0.6.0, and Claude agent ACP 0.100.0.
+
+Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
+`overrides.jsonl`, and `review-*/` prompt and reviewer logs. Checks that
+approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
+and valid overrides write `refs/slopcop/reviewed/<tree>`.
 
 ## Another deployment
 

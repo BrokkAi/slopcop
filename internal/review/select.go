@@ -1,0 +1,163 @@
+package review
+
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
+
+	acp "github.com/coder/acp-go-sdk"
+)
+
+// DefaultCommand returns the pinned ACP adapter argv for a reviewer family.
+func DefaultCommand(f Family) []string {
+	switch f {
+	case Terra:
+		return []string{"npx", "--yes", "@agentclientprotocol/codex-acp@2.5.0"}
+	case Flash:
+		return []string{"npx", "--yes", "@brokkai/dsh-acp@0.6.0"}
+	case Haiku:
+		return []string{"npx", "--yes", "@agentclientprotocol/claude-agent-acp@0.100.0"}
+	}
+	return nil
+}
+
+// ParseFamily accepts only the supported reviewer families.
+func ParseFamily(s string) (Family, error) {
+	f := Family(s)
+	if DefaultCommand(f) == nil {
+		return "", fmt.Errorf("unknown review family %q", s)
+	}
+	return f, nil
+}
+
+// FamilyOf classifies model ids, including provider qualified ids.
+func FamilyOf(model string) (Family, bool) {
+	m := strings.ToLower(model)
+	if i := strings.LastIndexByte(m, '/'); i >= 0 {
+		m = m[i+1:]
+	}
+	switch {
+	case strings.HasPrefix(m, "gpt-") && strings.Contains(m, "terra"):
+		return Terra, true
+	case strings.HasPrefix(m, "deepseek-") && strings.Contains(m, "flash"):
+		return Flash, true
+	case m == "haiku" || strings.HasPrefix(m, "claude-") && strings.Contains(m, "haiku"):
+		return Haiku, true
+	}
+	return "", false
+}
+
+// familyOrder demotes the model families that authored the change.
+func familyOrder(authors []string) []Family {
+	used := map[Family]bool{}
+	for _, m := range authors {
+		if f, ok := FamilyOf(m); ok {
+			used[f] = true
+		}
+	}
+	var out []Family
+	for _, f := range Families {
+		if !used[f] {
+			out = append(out, f)
+		}
+	}
+	for _, f := range Families {
+		if used[f] {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// configOption locates grouped or ungrouped ACP selectors by id or category.
+func configOption(options []acp.SessionConfigOption, key string) *acp.SessionConfigOptionSelect {
+	for _, o := range options {
+		if o.Select != nil && string(o.Select.Id) == key {
+			return o.Select
+		}
+	}
+	for _, o := range options {
+		if o.Select == nil {
+			continue
+		}
+		cat := ""
+		if o.Select.Category != nil {
+			cat = string(*o.Select.Category)
+		}
+		if key == "model" && cat == "model" {
+			return o.Select
+		}
+		if key == "effort" && (cat == "thought_level" || string(o.Select.Id) == "reasoning_effort") {
+			return o.Select
+		}
+	}
+	return nil
+}
+
+// choices flattens both ACP select option layouts.
+func choices(o *acp.SessionConfigOptionSelect) []acp.SessionConfigSelectOption {
+	if o == nil {
+		return nil
+	}
+	if o.Options.Ungrouped != nil {
+		return []acp.SessionConfigSelectOption(*o.Options.Ungrouped)
+	}
+	var out []acp.SessionConfigSelectOption
+	if o.Options.Grouped != nil {
+		for _, g := range *o.Options.Grouped {
+			out = append(out, g.Options...)
+		}
+	}
+	return out
+}
+
+var nums = regexp.MustCompile(`[0-9]+`)
+
+// compareVersions compares numeric model versions instead of lexical strings.
+func compareVersions(a, b string) int {
+	aa, bb := nums.FindAllString(a, -1), nums.FindAllString(b, -1)
+	for i := 0; i < len(aa) || i < len(bb); i++ {
+		var x, y int
+		if i < len(aa) {
+			x, _ = strconv.Atoi(aa[i])
+		}
+		if i < len(bb) {
+			y, _ = strconv.Atoi(bb[i])
+		}
+		if x != y {
+			if x > y {
+				return 1
+			}
+			return -1
+		}
+	}
+	return 0
+}
+
+// bestModel selects the newest advertised model in the requested family.
+func bestModel(f Family, options []acp.SessionConfigSelectOption) (string, bool) {
+	best := ""
+	bestVersion := ""
+	for _, o := range options {
+		v := string(o.Value)
+		match, ok := FamilyOf(v)
+		if !ok && f == Haiku && v == "haiku" {
+			ok = true
+			match = Haiku
+		}
+		if !ok || match != f {
+			continue
+		}
+		version := v
+		if nums.MatchString(o.Name) {
+			version = o.Name
+		}
+		cmp := compareVersions(version, bestVersion)
+		if best == "" || cmp > 0 || cmp == 0 && (nums.MatchString(v) && !nums.MatchString(best) || nums.MatchString(v) == nums.MatchString(best) && v > best) {
+			best = v
+			bestVersion = version
+		}
+	}
+	return best, best != ""
+}

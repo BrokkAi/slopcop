@@ -114,6 +114,7 @@ func addRepository(cmd *cobra.Command, repoRoot string, repository statusReposit
 	// approval cannot add the repository to another one.
 	return runCheck(cmd, &checkOptions{
 		root:          repoRoot,
+		mode:          modeStatic,
 		workspace:     target.ID,
 		addRepository: true,
 	}, serviceFlag, version)

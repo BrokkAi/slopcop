@@ -55,6 +55,10 @@ type harness struct {
 	// needsTrust says the harness runs a new or changed hook only once
 	// someone trusts it.
 	needsTrust bool
+	// event selects Stop by default or PreToolUse for the push gate.
+	event string
+	// gate uses an unguarded command so Claude can block a push with exit 2.
+	gate bool
 }
 
 // harnesses are the harnesses the hook installs into, each at the
@@ -93,12 +97,18 @@ func harnesses() []harness {
 // one from before it, exits 2; || true turns any failure into one that lets
 // the agent stop.
 func (h harness) command() string {
+	if h.gate {
+		return "slopcop gate --hook claude"
+	}
 	return "slopcop hook " + h.name + " || true"
 }
 
 // ours reports whether a handler's command is SlopCop's hook for this
 // harness, as installed now or as first installed, without the guard.
 func (h harness) ours(command any) bool {
+	if h.gate {
+		return command == h.command()
+	}
 	return command == h.command() || command == "slopcop hook "+h.name
 }
 
@@ -108,12 +118,54 @@ func (h harness) handler() *object {
 	handler := newObject()
 	handler.set("type", "command")
 	handler.set("command", h.command())
+	if h.gate {
+		return handler
+	}
 	if h.windowsCommand != "" {
 		handler.set("commandWindows", h.windowsCommand)
 	}
 	handler.set("timeout", json.Number(hookTimeoutSeconds))
 	handler.set("statusMessage", statusMessage)
 	return handler
+}
+
+// Repository installs or removes hooks in clone-local settings. skip leaves a
+// tracked settings file untouched, preserving the repository's own content.
+// Project-level .codex/hooks.json is inferred from Codex 0.166 strings and
+// has not yet been confirmed with a live run. Codex's shell tool gate payload
+// and blocking semantics are not established, so only Claude gets a gate.
+func Repository(root string, install bool, skip func(string) bool) (Result, error) {
+	var result Result
+	var errs []error
+	for _, h := range []harness{
+		{name: "claude", dir: filepath.Join(root, ".claude"), file: "settings.local.json"},
+		{name: "claude", dir: filepath.Join(root, ".claude"), file: "settings.local.json", event: "PreToolUse", gate: true},
+		{name: "codex", dir: filepath.Join(root, ".codex"), file: "hooks.json", windowsCommand: "slopcop hook codex || exit /b 0", needsTrust: true},
+	} {
+		path := filepath.Join(h.dir, h.file)
+		if skip != nil && skip(path) {
+			continue
+		}
+		if install {
+			if err := os.MkdirAll(h.dir, 0755); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		changed, present, err := reconcileHarness(h, install)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if changed != "" {
+			result.ChangedPaths = append(result.ChangedPaths, changed)
+		}
+		if install && present {
+			result.Installed = append(result.Installed, h.name)
+			result.NeedsTrust = result.NeedsTrust || h.needsTrust
+		}
+	}
+	return result, errors.Join(errs...)
 }
 
 // Install registers SlopCop's Stop hook in each harness installed here.

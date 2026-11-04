@@ -96,6 +96,80 @@ func readFile(t *testing.T, root, name string) string {
 	return string(data)
 }
 
+func TestCaptureWorkingTreeAndCommitIdentity(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, root, ".gitignore", "ignored/\n")
+	writeFile(t, root, "edit.txt", "before\n")
+	writeFile(t, root, "delete.txt", "gone\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+	writeFile(t, root, "edit.txt", "staged\n")
+	git(t, root, "add", "edit.txt")
+	writeFile(t, root, "edit.txt", "worktree\n")
+	if err := os.Remove(filepath.Join(root, "delete.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "new.txt", "new\n")
+	writeFile(t, root, "ignored/output", "ignored\n")
+	writeFile(t, root, "ignored/policy.rqlp", "policy\n")
+	indexBefore := git(t, root, "ls-files", "-s")
+	stagedBefore := git(t, root, "diff", "--cached")
+
+	snapshot, err := CaptureWorkingTree(root, []string{"ignored/policy.rqlp"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := git(t, root, "ls-files", "-s"); got != indexBefore {
+		t.Errorf("index changed: %q vs %q", got, indexBefore)
+	}
+	if got := git(t, root, "diff", "--cached"); got != stagedBefore {
+		t.Errorf("staged diff changed: %q vs %q", got, stagedBefore)
+	}
+	if snapshot.Tree == snapshot.PatchTree {
+		t.Fatal("ignored policy must change PatchTree")
+	}
+	paths := git(t, root, "ls-tree", "-r", "--name-only", snapshot.Tree)
+	for _, want := range []string{".gitignore", "edit.txt", "new.txt"} {
+		if !strings.Contains("\n"+paths+"\n", "\n"+want+"\n") {
+			t.Errorf("Tree missing %s: %q", want, paths)
+		}
+	}
+	for _, unwanted := range []string{"delete.txt", "ignored/output", "ignored/policy.rqlp"} {
+		if strings.Contains("\n"+paths+"\n", "\n"+unwanted+"\n") {
+			t.Errorf("Tree unexpectedly contains %s: %q", unwanted, paths)
+		}
+	}
+	if got := git(t, root, "show", snapshot.Tree+":edit.txt"); got != "worktree" {
+		t.Errorf("Tree has edit %q", got)
+	}
+	if got := git(t, root, "show", snapshot.PatchTree+":ignored/policy.rqlp"); got != "policy" {
+		t.Errorf("PatchTree has policy %q", got)
+	}
+	change, err := TreePatch(root, base, snapshot.Tree)
+	if err != nil || change.Files != 3 {
+		t.Errorf("TreePatch files = %d, err = %v", change.Files, err)
+	}
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "captured")
+	if got := git(t, root, "rev-parse", "HEAD^{tree}"); got != snapshot.Tree {
+		t.Errorf("committed tree = %s, captured = %s", got, snapshot.Tree)
+	}
+}
+
+func TestTreePatchEmptyForBaseTree(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, root, "file", "content\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+	tree := git(t, root, "rev-parse", "HEAD^{tree}")
+	change, err := TreePatch(root, base, tree)
+	if err != nil || change.Files != 0 || len(change.Patch) != 0 {
+		t.Fatalf("TreePatch(base, tree) = %+v, %v", change, err)
+	}
+}
+
 func TestWorkingTreePatchRoundTripsTheWorkingTree(t *testing.T) {
 	root := initRepo(t)
 	symlinks := symlinkError() == nil

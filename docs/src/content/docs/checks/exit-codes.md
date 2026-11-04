@@ -5,7 +5,9 @@ sidebar:
   order: 3
 ---
 
-The service sets the status of a check and the exit code follows it.
+The CLI merges the hosted static status and the local review status.
+Interrupts win, then findings, a static refusal needing a person, failure
+or incompleteness, static pending, and clean.
 `--if-enabled` can skip one locally, with `status: skipped` and exit `0`. A
 script or an agent can act on the code alone.
 
@@ -18,17 +20,35 @@ script or an agent can act on the code alone.
 | `4` | The service refused the check, and only a person can clear it. | Do not retry. Tell the person the `code` and remedy. |
 | `130`, `143` | Interrupted (Ctrl-C, or SIGTERM) before the check answered. No report was printed. | Run the same check again. |
 
-Only `clean` exits `0`. A status this CLI does not know exits `2`, so a newer
-service can never pass a check by accident, and stderr names the status. An
-inconclusive rule never changes the exit code (see
-[Read a report](/checks/read-a-report/#inconclusive-checks)).
+Exit `0` can also include a skipped static half or an empty review. Inspect the
+report before calling the change checked. A status this CLI does not know exits
+`2`, so a newer service can never pass a check by accident, and stderr names the
+status. An inconclusive rule never changes the exit code (see [Read a
+report](/checks/read-a-report/#inconclusive-checks)).
+
+In JSON, top-level `status` matches the exit code. `staticStatus` keeps
+the service status when it differs. `review.status` is `clean`, `findings`,
+`failed`, or `empty`; `review.reviewers` and `review.unavailable` explain the
+outcome. Review findings count toward exit `1` unless `--fail-on never` is
+set. A complete review is reused when its inputs have not changed.
 
 ## Exit 1: findings
 
 New findings that cross `--fail-on` exit `1` even when some rule did not
 complete. The findings are the work: fix them in the working tree and run the
-same check again. The loop ends when the check reports no new findings: exit
-`0`, or exit `2` with a report whose `summary.newFindings` is `0`.
+same check again. Exit `2` remains incomplete even when `summary.newFindings`
+is `0`.
+
+## Which results approve the tree
+
+A check records `refs/slopcop/reviewed/<tree>` for the snapshot it checked, and
+the Claude Code push gate looks for it, when nothing crossed `--fail-on`, the
+review is clean (or did not run), and the static half is clean, skipped, or
+incomplete (or did not run). So exit `0` approves the tree, and so does exit
+`2` whose only cause is static rules that did not complete: rerunning gives the
+same answer, so it must not block a push forever. A failed review, a service
+failure, a refusal, or a pending check (exit `3`) never approves it. An empty
+change approves nothing.
 
 ## Exit 2: incomplete, or an error
 

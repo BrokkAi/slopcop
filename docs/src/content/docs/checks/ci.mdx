@@ -7,9 +7,9 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 
-The same command that an agent runs gates a change in CI: no prompts, one
-request, and the [exit code](/checks/exit-codes/) says what happened. A check
-of unpushed or branch work is free and never uses credits.
+The same command that an agent runs gates a change in CI: no prompts in static
+mode, one request, and the [exit code](/checks/exit-codes/) says what happened.
+A check of unpushed or branch work is free and never uses credits.
 
 On GitHub, [pull request checks](/checks/pull-requests/) give each pull request
 the same check with no workflow or token: the SlopCop GitHub App posts it. Run
@@ -34,6 +34,10 @@ A check of a repository the workspace has not added exits `4` with
 from the checkout at a terminal, or once a person has approved it, pass
 `--add-repository --workspace <name>`. See [Repositories](/account/repositories/).
 </Aside>
+
+Use `--mode static` in CI unless the runner has Node.js and existing
+reviewer harness logins. Default `both` mode also runs local review and
+can take minutes. Reviewers can run commands and edit files in the checkout.
 
 ## GitHub Actions
 
@@ -62,7 +66,7 @@ jobs:
         env:
           SLOPCOP_TOKEN: ${{ secrets.SLOPCOP_TOKEN }}
         run: |
-          slopcop check --base "origin/${{ github.base_ref }}" --format sarif > slopcop.sarif
+          slopcop check --mode static --base "origin/${{ github.base_ref }}" --format sarif > slopcop.sarif
           echo "exit=$?" >> "$GITHUB_OUTPUT"
         id: slopcop
         continue-on-error: true
@@ -107,7 +111,7 @@ export `SLOPCOP_TOKEN`, check with `--base` naming the target branch, and act on
 the exit code.
 
 ```console
-slopcop check --base origin/main --format json > slopcop.json
+slopcop check --mode static --base origin/main --format json > slopcop.json
 ```
 
 `--timeout` bounds the whole wait (default ten minutes); a check still running
