@@ -68,6 +68,14 @@ Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
 approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
 and valid overrides write `refs/slopcop/reviewed/<tree>`.
 
+## Push approval level
+
+Set `gate.blockOn` by editing the user config file. It defaults to `error`;
+values are `never`, `finding`, `note`, `warning`, and `error`. New findings
+at or above that level block push approval. Unknown severities count as
+errors. This setting has no check flag and cannot be changed through
+`slopcop config`.
+
 ## Another deployment
 
 ```console

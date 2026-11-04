@@ -295,7 +295,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	if want := []string{"baseCommit", "findings", "incomplete", "inconclusive", "status", "summary"}; !reflect.DeepEqual(keys, want) {
+	if want := []string{"approved", "baseCommit", "findings", "incomplete", "inconclusive", "status", "summary"}; !reflect.DeepEqual(keys, want) {
 		t.Errorf("keys = %v, want %v", keys, want)
 	}
 	wantSummary := map[string]any{
@@ -382,6 +382,7 @@ func TestPendingIsAParseableReport(t *testing.T) {
 	}
 	want := map[string]any{
 		"status":     "pending",
+		"approved":   false,
 		"retryAfter": float64(5),
 		"message":    "The check is still running.",
 		"remedy":     "Run the same check again.",
@@ -432,6 +433,7 @@ func TestSkippedIsNeverMistakenForACleanCheck(t *testing.T) {
 	}
 	want := map[string]any{
 		"status":     "skipped",
+		"approved":   false,
 		"code":       "repository_not_enabled",
 		"state":      "not_added",
 		"repository": "Acme/widgets",
@@ -480,6 +482,7 @@ func TestFailureIsAParseableReport(t *testing.T) {
 	}
 	want := map[string]any{
 		"status":    "failed",
+		"approved":  false,
 		"code":      "insufficient_credits",
 		"message":   "The workspace is out of credits.",
 		"remedy":    "Add credits, then retry.",
@@ -992,7 +995,7 @@ func TestStaticJSONFieldOrderIsUnchanged(t *testing.T) {
 	if err := Write(&out, response, FormatJSON, Options{}); err != nil {
 		t.Fatal(err)
 	}
-	want := `{\n  "status": "clean",\n  "baseCommit": "base",\n  "summary":`
+	want := `{\n  "status": "clean",\n  "approved": false,\n  "baseCommit": "base",\n  "summary":`
 	if !strings.HasPrefix(out.String(), strings.ReplaceAll(want, `\n`, "\n")) {
 		t.Fatalf("field order changed: %s", out.String())
 	}

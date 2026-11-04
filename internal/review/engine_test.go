@@ -224,26 +224,28 @@ func TestOverrideRules(t *testing.T) {
 		exit    int
 		status  string
 		allowed bool
+		blocks  bool
 	}{
-		{2, "incomplete", true},
-		{0, "clean", true},
-		{0, "skipped", true},
-		{2, "failed", false},
-		{3, "pending", false},
-		{1, "findings", false},
+		{2, "incomplete", true, false},
+		{0, "clean", true, false},
+		{0, "skipped", true, false},
+		{2, "failed", false, true},
+		{3, "pending", false, true},
+		{1, "findings", false, true},
+		{1, "findings", true, false},
 	} {
-		if err := s.SetStatic(tc.exit, tc.status); err != nil {
+		if err := s.SetStatic(tc.exit, tc.status, tc.blocks); err != nil {
 			t.Fatal(err)
 		}
 		err := s.Override("reason", c.Tree)
 		if (err == nil) != tc.allowed {
 			t.Errorf("override static %d/%s: %v", tc.exit, tc.status, err)
 		}
-		if !tc.allowed && (err == nil || !strings.Contains(err.Error(), tc.status)) {
+		if !tc.allowed && (err == nil || !strings.Contains(err.Error(), "static")) {
 			t.Errorf("override reason missing %s: %v", tc.status, err)
 		}
 	}
-	if err := s.SetStatic(2, "incomplete"); err != nil {
+	if err := s.SetStatic(2, "incomplete", false); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Override("reason", c.Tree); err != nil {

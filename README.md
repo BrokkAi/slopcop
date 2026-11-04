@@ -387,14 +387,15 @@ isolation. Set `review.count` (1–3, default 2), `review.timeout` (default
 `--intent TEXT` for one check. CI normally uses `--mode static`.
 
 Review state and logs are under `<git-dir>/slopcop/`. A complete review is
-reused when nothing relevant changed. A check with no findings, a clean (or
-skipped) review, and a static half that is clean, skipped, or incomplete
-records `refs/slopcop/reviewed/<tree>`: exit `0`, or exit `2` caused only by
-static rules that did not complete. The Claude Code gate checks HEAD's tree, so
+reused when nothing relevant changed. A nonempty check with a clean review
+and a completed static result with no new findings at or above
+`gate.blockOn` (default `error`) records `refs/slopcop/reviewed/<tree>`.
+Warnings and notes are advisory for push approval, though they still exit `1`
+by default. The Claude Code gate checks HEAD's tree, so
 after checking a dirty tree, commit exactly that state. For demonstrably wrong
 complete review findings, `slopcop override --reason "..."` records acceptance
-when the static half has no findings and is clean, skipped, or incomplete, or
-did not run. Never override real bugs or failed or incomplete reviews.
+when the static half has no findings at or above the push level
+and completed, was skipped, or did not run. Never override real bugs or failed or incomplete reviews.
 
 ### What is sent
 

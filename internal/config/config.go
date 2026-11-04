@@ -22,6 +22,7 @@ type Config struct {
 	Token      string  `json:"token,omitempty"`
 	Mode       string  `json:"mode,omitempty"`
 	Review     *Review `json:"review,omitempty"`
+	Gate       *Gate   `json:"gate,omitempty"`
 }
 
 // Review contains local reviewer settings.
@@ -29,6 +30,11 @@ type Review struct {
 	Count    int                `json:"count,omitempty"`
 	Timeout  string             `json:"timeout,omitempty"`
 	Adapters map[string]Adapter `json:"adapters,omitempty"`
+}
+
+// Gate controls which hosted findings block push approval.
+type Gate struct {
+	BlockOn string `json:"blockOn,omitempty"`
 }
 
 // Adapter overrides an ACP adapter command.
@@ -98,6 +104,9 @@ func Save(cfg Config) (string, error) {
 	}
 	if cfg.Review != nil && cfg.Review.Count == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
 		cfg.Review = nil
+	}
+	if cfg.Gate != nil && cfg.Gate.BlockOn == "" {
+		cfg.Gate = nil
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

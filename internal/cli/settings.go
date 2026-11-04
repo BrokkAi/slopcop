@@ -111,3 +111,19 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 	}
 	return settings, nil
 }
+
+// pushBlockLevel reads the human-owned approval threshold.
+func pushBlockLevel(cfg config.Config) (string, error) {
+	if cfg.Gate == nil || cfg.Gate.BlockOn == "" {
+		return "error", nil
+	}
+	switch cfg.Gate.BlockOn {
+	case "never", "finding", "note", "warning", "error":
+		return cfg.Gate.BlockOn, nil
+	}
+	path, err := config.Path()
+	if err != nil {
+		return "", err
+	}
+	return "", fmt.Errorf("invalid gate.blockOn in %s: want never, finding, note, warning, or error", path)
+}

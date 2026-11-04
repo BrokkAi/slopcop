@@ -27,6 +27,8 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 // Options shape what a report lists. Rendering never changes the check, so
 // none of them is sent to the service.
 type Options struct {
+	// Approved says this run recorded push approval for the checked tree.
+	Approved bool
 	// Review is the local reviewers' verdict, when one ran.
 	Review *review.Verdict
 	// Status overrides the service status with the combined check status.
@@ -367,7 +369,8 @@ func printable(value string) string {
 // existing ones a service from before BrokkAi/bifrost-service#760 still
 // sent; summary counts both either way.
 type jsonReport struct {
-	Status string `json:"status"`
+	Status   string `json:"status"`
+	Approved bool   `json:"approved"`
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Review is the local verdict, when one ran.
@@ -392,6 +395,7 @@ type jsonReport struct {
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	return encode(w, jsonReport{
 		Status:          status(response.Status, options),
+		Approved:        options.Approved,
 		StaticStatus:    options.StaticStatus,
 		Review:          reviewValue(options.Review),
 		BaseCommit:      response.BaseCommit,
@@ -410,6 +414,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 // still running when --timeout ran out.
 type pendingReport struct {
 	Status       string        `json:"status"`
+	Approved     bool          `json:"approved"`
 	StaticStatus string        `json:"staticStatus,omitempty"`
 	Review       *reviewJSON   `json:"review,omitempty"`
 	RetryAfter   int           `json:"retryAfter"`
@@ -428,6 +433,7 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 		return encode(w, pendingReport{
 			Status:       status(service.StatusPending, options),
 			StaticStatus: options.StaticStatus,
+			Approved:     options.Approved,
 			Review:       reviewValue(options.Review),
 			RetryAfter:   pending.RetryAfter,
 			Message:      pending.Message,
@@ -466,6 +472,7 @@ type Skipped struct {
 // skippedReport is the document `--format json` prints for a skipped check.
 type skippedReport struct {
 	Status       string        `json:"status"`
+	Approved     bool          `json:"approved"`
 	StaticStatus string        `json:"staticStatus,omitempty"`
 	Review       *reviewJSON   `json:"review,omitempty"`
 	Code         string        `json:"code"`
@@ -487,6 +494,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 		return encode(w, skippedReport{
 			Status:       status("skipped", options),
 			StaticStatus: options.StaticStatus,
+			Approved:     options.Approved,
 			Review:       reviewValue(options.Review),
 			Code:         skipped.Code,
 			State:        skipped.State,
@@ -519,6 +527,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 // whether the same request may succeed later.
 type failureReport struct {
 	Status       string        `json:"status"`
+	Approved     bool          `json:"approved"`
 	StaticStatus string        `json:"staticStatus,omitempty"`
 	Review       *reviewJSON   `json:"review,omitempty"`
 	Code         string        `json:"code"`
@@ -541,6 +550,7 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 		return encode(w, failureReport{
 			Status:       status(service.StatusFailed, options),
 			StaticStatus: options.StaticStatus,
+			Approved:     options.Approved,
 			Review:       reviewValue(options.Review),
 			Code:         failure.Body.Code,
 			Message:      failure.Error(),
@@ -576,6 +586,7 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
+	properties["slopcop.approved"] = options.Approved
 	if options.EmptyChange {
 		properties["slopcop.emptyChange"] = true
 	}
@@ -888,7 +899,7 @@ func WriteAI(w io.Writer, format string, options Options) error {
 	case "", FormatHuman:
 		return writeReview(w, options.Review)
 	case FormatJSON:
-		return encode(w, aiReport{Status: status("clean", options), EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
+		return encode(w, aiReport{Status: status("clean", options), Approved: options.Approved, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "SlopCop", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: true}}, Properties: runProperties(map[string]any{"slopcop.status": status("clean", options)}, options)}), "sarif report")
 	default:
@@ -899,7 +910,8 @@ func WriteAI(w io.Writer, format string, options Options) error {
 // aiReport is the JSON document for a check without a static half.
 type aiReport struct {
 	// Status is the AI-only report's Status field.
-	Status string `json:"status"`
+	Status   string `json:"status"`
+	Approved bool   `json:"approved"`
 	// EmptyChange is the AI-only report's EmptyChange field.
 	EmptyChange bool `json:"emptyChange,omitempty"`
 	// Review is the AI-only report's Review field.

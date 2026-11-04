@@ -305,14 +305,19 @@ Other bounds in the report:
 The new findings are the work: fix them in the working tree and run the same
 check again. A static finding traces to a rule; a review finding is a model's
 judgment, so read the code it names before you change anything, and use
-`slopcop override` (below) when it is wrong. The loop ends at exit `0`, or at
-exit `2` whose only cause is static checks that did not complete, with no new
-findings and a clean review: say which checks did not complete, and why, using
-the terms above. Either one approves the tree for the push gate. A failed
-review, a service failure, or exit `3` never does. Read a `possible` or
-`heuristic` finding before fixing it, since it may be a false positive. Exit
-`3` means wait and run it again; it is not a result. Do not fix pre-existing
-findings unless asked: they are not this change's, and they never stop the loop.
+`slopcop override` (below) when it is wrong. The loop ends when the check
+approves the tree: `approved` is `true` in `json`, and where the push gate is
+installed, stderr says the tree may be pushed. That needs a clean review and
+no new static finding at or above the push level (`error` by default); a
+static check that ended `incomplete` does not prevent it. New static findings
+below the push level, warnings and notes by default, are advisory: they do not
+block the push, though they still exit `1` under the default `--fail-on`. Fix
+the real ones in this change, and tell the user about any you leave. A failed
+review, a service failure, or exit `3` never approves the tree. Read a
+`possible` or `heuristic` finding before fixing it, since it may be a false
+positive. Exit `3` means wait and run it again; it is not a result. Do not fix
+pre-existing findings unless asked: they are not this change's, and they never
+stop the loop.
 
 When a hosted static finding is a false positive, run `slopcop ignore <id>`
 with its id.
@@ -327,11 +332,15 @@ the change, so a new rule is picked up by the next check with no extra setup.
 
 For demonstrably incorrect or unreasonable **complete** review findings,
 run `slopcop override --reason "concrete explanation"`. This accepts the
-last reviewed snapshot only when the static half has no new findings and
-completed (clean or incomplete), was skipped, or did not run.
+last reviewed snapshot only when the static half has no new findings at or
+above the push level and completed, was skipped, or did not run.
 Never override a real bug, timeout, failed or incomplete review, or a
 different tree. Do not switch reviewers or reduce the count to bypass a
 failure.
+
+Set the push level with `gate.blockOn` in the config file. Only a person
+should change it. The default is `error`; `--fail-on` affects exit codes,
+not push approval.
 
 A passing check (see above) or valid override records
 `refs/slopcop/reviewed/<tree>`.

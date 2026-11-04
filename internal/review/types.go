@@ -151,6 +151,8 @@ type Record struct {
 	Mode string `json:"mode"`
 	// StaticExit is the static half's exit code; nil in "ai" mode.
 	StaticExit *int `json:"staticExit,omitempty"`
+	// StaticBlocksPush records whether the hosted result prevents approval.
+	StaticBlocksPush bool `json:"staticBlocksPush,omitempty"`
 	// StaticStatus is the hosted half's own status; empty in AI mode.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	Verdict

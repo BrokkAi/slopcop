@@ -3,6 +3,7 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -166,6 +167,17 @@ func Repository(root string, install bool, skip func(string) bool) (Result, erro
 		}
 	}
 	return result, errors.Join(errs...)
+}
+
+// GateInstalled reports whether the repository's Claude Code settings hold
+// SlopCop's push gate. A check says whether its tree may be pushed only where
+// the gate will ask; elsewhere, such as in CI, the line would be noise.
+func GateInstalled(root string) bool {
+	data, err := os.ReadFile(filepath.Join(root, ".claude", "settings.local.json"))
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(data, []byte(harness{gate: true}.command()))
 }
 
 // Install registers SlopCop's Stop hook in each harness installed here.

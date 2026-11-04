@@ -77,6 +77,7 @@ slopcop check --format json
 | --- | --- |
 | `staticStatus` | service status when it differs from merged `status` |
 | `review` | `status`, `reviewers`, `unavailable`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
+| `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result matching the exit code: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped` |
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
@@ -88,6 +89,9 @@ slopcop check --format json
 | `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
+
+Failure, pending, skipped, and AI-only JSON also include `approved`. The first
+SARIF run has `slopcop.approved` in its properties.
 
 A failed check prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the service
@@ -111,7 +115,9 @@ The static results carry `baselineState` `new` and the finding id
 in `properties["slopcop.findingId"]`. Inconclusive rules appear as `note`
 notifications with `slopcop.inconclusive` and `slopcop.elsewhere` properties;
 an empty change sets `properties["slopcop.emptyChange"]`; a skill update sits in
-`properties["slopcop.skillUpdated"]`.
+`properties["slopcop.skillUpdated"]`. The first run's
+`properties["slopcop.approved"]` says whether the checked tree got push
+approval.
 
 A failed check prints a run with `slopcop.status` `failed`, whose invocation is
 unsuccessful and carries an `error` notification whose descriptor id is the

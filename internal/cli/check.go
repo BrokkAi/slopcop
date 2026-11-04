@@ -19,6 +19,7 @@ import (
 	"github.com/BrokkAi/slopcop/internal/attribution"
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	agenthooks "github.com/BrokkAi/slopcop/internal/hooks"
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
@@ -82,6 +83,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
 	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	blockLevel, err := pushBlockLevel(cfg)
 	if err != nil {
 		return err
 	}
@@ -168,7 +173,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	if store != nil {
 		if mode == modeBoth {
-			if err := store.SetStatic(static.exit, static.status); err != nil {
+			if err := store.SetStatic(static.exit, static.status, !staticPasses(static, mode, blockLevel)); err != nil {
 				verdict.Status = review.StatusFailed
 				verdict.Error = err.Error()
 			}
@@ -225,9 +230,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(prepared.request.BaseCommit))
 	}
 	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean
-	staticPassed := mode == modeAI || static.skipped != nil || (static.response != nil && (static.response.Status == service.StatusClean || static.response.Status == service.StatusIncomplete))
+	staticPassed := staticPasses(static, mode, blockLevel)
 	nonempty := prepared.bytes > 0 && (static.response != nil || verdict.Status == review.StatusClean)
-	if reviewPassed && staticPassed && nonempty && exit != service.ExitFindings {
+	reportOptions.Approved = reviewPassed && staticPassed && nonempty
+	if reportOptions.Approved {
 		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
 			return err
 		}
@@ -249,6 +255,20 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	if writeErr != nil {
 		return writeErr
+	}
+	// Say whether the tree may be pushed only where the push gate is
+	// installed, and only when the check produced a result to judge: after a
+	// refusal or a pending check, the static half's own message already says
+	// what happened.
+	judged := static.response != nil || mode != modeStatic
+	if format == report.FormatHuman && judged && agenthooks.GateInstalled(prepared.repoRoot) {
+		tree := shortSHA(prepared.snapshot.Tree)
+		if reportOptions.Approved {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may be pushed: it passed the check.\n", tree)
+		} else {
+			reason := approvalReason(prepared.bytes == 0, reviewPassed, verdict, static, mode, blockLevel)
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may not be pushed yet: %s.\n", tree, reason)
+		}
 	}
 	return silentExit{exit}
 }
@@ -859,4 +879,60 @@ func shortSHA(value string) string {
 		return value[:12]
 	}
 	return value
+}
+
+// staticBlockingCount uses the service's new findings. The service lists the
+// most severe findings first, so omitted findings cannot hide a higher rank.
+func staticBlockingCount(response service.Response, level string) int {
+	if level == "never" {
+		return 0
+	}
+	rank := map[string]int{"note": 1, "warning": 2, "error": 3}
+	threshold := rank[level]
+	count := 0
+	for _, finding := range response.Findings {
+		if !finding.New {
+			continue
+		}
+		severity := rank[finding.Severity]
+		if severity == 0 {
+			severity = 3
+		}
+		if level == "finding" || severity >= threshold {
+			count++
+		}
+	}
+	return count
+}
+
+// staticPasses says whether the static half allows the tree to be approved
+// for push. A half that did not run (ai mode) or skipped an inactive
+// repository allows it; otherwise it needs a finished response of a known
+// status with no new finding at or above the push level. Findings below that
+// level are advisory, and --fail-on plays no part, so no option of a check
+// can loosen what blocks a push.
+func staticPasses(static staticOutcome, mode, level string) bool {
+	return mode == modeAI || static.skipped != nil ||
+		(static.response != nil && static.response.KnownStatus() && staticBlockingCount(*static.response, level) == 0)
+}
+
+// approvalReason names why a check did not approve its tree, for the line a
+// person or agent reads before pushing. It checks the causes in the order the
+// approval rule does.
+func approvalReason(empty, reviewPassed bool, verdict review.Verdict, static staticOutcome, mode, level string) string {
+	if empty {
+		return "nothing was checked (empty change)"
+	}
+	if !reviewPassed {
+		if verdict.Status == review.StatusFindings {
+			return "the review found problems (fix them, or override wrong ones with slopcop override)"
+		}
+		return "the review did not complete"
+	}
+	if mode != modeAI && static.response != nil && static.response.KnownStatus() {
+		if n := staticBlockingCount(*static.response, level); n > 0 {
+			return fmt.Sprintf("%d static finding(s) at or above %s", n, level)
+		}
+	}
+	return "the static check did not complete (failed, pending, or unknown status)"
 }

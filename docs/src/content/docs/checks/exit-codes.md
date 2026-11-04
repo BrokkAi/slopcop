@@ -9,7 +9,8 @@ The CLI merges the hosted static status and the local review status.
 Interrupts win, then findings, a static refusal needing a person, failure
 or incompleteness, static pending, and clean.
 `--if-enabled` can skip one locally, with `status: skipped` and exit `0`. A
-script or an agent can act on the code alone.
+script or an agent can act on the code alone for check completion; use
+`approved` or the approval ref to decide whether the tree may be pushed.
 
 | Exit | Meaning | What to do |
 | --- | --- | --- |
@@ -41,14 +42,14 @@ is `0`.
 
 ## Which results approve the tree
 
-A check records `refs/slopcop/reviewed/<tree>` for the snapshot it checked, and
-the Claude Code push gate looks for it, when nothing crossed `--fail-on`, the
-review is clean (or did not run), and the static half is clean, skipped, or
-incomplete (or did not run). So exit `0` approves the tree, and so does exit
-`2` whose only cause is static rules that did not complete: rerunning gives the
-same answer, so it must not block a push forever. A failed review, a service
-failure, a refusal, or a pending check (exit `3`) never approves it. An empty
-change approves nothing.
+A check records `refs/slopcop/reviewed/<tree>` when a nonempty change has a
+clean review (or no review), and the static half completed with no new finding
+at or above `gate.blockOn` (or was skipped or did not run). The default push
+level is `error`; warnings and notes are advisory even when `--fail-on` makes
+them exit `1`. `--fail-on` changes the exit code, not push approval. A static
+rule may be incomplete while the completed findings still approve the tree.
+A failed review, static failure, refusal, pending or unknown status never
+approves it. JSON `approved` reports the decision directly.
 
 ## Exit 2: incomplete, or an error
 

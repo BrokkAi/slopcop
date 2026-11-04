@@ -23,7 +23,7 @@ func newConfigCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "config",
 		Short: "Read or change user settings",
-		Long:  "Read or change user settings. Adapter commands are edited by hand in " + path + ".",
+		Long:  "Read or change user settings. Adapter commands and gate.blockOn are edited by hand in " + path + ".",
 		Args:  cobra.NoArgs,
 	}
 	command.AddCommand(&cobra.Command{
@@ -89,6 +89,12 @@ func newConfigCommand() *cobra.Command {
 // configValue returns the configured or default value for a key.
 func configValue(cfg config.Config, key string) (string, error) {
 	switch key {
+	case "gate.blockOn":
+		path, err := config.Path()
+		if err != nil {
+			return "", err
+		}
+		return "", fmt.Errorf("gate.blockOn is edited by hand in %s", path)
 	case "mode":
 		if cfg.Mode != "" {
 			return cfg.Mode, nil
@@ -112,6 +118,12 @@ func configValue(cfg config.Config, key string) (string, error) {
 // setConfigValue validates and updates one supported setting.
 func setConfigValue(cfg *config.Config, key, value string) error {
 	switch key {
+	case "gate.blockOn":
+		path, err := config.Path()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("gate.blockOn is edited by hand in %s", path)
 	case "mode":
 		if value != modeBoth && value != modeStatic && value != modeAI {
 			return fmt.Errorf("invalid mode %q (want both, static, or ai)", value)
@@ -138,6 +150,12 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 // unsetConfigValue removes a setting so its default applies again.
 func unsetConfigValue(cfg *config.Config, key string) error {
 	switch key {
+	case "gate.blockOn":
+		path, err := config.Path()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("gate.blockOn is edited by hand in %s", path)
 	case "mode":
 		cfg.Mode = ""
 	case "review.count":

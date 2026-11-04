@@ -143,7 +143,7 @@ func (s *Store) Save(r Record) error {
 }
 
 // SetStatic records the hosted half's exit and status for override checks.
-func (s *Store) SetStatic(code int, status string) error {
+func (s *Store) SetStatic(code int, status string, blocks bool) error {
 	r, err := s.Last()
 	if err != nil {
 		return err
@@ -153,6 +153,7 @@ func (s *Store) SetStatic(code int, status string) error {
 	}
 	r.StaticExit = &code
 	r.StaticStatus = status
+	r.StaticBlocksPush = blocks
 	return s.write("last.json", *r)
 }
 
@@ -168,15 +169,11 @@ func (s *Store) Override(reason, currentTree string) error {
 	if r == nil || r.Status != StatusFindings || groupVerdict(r.Reviewers) != StatusFindings {
 		return errors.New("override requires complete findings")
 	}
-	if r.StaticExit != nil {
-		allowed := r.StaticStatus == "clean" || r.StaticStatus == "skipped" || r.StaticStatus == "incomplete"
-		if !allowed || *r.StaticExit == 1 {
-			status := r.StaticStatus
-			if status == "" {
-				status = "unknown"
-			}
-			return fmt.Errorf("static check status %s does not allow override", status)
+	if r.StaticExit != nil && r.StaticBlocksPush {
+		if r.StaticStatus == "findings" {
+			return errors.New("static finding at or above the push block level does not allow override")
 		}
+		return fmt.Errorf("static status %s does not allow override", r.StaticStatus)
 	}
 	if currentTree != r.Capture.Tree {
 		return errors.New("working tree differs from reviewed tree")
