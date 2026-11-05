@@ -5,19 +5,30 @@ sidebar:
   order: 2
 ---
 
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
+
 ## The skill
 
-`slopcop init` puts the skill in `~/.claude/skills/slopcop/`, Claude Code's
-personal skills, so it is there in every project. Claude uses it when you ask it
+`slopcop init` puts the skill in `.claude/skills/slopcop/` in the current
+repository, so it is available for that project. Claude uses it when you ask it
 to check its change, and you can run it yourself with `/slopcop`.
 
 ```console
 slopcop init
 ```
 
-`slopcop login` and every check also install the skill, and replace one that
-differs from the skill bundled in the binary you run, so Claude follows the
-instructions of the slopcop version it has. [The agent skill](/agents/skill/)
+A check updates an existing copy when it differs from the bundled skill, but
+creates none. Login does not install it. Existing copies follow the instructions
+of the slopcop version that ran the check. [The agent skill](/agents/skill/)
 explains the update and backup rules.
 
 ## Check every change
@@ -40,13 +51,32 @@ again until none are left. The skill tells it to pass `--base` with the branch
 the change targets when it checks committed work, to read a `possible` finding
 before changing code, and to run `slopcop ignore <id>` for a false positive.
 
+## Running the review
+
+The default check includes local review and can take minutes. Run Bash with
+`run_in_background: true`, then poll TaskOutput until it finishes. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. The push gate
+installed by init is Claude Code only: it blocks `git push` and `gh pr
+create` until HEAD's tree has a passing check or valid override. After
+checking a dirty tree, commit exactly that state before pushing.
+
+The gate is a guard for the agent's workflow, not a security boundary. It
+checks HEAD in the directory Claude Code runs the command from: it does not
+follow `cd` or `git -C` in the command, read the pushed refspecs, or expand
+shell aliases. It matches commands by text, so it can also block a command
+that only mentions `git push`. Pushes from your own terminal are not affected.
+`slopcop init` lists its files in the repository's `.git/info/exclude`, which
+linked worktrees of the same repository share.
+
 ## The Stop hook
 
-`slopcop init` also adds a `Stop` hook to Claude Code's `settings.json`, under
-`CLAUDE_CONFIG_DIR` or `~/.claude`, and leaves everything else in the file as
-it was. When Claude stops, the hook checks the working tree through the same
-hosted API, but only when the session wrote files in the repository (or a
-dependency manifest or lockfile changed), slopcop is signed in with the
+`slopcop init` also adds a `Stop` hook to Claude Code's
+`.claude/settings.local.json` in the repository, and leaves everything else in
+the file as it was. When Claude stops, the hook checks the working tree through
+the same hosted API, but only when the session wrote files in the repository (or
+a dependency manifest or lockfile changed), slopcop is signed in with the
 repository active, and the tree differs from the last check in the session.
 
 New findings in files the session wrote are handed back to Claude to fix, once
@@ -64,10 +94,12 @@ Claude Code names its session in the commands it runs
 `~/.claude/projects` (or `$CLAUDE_CONFIG_DIR/projects`), subagents included,
 the CLI reads the model and effort behind each file Claude wrote: each
 successful Write, Edit, MultiEdit, or NotebookEdit gives a model, an effort, and
-a file. It reads only those fields, never the conversation, a tool's input, or
-a file's contents, and sends the harness, its version, the session id as an
-opaque identifier, and each model and effort with the repository-relative files
-it wrote. This is analytics only and never decides a check.
+a file. The static half sends only these attribution fields to SlopCop,
+never the conversation, tool input, or file contents from the session. The
+review half also reads the user's messages from the transcript for intent
+and includes them and the diff in prompts sent to the chosen reviewer model
+providers under your own logins. Review data does not go to SlopCop. Use
+`--mode static` to avoid local model review.
 `slopcop --verbose` prints it.
 
 ## Dogfooding tip

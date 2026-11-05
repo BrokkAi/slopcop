@@ -12,14 +12,27 @@ slopcop check --format json      # same, machine-readable
 slopcop --root ../repo --base origin/main
 ```
 
-Running `slopcop` with no subcommand runs the check; `slopcop check` is the
-same command. Every check it sends is one request, and a clean result or a
-failure always comes from the service. `--if-enabled` can skip a repository
-the workspace has not enabled; that is a `skipped` result, never a clean one.
+Running `slopcop` with no subcommand runs the check; `slopcop check` is the same
+command. The static half sends one request and its result comes from the
+service. The local review has a separate result. `--if-enabled` can skip a
+repository the workspace has not enabled; that is a `skipped` result, never a
+clean one.
+
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
 
 ## What is sent
 
-One git patch from the base commit to the working tree. The patch carries
+In modes with static analysis, one git patch travels from the base commit to the
+working tree. The local reviewers read the captured tree diff. The patch carries
 committed but unpushed work, unstaged edits, untracked files, deletions,
 renames, mode changes, and binary content. Git-ignored files stay out, except
 selected `.slopcop/policies` rules, which must travel because the service

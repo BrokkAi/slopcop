@@ -1,6 +1,6 @@
 # SlopCop
 
-**Static analysis deep enough for CI, fast enough to run on every edit.**
+**Hosted static analysis and local review for every change.**
 
 [![CI](https://github.com/BrokkAi/slopcop/actions/workflows/ci.yml/badge.svg)](https://github.com/BrokkAi/slopcop/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/BrokkAi/slopcop)](https://github.com/BrokkAi/slopcop/releases/latest)
@@ -9,21 +9,21 @@
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25%2B-blue.svg)](https://go.dev/)
 
-`slopcop` sends one git patch, from the base commit to the working tree, to the
-hosted check API at <https://slopcop.com>. The service applies it, runs the
-hosted policy catalog plus the repository rules you selected, and returns the
-report: every finding with its severity, the file and line that triggered it,
-and the certainty behind it. The analysis is
+In its default `both` mode, `slopcop` sends one git patch, from the base commit
+to the working tree, to the hosted check API at <https://slopcop.com>. The
+service applies it, runs the hosted policy catalog plus the repository rules you
+selected, and returns the report: every finding with its severity, the file and
+line that triggered it, and the certainty behind it. The analysis is
 [Bifrost](https://github.com/BrokkAi/bifrost), an open-source static analysis
-engine rather than a language model, so a finding traces back to a rule instead
-of to a guess.
+engine, so a static finding traces back to a rule. Local review findings are
+model judgments that need inspection.
 
 The full documentation is at <https://docs.slopcop.com>.
 
-There is no local analyzer and nothing to install per language: the CLI ships
-the change and prints what comes back, and it never reports a check as passed
-without the service. The command is built for agents and one-shot CI: no
-prompts, one request, and the analyzer's exit contract. A check never adds a
+The hosted static analyzer needs no per-language install. Local review uses your
+existing harness logins and Node.js with `npx`. `--mode ai` needs no SlopCop
+login, enabled repository, or supported origin. Use `--mode static` for a
+hosted-only check or CI without reviewer harness logins. A check never adds a
 repository; `--if-enabled` skips one the workspace has not enabled, and says it
 was skipped.
 
@@ -136,31 +136,29 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 ## Set it up in an agent
 
 The binary carries the agent skill that teaches a coding agent how to run
-slopcop, plus an automatic check hook for Claude Code and Codex. `slopcop init`
-installs the skill into each well-known skills directory whose harness is
-present, and names what it did:
+slopcop, plus an automatic check hook for Claude Code and Codex. Run
+`slopcop init` inside the repository. It installs the skill into the
+repository-local directories below and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `~/.agents/skills/slopcop/` | Codex, opencode, Cursor, and other agents |
-| `~/.claude/skills/slopcop/` | Claude Code, opencode |
-| `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
+| `.agents/skills/slopcop/` | Codex and other agents |
+| `.claude/skills/slopcop/` | Claude Code and other agents |
 
-When none of those harness directories is present, init writes the
-vendor-neutral `~/.agents/skills/slopcop/` instead, which Codex, opencode,
-Cursor and other agents read. A fresh machine therefore has the skill before
-any harness has created its configuration directory.
+Init adds these paths to `.git/info/exclude`, leaves tracked files alone, and
+removes SlopCop's old user-level skill copies and hooks.
 
 A skill that is already there is left alone by init, so running it again is
-safe. `slopcop login` and every check also install the skill in those
-directories, rewriting one that differs from the skill bundled into the binary,
-so an agent follows the instructions of the slopcop version it runs. Each
-install records the version that wrote it, and what each file held, in
-`.slopcop-skill.json` in the skill folder. An update names the version it
-replaces, the new one and the files that changed, for example:
+safe. A check updates copies already in the repository, but creates none; login
+does not install the skill. An existing copy is rewritten when it differs from
+the skill bundled into the binary, so an agent follows the instructions of the
+slopcop version it runs. Each install records the version that wrote it, and
+what each file held, in `.slopcop-skill.json` in the skill folder. An update
+names the version it replaces, the new one and the files that changed, for
+example:
 
 ```
-slopcop: updated the slopcop skill at ~/.claude/skills/slopcop from v0.0.9 to v0.0.10 (changed: SKILL.md). Reread it if you loaded the old one.
+slopcop: updated the slopcop skill at .claude/skills/slopcop from v0.0.9 to v0.0.10 (changed: SKILL.md). Reread it if you loaded the old one.
 ```
 
 It removes the files the new skill no longer has. A skill with local edits,
@@ -171,16 +169,21 @@ notice says where. A check's `json` and `sarif` reports carry the same update
 (see below). `slopcop init --no-skill` skips the install and any update of
 it.
 
-Init also adds a `Stop` hook for each harness installed here, and leaves
-everything else in the file as it was:
+Init also adds a static-only `Stop` hook for Claude Code and Codex, and
+leaves everything else in the file as it was:
 
 | File | Harness |
 | --- | --- |
-| `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
-| `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
+| `.claude/settings.local.json` in the repository | Claude Code |
+| `.codex/hooks.json` in the repository | Codex |
 
-Codex runs a new or changed hook only once you trust it: open Codex and review
-it with `/hooks`. Init never writes that trust itself, and reminds you each
+The Claude Code settings also get a PreToolUse Bash gate. It blocks `git push`
+and `gh pr create` until HEAD's tree matches a passing check or valid override.
+No Codex push gate is installed.
+
+Codex reads the repository's `.codex/hooks.json` only once you trust the
+project in Codex, and runs a new or changed hook only once you trust it too:
+open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each
 time it runs, since Codex says nothing of a hook it skips. The hook stays the
 same from one release to the next, so an update does not ask for it again.
 
@@ -300,19 +303,19 @@ one that is already active is left alone. An agent runs with your login and
 the service cannot tell it from you, so adding a repository stays a step you
 take yourself.
 
-A check never adds a repository. A check of one the workspace has not added
-exits `4` with `repository_not_enabled` and sends nothing; `status` shows the
-same state, and a check that is not at a terminal asks nothing. Once a person
-has approved adding one, `check --add-repository --workspace <name|id>`
-carries that approval without a terminal; the flag needs `--workspace` (the
-flag itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one workspace
-cannot add the repository to the one the login happens to point at. The flag
-changes nothing for a repository already in that workspace. `slopcop enable`
-says `added owner/name to "Workspace"` on stderr, and `json` reports
-`"repositoryAdded": true`. Deleting repositories, archiving workspaces,
-members, credits and repository settings stay in the web app. `enable` exits
-with its first check's result; the other account commands exit `0` on success
-and `2` with the service's message and remedy otherwise, as `ignore` does.
+The static half never adds a repository. A check of one the workspace has not
+added exits `4` with `repository_not_enabled` and sends nothing; `status` shows
+the same state, and a check that is not at a terminal asks nothing. Once a
+person has approved adding one, `check --add-repository --workspace <name|id>`
+carries that approval without a terminal; the flag needs `--workspace` (the flag
+itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one workspace cannot
+add the repository to the one the login happens to point at. The flag changes
+nothing for a repository already in that workspace. `slopcop enable` says `added
+owner/name to "Workspace"` on stderr, and `json` reports `"repositoryAdded":
+true`. Deleting repositories, archiving workspaces, members, credits and
+repository settings stay in the web app. `enable` exits with its first check's
+result; the other account commands exit `0` on success and `2` with the
+service's message and remedy otherwise, as `ignore` does.
 
 ## Check
 
@@ -338,17 +341,21 @@ clone explains the failure: origin's default branch was renamed and
 `origin/HEAD` still names the old one, or the base is not on origin's default
 branch.
 
-Every run sends one check request, even when the working tree matches the base
-and the patch is empty. A clean result or a failure always comes from the
-service. A report for an empty patch comes with a note on stderr that suggests
-`--base`, and `json` adds `"emptyChange": true` (`sarif`:
-`properties["slopcop.emptyChange"]`): a clean result then means nothing
-changed was checked.
+Every run with a static half sends one check request, even when the working tree
+matches the base and the patch is empty. The static result comes from the
+service; local review runs separately. A report for an empty patch comes with a
+note on stderr that suggests `--base`, and `json` adds `"emptyChange": true`
+(`sarif`: `properties["slopcop.emptyChange"]`): a clean result then means
+nothing changed was checked.
 
 Flags:
 
 | Flag | Meaning |
 | --- | --- |
+| `--mode both\|static\|ai` | choose both halves (default), static only, or review only |
+| `--static`, `--ai` | shortcuts for the corresponding mode |
+| `--intent TEXT` | user request when no session transcript is found |
+| `--review-timeout DURATION` | local review timeout (default `20m`) |
 | `--root PATH` | repository to check (default `.`) |
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` |
 | `--base-exact REV` | exact base commit or revision, without a merge base |
@@ -362,14 +369,50 @@ Flags:
 | `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
+### Modes and local review
+
+`slopcop check` runs hosted static analysis and local LLM review concurrently
+by default. Use `--mode static` or `--static` for only the hosted check; use
+`--mode ai` or `--ai` for only local review. A single captured snapshot
+includes committed, uncommitted, and untracked work, except ignored files.
+Reviewers read `git diff <baseTree> <snapshotTree>` themselves.
+
+Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
+through Claude ACP. Each uses the newest model of its family at high effort.
+`slopcop init` probes each family once when reviewers are not configured and
+mode is not static, then saves the first two that work (or one). Configured
+reviewers are left alone; unset `review.reviewers` and run init to pick again.
+`slopcop init --no-reviewers` skips probing. A check runs exactly the configured
+reviewers and fails with exit `2` if one cannot run. Set the ordered list (1–4
+entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol`.
+Set `review.timeout` (default `20m`) or `mode` with `slopcop config set`;
+adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
+The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
+CI normally uses `--mode static`.
+
+Review state and logs are under `<git-dir>/slopcop/`. A complete review is
+reused when nothing relevant changed. A nonempty check with a clean review
+and a completed static result with no new findings at or above
+`gate.blockOn` (default `error`) records `refs/slopcop/reviewed/<tree>`.
+Warnings and notes are advisory for push approval, though they still exit `1`
+by default. The Claude Code gate checks HEAD's tree, so
+after checking a dirty tree, commit exactly that state. For demonstrably wrong
+complete review findings, `slopcop override --reason "..."` records acceptance
+when the static half has no findings at or above the push level
+and completed, was skipped, or did not run. Never override real bugs or failed or incomplete reviews.
+
 ### What is sent
 
-One git patch from the base commit to the working tree. An empty change is
-sent as an empty patch, not filtered out. The patch carries committed but
-unpushed work, unstaged edits, untracked files, deletions, renames, mode
-changes, and binary content. Git-ignored files stay out, except selected
-`.slopcop/policies` rules, which must travel because the service evaluates them
-from the patched checkout.
+In modes with the static half, the CLI sends one git patch from the base commit
+to the working tree. An empty change is sent as an empty patch, not filtered
+out. The patch carries committed but unpushed work, unstaged edits, untracked
+files, deletions, renames, mode changes, and binary content. Git-ignored files
+stay out, except selected `.slopcop/policies` rules, which must travel because
+the service evaluates them from the patched checkout.
 
 A check run by a Claude Code or Codex agent also sends which models wrote the
 change, so the service can tie each finding to the model that wrote its file.
@@ -384,24 +427,25 @@ session's own record:
   `$CODEX_HOME/sessions`). Each completed file change gives the files, and its
   turn gives the model and effort. A move counts as writing its destination.
 
-It reads only those fields, never the conversation, tool input or file
-contents. What it sends is the harness, its version, the session id as an
-opaque identifier, and each model and effort with the repository-relative
-files it wrote. A check run outside an agent session sends none of this. It
-is analytics only, asserted by the client, and never decides a check.
-`--verbose` prints it.
+For static attribution, it reads only those fields, never the conversation, tool
+input, or file contents from the session. What it sends is the harness, its
+version, the session id as an opaque identifier, and each model and effort with
+the repository-relative files it wrote. A check run outside an agent session
+sends none of this. It is analytics only, asserted by the client, and never
+decides a check. `--verbose` prints it.
 
 The service owns the limits on what a check accepts. When a change is too
 large or touches too many files, the service's `payload_too_large` response is
 printed verbatim; the CLI does not impose its own limits.
 
-Every check also runs the hosted catalog. Rules under
+Every check with a static half also runs the hosted catalog. Rules under
 `.slopcop/policies/**/*.rqlp` are added automatically unless
 `--no-policy-discovery` is set.
 
 ### New and pre-existing findings
 
-A check fails only on findings the change introduced or touched: the service
+The static half fails only on findings the change introduced or touched:
+the service
 marks a finding new when it is in a file the change writes and its lines meet a
 line the change added, or the line beside one it removed. Findings that were
 already in the code are counted (`summary.existingFindings`, and `N already in
@@ -562,15 +606,14 @@ Each finding in the response carries an `id`; a service from before findings
 could be ignored omits it.
 
 `slopcop ignore <id>` calls `POST <service>/v1/ignore` with the same bearer
-token and `{"findingId": "<id>"}`, and gets back
-`{"findingId": "<id>", "status": "ignored"}`. Failures use the same closed
-contract, including `finding_not_found`. `slopcop unignore <id>` calls
-`POST <service>/v1/unignore` the same way and gets back
-`{"findingId": "<id>", "status": "unignored"}`, also when the finding was not
-ignored.
-`slopcop ignored` calls `GET <service>/v1/ignores?repoUrl=<url>&page=<n>`
-(`page` zero-based) and gets back `repository`, `total`, `page`, `pageSize` and
-`ignores`, newest first; see the [API reference](docs/src/content/docs/reference/api.md).
+token and `{"findingId": "<id>"}`, and gets back `{"findingId": "<id>",
+"status": "ignored"}`. Failures use the same closed contract, including
+`finding_not_found`. `slopcop unignore <id>` calls `POST <service>/v1/unignore`
+the same way and gets back `{"findingId": "<id>", "status": "unignored"}`, also
+when the finding was not ignored. `slopcop ignored` calls `GET
+<service>/v1/ignores?repoUrl=<url>&page=<n>` (`page` zero-based) and gets back
+`repository`, `total`, `page`, `pageSize` and `ignores`, newest first; see the
+[API reference](docs/src/content/docs/reference/api.md).
 
 The account commands use the same bearer token. `GET <service>/v1/whoami`
 answers `account`, `workspace` (`id`, `name`, `kind`, `role`, `current`),

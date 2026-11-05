@@ -24,7 +24,9 @@ completion <shell>` generates shell completion.
 
 ## `slopcop check`
 
-Check the working tree through the hosted check API. See
+Check the working tree with hosted static analysis and local review by
+default. Use `--mode static` for the hosted half alone or `--mode ai` for
+review without login, repository enablement, or supported origin. See
 [Run a check](/checks/run-a-check/).
 
 ```console
@@ -36,6 +38,10 @@ slopcop --root ../repo --base origin/main
 
 | Flag | Meaning |
 | --- | --- |
+| `--mode both\|static\|ai` | both halves (default), static only, or review only |
+| `--static`, `--ai` | shortcuts for the corresponding mode |
+| `--intent TEXT` | user request if no session transcript is found |
+| `--review-timeout DURATION` | review timeout (default `20m`) |
 | `--root PATH` | repository path to check (default `.`) |
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` (default: merge base with the upstream branch, then with `origin/HEAD`, then `HEAD`) |
 | `--base-exact REV` | exact base commit or revision, used without taking a merge base |
@@ -92,8 +98,7 @@ the checkout has no `origin`, or the service cannot answer.
 
 Sign in to the SlopCop check service. With no flags, starts the browser device
 flow: prints a link that opens the approval page with the code filled in, then
-waits for approval. Also installs the agent skill into every well-known skills
-directory whose harness is installed here, as every check does. See
+waits for approval. Login does not install the agent skill. See
 [Sign in](/account/sign-in/).
 
 | Flag | Meaning |
@@ -163,12 +168,15 @@ message.
 
 ## `slopcop init`
 
-Install the agent skill that ships inside this binary, and a Claude Code and
-Codex Stop hook that checks what a session wrote when the agent stops. See
+Run inside a repository to install local skills and static-only Stop hooks
+for Claude Code and Codex, plus a Claude Code push gate. Tracked files are
+left alone; paths are added to `.git/info/exclude`. Init removes old
+user-level SlopCop hooks and skill copies. See
 [The agent skill](/agents/skill/) and [The Stop hook](/agents/stop-hook/).
 
 | Flag | Meaning |
 | --- | --- |
+| `--root PATH` | repository path (default `.`) |
 | `--no-skill` | do not install or update the agent skill |
 | `--no-hooks` | do not install or update the automatic check hook |
 | `--remove-hooks` | remove SlopCop's automatic check hook and nothing else |
@@ -179,6 +187,22 @@ Run a check from a Claude Code or Codex Stop hook. It reads the hook's input on
 stdin and answers in the harness's hook protocol. `slopcop init` installs it as
 `slopcop hook claude || true` and `slopcop hook codex || true`; it is not meant
 to be run by hand.
+
+## `slopcop config` and `slopcop override`
+
+`slopcop config get|set|unset <key> [value]` manages `mode` (`both`,
+`static`, `ai`), `review.reviewers` (1–4 comma-separated entries, in order;
+duplicates allowed), and `review.timeout` (default `20m`). Adapter command
+overrides are under `review.adapters.<codex|dsh|claude>.command`.
+
+`slopcop override --reason "..."` accepts demonstrably incorrect findings
+from the last complete review of the same working-tree snapshot, provided
+the static half passed or did not run. It records the reason and cannot
+accept failed or incomplete reviews or real bugs.
+
+The Claude Code PreToolUse Bash hook runs `slopcop gate --hook claude`. It
+blocks `git push` and `gh pr create` until HEAD's tree matches a passing
+check or valid override. Init installs no Codex push gate.
 
 ## `slopcop version`
 

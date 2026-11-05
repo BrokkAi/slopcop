@@ -5,7 +5,7 @@ sidebar:
   order: 7
 ---
 
-## What a check sends
+## What the static half sends
 
 - **The repository's URL**, canonicalized from the `origin` remote.
 - **The base commit's hash.**
@@ -22,11 +22,30 @@ sidebar:
 
 Run by Claude Code or Codex, a check also sends which models wrote the change:
 the harness and its version, the session or thread id as an opaque identifier,
-and each model and effort with the repository-relative files it wrote. The CLI
-reads only those fields from the session's own record under `~/.claude` or
-`~/.codex`, never the conversation, a tool's input, or a file's contents. Run
-outside an agent, a check sends none of it. It is analytics only, asserted by
-the client, and never decides a check or what it costs.
+and each model and effort with the repository-relative files it wrote. For the
+static half, the CLI reads only those attribution fields from the session record
+under `~/.claude` or `~/.codex`, not the conversation, tool input, or file
+contents from the session. Run outside an agent, a check sends none of it. It is
+analytics only, asserted by the client, and never decides a check or what it
+costs.
+
+## What local review sends
+
+In default `both` mode or `ai` mode, each reviewer receives a prompt with the
+captured diff, up to 256 KiB, and the user's intent, up to the most recent
+64 KiB. Their models also see any repository files the reviewers read with
+their tools, such as the rest of a diff that was cut short. The CLI obtains
+intent from the current Claude Code transcript or Codex rollout when available,
+then from `--intent`, else labels it `not available`. Reviewer adapters use your existing
+logins to send these prompts to the chosen model providers: OpenAI through Codex
+for GPT Terra, DeepSeek through dsh for DeepSeek Flash, and Anthropic through
+Claude for Claude Haiku. Review results and logs stay under
+`<git-dir>/slopcop/`; nothing from the local review goes to the SlopCop service.
+Use `--mode static` to avoid the local review and these provider requests.
+The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 
 ## What the service does with it
 
@@ -35,12 +54,13 @@ repository and runs Bifrost over the files the change writes. The result is
 kept so that an identical request within an hour attaches to the same analysis,
 and so the workspace's Checks page can show what was found and ignored.
 
-## What it never does
+## What the SlopCop service never does
 
 - **Never runs your code.** The analysis reads source as written. Nothing is
   built or executed.
-- **Never sends your code to a language model.** A check is static analysis
-  only.
+- **Never sends your code to a language model through the SlopCop service.**
+  The hosted half is static analysis. Local reviewers send the diff to
+  model providers under your own harness logins.
 - **Never writes to your repository.** The GitHub App asks for read-only
   contents and metadata; the optional issues permission is for the web app's
   issue filing, not checks.
@@ -48,8 +68,10 @@ and so the workspace's Checks page can show what was found and ignored.
   certainty, file, line, and message. The workspace's Checks page shows a
   private repository's examples only to members whose own connection can read
   it.
-- **Never reads your session's conversation.** Only the model, effort, and
-  file of each edit.
+- **Never reads conversation for static attribution.** The local review
+  reads the user's own messages from a Claude Code transcript or Codex
+  rollout, when found, to provide intent. It does not read assistant
+  messages for this purpose.
 
 ## What stays on your machine
 

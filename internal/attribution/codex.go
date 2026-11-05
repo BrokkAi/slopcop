@@ -261,3 +261,20 @@ func codexEdits(path string) []fileEdit {
 	}
 	return edits
 }
+
+// CodexRollout finds the uniquely identified current thread rollout.
+func CodexRollout(getenv func(string) string) (string, bool) {
+	id := strings.TrimSpace(getenv("CODEX_THREAD_ID"))
+	if !sessionIDPattern.MatchString(id) || strings.Trim(id, ".") == "" {
+		return "", false
+	}
+	home := codexHomeDir(getenv)
+	if home == "" {
+		return "", false
+	}
+	matches, _ := filepath.Glob(filepath.Join(home, "sessions", "*", "*", "*", "rollout-*-"+id+".jsonl"))
+	if len(matches) != 1 {
+		return "", false
+	}
+	return matches[0], true
+}

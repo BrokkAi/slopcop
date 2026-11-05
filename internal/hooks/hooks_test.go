@@ -433,3 +433,26 @@ func TestCommandProblemProbesTheSlopcopOnPath(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryHooksInstallAndRemove(t *testing.T) {
+	repo := t.TempDir()
+	for i := 0; i < 2; i++ {
+		if _, err := Repository(repo, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude := readConfig(t, filepath.Join(repo, ".claude/settings.local.json"))
+	if bytes.Count(claude, []byte("slopcop gate --hook claude")) != 1 || bytes.Count(claude, []byte("slopcop hook claude")) != 1 {
+		t.Fatalf("duplicate or missing hook: %s", claude)
+	}
+	if !bytes.Contains(claude, []byte(`"matcher": "Bash"`)) {
+		t.Fatalf("gate matcher: %s", claude)
+	}
+	if _, err := Repository(repo, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	claude = readConfig(t, filepath.Join(repo, ".claude/settings.local.json"))
+	if bytes.Contains(claude, []byte("slopcop")) {
+		t.Fatalf("hook remains: %s", claude)
+	}
+}

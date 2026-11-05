@@ -18,8 +18,28 @@ const DefaultServiceURL = "https://slopcop.com"
 // Config is the per-user slopcop configuration. It lives outside any
 // repository because it contains a credential.
 type Config struct {
-	ServiceURL string `json:"serviceUrl,omitempty"`
-	Token      string `json:"token,omitempty"`
+	ServiceURL string  `json:"serviceUrl,omitempty"`
+	Token      string  `json:"token,omitempty"`
+	Mode       string  `json:"mode,omitempty"`
+	Review     *Review `json:"review,omitempty"`
+	Gate       *Gate   `json:"gate,omitempty"`
+}
+
+// Review contains local reviewer settings.
+type Review struct {
+	Reviewers []string           `json:"reviewers,omitempty"`
+	Timeout   string             `json:"timeout,omitempty"`
+	Adapters  map[string]Adapter `json:"adapters,omitempty"`
+}
+
+// Gate controls which hosted findings block push approval.
+type Gate struct {
+	BlockOn string `json:"blockOn,omitempty"`
+}
+
+// Adapter overrides an ACP adapter command.
+type Adapter struct {
+	Command []string `json:"command"`
 }
 
 // Path returns the configuration file location.
@@ -81,6 +101,12 @@ func Save(cfg Config) (string, error) {
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
+	}
+	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+		cfg.Review = nil
+	}
+	if cfg.Gate != nil && cfg.Gate.BlockOn == "" {
+		cfg.Gate = nil
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

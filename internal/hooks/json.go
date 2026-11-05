@@ -20,7 +20,11 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	if err != nil || hooks == nil {
 		return data, false, err
 	}
-	stopValue, _ := hooks.get("Stop")
+	event := h.event
+	if event == "" {
+		event = "Stop"
+	}
+	stopValue, _ := hooks.get(event)
 	if stopValue == nil && !install {
 		return data, false, nil
 	}
@@ -28,7 +32,7 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	if stopValue != nil {
 		var ok bool
 		if stop, ok = stopValue.([]any); !ok {
-			return nil, false, fmt.Errorf("hooks.Stop must be an array")
+			return nil, false, fmt.Errorf("hooks.%s must be an array", event)
 		}
 	}
 
@@ -86,6 +90,9 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	}
 	if install && !found {
 		group := newObject()
+		if h.gate {
+			group.set("matcher", "Bash")
+		}
 		group.set("hooks", []any{canonical})
 		newStop = append(newStop, group)
 		changed = true
@@ -94,12 +101,12 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 		return data, false, nil
 	}
 	if len(newStop) == 0 {
-		hooks.remove("Stop")
+		hooks.remove(event)
 		if len(hooks.keys) == 0 {
 			root.remove("hooks")
 		}
 	} else {
-		hooks.set("Stop", newStop)
+		hooks.set(event, newStop)
 	}
 	var out bytes.Buffer
 	if err := encodeValue(&out, root, ""); err != nil {

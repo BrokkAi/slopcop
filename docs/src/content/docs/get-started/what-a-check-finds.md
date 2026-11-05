@@ -12,6 +12,17 @@ structural and data-flow rules that run on the source as written, with no build
 and no language model. The service pins the catalog version, so a check run
 twice on the same code gives the same result.
 
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
+
 ## Kinds of findings
 
 Policy ids name their pack, so a finding's id tells you what kind it is.

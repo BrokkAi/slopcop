@@ -1,6 +1,6 @@
 ---
 title: The agent skill
-description: "The SlopCop skill bundled in the binary, where slopcop init installs it, how login and every check keep it current, and what happens to local edits."
+description: "The bundled SlopCop skill, its repository install, updates to existing copies, and local edit backups."
 sidebar:
   order: 5
 ---
@@ -13,38 +13,49 @@ file at
 in the repository, with a small `agents/openai.yaml` beside it that gives Codex
 the skill's display name and default prompt.
 
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
+
 ## What it tells an agent
 
-The skill checks only repositories the workspace has enabled. Before an
-automatic check it uses `slopcop check --if-enabled`, which sends nothing and
-exits `0` when the repository is not active. It never adds a repository and
-never asks the user to add one as a side effect of a check; `slopcop enable`
-is the step a person takes at a terminal, and the skill only points to it when
-the user explicitly asks for a check of a repository that is not enabled.
+For hosted static checks, the skill uses repositories the workspace has enabled.
+Local review in `ai` mode does not need enablement. Before an automatic check it
+uses `slopcop check --if-enabled`, which skips only the static half when the
+repository is not active. Local review still runs in default `both` mode. It
+never adds a repository and never asks the user to add one as a side effect of a
+check; `slopcop enable` is the step a person takes at a terminal, and the skill
+only points to it when the user explicitly asks for a check of a repository that
+is not enabled.
 
 ## Where it goes
 
-`slopcop init` installs the skill into each well-known skills directory whose
-harness is present, and names what it did:
+Run `slopcop init` inside each repository. It installs the skill in these
+repository-local directories and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `~/.agents/skills/slopcop/` | Codex, opencode, Cursor, and other agents |
-| `~/.claude/skills/slopcop/` | Claude Code, opencode |
-| `$CODEX_HOME/skills/slopcop/`, or `~/.codex/skills/slopcop/` | Codex home |
+| `.agents/skills/slopcop/` | Codex and other agents |
+| `.claude/skills/slopcop/` | Claude Code and other agents |
 
-When none of those harness directories is present, init writes the
-vendor-neutral `~/.agents/skills/slopcop/` instead, which Codex, opencode,
-Cursor and other agents read. A fresh machine therefore has the skill before
-any harness has created its configuration directory. A skill that is already
-there is left alone by init, so running it again is safe.
+Init adds these paths to `.git/info/exclude`, leaves tracked targets alone,
+and removes old user-level SlopCop skill copies. An existing skill is left
+alone when init runs again.
 `slopcop init --no-skill` skips the install and any update of it.
 
 ## How it stays current
 
-`slopcop login` and every check also install the skill in those directories,
-rewriting one that differs from the skill bundled into the binary, so an agent
-follows the instructions of the slopcop version it runs. Each install records
+A check updates skill copies already present in the repository, rewriting
+one that differs from the skill bundled into the binary. It creates no new
+copy, and `slopcop login` does not install the skill. This keeps existing
+copies aligned with the version of slopcop that runs. Each install records
 the version that wrote it, and what each file held, in `.slopcop-skill.json` in
 the skill folder.
 
@@ -52,7 +63,7 @@ An update names the version it replaces, the new one, and the files that
 changed:
 
 ```text
-slopcop: updated the slopcop skill at ~/.claude/skills/slopcop from v0.0.9 to v0.0.10 (changed: SKILL.md). Reread it if you loaded the old one.
+slopcop: updated the slopcop skill at .claude/skills/slopcop from v0.0.9 to v0.0.10 (changed: SKILL.md). Reread it if you loaded the old one.
 ```
 
 It removes the files the new skill no longer has. A check's `json` and `sarif`

@@ -5,21 +5,27 @@ sidebar:
   order: 6
 ---
 
-Besides the skill, `slopcop init` adds a `Stop` hook for each harness installed
-on the machine, and leaves everything else in the file as it was:
+Inside the repository, `slopcop init` adds a static-only `Stop` hook for
+Claude Code and Codex, and leaves everything else in the file as it was:
 
 | File | Harness |
 | --- | --- |
-| `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
-| `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
+| `.claude/settings.local.json` in the repository | Claude Code |
+| `.codex/hooks.json` in the repository | Codex |
 
-Codex runs a new or changed hook only once you trust it: open Codex and review
-it with `/hooks`. Init never writes that trust itself, and reminds you each time
+Codex reads the repository's `.codex/hooks.json` only once you trust the
+project in Codex, and runs a new or changed hook only once you trust it too:
+open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each time
 it runs, since Codex says nothing of a hook it skips. The hook stays the same
 from one release to the next, so an update does not ask for it again.
 
 The hook is a backstop, not a replacement. The skill keeps telling the agent to
 check as it works; the hook catches a session that stopped without doing so.
+
+The Claude Code settings also get a PreToolUse Bash push gate. It blocks
+`git push` and `gh pr create` until HEAD's tree has a passing check or valid
+override. No Codex push gate is installed. The Stop hook itself remains
+hosted static-only; it does not run the local review.
 
 ## When it checks
 

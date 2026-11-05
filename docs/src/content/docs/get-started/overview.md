@@ -7,10 +7,10 @@ sidebar:
 
 SlopCop checks a change to a repository and reports what the change introduced:
 every new finding with its severity, the rule that raised it, the file and line,
-and the certainty behind it. The analysis is
+and the certainty behind it. The hosted static analysis is
 [Bifrost](https://github.com/BrokkAi/bifrost), an open-source static analysis
-engine written in Rust, rather than a language model. A finding traces back to a
-rule and to the lines that prove it, never to a guess.
+engine written in Rust. A static finding traces back to a rule and to the
+lines that prove it. A local review finding is a model judgment.
 
 It is built to run inside a coding agent's loop. The agent edits, runs
 `slopcop`, reads what came back, fixes it, and checks again, all before you
@@ -24,17 +24,28 @@ push. The same command gates a change in CI.
 | **The hosted check service** | [slopcop.com](https://slopcop.com). It keeps its own clone of your repository, applies the patch at the base commit, runs the hosted policy catalog plus any repository rules you selected, and answers with structured results. |
 | **The web app** | Where you sign in, approve a CLI login, see what your agents' checks found and ignored, manage workspace members and repositories, and add credits. |
 
-There is no local analyzer and nothing to install per language. The CLI never
-reports a check as passed without the service: every check it sends makes one
-request, and a clean result always comes from the service. `--if-enabled` can
-skip a repository the workspace has not enabled, and marks that as `skipped`,
-never as clean.
+The static analyzer needs no per-language install. In default `both` mode, the
+CLI also runs local review. In `ai` mode, it runs review without the service,
+login, or an enabled repository. `--if-enabled` skips an inactive static half;
+in `both` mode the local review still runs. A static-only skip is marked
+`skipped`, not clean.
+
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
 
 ## What a check reports
 
-A check analyzes the files the change writes and reports the findings on the
-lines it added or touched. Findings that were already in the code are counted
-but never fail the check and are not listed, so a change that introduces
+The static half analyzes the files the change writes and reports the findings on
+the lines it added or touched. Findings that were already in the code are
+counted but never fail the check and are not listed, so a change that introduces
 nothing passes however many findings the repository already holds.
 
 Each finding carries:
@@ -59,12 +70,12 @@ front end.
 
 ## What it is not
 
-- **Not a language model review.** A check never sends your code to a model.
-  The analysis is deterministic: the same code gives the same result.
+- **Static findings are rule-based.** The hosted analyzer is deterministic.
+  Local review uses language models and its findings need inspection.
 - **Not a build.** The service reads source as written. It never builds or runs
   your code, so half-finished edits can be checked.
-- **Not a local tool.** The engine runs only in the service. The CLI has no
-  offline mode and no embedded analyzer.
+- **Static analysis needs the service.** Local review can run alone with
+  `--mode ai`.
 - **Not a replacement for tests.** It finds what static analysis can prove:
   injection paths, misuse of APIs, secret-like strings, structural rules your
   repository declares. It does not know whether your feature works.
