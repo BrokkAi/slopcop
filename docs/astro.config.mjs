@@ -98,6 +98,7 @@ export default defineConfig({
             { label: 'OpenCode and Kilo Code', slug: 'agents/opencode' },
             { label: 'Pi', slug: 'agents/pi' },
             { label: 'GitHub Copilot CLI', slug: 'agents/copilot-cli' },
+            { label: 'Grok and Kimi Code', slug: 'agents/grok-kimi' },
             { label: 'Other agents', slug: 'agents/other-agents' },
             { label: 'Lovable, Bolt, and MCP', slug: 'agents/app-builders' },
             { label: 'The agent skill', slug: 'agents/skill' },
