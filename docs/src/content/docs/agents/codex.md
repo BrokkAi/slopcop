@@ -85,7 +85,7 @@ reads the files each completed file change wrote, and the model and effort of
 its turn. A move counts as writing its destination. For the static half,
 the CLI sends only these attribution fields to SlopCop, never the session
 conversation, tool input, or file contents. The review half also reads the
-user's messages from the rollout for intent. The reviewers read the diff
-and send it with the user messages to model providers through your own
+user's messages from the rollout for intent. The reviewer prompts carry
+the diff and the user messages to model providers through your own
 logins. Review data does not go to SlopCop. Use `--mode static` to avoid
 local model review. `slopcop --verbose` prints it.

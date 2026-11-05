@@ -31,11 +31,12 @@ costs.
 
 ## What local review sends
 
-In default `both` mode or `ai` mode, reviewers read the captured diff and
-receive a prompt with the diff command and the user's intent. Their models see
-the diff when reviewers fetch it with their tools. The CLI obtains intent from
-the current Claude Code transcript or Codex rollout when available, then from
-`--intent`, else labels it `not available`. Reviewer adapters use your existing
+In default `both` mode or `ai` mode, each reviewer receives a prompt with the
+captured diff, up to 256 KiB, and the user's intent, up to the most recent
+64 KiB. Their models also see any repository files the reviewers read with
+their tools, such as the rest of a diff that was cut short. The CLI obtains
+intent from the current Claude Code transcript or Codex rollout when available,
+then from `--intent`, else labels it `not available`. Reviewer adapters use your existing
 logins to send these prompts to the chosen model providers: OpenAI through Codex
 for GPT Terra, DeepSeek through dsh for DeepSeek Flash, and Anthropic through
 Claude for Claude Haiku. Review results and logs stay under
