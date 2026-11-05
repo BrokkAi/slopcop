@@ -132,8 +132,9 @@ func (h harness) handler() *object {
 
 // Repository installs or removes hooks in clone-local settings. skip leaves a
 // tracked settings file untouched, preserving the repository's own content.
-// Project-level .codex/hooks.json is inferred from Codex 0.166 strings and
-// has not yet been confirmed with a live run. Codex's shell tool gate payload
+// Codex 0.166 reads .codex/hooks.json from a project it trusts, as a
+// "project" hook that still needs /hooks trust (checked with its app-server
+// hooks/list). Codex's shell tool gate payload
 // and blocking semantics are not established, so only Claude gets a gate.
 func Repository(root string, install bool, skip func(string) bool) (Result, error) {
 	var result Result

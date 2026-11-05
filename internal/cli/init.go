@@ -528,7 +528,7 @@ repository and user-level hooks. Init probes available reviewers unless --no-rev
 				}
 			}
 			if r.NeedsTrust {
-				fmt.Fprintln(out, "slopcop: Codex runs the Stop hook only after you trust it with /hooks")
+				fmt.Fprintln(out, "slopcop: Codex reads .codex/hooks.json only in a project you trust, and runs the Stop hook only after you trust it with /hooks")
 			}
 			if problem := agenthooks.CommandProblem(r.Installed); problem != "" {
 				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: warning: %s\n", problem)

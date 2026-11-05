@@ -181,8 +181,9 @@ The Claude Code settings also get a PreToolUse Bash gate. It blocks `git push`
 and `gh pr create` until HEAD's tree matches a passing check or valid override.
 No Codex push gate is installed.
 
-Codex runs a new or changed hook only once you trust it: open Codex and review
-it with `/hooks`. Init never writes that trust itself, and reminds you each
+Codex reads the repository's `.codex/hooks.json` only once you trust the
+project in Codex, and runs a new or changed hook only once you trust it too:
+open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each
 time it runs, since Codex says nothing of a hook it skips. The hook stays the
 same from one release to the next, so an update does not ask for it again.
 

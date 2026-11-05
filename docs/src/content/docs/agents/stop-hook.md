@@ -13,8 +13,9 @@ Claude Code and Codex, and leaves everything else in the file as it was:
 | `.claude/settings.local.json` in the repository | Claude Code |
 | `.codex/hooks.json` in the repository | Codex |
 
-Codex runs a new or changed hook only once you trust it: open Codex and review
-it with `/hooks`. Init never writes that trust itself, and reminds you each time
+Codex reads the repository's `.codex/hooks.json` only once you trust the
+project in Codex, and runs a new or changed hook only once you trust it too:
+open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each time
 it runs, since Codex says nothing of a hook it skips. The hook stays the same
 from one release to the next, so an update does not ask for it again.
 
