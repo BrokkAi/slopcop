@@ -95,6 +95,7 @@ export default defineConfig({
             { label: 'SlopCop in your agent', slug: 'agents/overview' },
             { label: 'Claude Code', slug: 'agents/claude-code' },
             { label: 'Codex', slug: 'agents/codex' },
+            { label: 'OpenCode and Kilo Code', slug: 'agents/opencode' },
             { label: 'Other agents', slug: 'agents/other-agents' },
             { label: 'The agent skill', slug: 'agents/skill' },
             { label: 'The Stop hook', slug: 'agents/stop-hook' },

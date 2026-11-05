@@ -195,6 +195,7 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
 | `CODEX_THREAD_ID`, `CODEX_HOME` | set by Codex; the same |
+| `OPENCODE_SESSION_ID`, `OPENCODE_DB`, `XDG_DATA_HOME` | set by OpenCode or you; the same |
 
 See [Configuration](/reference/configuration/) for precedence and the files
 the CLI writes.
