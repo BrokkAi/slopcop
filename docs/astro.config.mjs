@@ -98,6 +98,7 @@ export default defineConfig({
             { label: 'Other agents', slug: 'agents/other-agents' },
             { label: 'The agent skill', slug: 'agents/skill' },
             { label: 'The Stop hook', slug: 'agents/stop-hook' },
+            { label: 'Managed rollout', slug: 'agents/managed-rollout' },
           ],
         },
         {
