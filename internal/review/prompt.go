@@ -19,7 +19,11 @@ func reviewPrompt(root string, capture Capture, in intent, previous *Record, dif
 	var b strings.Builder
 	b.WriteString(rubric)
 	b.WriteString("\n\n## Task\nReview the change from the base tree to a snapshot of the working tree independently and provide prioritized findings.\n")
-	fmt.Fprintf(&b, "\nUser intent (%s):\n<user_intent>\n%s\n</user_intent>\n", in.Source, in.Text)
+	fmt.Fprintf(&b, "\nUser intent (%s):\n<user_intent>\n", in.Source)
+	if in.Truncated {
+		fmt.Fprintf(&b, "[Earlier user messages omitted; only the most recent %d KiB are shown.]\n", intentLimit/1024)
+	}
+	fmt.Fprintf(&b, "%s\n</user_intent>\n", in.Text)
 	fmt.Fprintf(&b, "\nPer-file diffstat (git diff --numstat between the captured trees):\n%s\n", capture.Numstat)
 	const limit = 256 * 1024
 	truncated := len(diff) > limit

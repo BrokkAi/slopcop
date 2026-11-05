@@ -6,27 +6,63 @@ import (
 	"encoding/json"
 	"os"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/BrokkAi/slopcop/internal/attribution"
 )
 
-type intent struct{ Text, Source string }
+// intent is the user's request as given to reviewers. Truncated says that
+// earlier text was dropped to keep the prompt within intentLimit.
+type intent struct {
+	Text, Source string
+	Truncated    bool
+}
+
+// intentLimit bounds the intent text in a review prompt. A long session's
+// transcript can hold megabytes of user messages; the most recent ones say
+// best what the change under review is for.
+const intentLimit = 64 * 1024
 
 func discoverIntent(fallback string) intent {
+	return capIntent(findIntent(fallback), intentLimit)
+}
+func findIntent(fallback string) intent {
 	if p, ok := attribution.ClaudeTranscript(os.Getenv); ok {
 		if t, err := readClaudeIntent(p); err == nil && t != "" {
-			return intent{t, "actual user messages from the identified Claude Code transcript"}
+			return intent{Text: t, Source: "actual user messages from the identified Claude Code transcript"}
 		}
 	}
 	if p, ok := attribution.CodexRollout(os.Getenv); ok {
 		if t, err := readCodexIntent(p); err == nil && t != "" {
-			return intent{t, "actual user messages from the identified Codex rollout"}
+			return intent{Text: t, Source: "actual user messages from the identified Codex rollout"}
 		}
 	}
 	if strings.TrimSpace(fallback) != "" {
-		return intent{fallback, "agent supplied via --intent; not independently verified user messages"}
+		return intent{Text: fallback, Source: "agent supplied via --intent; not independently verified user messages"}
 	}
-	return intent{"", "not available"}
+	return intent{Text: "", Source: "not available"}
+}
+
+// capIntent keeps at most limit bytes from the end of the intent text. It
+// starts the kept text at a message boundary (a blank line) when there is
+// one, else at a line boundary, else at a character boundary.
+func capIntent(in intent, limit int) intent {
+	if len(in.Text) <= limit {
+		return in
+	}
+	tail := in.Text[len(in.Text)-limit:]
+	if i := strings.Index(tail, "\n\n"); i >= 0 {
+		tail = tail[i+2:]
+	} else if i := strings.IndexByte(tail, '\n'); i >= 0 {
+		tail = tail[i+1:]
+	} else {
+		for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
+			tail = tail[1:]
+		}
+	}
+	in.Text = tail
+	in.Truncated = true
+	return in
 }
 func readClaudeIntent(path string) (string, error) {
 	f, err := os.Open(path)
