@@ -76,7 +76,7 @@ so running it again is safe. See the [Quickstart](/get-started/quickstart/).
 
 ## Which models wrote what
 
-Run by Claude Code or Codex, a check also sends which models wrote each changed
+Run by Claude Code, Codex or Pi, a check also sends which models wrote each changed
 file, read from the session's own record, so a finding can be traced to the
 model that wrote its line. The CLI reads only the model, effort, and file of
 each edit, never the conversation, a tool's input, or a file's contents. Run
@@ -89,6 +89,8 @@ would send. See [What leaves your machine](/account/privacy/).
   hook in `settings.json`, and the line for `CLAUDE.md`.
 - [Codex](/agents/codex/): `~/.agents/skills` and `$CODEX_HOME/skills`,
   `$slopcop`, trusting the hook with `/hooks`, and the line for `AGENTS.md`.
+- [Pi](/agents/pi/): `~/.agents/skills`, and the models the session file
+  records; no Stop hook.
 - [Other agents](/agents/other-agents/): opencode, and anything with a shell.
 - [Lovable, Bolt, and MCP clients](/agents/app-builders/): agents with no
   shell, which check over SlopCop's hosted MCP server.

@@ -228,17 +228,6 @@ func openCodePath(directory, path string) (string, bool) {
 		}
 		return filepath.Join(home, path[1:]), true
 	}
-	if filepath.IsAbs(path) {
-		return path, true
-	}
-	if directory == "" {
-		return "", false
-	}
-	directory = filepath.FromSlash(directory)
-	// On Windows, \dir\file has a root but no drive: it is on the session
-	// directory's drive, not under the session directory.
-	if strings.HasPrefix(path, string(filepath.Separator)) {
-		return filepath.VolumeName(directory) + path, true
-	}
-	return filepath.Join(directory, path), true
+	resolved := resolvePath(filepath.FromSlash(directory), path)
+	return resolved, resolved != ""
 }
