@@ -85,14 +85,45 @@ func split(findings []service.Finding) (fresh, existing []service.Finding) {
 	return fresh, existing
 }
 
-// listed is what a report lists: the new findings first, and the existing
-// ones after them only when asked for.
+// splitRemapped returns the existing findings that match an earlier ignore,
+// then the rest. A finding that matches one is always listed, so a reader
+// learns the ignore no longer covers it whether or not the service counts it
+// as new.
+func splitRemapped(existing []service.Finding) (remapped, rest []service.Finding) {
+	remapped, rest = []service.Finding{}, []service.Finding{}
+	for _, finding := range existing {
+		if finding.PreviouslyIgnored != "" {
+			remapped = append(remapped, finding)
+		} else {
+			rest = append(rest, finding)
+		}
+	}
+	return remapped, rest
+}
+
+// listed is what a report lists: the new findings first, then the existing
+// ones that match an earlier ignore, and the other existing ones after them
+// only when asked for.
 func listed(response service.Response, options Options) []service.Finding {
 	fresh, existing := split(response.Findings)
+	remapped, rest := splitRemapped(existing)
+	findings := append(fresh, remapped...)
 	if options.ShowExisting {
-		return append(fresh, existing...)
+		findings = append(findings, rest...)
 	}
-	return fresh
+	return findings
+}
+
+// remappedCount is how many findings match an earlier ignore. A service from
+// before summary.remappedIgnores sends none, so the listed ones count too.
+func remappedCount(response service.Response) int {
+	flagged := 0
+	for _, finding := range response.Findings {
+		if finding.PreviouslyIgnored != "" {
+			flagged++
+		}
+	}
+	return max(response.Summary.RemappedIgnores, flagged)
 }
 
 // human is close to Bifrost's own human report: one block per new finding,
@@ -101,9 +132,11 @@ func listed(response service.Response, options Options) []service.Finding {
 func human(response service.Response, options Options) string {
 	var out strings.Builder
 	fresh, existing := split(response.Findings)
+	remapped, rest := splitRemapped(existing)
 	writeBlock(&out, "New findings", fresh)
+	writeBlock(&out, "Previously ignored, code changed (never fail the check)", remapped)
 	if options.ShowExisting {
-		writeBlock(&out, "Already in the code (never fail the check)", existing)
+		writeBlock(&out, "Already in the code (never fail the check)", rest)
 	}
 	out.WriteString(summaryLine(response))
 	out.WriteString("\n")
@@ -157,8 +190,26 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 		if finding.ID != "" {
 			fmt.Fprintf(out, "    ID: %s\n", printable(finding.ID))
 		}
+		if line := previouslyIgnoredLine(finding); line != "" {
+			fmt.Fprintf(out, "    %s\n", line)
+		}
 		out.WriteString("\n")
 	}
+}
+
+// previouslyIgnoredLine says a finding matches an ignored one whose code
+// changed, and how to keep ignoring it, such as `Matches ignored finding
+// f5a9bad1-… (code changed); ` + "`slopcop ignore 98a2d745-…`" + ` to keep
+// ignoring it`.
+func previouslyIgnoredLine(finding service.Finding) string {
+	if finding.PreviouslyIgnored == "" {
+		return ""
+	}
+	line := fmt.Sprintf("Matches ignored finding %s (code changed)", printable(finding.PreviouslyIgnored))
+	if finding.ID == "" {
+		return line
+	}
+	return fmt.Sprintf("%s; `slopcop ignore %s` to keep ignoring it", line, printable(finding.ID))
 }
 
 // summaryLine is one line, like the first line of Bifrost's human report:
@@ -180,6 +231,9 @@ func summaryLine(response service.Response) string {
 	// and counts the rest; a service from before that also listed them.
 	if count := max(response.Summary.ExistingFindings, len(existing)); count > 0 {
 		scope = fmt.Sprintf("%s; %d already in the code", scope, count)
+	}
+	if count := remappedCount(response); count > 0 {
+		scope = fmt.Sprintf("%s; %d match(es) an earlier ignore", scope, count)
 	}
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
@@ -601,7 +655,7 @@ type sarifResult struct {
 	// `unchanged` for one already in the code.
 	BaselineState string `json:"baselineState"`
 	// Properties carries the finding id `slopcop ignore` takes, when the
-	// service sent one.
+	// service sent one, and the id of the ignored finding it matches.
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
@@ -689,8 +743,14 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Locations:     []sarifLocation{{PhysicalLocation: physical}},
 			BaselineState: baselineState(finding),
 		}
+		if finding.ID != "" || finding.PreviouslyIgnored != "" {
+			result.Properties = map[string]any{}
+		}
 		if finding.ID != "" {
-			result.Properties = map[string]any{"slopcop.findingId": finding.ID}
+			result.Properties["slopcop.findingId"] = finding.ID
+		}
+		if finding.PreviouslyIgnored != "" {
+			result.Properties["slopcop.previouslyIgnored"] = finding.PreviouslyIgnored
 		}
 		results = append(results, result)
 	}
@@ -755,6 +815,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.failOn":                response.Summary.FailOn,
 		"slopcop.newFindings":           response.Summary.NewFindings,
 		"slopcop.existingFindings":      response.Summary.ExistingFindings,
+		"slopcop.remappedIgnores":       remappedCount(response),
 		"slopcop.inconclusive":          response.Summary.Inconclusive,
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 	}, options)

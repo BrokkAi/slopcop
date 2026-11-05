@@ -72,8 +72,8 @@ slopcop check --format json
 | `status` | `clean`, `findings`, `incomplete`, `pending`, `failed`, or, for `--if-enabled` with an inactive repository, `skipped` |
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
-| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `inconclusive` |
-| `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message |
+| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `inconclusive`, `remappedIgnores` |
+| `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, and `previouslyIgnored` with the id of an ignored finding it matches; a finding with `previouslyIgnored` is listed even when it is not new |
 | `incomplete` | rules that did not complete, each with a `reason` |
 | `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `elsewhere` |
 | `failure` | present when the analysis as a whole did not complete |
@@ -98,7 +98,9 @@ slopcop check --format sarif > slopcop.sarif
 ```
 
 A SARIF 2.1.0 log whose results carry `baselineState` `new` and the finding id
-in `properties["slopcop.findingId"]`. Inconclusive rules appear as `note`
+in `properties["slopcop.findingId"]`, and the id of an ignored finding it
+matches in `properties["slopcop.previouslyIgnored"]`, counted in the run's
+`slopcop.remappedIgnores`. Inconclusive rules appear as `note`
 notifications with `slopcop.inconclusive` and `slopcop.elsewhere` properties;
 an empty change sets `properties["slopcop.emptyChange"]`; a skill update sits in
 `properties["slopcop.skillUpdated"]`.
