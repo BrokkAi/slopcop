@@ -35,7 +35,15 @@ func options(model, mode string) []acp.SessionConfigOption {
 	if mode == "no-high" {
 		err = acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
 	}
-	return []acp.SessionConfigOption{{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "model", Name: "Model", CurrentValue: acp.SessionConfigValueId(model), Options: acp.SessionConfigSelectOptions{Ungrouped: &m}}}, {Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "effort", Name: "Effort", CurrentValue: "high", Options: acp.SessionConfigSelectOptions{Ungrouped: &err}}}}
+	out := []acp.SessionConfigOption{{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "model", Name: "Model", CurrentValue: acp.SessionConfigValueId(model), Options: acp.SessionConfigSelectOptions{Ungrouped: &m}}}, {Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "effort", Name: "Effort", CurrentValue: "high", Options: acp.SessionConfigSelectOptions{Ungrouped: &err}}}}
+	if mode == "no-mode" {
+		return out
+	}
+	// Each real adapter offers the restrictive mode slopcop selects: Codex
+	// mode=read-only, Claude mode=default and dsh permission_mode=ask.
+	modes := acp.SessionConfigSelectOptionsUngrouped{{Value: "read-only", Name: "Read Only"}, {Value: "default", Name: "Default"}, {Value: "full-access", Name: "Full Access"}}
+	permission := acp.SessionConfigSelectOptionsUngrouped{{Value: "ask", Name: "Ask"}, {Value: "auto", Name: "Auto"}}
+	return append(out, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "mode", Name: "Mode", CurrentValue: "full-access", Options: acp.SessionConfigSelectOptions{Ungrouped: &modes}}}, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "permission_mode", Name: "Permission mode", CurrentValue: "auto", Options: acp.SessionConfigSelectOptions{Ungrouped: &permission}}})
 }
 func (a *agent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	if a.mode == "new-error" {
@@ -104,6 +112,12 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 	if a.mode == "no-allow" {
 		kind := acp.ToolKindRead
 		_, _ = a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "reject"}}})
+	}
+	if a.mode == "denied-then-fail" {
+		kind := acp.ToolKindExecute
+		title := "rm -rf ."
+		_, _ = a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind, Title: &title}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow"}, {Kind: acp.PermissionOptionKindRejectOnce, OptionId: "reject"}}})
+		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "Prompt failed"}
 	}
 	if a.mode == "findings" {
 		text = "- [P1] fake defect"

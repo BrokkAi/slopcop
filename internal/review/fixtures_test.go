@@ -39,6 +39,10 @@ func TestAdapterConfigFixtures(t *testing.T) {
 			if !found {
 				t.Fatal("high effort missing")
 			}
+			key, value := reviewerMode(tc.family)
+			if !hasChoice(configOption(options, key), value) {
+				t.Fatalf("mode %s=%s missing", key, value)
+			}
 		})
 	}
 }

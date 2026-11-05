@@ -252,9 +252,11 @@ func (s *runner) prepare(root string) error {
 	if option == nil {
 		option = configOption(session.ConfigOptions, key)
 	}
+	// The adapter's default mode may let the reviewer edit files or run
+	// commands without asking, so a reviewer that cannot be put in its
+	// restrictive mode does not run.
 	if !hasChoice(option, value) {
-		fmt.Fprintf(s.stderr, "reviewer mode %s=%s unavailable\n", key, value)
-		return nil
+		return fmt.Errorf("adapter offers no %s=%s option, so the reviewer cannot be restricted; update the adapter", key, value)
 	}
 	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: option.Id, Value: acp.SessionConfigValueId(value)}})
 	if err != nil {
@@ -273,14 +275,15 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 	if s.client.permissionError != nil {
 		err = s.client.permissionError
 	}
+	denied := s.client.deniedEdit
 	s.client.mu.Unlock()
 	if s.ctx.Err() != nil {
 		err = s.ctx.Err()
 	}
 	if err != nil {
 		s.result.Error = err.Error()
-		if s.client.deniedEdit != "" {
-			s.result.Error += "; " + s.client.deniedEdit
+		if denied != "" {
+			s.result.Error += "; " + denied
 		}
 	}
 	s.result.Status = parseVerdict(s.result)

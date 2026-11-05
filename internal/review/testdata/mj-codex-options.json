@@ -22,5 +22,17 @@
       {"value": "high", "name": "High"},
       {"value": "xhigh", "name": "Extra high"}
     ]
+  },
+  {
+    "id": "mode",
+    "name": "Approval Preset",
+    "type": "select",
+    "category": "mode",
+    "currentValue": "auto",
+    "options": [
+      {"value": "read-only", "name": "Read Only"},
+      {"value": "auto", "name": "Default"},
+      {"value": "full-access", "name": "Full Access"}
+    ]
   }
 ]

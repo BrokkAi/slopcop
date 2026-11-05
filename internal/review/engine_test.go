@@ -92,6 +92,33 @@ func TestNoEchoAndNoAllow(t *testing.T) {
 		})
 	}
 }
+
+// TestReviewerWithoutRestrictiveModeFails checks that a reviewer whose adapter
+// offers no read-only mode fails rather than running in the adapter's default.
+func TestReviewerWithoutRestrictiveModeFails(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("no-mode", "gpt-6.10-terra", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusFailed || len(v.Reviewers) != 1 || v.Reviewers[0].Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "mode=read-only") {
+		t.Fatalf("%+v", v)
+	}
+	data, _ := os.ReadFile(trace)
+	if strings.Contains(string(data), "prompt") {
+		t.Fatalf("reviewer was prompted: %s", data)
+	}
+}
+
+// TestFailedReviewerNamesRefusedRequest checks that a failed reviewer's error
+// carries the permission request slopcop refused during the turn.
+func TestFailedReviewerNamesRefusedRequest(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("denied-then-fail", "gpt-6.10-terra", "")}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusFailed || len(v.Reviewers) != 1 || !strings.Contains(v.Reviewers[0].Error, "reviewer requested execute permission: rm -rf .") {
+		t.Fatalf("%+v", v)
+	}
+}
 func TestReuseAndInvalidation(t *testing.T) {
 	root, c, s := reviewRepo(t)
 	trace := filepath.Join(t.TempDir(), "trace")
