@@ -449,7 +449,8 @@ is written to .agents/skills/slopcop and, when Claude Code is installed,
 Codex's shell hook blocking protocol is not established, so no Codex push gate
 is installed. Codex requires /hooks trust. Written paths are added to the
 repository's info/exclude. Tracked targets are left untouched. Existing
-user-level SlopCop hooks and skills are removed. --remove-hooks removes both
+user-level SlopCop hooks and skills are removed, except that --no-hooks keeps
+the user-level hooks and --no-skill the user-level skills. --remove-hooks removes both
 repository and user-level hooks. Init probes available reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		repo, err := gitx.Toplevel(root)
 		if err != nil {
@@ -463,12 +464,16 @@ repository and user-level hooks. Init probes available reviewers unless --no-rev
 			}
 			return false
 		}
-		user, err := agenthooks.Remove()
-		for _, p := range user.ChangedPaths {
-			fmt.Fprintf(out, "slopcop: removed the user-level hook from %s\n", p)
-		}
-		if err != nil {
-			return err
+		// --no-hooks and --no-skill leave the user-level hooks and skills
+		// alone as well; init removes only what it would replace.
+		if !noHooks {
+			user, err := agenthooks.Remove()
+			for _, p := range user.ChangedPaths {
+				fmt.Fprintf(out, "slopcop: removed the user-level hook from %s\n", p)
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if removeHooks {
 			r, err := agenthooks.Repository(repo, false, skip)
@@ -477,8 +482,10 @@ repository and user-level hooks. Init probes available reviewers unless --no-rev
 			}
 			return err
 		}
-		if err := removeUserSkills(out); err != nil {
-			return err
+		if !noSkill {
+			if err := removeUserSkills(out); err != nil {
+				return err
+			}
 		}
 		var excluded []string
 		if !noSkill {
