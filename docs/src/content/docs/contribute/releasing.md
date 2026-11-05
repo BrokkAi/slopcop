@@ -21,7 +21,7 @@ The same tag push then:
   installs the wheel on every platform GitHub can run, and publishes
   `brokk-slopcop` to PyPI with trusted publishing. See
   [Publishing to PyPI](/contribute/pypi-publishing/).
-- for a stable version, fast-forwards `production` to the tagged commit, which
+- for a stable version, fast-forwards `docs-production` to the tagged commit, which
   deploys docs.slopcop.com.
 
 Stable versions publish on npm's `latest` dist-tag and prereleases on `next`;
@@ -44,8 +44,8 @@ rerunning.
   and older CLIs print the [upgrade notice](/get-started/install/#upgrade-notices).
 - The next `slopcop login` or check from the new binary updates the installed
   [agent skill](/agents/skill/) and names the files that changed.
-- A stable tag fast-forwards the `production` branch to the tagged commit and
+- A stable tag fast-forwards the `docs-production` branch to the tagged commit and
   redeploys this documentation from it, so the site describes the released
   CLI; see [This documentation](/contribute/docs/#deploy). The release fails
-  at that step if `production` is not an ancestor of the tag, which means
-  `production` was moved off `master` and needs reconciling by hand.
+  at that step if `docs-production` is not an ancestor of the tag, which means
+  `docs-production` was moved off `master` and needs reconciling by hand.

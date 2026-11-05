@@ -56,21 +56,21 @@ The social card is rendered from `src/assets/social-card.svg` into
 The **Docs** workflow (`.github/workflows/docs.yml`) builds the site and
 deploys it to GitHub Pages, which serves it at
 [docs.slopcop.com](https://docs.slopcop.com). It deploys only from the
-`production` branch, so a page goes live with the release it describes, not
+`docs-production` branch, so a page goes live with the release it describes, not
 when its pull request merges.
 
-`production` stays an ancestor of `master` and only ever fast-forwards. Two
+`docs-production` stays an ancestor of `master` and only ever fast-forwards. Two
 releases move it:
 
-- a stable CLI release: the **Release** workflow fast-forwards `production` to
+- a stable CLI release: the **Release** workflow fast-forwards `docs-production` to
   the tagged commit and runs the Docs workflow there (prerelease tags such as
   `v0.2.0-rc.1` leave it alone);
 - a promotion of the hosted service to production: bifrost-service's
-  **Promote to production** fast-forwards `production` to `master`.
+  **Promote to production** fast-forwards `docs-production` to `master`.
 
 A push to `master` or a pull request that touches `docs/` builds the site
 without deploying it, so a broken link or page fails the check before it
-merges. Running the workflow from the Actions tab on `production` redeploys
+merges. Running the workflow from the Actions tab on `docs-production` redeploys
 the current site; on any other branch it only builds.
 
 So merge docs to `master` once what they describe is ready to ship with the
