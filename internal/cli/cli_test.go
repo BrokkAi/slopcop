@@ -1640,6 +1640,7 @@ func TestCombinedExitAndStatus(t *testing.T) {
 		{"person review clean", "person", "clean", "finding", "failed", "", 4},
 		{"static clean review failed", "clean", "empty", "finding", "incomplete", "clean", 2},
 		{"static pending review clean", "pending", "clean", "finding", "pending", "", 3},
+		{"static pending review failed", "pending", "empty", "finding", "pending", "", 3},
 		{"fail never review findings", "clean", "findings", "never", "clean", "", 0},
 		{"static incomplete review clean", "incomplete", "clean", "finding", "incomplete", "", 2},
 	}
@@ -1683,6 +1684,9 @@ func TestCombinedExitAndStatus(t *testing.T) {
 			}
 			if doc.Status != tc.wantStatus || doc.StaticStatus != tc.wantStatic {
 				t.Fatalf("status %+v want %q/%q", doc, tc.wantStatus, tc.wantStatic)
+			}
+			if tc.agent == "empty" && doc.Review.Status != "failed" {
+				t.Fatalf("failed review hidden: %+v", doc)
 			}
 			if tc.name == "static incomplete review clean" || tc.name == "static pending review clean" {
 				snapshot, err := gitx.CaptureWorkingTree(repo, nil)

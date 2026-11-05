@@ -6,8 +6,10 @@ sidebar:
 ---
 
 The CLI merges the hosted static status and the local review status.
-Interrupts win, then findings, a static refusal needing a person, failure
-or incompleteness, static pending, and clean.
+Interrupts win, then findings, a static refusal needing a person, static
+failure or incompleteness, static pending, a failed review, and clean. A
+failed review with a pending static half exits `3`, because running the check
+again also runs the review again; `review.status` still says `failed`.
 `--if-enabled` can skip one locally, with `status: skipped` and exit `0`. A
 script or an agent can act on the code alone for check completion; use
 `approved` or the approval ref to decide whether the tree may be pushed.
