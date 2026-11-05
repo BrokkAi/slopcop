@@ -11,10 +11,34 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// shellSeparator splits a command line at the operators that start a new
+// command: ;, &, &&, |, ||, newlines, subshells and command substitution.
+var shellSeparator = regexp.MustCompile("[;&|\n()`]")
+
+// shellWord is one shell word, quoted or not.
+const shellWord = `(?:"[^"]*"|'[^']*'|\S+)`
+
+// gitPush matches git whose subcommand is push, allowing git's global options
+// before it: -C dir and -c key=value, the long options that take a separate
+// value, flags such as --no-pager or --git-dir=dir, and -p, -P, -v and -h. Any other word before
+// push is a different subcommand (git commit -m "push", git stash push).
+var gitPush = regexp.MustCompile(`\bgit(?:\s+(?:-[Cc]\s+` + shellWord + `|--(?:git-dir|work-tree|namespace|config-env)\s+` + shellWord + `|--[-\w]+(?:=` + shellWord + `)?|-[pPvh]))*\s+push(?:\s|$)`)
+
+// ghPRCreate matches gh pr create.
+var ghPRCreate = regexp.MustCompile(`\bgh\b[^\n;&|]*\bpr\s+create\b`)
+
 // pushCommand recognizes the git push and gh pr create forms that checkpoint
-// guarded. It is deliberately conservative: this is a prompt guard, not a
-// shell parser or a security boundary.
-var pushCommand = regexp.MustCompile(`\b(?:git\b[^\n;&|]*\bpush\b|gh\b[^\n;&|]*\bpr\s+create\b)`)
+// guarded, in any command of a chained command line. It is deliberately
+// conservative: this is a prompt guard, not a shell parser or a security
+// boundary, so a quoted "git push" inside another command still counts.
+func pushCommand(command string) bool {
+	for _, part := range shellSeparator.Split(command, -1) {
+		if gitPush.MatchString(part) || ghPRCreate.MatchString(part) {
+			return true
+		}
+	}
+	return false
+}
 
 // gateInput is the part of Claude's PreToolUse payload needed to identify a
 // Bash push and the working directory from which it would run.
@@ -70,7 +94,7 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				if err := decoder.Decode(&input); err != nil {
 					return gateBlock(cmd, fmt.Errorf("slopcop: invalid %s hook input: %w", hook, err))
 				}
-				if input.ToolName != "Bash" || !pushCommand.MatchString(input.ToolInput.Command) {
+				if input.ToolName != "Bash" || !pushCommand(input.ToolInput.Command) {
 					return nil
 				}
 				if input.CWD == "" {

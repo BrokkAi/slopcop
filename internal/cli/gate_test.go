@@ -13,8 +13,39 @@ func TestGatePushCommands(t *testing.T) {
 	for _, tc := range []struct {
 		cmd  string
 		want bool
-	}{{"git push", true}, {"git -C . push origin main", true}, {"gh pr create", true}, {"echo hello", false}, {"git status; echo push", false}, {"echo git push", true}} {
-		if got := pushCommand.MatchString(tc.cmd); got != tc.want {
+	}{
+		{"git push", true},
+		{"git -C . push origin main", true},
+		{"gh pr create", true},
+		{"echo hello", false},
+		{"git status; echo push", false},
+		{"echo git push", true},
+		{"git -c core.sshCommand=ssh push", true},
+		{`git -C "my dir" -c user.name=x --no-pager push --force`, true},
+		{"git --git-dir=.git --work-tree . push", true},
+		{"/usr/bin/git push", true},
+		{"git add . && git commit -m wip && git push", true},
+		{"git fetch; git push origin HEAD", true},
+		{"cd x || git push", true},
+		{"git status\ngit push", true},
+		{"(git push)", true},
+		{"git push&& echo done", true},
+		{"git status | gh pr create --fill", true},
+		{`git commit -m "fix push retry"`, false},
+		{"git stash push", false},
+		{"git stash push -m wip", false},
+		{"git add internal/push.go", false},
+		{"git log --grep=push", false},
+		{"git log --grep push", false},
+		{"git -C push status", false},
+		{"git config push.default simple", false},
+		{"git help push", false},
+		{"git pushx", false},
+		{"git-lfs push", false},
+		{"git status && echo push", false},
+		{"git status | grep push", false},
+	} {
+		if got := pushCommand(tc.cmd); got != tc.want {
 			t.Errorf("%q: got %v", tc.cmd, got)
 		}
 	}
