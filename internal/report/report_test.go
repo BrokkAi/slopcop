@@ -307,6 +307,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		"inconclusive":          float64(0),
 		"inconclusiveElsewhere": float64(0),
 		"omittedFindings":       float64(0),
+		"remappedIgnores":       float64(0),
 		"failOn":                "error",
 	}
 	if !reflect.DeepEqual(document["summary"], wantSummary) {
@@ -873,6 +874,119 @@ func TestEveryFormatCarriesTheFindingID(t *testing.T) {
 	}
 	if _, ok := results[1]["properties"]; ok {
 		t.Errorf("sarif invented an id: %v", results[1])
+	}
+}
+
+// remapped is a check where one new finding and one finding already in the
+// code each match an ignore made before their code changed.
+func remapped() service.Response {
+	touched := finding("tests/test_inputs.py", 58, "warning", "acme.inheritance")
+	touched.ID = "98a2d745-fa33-467b-8289-2a9f3d05a0c8"
+	touched.PreviouslyIgnored = "f5a9bad1-80ab-4a38-9351-4131e05d1682"
+	untouched := existing("tests/test_other.py", 9, "note", "acme.inheritance")
+	untouched.ID = "1b4e28ba-2fa1-11d2-883f-0016d3cca427"
+	untouched.PreviouslyIgnored = "6fa459ea-ee8a-3ca4-894e-db77e160355e"
+	check := response(service.StatusFindings, "finding", []service.Finding{
+		touched,
+		untouched,
+		existing("server/main.rs", 4, "note", "acme.length"),
+	})
+	check.Summary.RemappedIgnores = 2
+	return check
+}
+
+func TestHumanSaysAFindingMatchesAnEarlierIgnore(t *testing.T) {
+	want := "New findings\n" +
+		"  [warning] acme.inheritance: acme.inheritance title\n" +
+		"    Location: tests/test_inputs.py:58\n" +
+		"    Certainty: definite\n" +
+		"    ID: 98a2d745-fa33-467b-8289-2a9f3d05a0c8\n" +
+		"    Matches ignored finding f5a9bad1-80ab-4a38-9351-4131e05d1682 (code changed); " +
+		"`slopcop ignore 98a2d745-fa33-467b-8289-2a9f3d05a0c8` to keep ignoring it\n" +
+		"\n" +
+		"Previously ignored, code changed (never fail the check)\n" +
+		"  [note] acme.inheritance: acme.inheritance title\n" +
+		"    Location: tests/test_other.py:9\n" +
+		"    Certainty: definite\n" +
+		"    ID: 1b4e28ba-2fa1-11d2-883f-0016d3cca427\n" +
+		"    Matches ignored finding 6fa459ea-ee8a-3ca4-894e-db77e160355e (code changed); " +
+		"`slopcop ignore 1b4e28ba-2fa1-11d2-883f-0016d3cca427` to keep ignoring it\n" +
+		"\n" +
+		"1 new finding across 1 file(s); 2 already in the code; 2 match(es) an earlier ignore | Analysis complete\n"
+	if got := render(t, remapped(), FormatHuman); got != want {
+		t.Errorf("human = %q\nwant    %q", got, want)
+	}
+
+	// Without an id to ignore it by, the match is still said.
+	anonymous := finding("cli.py", 2, "warning", "acme.eval")
+	anonymous.PreviouslyIgnored = "f5a9bad1-80ab-4a38-9351-4131e05d1682"
+	got := Findings([]service.Finding{anonymous})
+	if !strings.Contains(got, "    Matches ignored finding f5a9bad1-80ab-4a38-9351-4131e05d1682 (code changed)\n") ||
+		strings.Contains(got, "slopcop ignore") {
+		t.Errorf("findings = %q", got)
+	}
+
+	// A service from before the summary count still has its matches counted.
+	older := remapped()
+	older.Summary.RemappedIgnores = 0
+	if got := render(t, older, FormatHuman); !strings.Contains(got, "; 2 match(es) an earlier ignore |") {
+		t.Errorf("older = %q", got)
+	}
+	if got := render(t, mixed(), FormatHuman); strings.Contains(got, "earlier ignore") {
+		t.Errorf("unmatched = %q", got)
+	}
+}
+
+func TestMachineReportsCarryTheEarlierIgnore(t *testing.T) {
+	var document struct {
+		Summary  map[string]any   `json:"summary"`
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(render(t, remapped(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document.Summary["remappedIgnores"] != float64(2) {
+		t.Errorf("json summary = %v", document.Summary)
+	}
+	if len(document.Findings) != 2 ||
+		document.Findings[0]["previouslyIgnored"] != "f5a9bad1-80ab-4a38-9351-4131e05d1682" ||
+		document.Findings[1]["previouslyIgnored"] != "6fa459ea-ee8a-3ca4-894e-db77e160355e" {
+		t.Errorf("json findings = %v", document.Findings)
+	}
+	document.Findings = nil
+	if err := json.Unmarshal([]byte(render(t, mixed(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := document.Findings[0]["previouslyIgnored"]; ok {
+		t.Errorf("json invented a match: %v", document.Findings[0])
+	}
+
+	var log struct {
+		Runs []struct {
+			Results    []map[string]any `json:"results"`
+			Properties map[string]any   `json:"properties"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, remapped(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log.Runs[0]
+	if run.Properties["slopcop.remappedIgnores"] != float64(2) {
+		t.Errorf("sarif run properties = %v", run.Properties)
+	}
+	if len(run.Results) != 2 {
+		t.Fatalf("sarif results = %v", run.Results)
+	}
+	for index, want := range []struct{ id, previous, state string }{
+		{"98a2d745-fa33-467b-8289-2a9f3d05a0c8", "f5a9bad1-80ab-4a38-9351-4131e05d1682", "new"},
+		{"1b4e28ba-2fa1-11d2-883f-0016d3cca427", "6fa459ea-ee8a-3ca4-894e-db77e160355e", "unchanged"},
+	} {
+		result := run.Results[index]
+		properties, _ := result["properties"].(map[string]any)
+		if properties["slopcop.findingId"] != want.id || properties["slopcop.previouslyIgnored"] != want.previous ||
+			result["baselineState"] != want.state {
+			t.Errorf("sarif result %d = %v", index, result)
+		}
 	}
 }
 

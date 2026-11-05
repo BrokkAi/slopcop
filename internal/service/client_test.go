@@ -486,6 +486,34 @@ func TestCheckReadsTheFindingID(t *testing.T) {
 	}
 }
 
+func TestCheckReadsAMatchToAnEarlierIgnore(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status": "findings",
+			"summary": {"newFindings": 2, "remappedIgnores": 1},
+			"findings": [
+				{"id": "98a2d745-fa33-467b-8289-2a9f3d05a0c8", "policyId": "a", "new": true, "previouslyIgnored": "f5a9bad1-80ab-4a38-9351-4131e05d1682"},
+				{"id": "0f8fad5b-d9cb-469f-a165-70867728950e", "policyId": "b", "new": true}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if response.Summary.RemappedIgnores != 1 ||
+		response.Findings[0].PreviouslyIgnored != "f5a9bad1-80ab-4a38-9351-4131e05d1682" ||
+		response.Findings[1].PreviouslyIgnored != "" {
+		t.Errorf("response = %+v", response)
+	}
+}
+
 func TestOnlyPersonCodesNeedAPerson(t *testing.T) {
 	for code, want := range map[string]bool{
 		"repository_add_unconfirmed": true,

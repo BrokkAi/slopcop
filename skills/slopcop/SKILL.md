@@ -268,7 +268,9 @@ never stop the loop.
 When a finding is a false positive, run `slopcop ignore <id>` with its id.
 That finding is not reported again for this repository. Undo a mistaken ignore
 with `slopcop unignore <id>`. List the repository's ignored findings, with
-their ids, with `slopcop ignored`.
+their ids, with `slopcop ignored`. A finding marked as matching an ignored
+finding (`previouslyIgnored`) is one you ignored before its code changed: if it
+is still a false positive, ignore its new id, and tell the user.
 
 A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
 the change, so a new rule is picked up by the next check with no extra setup.

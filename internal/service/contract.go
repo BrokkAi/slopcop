@@ -148,6 +148,10 @@ type Summary struct {
 	// already in the code that were left out count in ExistingFindings. They
 	// never change the status.
 	OmittedFindings uint64 `json:"omittedFindings"`
+	// RemappedIgnores counts the findings flagged PreviouslyIgnored, so a
+	// match to an earlier ignore can be audited. A service from before
+	// BrokkAi/bifrost-service#953 omits it.
+	RemappedIgnores int    `json:"remappedIgnores"`
 	FailOn          string `json:"failOn"`
 }
 
@@ -179,6 +183,12 @@ type Finding struct {
 	Title     string `json:"title"`
 	// New says the change introduced or touched the finding.
 	New bool `json:"new"`
+	// PreviouslyIgnored is the id of an ignored finding this one plausibly
+	// is: the same rule in the same file at the same place, under a new id
+	// because its code changed. The ignore does not cover it; `slopcop
+	// ignore` with ID does. A service from before
+	// BrokkAi/bifrost-service#953 omits it.
+	PreviouslyIgnored string `json:"previouslyIgnored,omitempty"`
 }
 
 // KnownStatus reports whether this client knows the response status.
