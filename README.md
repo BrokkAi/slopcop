@@ -371,7 +371,7 @@ changes, and binary content. Git-ignored files stay out, except selected
 `.slopcop/policies` rules, which must travel because the service evaluates them
 from the patched checkout.
 
-A check run by a Claude Code or Codex agent also sends which models wrote the
+A check run by a Claude Code, Codex or OpenCode agent also sends which models wrote the
 change, so the service can tie each finding to the model that wrote its file.
 The CLI finds the agent's session from its environment and reads that
 session's own record:
@@ -383,6 +383,10 @@ session's own record:
 - **Codex:** `CODEX_THREAD_ID` names the rollout under `~/.codex/sessions` (or
   `$CODEX_HOME/sessions`). Each completed file change gives the files, and its
   turn gives the model and effort. A move counts as writing its destination.
+- **OpenCode:** `OPENCODE_SESSION_ID` names the session in OpenCode's
+  database, `~/.local/share/opencode/opencode.db` (or `$OPENCODE_DB`),
+  subagents included. Each completed edit, write or patch gives the files,
+  and its step gives the model and its variant as the effort.
 
 It reads only those fields, never the conversation, tool input or file
 contents. What it sends is the harness, its version, the session id as an

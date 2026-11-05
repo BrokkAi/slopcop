@@ -93,7 +93,7 @@ func HookSessions() map[string]string {
 func detect(getenv func(string) string, repoRoot string) *service.Attribution {
 	var best *service.Attribution
 	var bestTime time.Time
-	for _, read := range []func(func(string) string, string) (*service.Attribution, []string){claudeCode, codex} {
+	for _, read := range []func(func(string) string, string) (*service.Attribution, []string){claudeCode, codex, openCode} {
 		attribution, records := read(getenv, repoRoot)
 		if attribution == nil {
 			continue

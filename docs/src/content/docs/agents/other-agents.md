@@ -1,29 +1,20 @@
 ---
 title: Other agents
-description: "opencode reads both skills folders, and any agent that can run a shell command can run slopcop. What to tell an agent that has no skill support."
+description: "Any agent that can run a shell command can run slopcop. What to tell an agent that has no skill support."
 sidebar:
   order: 4
 ---
 
-## opencode
+## OpenCode and Kilo Code
 
-opencode reads both `~/.agents/skills` and `~/.claude/skills`, so
-`slopcop init` covers it too. Add the repository to the workspace from its
-checkout with `slopcop enable` at a terminal, then ask it to check its change,
-or add the usual line to your project's `AGENTS.md`:
-
-```text
-Run `slopcop check --if-enabled` before you finish and fix what it reports.
-```
-
-There is no Stop hook for opencode; the skill is how it knows to check.
+See [OpenCode and Kilo Code](/agents/opencode/).
 
 ## Any agent with a shell
 
 Any agent that can run a shell command can run `slopcop`: it never prompts,
 every check it sends makes one request, and it answers with an exit code. Run
-outside Claude Code or Codex, a check sends nothing about the session, only the
-repository URL, the base commit, and the patch.
+outside Claude Code, Codex or OpenCode, a check sends nothing about the
+session, only the repository URL, the base commit, and the patch.
 
 If the agent cannot load skills, give it the essentials in its instructions
 file:
