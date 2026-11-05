@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -38,6 +39,8 @@ var rolloutSettle = 300 * time.Millisecond
 var hookHarnesses = map[string]string{
 	"claude": attribution.ClaudeHarness,
 	"codex":  attribution.CodexHarness,
+	"grok":   attribution.GrokHarness,
+	"kimi":   attribution.KimiHarness,
 }
 
 // repositoryProviders names the provider the service lists a repository
@@ -56,6 +59,8 @@ type hookInput struct {
 	SessionID      string `json:"session_id"`
 	TranscriptPath string `json:"transcript_path"`
 	StopHookActive bool   `json:"stop_hook_active"`
+	// StopHookActiveCamel is stop_hook_active as Grok names it.
+	StopHookActiveCamel bool `json:"stopHookActive"`
 }
 
 type hookOutput struct {
@@ -66,8 +71,8 @@ type hookOutput struct {
 
 func newHookCommand(serviceURL *string, version string) *cobra.Command {
 	return &cobra.Command{
-		Use:    "hook <claude|codex>",
-		Short:  "Run a check from a Claude Code or Codex Stop hook",
+		Use:    "hook <claude|codex|grok|kimi>",
+		Short:  "Run a check from a Claude Code, Codex, Grok or Kimi Code Stop hook",
 		Hidden: true,
 		// A harness reads exit 2 from a Stop hook as an order to keep going,
 		// so the hook takes any arguments and always exits 0 with its
@@ -78,6 +83,10 @@ func newHookCommand(serviceURL *string, version string) *cobra.Command {
 			var output hookOutput
 			if len(args) == 1 && hookHarnesses[args[0]] != "" {
 				output = runHook(cmd, hookHarnesses[args[0]], *serviceURL, version)
+			}
+			if len(args) == 1 && hookHarnesses[args[0]] == attribution.KimiHarness {
+				_ = json.NewEncoder(cmd.OutOrStdout()).Encode(kimiAnswer(output))
+				return
 			}
 			_ = json.NewEncoder(cmd.OutOrStdout()).Encode(output)
 		},
@@ -99,7 +108,14 @@ func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output ho
 	if input.Event != "Stop" || strings.TrimSpace(input.CWD) == "" || input.SessionID == "" {
 		return hookOutput{}
 	}
+	// Grok also runs the hooks in ~/.claude/settings.json, so SlopCop's
+	// Claude Code hook fires there beside its Grok hook. Grok sets
+	// GROK_HOOK_EVENT for every hook it runs.
+	if harness == attribution.ClaudeHarness && os.Getenv("GROK_HOOK_EVENT") != "" {
+		return hookOutput{}
+	}
 	input.Harness = harness
+	input.StopHookActive = input.StopHookActive || input.StopHookActiveCamel
 	return stopHook(cmd.Context(), input, serviceURL, version)
 }
 
@@ -299,6 +315,26 @@ func (s *hookState) answer(written map[string]bool, fresh, stopHookActive, loade
 		return hookOutput{SystemMessage: "slopcop: the automatic check did not complete. Run 'slopcop check' for details."}
 	}
 	return hookOutput{}
+}
+
+// kimiHookAnswer is a Stop hook's answer as Kimi Code reads it: a block is a
+// hookSpecificOutput whose permissionDecision is deny, with the reason handed
+// to the agent, and anything else to say is message.
+type kimiHookAnswer struct {
+	Message            string              `json:"message,omitempty"`
+	HookSpecificOutput *kimiSpecificOutput `json:"hookSpecificOutput,omitempty"`
+}
+
+type kimiSpecificOutput struct {
+	PermissionDecision       string `json:"permissionDecision"`
+	PermissionDecisionReason string `json:"permissionDecisionReason"`
+}
+
+func kimiAnswer(output hookOutput) kimiHookAnswer {
+	if output.Decision == "block" {
+		return kimiHookAnswer{HookSpecificOutput: &kimiSpecificOutput{"deny", output.Reason}}
+	}
+	return kimiHookAnswer{Message: output.SystemMessage}
 }
 
 func boundedHookText(text string) string {

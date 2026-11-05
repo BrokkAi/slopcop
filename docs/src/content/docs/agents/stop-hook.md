@@ -1,6 +1,6 @@
 ---
 title: The Stop hook
-description: "The automatic check hook slopcop init installs for Claude Code and Codex. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
+description: "The automatic check hook slopcop init installs for Claude Code, Codex and Grok. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
 sidebar:
   order: 7
 ---
@@ -12,6 +12,10 @@ on the machine, and leaves everything else in the file as it was:
 | --- | --- |
 | `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
 | `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
+| `hooks/slopcop.json` under `GROK_HOME`, or `~/.grok` | Grok |
+
+Kimi Code keeps its hooks in `config.toml`, which init does not edit; see
+[Grok and Kimi Code](/agents/grok-kimi/) to add the hook there.
 
 Codex runs a new or changed hook only once you trust it: open Codex and review
 it with `/hooks`. Init never writes that trust itself, and reminds you each time

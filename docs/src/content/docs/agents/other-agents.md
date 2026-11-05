@@ -13,8 +13,9 @@ See [OpenCode and Kilo Code](/agents/opencode/).
 
 Any agent that can run a shell command can run `slopcop`: it never prompts,
 every check it sends makes one request, and it answers with an exit code. Run
-outside Claude Code, Codex or OpenCode, a check sends nothing about the
-session, only the repository URL, the base commit, and the patch.
+outside Claude Code, Codex, OpenCode, Pi or Grok, a check sends nothing about the
+session (see [Grok and Kimi Code](/agents/grok-kimi/)), only the repository URL,
+the base commit, and the patch.
 
 If the agent cannot load skills, give it the essentials in its instructions
 file:

@@ -1,0 +1,4 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1793800001500,"min_protocol_version":"1.5"}
+{"type":"profile.bind","agentId":"agent-0","modelAlias":"kimi-code/kimi-for-coding-highspeed","profileName":"coder","thinkingEffort":"low","systemPrompt":"You are a sub-agent.","disallowedTools":[],"time":1793800001501}
+{"type":"context.append_loop_event","agentId":"agent-0","event":{"type":"tool.call","uuid":"v1","turnId":"1","step":0,"stepUuid":"t1","toolCallId":"tool_s1","name":"Write","args":{"path":"{{repo}}/a.go","content":"package a"}},"time":1793800001600}
+{"type":"context.append_loop_event","agentId":"agent-0","event":{"type":"tool.result","parentUuid":"v1","toolCallId":"tool_s1","result":{"output":"Wrote a.go"}},"time":1793800001700}
