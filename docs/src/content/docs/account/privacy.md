@@ -41,9 +41,10 @@ for GPT Terra, DeepSeek through dsh for DeepSeek Flash, and Anthropic through
 Claude for Claude Haiku. Review results and logs stay under
 `<git-dir>/slopcop/`; nothing from the local review goes to the SlopCop service.
 Use `--mode static` to avoid the local review and these provider requests.
-Reviewers can read files and run commands in the repository root. Slopcop
-refuses their requests to edit, delete, or move files and runs Codex in its
-read-only sandbox. Commands can still write, so this is not a security boundary.
+The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 
 ## What the service does with it
 

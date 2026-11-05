@@ -11,6 +11,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/BrokkAi/slopcop/internal/gitx"
 )
 
 // Run performs or reuses a review; setup failures become a failed Verdict.
@@ -80,7 +82,13 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	}
 	v.LogDir = dir
 	trimLogs(store.dir)
-	prompt := reviewPrompt(opts.Root, capture, in, findings)
+	diff, err := gitx.RunBytes(opts.Root, nil, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.Tree)
+	if err != nil {
+		v.Error = "read captured diff: " + err.Error()
+		save()
+		return v
+	}
+	prompt := reviewPrompt(opts.Root, capture, in, findings, string(diff), order[0])
 	if err = os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(prompt), 0600); err != nil {
 		v.Error = "write review prompt: " + err.Error()
 		save()
@@ -123,7 +131,10 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	var wg sync.WaitGroup
 	for i, s := range ready {
 		wg.Add(1)
-		go func() { defer wg.Done(); v.Reviewers[i], _ = s.prompt(prompt) }()
+		go func() {
+			defer wg.Done()
+			v.Reviewers[i], _ = s.prompt(reviewPrompt(opts.Root, capture, in, findings, string(diff), s.result.Family))
+		}()
 	}
 	wg.Wait()
 	v.Status = groupVerdict(v.Reviewers)

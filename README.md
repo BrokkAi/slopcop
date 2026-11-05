@@ -388,9 +388,10 @@ reviewers and fails with exit `2` if one cannot run. Set the ordered list (1–4
 entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol`.
 Set `review.timeout` (default `20m`) or `mode` with `slopcop config set`;
 adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
-Reviewers can read files and run commands in the repository root. Slopcop
-refuses their requests to edit, delete, or move files and runs Codex in its
-read-only sandbox. Commands can still write, so this is not a security boundary.
+The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 CI normally uses `--mode static`.
 
 Review state and logs are under `<git-dir>/slopcop/`. A complete review is

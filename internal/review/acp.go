@@ -40,20 +40,26 @@ func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotificatio
 	return nil
 }
 
-// RequestPermission rejects file changes and allows other tools.
+// RequestPermission allows only file reading, searching, and thinking.
 func (c *reviewClient) RequestPermission(_ context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	kinds := []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways}
-	if p.ToolCall.Kind != nil {
-		switch *p.ToolCall.Kind {
-		case acp.ToolKindEdit, acp.ToolKindDelete, acp.ToolKindMove:
-			kinds = []acp.PermissionOptionKind{acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways}
-			c.mu.Lock()
-			c.deniedEdit = fmt.Sprintf("reviewer requested %s permission", *p.ToolCall.Kind)
-			if c.stderr != nil {
-				fmt.Fprintln(c.stderr, c.deniedEdit)
-			}
-			c.mu.Unlock()
+	kinds := []acp.PermissionOptionKind{acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways}
+	if p.ToolCall.Kind != nil && (*p.ToolCall.Kind == acp.ToolKindRead || *p.ToolCall.Kind == acp.ToolKindSearch || *p.ToolCall.Kind == acp.ToolKindThink) {
+		kinds = []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways}
+	} else {
+		kind := "missing"
+		if p.ToolCall.Kind != nil {
+			kind = string(*p.ToolCall.Kind)
 		}
+		title := ""
+		if p.ToolCall.Title != nil {
+			title = *p.ToolCall.Title
+		}
+		c.mu.Lock()
+		c.deniedEdit = fmt.Sprintf("reviewer requested %s permission: %s", kind, title)
+		if c.stderr != nil {
+			fmt.Fprintln(c.stderr, c.deniedEdit)
+		}
+		c.mu.Unlock()
 	}
 	for _, kind := range kinds {
 		for _, o := range p.Options {

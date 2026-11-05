@@ -103,10 +103,10 @@ A check runs exactly the configured reviewers. It never reorders or replaces
 them. If one cannot run, review fails with exit `2` and names the reviewer and
 reason. With no reviewers configured, run `slopcop init` or set
 `review.reviewers`. Do not change reviewers or adapters to get past a failure;
-report it to the user. Reviewers use their own tools and permissions in the
-repository root. They can read files and run commands. Slopcop refuses their
-requests to edit, delete, or move files and runs Codex in its read-only sandbox.
-Commands can still write, so this is not a security boundary.
+report it to the user. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 
 For intent, the CLI reads the user's own messages from the Claude Code
 transcript or Codex rollout when found, then uses `--intent TEXT`, else

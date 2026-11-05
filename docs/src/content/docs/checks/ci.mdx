@@ -37,7 +37,10 @@ from the checkout at a terminal, or once a person has approved it, pass
 
 Use `--mode static` in CI unless the runner has Node.js and existing
 reviewer harness logins. Default `both` mode also runs local review and
-can take minutes. Reviewers can run commands and edit files in the checkout.
+can take minutes. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 
 ## GitHub Actions
 

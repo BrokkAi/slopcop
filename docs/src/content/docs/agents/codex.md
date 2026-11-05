@@ -11,10 +11,10 @@ By default, `slopcop check` runs the hosted static check and local review
 concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
 review without a SlopCop login, enabled repository, or supported origin.
 `--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
-existing harness logins. Reviewers can read files and run commands in the
-repository. Slopcop refuses their requests to edit, delete, or move files and
-runs Codex in its read-only sandbox. Commands can still write, so this
-is not a security boundary. A review finding is a model's judgment, while a static finding traces to a rule.
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
 
 ## The skill
 
@@ -49,10 +49,10 @@ Run `slopcop check --if-enabled` before you finish and fix what it reports.
 
 The default check includes local review and can take minutes. Run it in the
 foreground and poll the shell session until it exits. Do not detach with
-`nohup` or `&`. Reviewers can read files and run commands in the repository.
-Slopcop refuses their requests to edit, delete, or move files and runs Codex in
-its read-only sandbox. Commands can still write, so this is not a security
-boundary. Init installs no Codex push gate. Its PreToolUse payload and blocking semantics have not been established.
+`nohup` or `&`. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. Init installs no Codex push gate. Its PreToolUse payload and blocking semantics have not been established.
 
 ## The Stop hook
 

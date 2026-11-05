@@ -33,10 +33,10 @@ any install or top-up link. `--verbose` names each inconclusive rule.
 
 After the static report, human output includes a Review section with each
 reviewer's verdict, text, log path, and intent source.
-Review progress goes to stderr. Reviewers run in the repository root with
-their own tools and permissions. Slopcop refuses edit, delete, and move
-requests and runs Codex in its read-only sandbox. Commands can still write, so
-this is not a security boundary.
+Review progress goes to stderr. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 
 ## json
 

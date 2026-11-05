@@ -24,11 +24,21 @@ func TestVerdictAndSelection(t *testing.T) {
 	}
 }
 func TestPrompt(t *testing.T) {
-	p := reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{Source: "not available"}, nil)
-	for _, v := range []string{"snapshot of the working tree", "Base tree: base", "Snapshot tree: snap", "git -C '/repo' diff --no-ext-diff base snap", "No findings."} {
+	p := reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{Source: "not available"}, nil, "+added line\n", Terra)
+	for _, v := range []string{"snapshot of the working tree", "Base tree: base", "Snapshot tree: snap", "+added line", "git -C '/repo' diff --no-ext-diff base snap", "No findings."} {
 		if !strings.Contains(p, v) {
 			t.Fatal(v)
 		}
+	}
+	for _, family := range []Family{Sol, Flash} {
+		p = reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, nil, "diff", family)
+		if strings.Contains(p, "git -C") != (family == Sol) {
+			t.Fatal(family)
+		}
+	}
+	p = reviewPrompt("/repo", Capture{}, intent{}, nil, strings.Repeat("a\n", 131073), Flash)
+	if !strings.Contains(p, "Diff truncated at 256 KiB") || strings.Contains(p, strings.Repeat("a\n", 131073)) {
+		t.Fatal("truncation")
 	}
 }
 func TestState(t *testing.T) {
