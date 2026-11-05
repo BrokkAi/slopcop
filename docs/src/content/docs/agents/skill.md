@@ -2,7 +2,7 @@
 title: The agent skill
 description: "The SlopCop skill bundled in the binary, where slopcop init installs it, how login and every check keep it current, and what happens to local edits."
 sidebar:
-  order: 5
+  order: 6
 ---
 
 The `slopcop` binary carries the agent skill that teaches a coding agent how to

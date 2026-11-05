@@ -43,6 +43,12 @@ The full instructions are in the skill itself, which you can read at
 [`skills/slopcop/SKILL.md`](https://github.com/BrokkAi/slopcop/blob/master/skills/slopcop/SKILL.md)
 and adapt.
 
+## Agents with no shell
+
+An agent that cannot run a command, such as the ones inside Lovable and Bolt,
+checks over SlopCop's hosted MCP server instead. See
+[Lovable, Bolt, and MCP clients](/agents/app-builders/).
+
 ## Signing in for an agent
 
 An agent runs with your login. On a machine where you cannot open a browser,

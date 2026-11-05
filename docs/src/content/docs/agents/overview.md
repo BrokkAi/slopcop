@@ -90,3 +90,5 @@ would send. See [What leaves your machine](/account/privacy/).
 - [Codex](/agents/codex/): `~/.agents/skills` and `$CODEX_HOME/skills`,
   `$slopcop`, trusting the hook with `/hooks`, and the line for `AGENTS.md`.
 - [Other agents](/agents/other-agents/): opencode, and anything with a shell.
+- [Lovable, Bolt, and MCP clients](/agents/app-builders/): agents with no
+  shell, which check over SlopCop's hosted MCP server.

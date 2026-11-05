@@ -97,6 +97,7 @@ export default defineConfig({
             { label: 'Codex', slug: 'agents/codex' },
             { label: 'OpenCode and Kilo Code', slug: 'agents/opencode' },
             { label: 'Other agents', slug: 'agents/other-agents' },
+            { label: 'Lovable, Bolt, and MCP', slug: 'agents/app-builders' },
             { label: 'The agent skill', slug: 'agents/skill' },
             { label: 'The Stop hook', slug: 'agents/stop-hook' },
           ],
