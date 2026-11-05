@@ -13,9 +13,10 @@ the loop:
   tells an agent how to run a check, how to read the report, which exit codes
   mean what, and what to do about each. `slopcop init` installs it where your
   agents look for skills. See [The agent skill](/agents/skill/).
-- **The Stop hook.** For Claude Code and Codex, a hook that runs a check when
-  the agent stops after writing files, and hands new findings in those files
-  back to the agent to fix. See [The Stop hook](/agents/stop-hook/).
+- **The Stop hook.** For Claude Code, Codex and Grok, and Kimi Code when added
+  by hand, a hook that runs a check when the agent stops after writing files,
+  and hands new findings in those files back to the agent to fix. See
+  [The Stop hook](/agents/stop-hook/).
 
 The CLI itself is built for this: it never prompts, every check it sends is
 one request, and it answers with a closed exit-code contract. Any agent that

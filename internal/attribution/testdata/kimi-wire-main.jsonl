@@ -1,0 +1,19 @@
+{"type":"metadata","protocol_version":"1.5","created_at":1793800000000,"min_protocol_version":"1.5"}
+{"type":"profile.bind","agentId":"main","modelAlias":"kimi-code/k3","profileName":"agent","thinkingEffort":"high","systemPrompt":"You are Kimi.","disallowedTools":[],"time":1793800000001}
+{"type":"turn.prompt","input":[{"type":"text","text":"fix a.go"}],"origin":{"kind":"user"},"time":1793800001000}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"step.begin","uuid":"s1","turnId":"1","step":0},"time":1793800001100}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"u1","turnId":"1","step":0,"stepUuid":"s1","toolCallId":"tool_a1","name":"Edit","args":{"path":"a.go","old_string":"x","new_string":"y"}},"time":1793800001200}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","parentUuid":"u1","toolCallId":"tool_a1","result":{"output":"Edited a.go","durationMs":12}},"time":1793800001300}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"u2","turnId":"1","step":0,"stepUuid":"s1","toolCallId":"tool_b2","name":"Edit","args":{"path":"{{repo}}/b.go","old_string":"x","new_string":"y"}},"time":1793800001400}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","parentUuid":"u2","toolCallId":"tool_b2","result":{"output":"old_string not found","isError":true}},"time":1793800001500}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"u3","turnId":"1","step":0,"stepUuid":"s1","toolCallId":"tool_c3","name":"Read","args":{"path":"{{repo}}/c.go"}},"time":1793800001600}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","parentUuid":"u3","toolCallId":"tool_c3","result":{"output":"package c"}},"time":1793800001700}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"u5","turnId":"1","step":0,"stepUuid":"s1","toolCallId":"tool_e5","name":"Write","args":{"path":"/elsewhere/e.go","content":"package e"}},"time":1793800001800}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","parentUuid":"u5","toolCallId":"tool_e5","result":{"output":"Wrote /elsewhere/e.go"}},"time":1793800001900}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"step.end","uuid":"s1","turnId":"1","step":0,"finishReason":"tool_calls"},"time":1793800002000}
+{"type":"usage.record","agentId":"main","model":"kimi-code/k3","usage":{"inputOther":10,"output":5,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":1793800002001}
+{"type":"config.update","agentId":"main","modelAlias":"kimi-code/kimi-for-coding","thinkingEffort":"off","time":1793800003000}
+{"type":"turn.prompt","input":[{"type":"text","text":"now d.go"}],"origin":{"kind":"user"},"time":1793800003100}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"u4","turnId":"2","step":0,"stepUuid":"s2","toolCallId":"tool_d4","name":"Write","args":{"path":"pkg/d.go","content":"package pkg"}},"time":1793800003200}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.result","parentUuid":"u4","toolCallId":"tool_d4","result":{"output":"Wrote pkg/d.go"}},"time":1793800003300}
+{"type":"context.append_loop_event","agentId":"main","event":{"type":"tool.call","uuid":"u6","turnId":"2","step":0,"stepUuid":"s2","toolCallId":"tool_f6","name":"Edit","args":{"path":"f.go","old_string":"x","new_string":"y"}},"time":1793800003400}

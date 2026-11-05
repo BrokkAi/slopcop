@@ -42,6 +42,8 @@ var hookHarnesses = map[string]struct {
 }{
 	ClaudeHarness: {"CLAUDE_CODE_SESSION_ID", claudeCodeFrom},
 	CodexHarness:  {"CODEX_THREAD_ID", codexFrom},
+	GrokHarness:   {"GROK_SESSION_ID", grokFrom},
+	KimiHarness:   {kimiSessionVariable, kimiFrom},
 }
 
 // DetectHook returns the attribution of the session a Stop hook of harness
@@ -93,7 +95,7 @@ func HookSessions() map[string]string {
 func detect(getenv func(string) string, repoRoot string) *service.Attribution {
 	var best *service.Attribution
 	var bestTime time.Time
-	for _, read := range []func(func(string) string, string) (*service.Attribution, []string){claudeCode, codex, openCode, pi} {
+	for _, read := range []func(func(string) string, string) (*service.Attribution, []string){claudeCode, codex, openCode, pi, grok} {
 		attribution, records := read(getenv, repoRoot)
 		if attribution == nil {
 			continue

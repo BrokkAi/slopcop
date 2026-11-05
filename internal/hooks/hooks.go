@@ -1,5 +1,5 @@
-// Package hooks installs and removes SlopCop's Stop hook for Claude Code and
-// Codex.
+// Package hooks installs and removes SlopCop's Stop hook for Claude Code, Codex
+// and Grok.
 package hooks
 
 import (
@@ -59,8 +59,9 @@ type harness struct {
 
 // harnesses are the harnesses the hook installs into, each at the
 // configuration directory it reads: CLAUDE_CONFIG_DIR or ~/.claude for
-// Claude Code, as the attribution package reads it, and CODEX_HOME or
-// ~/.codex for Codex. A harness whose directory cannot be told is left out.
+// Claude Code, as the attribution package reads it, CODEX_HOME or
+// ~/.codex for Codex, and GROK_HOME or ~/.grok for Grok. A harness whose
+// directory cannot be told is left out.
 func harnesses() []harness {
 	home, homeErr := os.UserHomeDir()
 	dir := func(variable, fallback string) string {
@@ -78,6 +79,10 @@ func harnesses() []harness {
 			name: "codex", dir: dir("CODEX_HOME", ".codex"), file: "hooks.json",
 			windowsCommand: "slopcop hook codex || exit /b 0", needsTrust: true,
 		},
+		// Grok merges every *.json in ~/.grok/hooks, so SlopCop keeps a
+		// file of its own there. Grok asks to trust project hooks, not
+		// these.
+		{name: "grok", dir: dir("GROK_HOME", ".grok"), file: filepath.Join("hooks", "slopcop.json")},
 	}
 	var known []harness
 	for _, h := range all {
@@ -181,6 +186,9 @@ func reconcileHarness(h harness, install bool) (string, bool, error) {
 	}
 	if !changed {
 		return "", true, nil
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
+		return "", true, fmt.Errorf("create %s: %w", filepath.Dir(target), err)
 	}
 	if err := writeAtomic(target, updated, mode); err != nil {
 		return "", true, err

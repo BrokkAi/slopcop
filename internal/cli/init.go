@@ -307,8 +307,9 @@ skill-backups next to the slopcop configuration. Pass --no-skill to leave the
 skill install and any update of it undone.
 
 A Stop hook goes into Claude Code's settings.json, under CLAUDE_CONFIG_DIR or
-~/.claude, and Codex's hooks.json, under CODEX_HOME or ~/.codex, for each
-harness installed here. Codex runs it only once you trust it with /hooks.
+~/.claude, Codex's hooks.json, under CODEX_HOME or ~/.codex, and Grok's
+hooks/slopcop.json, under GROK_HOME or ~/.grok, for each harness installed
+here. Codex runs it only once you trust it with /hooks.
 Pass --no-hooks to skip the hook, or --remove-hooks to remove only SlopCop's.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {

@@ -20,6 +20,7 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -289,6 +290,46 @@ func TestInstallAddsTheCodexHook(t *testing.T) {
 	removed := readConfig(t, path)
 	if bytes.Contains(removed, []byte("slopcop hook")) || !bytes.Contains(removed, []byte(`"command": "mine"`)) {
 		t.Fatalf("hooks.json after removal:\n%s", removed)
+	}
+}
+
+func TestInstallAddsTheGrokHookInAFileOfItsOwn(t *testing.T) {
+	home := isolateHome(t)
+	grok := filepath.Join(home, "custom-grok")
+	t.Setenv("GROK_HOME", grok)
+	mine := filepath.Join(grok, "hooks", "mine.json")
+	writeConfig(t, mine, `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine"}]}]}}`)
+
+	result, err := Install()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NeedsTrust || len(result.Installed) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	path := filepath.Join(grok, "hooks", "slopcop.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"Stop"`, `"command": "slopcop hook grok || true"`, `"timeout": 720`} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Errorf("slopcop.json lacks %s:\n%s", want, data)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".grok")); !os.IsNotExist(err) {
+		t.Fatalf("install used ~/.grok instead of GROK_HOME: %v", err)
+	}
+
+	if _, err := Remove(); err != nil {
+		t.Fatal(err)
+	}
+	removed, err := os.ReadFile(path)
+	if err != nil || bytes.Contains(removed, []byte("slopcop hook")) {
+		t.Fatalf("slopcop.json after removal: %s, %v", removed, err)
+	}
+	if kept := readConfig(t, mine); !bytes.Contains(kept, []byte(`"command": "mine"`)) {
+		t.Fatalf("the user's hook file changed:\n%s", kept)
 	}
 }
 
