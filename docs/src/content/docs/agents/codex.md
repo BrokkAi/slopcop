@@ -11,9 +11,10 @@ By default, `slopcop check` runs the hosted static check and local review
 concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
 review without a SlopCop login, enabled repository, or supported origin.
 `--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
-existing harness logins. Reviewers can run commands and edit files in the
-repository; they have no read-only isolation. A review finding is a model's
-judgment, while a static finding traces to a rule.
+existing harness logins. Reviewers can read files and run commands in the
+repository. Slopcop refuses their requests to edit, delete, or move files and
+runs Codex in its read-only sandbox. Commands can still write, so this
+is not a security boundary. A review finding is a model's judgment, while a static finding traces to a rule.
 
 ## The skill
 
@@ -48,9 +49,10 @@ Run `slopcop check --if-enabled` before you finish and fix what it reports.
 
 The default check includes local review and can take minutes. Run it in the
 foreground and poll the shell session until it exits. Do not detach with
-`nohup` or `&`. Reviewers can use tools and edit files in the repository;
-there is no read-only isolation. Init installs no Codex push gate. Its
-PreToolUse payload and blocking semantics have not been established.
+`nohup` or `&`. Reviewers can read files and run commands in the repository.
+Slopcop refuses their requests to edit, delete, or move files and runs Codex in
+its read-only sandbox. Commands can still write, so this is not a security
+boundary. Init installs no Codex push gate. Its PreToolUse payload and blocking semantics have not been established.
 
 ## The Stop hook
 

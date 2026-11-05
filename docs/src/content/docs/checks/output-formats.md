@@ -34,7 +34,9 @@ any install or top-up link. `--verbose` names each inconclusive rule.
 After the static report, human output includes a Review section with each
 reviewer's verdict, text, log path, and intent source.
 Review progress goes to stderr. Reviewers run in the repository root with
-their own tools and permissions; they can edit files.
+their own tools and permissions. Slopcop refuses edit, delete, and move
+requests and runs Codex in its read-only sandbox. Commands can still write, so
+this is not a security boundary.
 
 ## json
 

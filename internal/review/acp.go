@@ -21,6 +21,8 @@ type reviewClient struct {
 	mu              sync.Mutex
 	text            strings.Builder
 	permissionError error
+	deniedEdit      string
+	stderr          io.Writer
 }
 
 // SessionUpdate retains only agent message chunks after the last tool update.
@@ -38,14 +40,30 @@ func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotificatio
 	return nil
 }
 
-// RequestPermission selects the narrowest available allow option.
+// RequestPermission rejects file changes and allows other tools.
 func (c *reviewClient) RequestPermission(_ context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	for _, kind := range []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways} {
+	kinds := []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways}
+	if p.ToolCall.Kind != nil {
+		switch *p.ToolCall.Kind {
+		case acp.ToolKindEdit, acp.ToolKindDelete, acp.ToolKindMove:
+			kinds = []acp.PermissionOptionKind{acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways}
+			c.mu.Lock()
+			c.deniedEdit = fmt.Sprintf("reviewer requested %s permission", *p.ToolCall.Kind)
+			if c.stderr != nil {
+				fmt.Fprintln(c.stderr, c.deniedEdit)
+			}
+			c.mu.Unlock()
+		}
+	}
+	for _, kind := range kinds {
 		for _, o := range p.Options {
 			if o.Kind == kind {
 				return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: o.OptionId}}}, nil
 			}
 		}
+	}
+	if len(kinds) > 0 && kinds[0] == acp.PermissionOptionKindRejectOnce {
+		return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}}}, nil
 	}
 	err := fmt.Errorf("reviewer offered no allow permission option")
 	c.mu.Lock()
@@ -154,7 +172,7 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 	}
 	go func() { _ = s.cmd.Wait(); close(s.exited) }()
 	s.stopWatch = context.AfterFunc(s.ctx, func() { killProcessTree(s.cmd) })
-	s.client = &reviewClient{}
+	s.client = &reviewClient{stderr: s.stderr}
 	s.conn = acp.NewClientSideConnection(s.client, s.stdin, io.TeeReader(stdout, s.updates))
 	s.conn.SetLogger(slog.New(slog.NewTextHandler(s.stderr, nil)))
 	_, err = s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
@@ -214,11 +232,28 @@ func (s *runner) prepare(root string) error {
 	if !found {
 		return fmt.Errorf("high effort unavailable")
 	}
-	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
+	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
 	if err != nil {
 		return fmt.Errorf("select high effort: %w", err)
 	}
 	s.result.Effort = "high"
+	modeOptions := response.ConfigOptions
+	key, value := reviewerMode(s.result.Family)
+	option := configOption(modeOptions, key)
+	if option == nil {
+		option = configOption(effortOptions, key)
+	}
+	if option == nil {
+		option = configOption(session.ConfigOptions, key)
+	}
+	if !hasChoice(option, value) {
+		fmt.Fprintf(s.stderr, "reviewer mode %s=%s unavailable\n", key, value)
+		return nil
+	}
+	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: option.Id, Value: acp.SessionConfigValueId(value)}})
+	if err != nil {
+		return fmt.Errorf("select %s=%s: %w", key, value, err)
+	}
 	return nil
 }
 func (s *runner) prompt(prompt string) (Reviewer, error) {
@@ -238,6 +273,9 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 	}
 	if err != nil {
 		s.result.Error = err.Error()
+		if s.client.deniedEdit != "" {
+			s.result.Error += "; " + s.client.deniedEdit
+		}
 	}
 	s.result.Status = parseVerdict(s.result)
 	return s.result, err

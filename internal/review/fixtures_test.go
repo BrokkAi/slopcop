@@ -87,3 +87,27 @@ func TestFamilyOfRejectsOtherModels(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewerModeChoices(t *testing.T) {
+	for _, tc := range []struct {
+		family     Family
+		key, value string
+		options    string
+	}{
+		{Terra, "mode", "read-only", `[{"id":"mode","name":"Mode","type":"select","currentValue":"default","options":[{"value":"read-only","name":"Read only"}]}]`},
+		{Haiku, "mode", "default", `[{"id":"mode","name":"Mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Manual"}]}]`},
+		{Flash, "permission_mode", "ask", `[{"id":"permission_mode","name":"Permissions","type":"select","currentValue":"allow","options":[{"value":"ask","name":"Ask"}]}]`},
+	} {
+		var opts []acp.SessionConfigOption
+		if err := json.Unmarshal([]byte(tc.options), &opts); err != nil {
+			t.Fatal(err)
+		}
+		key, value := reviewerMode(tc.family)
+		if key != tc.key || value != tc.value || !hasChoice(configOption(opts, key), value) {
+			t.Fatalf("mode %s=%s unavailable", key, value)
+		}
+		if hasChoice(configOption(nil, key), value) {
+			t.Fatal("missing mode selected")
+		}
+	}
+}

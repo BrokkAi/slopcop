@@ -49,7 +49,9 @@ level is `error`; warnings and notes are advisory even when `--fail-on` makes
 them exit `1`. `--fail-on` changes the exit code, not push approval. A static
 rule may be incomplete while the completed findings still approve the tree.
 A failed review, static failure, refusal, pending or unknown status never
-approves it. JSON `approved` reports the decision directly.
+approves it. A later check that does not approve the same nonempty tree removes
+its approval ref, including an override. Rerun `slopcop override` if the review
+findings are unchanged. JSON `approved` reports the decision directly.
 
 ## Exit 2: incomplete, or an error
 

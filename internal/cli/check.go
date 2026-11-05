@@ -230,6 +230,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
 			return err
 		}
+	} else if prepared.bytes > 0 {
+		// A later failed decision also withdraws an override for this tree.
+		if err := review.Unmark(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
+			return err
+		}
 	}
 	var writeErr error
 	switch {

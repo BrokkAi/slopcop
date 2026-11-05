@@ -11,9 +11,10 @@ By default, `slopcop check` runs the hosted static check and local review
 concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
 review without a SlopCop login, enabled repository, or supported origin.
 `--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
-existing harness logins. Reviewers can run commands and edit files in the
-repository; they have no read-only isolation. A review finding is a model's
-judgment, while a static finding traces to a rule.
+existing harness logins. Reviewers can read files and run commands in the
+repository. Slopcop refuses their requests to edit, delete, or move files and
+runs Codex in its read-only sandbox. Commands can still write, so this
+is not a security boundary. A review finding is a model's judgment, while a static finding traces to a rule.
 
 ## The skill
 
@@ -54,7 +55,9 @@ before changing code, and to run `slopcop ignore <id>` for a false positive.
 
 The default check includes local review and can take minutes. Run Bash with
 `run_in_background: true`, then poll TaskOutput until it finishes. Reviewers
-use their own tools in the repository root and may edit files. The push gate
+can read files and run commands in the repository root. Slopcop refuses their
+requests to edit, delete, or move files and runs Codex in its read-only sandbox.
+Commands can still write, so this is not a security boundary. The push gate
 installed by init is Claude Code only: it blocks `git push` and `gh pr
 create` until HEAD's tree has a passing check or valid override. After
 checking a dirty tree, commit exactly that state before pushing.

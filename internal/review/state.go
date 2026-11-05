@@ -206,6 +206,17 @@ func MarkReviewed(root, tree string) error {
 	return err
 }
 
+// Unmark removes the approval ref for a tree. Deleting an absent ref succeeds.
+func Unmark(root, tree string) error {
+	ref := "refs/slopcop/reviewed/" + tree
+	found, err := Reviewed(root, tree)
+	if err != nil || !found {
+		return err
+	}
+	_, err = gitx.Run(root, "update-ref", "-d", ref)
+	return err
+}
+
 // Reviewed reports whether the exact tree has an approval ref.
 func Reviewed(root, tree string) (bool, error) {
 	ref := "refs/slopcop/reviewed/" + tree

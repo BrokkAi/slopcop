@@ -104,8 +104,9 @@ them. If one cannot run, review fails with exit `2` and names the reviewer and
 reason. With no reviewers configured, run `slopcop init` or set
 `review.reviewers`. Do not change reviewers or adapters to get past a failure;
 report it to the user. Reviewers use their own tools and permissions in the
-repository root. They can edit files and run commands; there is no read-only
-isolation.
+repository root. They can read files and run commands. Slopcop refuses their
+requests to edit, delete, or move files and runs Codex in its read-only sandbox.
+Commands can still write, so this is not a security boundary.
 
 For intent, the CLI reads the user's own messages from the Claude Code
 transcript or Codex rollout when found, then uses `--intent TEXT`, else
@@ -349,7 +350,9 @@ should change it. The default is `error`; `--fail-on` affects exit codes,
 not push approval.
 
 A passing check (see above) or valid override records
-`refs/slopcop/reviewed/<tree>`.
+`refs/slopcop/reviewed/<tree>`. A later check that does not approve the same
+nonempty tree removes that ref, including an override. Rerun `slopcop override`
+if the review findings are unchanged.
 The Claude Code gate blocks `git push` and `gh pr create` until HEAD has
 exactly that tree. After checking a dirty tree, commit exactly that state,
 including untracked files, before pushing. Init installs no Codex push

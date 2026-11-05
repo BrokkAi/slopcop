@@ -163,3 +163,22 @@ func bestModel(f Family, options []acp.SessionConfigSelectOption) (string, bool)
 	}
 	return best, best != ""
 }
+
+func reviewerMode(f Family) (string, string) {
+	if f == Flash {
+		return "permission_mode", "ask"
+	}
+	if f == Haiku {
+		return "mode", "default"
+	}
+	return "mode", "read-only"
+}
+
+func hasChoice(option *acp.SessionConfigOptionSelect, value string) bool {
+	for _, choice := range choices(option) {
+		if string(choice.Value) == value {
+			return true
+		}
+	}
+	return false
+}
