@@ -152,7 +152,11 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 		return nil, err
 	}
 	s.cmd = exec.Command(path, argv[1:]...)
-	s.cmd.Dir = root
+	// npx reads .npmrc and node_modules from its working directory and the
+	// directories above it, so starting it in the repository under review
+	// would let that repository choose what runs. The adapter starts in the
+	// temporary directory; the session still gets the repository as its cwd.
+	s.cmd.Dir = os.TempDir()
 	s.cmd.Env = reviewerEnvironment(f, root, filepath.Join(dir, name+"-data"), os.Environ())
 	configureProcess(s.cmd)
 	s.cmd.Stderr = s.stderr

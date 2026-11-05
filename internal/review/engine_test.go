@@ -109,6 +109,31 @@ func TestReviewerWithoutRestrictiveModeFails(t *testing.T) {
 	}
 }
 
+// TestAdapterStartsOutsideTheRepository checks that the adapter process runs
+// in a directory the repository does not control, while its ACP session is
+// still rooted in the repository.
+func TestAdapterStartsOutsideTheRepository(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("cwd", "gpt-6.10-terra", trace)}}}
+	if v := Run(context.Background(), s, c, o); v.Status != StatusClean {
+		t.Fatalf("%+v", v)
+	}
+	data, _ := os.ReadFile(trace)
+	var process string
+	for _, line := range strings.Split(string(data), "\n") {
+		if v, ok := strings.CutPrefix(line, "process-cwd="); ok {
+			process = v
+		}
+	}
+	// os.TempDir can be a symbolic link, as on macOS.
+	want, _ := filepath.EvalSymlinks(os.TempDir())
+	got, _ := filepath.EvalSymlinks(process)
+	if process == "" || got != want || !strings.Contains(string(data), "session-cwd="+root+"\n") {
+		t.Fatalf("trace: %s", data)
+	}
+}
+
 // TestFailedReviewerNamesRefusedRequest checks that a failed reviewer's error
 // carries the permission request slopcop refused during the turn.
 func TestFailedReviewerNamesRefusedRequest(t *testing.T) {

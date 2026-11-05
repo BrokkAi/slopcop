@@ -45,7 +45,12 @@ func options(model, mode string) []acp.SessionConfigOption {
 	permission := acp.SessionConfigSelectOptionsUngrouped{{Value: "ask", Name: "Ask"}, {Value: "auto", Name: "Auto"}}
 	return append(out, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "mode", Name: "Mode", CurrentValue: "full-access", Options: acp.SessionConfigSelectOptions{Ungrouped: &modes}}}, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "permission_mode", Name: "Permission mode", CurrentValue: "auto", Options: acp.SessionConfigSelectOptions{Ungrouped: &permission}}})
 }
-func (a *agent) NewSession(context.Context, acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *agent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	if a.mode == "cwd" {
+		dir, _ := os.Getwd()
+		a.record("process-cwd=" + dir)
+		a.record("session-cwd=" + p.Cwd)
+	}
 	if a.mode == "new-error" {
 		return acp.NewSessionResponse{}, fmt.Errorf("fake session failure")
 	}
