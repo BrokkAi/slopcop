@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -81,7 +82,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		return v
 	}
 	v.LogDir = dir
-	trimLogs(store.dir)
+	TrimLogs(store.dir)
 	diff, err := gitx.RunBytes(opts.Root, nil, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.Tree)
 	if err != nil {
 		v.Error = "read captured diff: " + err.Error()
@@ -146,21 +147,24 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	return v
 }
 
-// trimLogs keeps the newest twenty review directories by timestamped name.
-func trimLogs(dir string) {
+// TrimLogs keeps the newest twenty review and the newest twenty probe log
+// directories in a state directory, by timestamped name.
+func TrimLogs(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	var names []string
-	for _, v := range entries {
-		if v.IsDir() && len(v.Name()) >= 7 && v.Name()[:7] == "review-" {
-			names = append(names, v.Name())
+	for _, prefix := range []string{"review-", "probe-"} {
+		var names []string
+		for _, v := range entries {
+			if v.IsDir() && strings.HasPrefix(v.Name(), prefix) {
+				names = append(names, v.Name())
+			}
 		}
-	}
-	sort.Strings(names)
-	for len(names) > 20 {
-		_ = os.RemoveAll(filepath.Join(dir, names[0]))
-		names = names[1:]
+		sort.Strings(names)
+		for len(names) > 20 {
+			_ = os.RemoveAll(filepath.Join(dir, names[0]))
+			names = names[1:]
+		}
 	}
 }

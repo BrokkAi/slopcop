@@ -597,6 +597,7 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 	if err != nil {
 		return err
 	}
+	review.TrimLogs(probeParent)
 	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt")
 	results := review.Probe(ctx, repo, logDir, review.Families, settings)
 	var names []string

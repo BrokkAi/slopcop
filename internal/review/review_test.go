@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +75,34 @@ func TestIntentKeepsTheMostRecentMessages(t *testing.T) {
 	p := reviewPrompt("/repo", Capture{}, in, nil, "", Flash)
 	if !strings.Contains(p, "<user_intent>\n[Earlier user messages omitted; only the most recent 64 KiB are shown.]\nold message") {
 		t.Fatal("truncation not marked")
+	}
+}
+
+// TestTrimLogsPrunesReviewAndProbeDirectories checks that each kind of log
+// directory keeps its newest twenty and that other entries are left alone.
+func TestTrimLogsPrunesReviewAndProbeDirectories(t *testing.T) {
+	dir := t.TempDir()
+	for _, prefix := range []string{"review-", "probe-"} {
+		for i := 0; i < 25; i++ {
+			if err := os.Mkdir(filepath.Join(dir, fmt.Sprintf("%s20260101T%06d-x", prefix, i)), 0700); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := os.WriteFile(filepath.Join(dir, "last.json"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	TrimLogs(dir)
+	for _, prefix := range []string{"review-", "probe-"} {
+		for i := 0; i < 25; i++ {
+			_, err := os.Stat(filepath.Join(dir, fmt.Sprintf("%s20260101T%06d-x", prefix, i)))
+			if kept := err == nil; kept != (i >= 5) {
+				t.Errorf("%s%d kept=%v", prefix, i, kept)
+			}
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dir, "last.json")); err != nil {
+		t.Fatal(err)
 	}
 }
 func TestState(t *testing.T) {
