@@ -87,3 +87,10 @@ slopcop init --remove-hooks   # remove SlopCop's hooks and nothing else
 
 Ordinary checks do not reinstall a removed hook. The skill remains the way to
 check from other harnesses.
+
+## Deploy it for a fleet
+
+An administrator can deploy the hook through Claude Code managed settings or
+Codex's managed `requirements.toml` instead of having each user run
+`slopcop init`. Where only managed hooks may run, that is required. See
+[Managed rollout](/agents/managed-rollout/).

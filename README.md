@@ -232,6 +232,29 @@ The hook is dormant in a repository until it is enabled in the workspace. Run
 check. The hook then checks what an agent writes and hands findings back; it
 never adds a repository and sends nothing for one that is not active.
 
+### Managed rollout
+
+An administrator can deploy the `Stop` hook through managed configuration
+instead of having each user run `slopcop init`. Device management must still
+put `slopcop` on `PATH`, and each user still signs in.
+
+- **Claude Code:** add the handler `slopcop init` writes to the `hooks` key of
+  the managed settings (`managed-settings.json` or a file in
+  `managed-settings.d/`): a `Stop` group with `"type": "command"`,
+  `"command": "slopcop hook claude || true"`, `"timeout": 720` and
+  `"statusMessage": "Checking the change with SlopCop"`. Under
+  `allowManagedHooksOnly` the hook init writes to `~/.claude/settings.json`
+  is blocked, so the managed hook is the only one that runs. Claude Code runs
+  an identical handler from several settings files once.
+- **Codex:** define the `Stop` hook under `[hooks]` in the managed
+  `requirements.toml` (`command = "slopcop hook codex || true"`,
+  `command_windows = "slopcop hook codex || exit /b 0"`, `timeout = 720`).
+  Managed hooks are trusted by policy, so users skip `/hooks`. Codex installs
+  nothing from `managed_dir`.
+
+Users then run `slopcop init --no-hooks` to install only the skill. See
+[Managed rollout](https://docs.slopcop.com/agents/managed-rollout/).
+
 ## Sign in
 
 ```console
