@@ -96,6 +96,7 @@ export default defineConfig({
             { label: 'Claude Code', slug: 'agents/claude-code' },
             { label: 'Codex', slug: 'agents/codex' },
             { label: 'Other agents', slug: 'agents/other-agents' },
+            { label: 'Lovable, Bolt, and MCP', slug: 'agents/app-builders' },
             { label: 'The agent skill', slug: 'agents/skill' },
             { label: 'The Stop hook', slug: 'agents/stop-hook' },
           ],

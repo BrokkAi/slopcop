@@ -2,7 +2,7 @@
 title: The Stop hook
 description: "The automatic check hook slopcop init installs for Claude Code and Codex. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
 sidebar:
-  order: 6
+  order: 7
 ---
 
 Besides the skill, `slopcop init` adds a `Stop` hook for each harness installed

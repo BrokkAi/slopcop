@@ -81,6 +81,13 @@ first, 25 per page. `page` is optional, zero-based, at most 10000. It answers
 longer recorded. A repository the workspace does not have answers
 `workspace_repository_not_found`.
 
+## MCP
+
+`POST /v1/mcp` serves the same check, ignore, unignore, and ignored routes as
+[Model Context Protocol](https://modelcontextprotocol.io) tools, over
+streamable HTTP with no session, for agents that cannot run the CLI. It takes
+the same bearer token. See [Lovable, Bolt, and MCP clients](/agents/app-builders/).
+
 ## Account
 
 | Route | Answer |
