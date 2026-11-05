@@ -93,7 +93,7 @@ func HookSessions() map[string]string {
 func detect(getenv func(string) string, repoRoot string) *service.Attribution {
 	var best *service.Attribution
 	var bestTime time.Time
-	for _, read := range []func(func(string) string, string) (*service.Attribution, []string){claudeCode, codex, openCode} {
+	for _, read := range []func(func(string) string, string) (*service.Attribution, []string){claudeCode, codex, openCode, pi} {
 		attribution, records := read(getenv, repoRoot)
 		if attribution == nil {
 			continue
@@ -254,4 +254,22 @@ func models(repoRoot string, edits []fileEdit) []service.AttributedModel {
 		})
 	}
 	return out
+}
+
+// resolvePath resolves a path a harness recorded for an edit against the
+// directory it ran in. On Windows, \dir\file has a root but no drive: it is on
+// dir's drive, not under dir. An empty dir resolves only absolute paths.
+func resolvePath(dir, path string) string {
+	path = filepath.FromSlash(path)
+	switch {
+	case path == "":
+		return ""
+	case filepath.IsAbs(path):
+		return filepath.Clean(path)
+	case dir == "":
+		return ""
+	case strings.HasPrefix(path, string(filepath.Separator)):
+		return filepath.Clean(filepath.VolumeName(dir) + path)
+	}
+	return filepath.Join(dir, path)
 }
