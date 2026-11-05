@@ -151,3 +151,44 @@ jobs:
           packages-dir: pypi-dist
           # A rerun of a half-finished upload publishes whatever is missing.
           skip-existing: true
+
+  # docs.slopcop.com deploys from `production`, so a stable CLI release moves
+  # `production` forward to the tagged commit and the docs ship with the CLI
+  # they describe. See docs/src/content/docs/contribute/docs.md.
+  docs-production:
+    name: Promote docs to production
+    needs: goreleaser
+    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # fast-forward the production branch
+      actions: write # dispatch the Docs workflow on production
+    env:
+      RELEASE_TAG: ${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Fast-forward production to the tagged commit
+        run: |
+          tagged="$(git rev-parse "$GITHUB_SHA^{commit}")"
+          if ! git fetch --quiet origin refs/heads/production:refs/remotes/origin/production; then
+            echo "::error::The production branch does not exist. Create it from master before releasing."
+            exit 1
+          fi
+          production="$(git rev-parse origin/production)"
+          if git merge-base --is-ancestor "$tagged" "$production"; then
+            echo "production ($production) already contains $RELEASE_TAG ($tagged); nothing to move."
+          elif git merge-base --is-ancestor "$production" "$tagged"; then
+            # A plain push: the server refuses anything but a fast-forward.
+            git push origin "$tagged:refs/heads/production"
+            echo "Fast-forwarded production from $production to $RELEASE_TAG ($tagged)."
+          else
+            echo "::error::production ($production) is not an ancestor of $RELEASE_TAG ($tagged), so it cannot be fast-forwarded. production must only ever move forward along master; reconcile it by hand."
+            exit 1
+          fi
+      # The push above used GITHUB_TOKEN, which starts no workflow on its own.
+      - name: Deploy the docs from production
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh workflow run docs.yml --repo "$GITHUB_REPOSITORY" --ref production

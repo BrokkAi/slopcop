@@ -55,21 +55,30 @@ The social card is rendered from `src/assets/social-card.svg` into
 
 The **Docs** workflow (`.github/workflows/docs.yml`) builds the site and
 deploys it to GitHub Pages, which serves it at
-[docs.slopcop.com](https://docs.slopcop.com). It runs:
+[docs.slopcop.com](https://docs.slopcop.com). It deploys only from the
+`production` branch, so a page goes live with the release it describes, not
+when its pull request merges.
 
-- on a push to `master` that touches `docs/` or the workflow;
-- on a `v*.*.*` tag, so the site is redeployed with each CLI release;
-- on a `repository_dispatch` with event type `deploy-docs`, which the service's
-  own release can send so the site redeploys when the hosted side changes:
+`production` stays an ancestor of `master` and only ever fast-forwards. Two
+releases move it:
 
-  ```console
-  gh api repos/BrokkAi/slopcop/dispatches -f event_type=deploy-docs
-  ```
+- a stable CLI release: the **Release** workflow fast-forwards `production` to
+  the tagged commit and runs the Docs workflow there (prerelease tags such as
+  `v0.2.0-rc.1` leave it alone);
+- a promotion of the hosted service to production: bifrost-service's
+  **Promote to production** fast-forwards `production` to `master`.
 
-- on demand, from the Actions tab.
+A push to `master` or a pull request that touches `docs/` builds the site
+without deploying it, so a broken link or page fails the check before it
+merges. Running the workflow from the Actions tab on `production` redeploys
+the current site; on any other branch it only builds.
 
-A pull request that touches `docs/` builds the site without deploying it, so a
-broken link or page fails the check before it merges.
+So merge docs to `master` once what they describe is ready to ship with the
+next release:
+
+- CLI docs merge with the CLI change and go live with the next CLI release.
+- Hosted-feature docs merge once the service change is on bifrost-service
+  `main`, and go live at the next promotion to production.
 
 Two repository variables override the build target without a code change:
 `DOCS_SITE` (default `https://docs.slopcop.com`) and `DOCS_BASE` (default `/`).

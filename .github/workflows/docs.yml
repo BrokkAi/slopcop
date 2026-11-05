@@ -4,24 +4,27 @@ name: Docs
 # serves it at docs.slopcop.com (the custom domain is set in the repository's
 # Pages settings; an Actions deployment needs no CNAME file).
 #
-# The site documents both the CLI and the hosted service, so it has triggers
-# of its own: a docs change on master, a CLI release tag, a repository_dispatch
-# the service's release can send (`gh api repos/BrokkAi/slopcop/dispatches
-# -f event_type=deploy-docs`), and the Actions tab. A pull request that touches
-# docs/ builds without deploying.
+# The site documents both the CLI and the hosted service, so it deploys from
+# the `production` branch, never from master. `production` stays an ancestor
+# of master and is fast-forwarded by the two releases the site describes: a
+# stable CLI tag here (release.yml) and bifrost-service's promotion to
+# production. A push to master or a pull request that touches docs/ builds
+# without deploying, so a broken page fails before it ships.
+#
+# A push made with the built-in GITHUB_TOKEN starts no workflow, so release.yml
+# runs this workflow on `production` with workflow_dispatch after moving it.
+# The Actions tab can do the same to redeploy by hand; a dispatch on any other
+# branch only builds.
 on:
   push:
-    branches: [master]
+    branches: [master, production]
     paths:
       - 'docs/**'
       - '.github/workflows/docs.yml'
-    tags: ['v*.*.*']
   pull_request:
     paths:
       - 'docs/**'
       - '.github/workflows/docs.yml'
-  repository_dispatch:
-    types: [deploy-docs]
   workflow_dispatch: {}
 
 permissions:
@@ -75,14 +78,14 @@ jobs:
           PUBLIC_DOCS_BASE: /slopcop
 
       - name: Upload Pages artifact
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/production'
         uses: actions/upload-pages-artifact@v4
         with:
           path: docs/dist
 
   deploy:
     name: Deploy docs
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/production'
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 10
