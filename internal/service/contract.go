@@ -156,6 +156,11 @@ type Summary struct {
 	// BrokkAi/bifrost-service#953 omits it.
 	RemappedIgnores int    `json:"remappedIgnores"`
 	FailOn          string `json:"failOn"`
+	// LessCertainFindings counts the findings the CLI left out because
+	// their certainty is not definite; --certainty all lists them. The
+	// service never sends it, and Findings and NewFindings no longer count
+	// them.
+	LessCertainFindings int `json:"lessCertainFindings,omitempty"`
 }
 
 // IncompletePolicy mirrors IncompletePolicy: a check that did not complete

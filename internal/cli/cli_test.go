@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -801,6 +802,81 @@ func TestExitCodeFollowsTheServiceStatus(t *testing.T) {
 	// so each one is listed as new.
 	if !strings.Contains(stdout, "1 new finding across 1 file(s) | Analysis complete") {
 		t.Fatalf("stdout = %q", stdout)
+	}
+}
+
+// A check reports and fails on definite findings only. A possible or
+// heuristic one is counted on the summary line and listed, failing the check
+// again, with --certainty all; one still crossing --fail-on keeps it failed.
+func TestACheckReportsOnlyDefiniteFindingsByDefault(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	definite := `{"policyId": "d", "severity": "note", "certainty": "definite", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "proven", "new": true}`
+	respond := func(findings ...string) *httptest.Server {
+		body := fmt.Sprintf(`{
+			"status": "findings",
+			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+			"applied": true,
+			"summary": {"files": 1, "findings": %[1]d, "newFindings": %[1]d, "incompletePolicies": 0, "failOn": "warning"},
+			"findings": [%[2]s],
+			"incomplete": []
+		}`, len(findings), strings.Join(findings, ","))
+		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(body))
+		}))
+	}
+	possible := `{"policyId": "p", "severity": "error", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "maybe", "new": true}`
+	heuristic := `{"policyId": "h", "severity": "warning", "certainty": "heuristic", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "looks like", "new": true}`
+	server := respond(definite, possible, heuristic)
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--fail-on", "warning")
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (the definite note is below --fail-on); stderr = %s", code, stderr)
+	}
+	if strings.Contains(stdout, "maybe") || strings.Contains(stdout, "looks like") || !strings.Contains(stdout, "[note] d: proven") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	if !strings.Contains(stdout, "1 new finding across 1 file(s); 2 less certain not shown (--certainty all) | Analysis complete") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--fail-on", "warning", "--format", "json")
+	var report struct {
+		Status  string `json:"status"`
+		Summary struct {
+			NewFindings         int `json:"newFindings"`
+			LessCertainFindings int `json:"lessCertainFindings"`
+		} `json:"summary"`
+		Findings []struct {
+			PolicyID string `json:"policyId"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
+		t.Fatalf("stdout is not the JSON report: %q: %v", stdout, err)
+	}
+	if code != 0 || report.Status != "clean" || report.Summary.NewFindings != 1 ||
+		report.Summary.LessCertainFindings != 2 || len(report.Findings) != 1 || report.Findings[0].PolicyID != "d" {
+		t.Fatalf("exit = %d, report = %+v", code, report)
+	}
+
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--fail-on", "warning", "--certainty", "all")
+	if code != 1 || !strings.Contains(stdout, "[error] p: maybe") || !strings.Contains(stdout, "3 new findings") ||
+		strings.Contains(stdout, "less certain") {
+		t.Fatalf("exit = %d, stdout = %q", code, stdout)
+	}
+
+	failing := respond(strings.Replace(definite, `"note"`, `"error"`, 1), possible)
+	defer failing.Close()
+	if code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", failing.URL, "--fail-on", "warning"); code != 1 {
+		t.Fatalf("exit = %d, want 1 (a definite error crosses --fail-on); stdout = %q", code, stdout)
+	}
+
+	if code, _, stderr = runCLI(t, "check", "--root", repo, "--certainty", "likely"); code == 0 ||
+		!strings.Contains(stderr, `unknown certainty "likely"`) {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
 	}
 }
 

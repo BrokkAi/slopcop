@@ -26,8 +26,12 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
-	invalidChange   = "invalid_change"
-	baseNotFound    = "base_not_found"
+	// certaintyDefinite and certaintyAll are the --certainty values. A check
+	// reports and fails on definite findings only unless asked for all.
+	certaintyDefinite = service.CertaintyDefinite
+	certaintyAll      = "all"
+	invalidChange     = "invalid_change"
+	baseNotFound      = "base_not_found"
 	// addRepositoryNeedsWorkspace is the usage error for --add-repository
 	// without --workspace: the approval is for one workspace, so the flag
 	// names it rather than trusting wherever the login points.
@@ -55,6 +59,14 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	format, failOn, err := resolveEnums(opts)
 	if err != nil {
 		return err
+	}
+	certainty := strings.ToLower(strings.TrimSpace(opts.certainty))
+	switch certainty {
+	case "":
+		certainty = certaintyDefinite
+	case certaintyDefinite, certaintyAll:
+	default:
+		return fmt.Errorf("unknown certainty %q (expected definite or all)", opts.certainty)
 	}
 	if opts.addRepository && strings.TrimSpace(opts.workspace) == "" {
 		return errors.New(addRepositoryNeedsWorkspace)
@@ -174,6 +186,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
 	}
 	reportOptions.EmptyChange = emptyChange
+	// The Stop hook acts on definite findings only, so its state does too,
+	// whatever this check lists.
+	definite := response.OnlyDefinite()
+	if certainty == certaintyDefinite {
+		response = definite
+	}
 	if err := report.Write(stdout, response, format, reportOptions); err != nil {
 		return err
 	}
@@ -183,7 +201,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			"slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n",
 			response.Status)
 	} else {
-		rememberCheck(prepared, response)
+		rememberCheck(prepared, definite)
 	}
 	return silentExit{response.ExitCode()}
 }

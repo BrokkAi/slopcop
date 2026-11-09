@@ -225,7 +225,8 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 	if !response.KnownStatus() {
 		return fmt.Sprintf("slopcop: the service answered status %q, which this version of slopcop does not know. Update slopcop.", response.Status), false
 	}
-	state.completed(prepared.workspace, prepared.fingerprint, response)
+	// The hook holds an agent back only for findings Bifrost proved.
+	state.completed(prepared.workspace, prepared.fingerprint, response.OnlyDefinite())
 	return "", true
 }
 

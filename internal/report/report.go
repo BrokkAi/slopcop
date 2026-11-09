@@ -242,6 +242,11 @@ func summaryLine(response service.Response) string {
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
 	}
+	// Findings Bifrost did not prove are left out by default; say how many,
+	// so a clean line is not read as none at all.
+	if count := response.Summary.LessCertainFindings; count > 0 {
+		scope = fmt.Sprintf("%s; %d less certain not shown (--certainty all)", scope, count)
+	}
 	state := "Analysis complete"
 	switch {
 	case response.Failure != "":
@@ -976,6 +981,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.failOn":                response.Summary.FailOn,
 		"slopcop.newFindings":           response.Summary.NewFindings,
 		"slopcop.existingFindings":      response.Summary.ExistingFindings,
+		"slopcop.lessCertainFindings":   response.Summary.LessCertainFindings,
 		"slopcop.remappedIgnores":       remappedCount(response),
 		"slopcop.inconclusive":          response.Summary.Inconclusive,
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
