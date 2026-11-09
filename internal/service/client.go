@@ -127,7 +127,7 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 			err        error
 		)
 		if checkID != "" {
-			response, retryAfter, err = c.pollOnce(ctx, checkID, request.FailOn)
+			response, retryAfter, err = c.pollOnce(ctx, checkID, request.FailOn, request.Certainty)
 		} else {
 			response, retryAfter, err = c.checkOnce(ctx, request)
 		}
@@ -180,11 +180,19 @@ func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time
 }
 
 // pollOnce asks for a running check by its id once, without the change. The
-// service rebuilds the answer for failOn, as it would for the change.
-func (c *Client) pollOnce(ctx context.Context, checkID, failOn string) (Response, time.Duration, error) {
+// service rebuilds the answer for failOn and certainty, as it would for the
+// change.
+func (c *Client) pollOnce(ctx context.Context, checkID, failOn, certainty string) (Response, time.Duration, error) {
 	path := checkPath + "/" + url.PathEscape(checkID)
+	query := url.Values{}
 	if failOn != "" {
-		path += "?" + url.Values{"failOn": {failOn}}.Encode()
+		query.Set("failOn", failOn)
+	}
+	if certainty != "" {
+		query.Set("certainty", certainty)
+	}
+	if len(query) > 0 {
+		path += "?" + query.Encode()
 	}
 	status, header, payload, err := c.getJSON(ctx, path)
 	if err != nil {

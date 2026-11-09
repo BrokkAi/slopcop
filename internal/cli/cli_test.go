@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -804,6 +805,66 @@ func TestExitCodeFollowsTheServiceStatus(t *testing.T) {
 	}
 }
 
+// The service decides which findings a check answers: the CLI sends no
+// certainty by default, so an older service still accepts the request, and
+// sends certainty all, on the request and when it asks again by id, for
+// --certainty all. It prints the service's count of the findings it left out.
+func TestCertaintyIsTheServicesToApply(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	var sent []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		certainty := r.URL.Query().Get("certainty")
+		if r.Method == http.MethodPost {
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			value, present := request["certainty"]
+			if !present {
+				value = "<none>"
+			}
+			certainty = fmt.Sprint(value)
+			sent = append(sent, "post "+certainty)
+			// The first answer is still running, so the CLI asks by id.
+			checkRunningWithID(w, "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b")
+			return
+		}
+		sent = append(sent, "get "+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		if certainty == "all" {
+			_, _ = w.Write([]byte(`{"status": "findings", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "applied": true,
+				"summary": {"files": 1, "findings": 1, "newFindings": 1, "incompletePolicies": 0, "failOn": "finding"},
+				"findings": [{"policyId": "p", "severity": "error", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "maybe", "new": true}],
+				"incomplete": []}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "applied": true,
+			"summary": {"files": 1, "findings": 0, "newFindings": 0, "lessCertainFindings": 1, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [], "incomplete": []}`))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 0 || stdout != "No new findings; 1 less certain not shown (--certainty all) | Analysis complete\n" {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
+	}
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--certainty", "ALL")
+	if code != 1 || !strings.Contains(stdout, "[error] p: maybe") {
+		t.Fatalf("exit = %d, stdout = %q", code, stdout)
+	}
+	want := []string{"post <none>", "get failOn=finding", "post all", "get certainty=all&failOn=finding"}
+	if fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("sent %q, want %q", sent, want)
+	}
+
+	if code, _, stderr = runCLI(t, "check", "--root", repo, "--certainty", "likely"); code == 0 ||
+		!strings.Contains(stderr, `unknown certainty "likely"`) {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+}
+
 // --show-existing still parses, so scripts that pass it keep working, but the
 // service no longer lists findings outside the change: the flag is hidden and
 // says so on stderr, never on stdout, where it would break the JSON report.
@@ -881,6 +942,15 @@ func checkRunning(w http.ResponseWriter, retryAfter string) {
 		"remedy": "Run the same check again to wait for its result.",
 		"retryable": true
 	}`))
+}
+
+// checkRunningWithID answers check_running for the check id, with no wait,
+// so the client asks again by that id.
+func checkRunningWithID(w http.ResponseWriter, checkID string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", "0")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = fmt.Fprintf(w, `{"code": "check_running", "message": "The check is still running.", "remedy": "Wait.", "retryable": true, "checkId": %q}`, checkID)
 }
 
 const onlyPreExisting = `{

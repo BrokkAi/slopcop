@@ -110,7 +110,10 @@ default base is `HEAD` and the patch is empty.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
 `--fail-on never|finding|note|warning|error` (default `finding`, so any new
-finding fails the check; the service alone defaults to `warning`), `--policy
+finding fails the check; the service alone defaults to `warning`),
+`--certainty definite|all` (default `definite`: only findings Bifrost proved
+are listed and can fail the check; `all` adds `possible` and `heuristic`
+ones, which `summary.lessCertainFindings` otherwise counts), `--policy
 PATH` for a repository-relative `.rqlp` file (repeatable), and
 `--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
 otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
@@ -213,6 +216,8 @@ Finding `certainty`:
 | `definite` | Bifrost proved the pattern or relation holds at this location. Fix it. |
 | `possible` | The match depends on something Bifrost could not settle, such as an ambiguous receiver or dispatch, name-based resolution, several candidate declarations, or a "may" relation. It can be a false positive: read the code before changing it, and tell the user when it is wrong. |
 | `heuristic` | A text-pattern match, such as a secret-like string. Confirm it the same way. |
+
+A check lists `possible` and `heuristic` findings only with `--certainty all`; otherwise `summary.lessCertainFindings` counts them and they do not change the status.
 
 Why a check is `incomplete` (`incomplete[].reason`):
 

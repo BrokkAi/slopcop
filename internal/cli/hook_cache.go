@@ -84,6 +84,7 @@ func fingerprintCheck(serviceURL, token, workspace string, request service.Reque
 		Change     string             `json:"change"`
 		Selection  *service.Selection `json:"selection,omitempty"`
 		FailOn     string             `json:"failOn,omitempty"`
+		Certainty  string             `json:"certainty,omitempty"`
 	}{
 		ServiceURL: serviceURL,
 		Credential: hex.EncodeToString(credential[:]),
@@ -93,6 +94,7 @@ func fingerprintCheck(serviceURL, token, workspace string, request service.Reque
 		Change:     request.Change,
 		Selection:  request.Selection,
 		FailOn:     request.FailOn,
+		Certainty:  request.Certainty,
 	}
 	encoded, _ := json.Marshal(body)
 	digest := sha256.Sum256(encoded)

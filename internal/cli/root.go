@@ -142,6 +142,7 @@ type checkOptions struct {
 	baseExact    string
 	format       string
 	failOn       string
+	certainty    string
 	policies     []string
 	noDiscovery  bool
 	verbose      bool
@@ -163,6 +164,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringVar(&opts.baseExact, "base-exact", "", "exact base commit or revision, used without taking a merge base")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
 	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
+	flags.StringVar(&opts.certainty, "certainty", certaintyDefinite, "which findings to report and fail on: definite (proven at their location) or all (also possible and heuristic ones)")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
 	// The service stopped listing findings outside the changed lines; it
 	// counts them in summary.existingFindings, which every format prints.
