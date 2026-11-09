@@ -40,6 +40,24 @@ func pushCommand(command string) bool {
 	return false
 }
 
+// approvalRef matches a mention of SlopCop's approval refs, as a ref name or
+// as a path under .git, with either path separator.
+var approvalRef = regexp.MustCompile(`refs[/\\]+slopcop\b`)
+
+// forgedApproval reports whether a command names SlopCop's approval refs. Only
+// slopcop check and slopcop override write them, and neither is run with the
+// ref on its command line, so an agent's command that names one is most
+// likely writing an approval the check did not give (git update-ref, or a
+// file under .git/refs). Reading them is blocked too: an agent has no need to.
+// Like pushCommand, this guards against an agent's shortcut, not an attacker.
+func forgedApproval(command string) bool {
+	return approvalRef.MatchString(command)
+}
+
+// forgedApprovalText is the reason a command that names the approval refs is
+// blocked.
+const forgedApprovalText = "slopcop: blocked: refs/slopcop/ holds the approvals that slopcop check and slopcop override write, and nothing else may write them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
+
 // gateInput is the part of Claude's PreToolUse payload needed to identify a
 // Bash push and the working directory from which it would run.
 type gateInput struct {
@@ -94,7 +112,13 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				if err := decoder.Decode(&input); err != nil {
 					return gateBlock(cmd, fmt.Errorf("slopcop: invalid %s hook input: %w", hook, err))
 				}
-				if input.ToolName != "Bash" || !pushCommand(input.ToolInput.Command) {
+				if input.ToolName != "Bash" {
+					return nil
+				}
+				if forgedApproval(input.ToolInput.Command) {
+					return gateBlock(cmd, errors.New(forgedApprovalText))
+				}
+				if !pushCommand(input.ToolInput.Command) {
 					return nil
 				}
 				if input.CWD == "" {

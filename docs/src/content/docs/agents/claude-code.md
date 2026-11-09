@@ -68,6 +68,9 @@ checks HEAD in the directory Claude Code runs the command from: it does not
 follow `cd` or `git -C` in the command, read the pushed refspecs, or expand
 shell aliases. It matches commands by text, so it can also block a command
 that only mentions `git push`. Pushes from your own terminal are not affected.
+It also blocks any command that names `refs/slopcop/`, where approvals are
+kept, so the agent cannot write an approval the check did not give with
+`git update-ref` or a file under `.git`.
 `slopcop init` lists its files in the repository's `.git/info/exclude`, which
 linked worktrees of the same repository share.
 

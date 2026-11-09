@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -92,6 +93,38 @@ func TestGateHookPayload(t *testing.T) {
 		err := cmd.Execute()
 		if (err != nil) != tc.blocked {
 			t.Errorf("payload %s: err %v", tc.payload, err)
+		}
+	}
+}
+
+// TestGateBlocksForgedApprovals covers commands that would write an approval
+// the check did not give, in a repository where a push itself would pass.
+func TestGateBlocksForgedApprovals(t *testing.T) {
+	repo := testInitRepo(t)
+	for _, tc := range []struct {
+		command string
+		blocked bool
+	}{
+		{"git update-ref refs/slopcop/reviewed/$(git rev-parse HEAD^{tree}) $(git rev-parse HEAD^{tree})", true},
+		{"echo abc > .git/refs/slopcop/reviewed/abc", true},
+		{`git update-ref refs\slopcop\reviewed\abc abc`, true},
+		{"git for-each-ref refs/slopcop", true},
+		{"slopcop check --format json", false},
+		{`slopcop override --reason "the finding is wrong"`, false},
+		{"git log refs/heads/slopcop-fix", false},
+	} {
+		cmd := newGateCommand()
+		payload, _ := json.Marshal(map[string]any{"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": tc.command}})
+		cmd.SetIn(bytes.NewReader(payload))
+		cmd.SetArgs([]string{"--hook", "claude"})
+		var errOut bytes.Buffer
+		cmd.SetErr(&errOut)
+		err := cmd.Execute()
+		if (err != nil) != tc.blocked {
+			t.Errorf("%s: err %v", tc.command, err)
+		}
+		if tc.blocked && !strings.Contains(errOut.String(), "slopcop override") {
+			t.Errorf("%s: reason %q", tc.command, errOut.String())
 		}
 	}
 }

@@ -370,7 +370,8 @@ A passing check (see above) or valid override records
 nonempty tree removes that ref, including an override. Rerun `slopcop override`
 if the review findings are unchanged.
 The Claude Code gate blocks `git push` and `gh pr create` until HEAD has
-exactly that tree. After checking a dirty tree, commit exactly that state,
+exactly that tree. Never write, read, or delete `refs/slopcop/` yourself; the
+gate blocks any command that names it. After checking a dirty tree, commit exactly that state,
 including untracked files, before pushing. Init installs no Codex push
 gate. Gate approval does not authorize a push the user did not request. The
 gate checks HEAD in the directory the command runs from and does not follow
