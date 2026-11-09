@@ -99,7 +99,10 @@ When you check work you have already committed, pass `--base` with the branch
 the change targets, such as the PR's base (`--base origin/main`), instead of
 relying on the default. `--base REV` works like `git diff REV...HEAD`: the base
 is the merge base of `REV` and `HEAD`, so the patch covers only the branch's
-work even after the target branch has moved on. `--base-exact REV` diffs
+work even after the target branch has moved on. A branch stacked on another
+PR's branch that merged a newer `origin/HEAD` also sends only its own work once
+the prerequisite has landed; if it has not, stderr warns that the patch carries
+the merged-in commits. `--base-exact REV` diffs
 against that exact commit instead; a target branch that moved on then shows up
 as reverse edits. The two flags cannot be combined, and `--base` stops with an
 error when `REV` shares no history with `HEAD`. On the default branch with nothing unpushed, the
