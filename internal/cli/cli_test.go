@@ -2042,3 +2042,54 @@ func TestStaticApprovalWithdrawnByBothReview(t *testing.T) {
 		t.Fatal("stale static approval")
 	}
 }
+
+// TestPushApprovalWithIncompleteRules covers an incomplete static result with
+// no findings and a clean review: a rule that could not answer for a cause of
+// its own does not block the push, but a run failure, which left the whole
+// analyzer run without an answer, does, and the push line says why.
+func TestPushApprovalWithIncompleteRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, incomplete, runFailures string
+		approved                      bool
+	}{
+		{"own cause approves", `[{"policyId":"p","reason":"unsupported"}]`, `[]`, true},
+		{"run failure blocks", `[{"policyId":"p","reason":"unreliable","detail":"type=incomplete reasons=analyzer_process_failed exit_code=137","scope":"run"}]`,
+			`[{"reason":"unreliable","detail":"type=incomplete reasons=analyzer_process_failed exit_code=137","policies":1}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "README.md", "changed\n")
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=clean"}}}}}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"status":"incomplete","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"incompletePolicies":1,"failOn":"finding"},"findings":[],"incomplete":%s,"runFailures":%s}`, tc.incomplete, tc.runFailures)
+			}))
+			defer server.Close()
+			_, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json", "--timeout", "50ms")
+			var doc struct {
+				Approved bool `json:"approved"`
+			}
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatalf("%v: %s %s", err, out, stderr)
+			}
+			if doc.Approved != tc.approved {
+				t.Fatalf("approved=%v want %v: %s", doc.Approved, tc.approved, out)
+			}
+			writeFile(t, repo, ".claude/settings.local.json", `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`)
+			writeFile(t, repo, ".git/info/exclude", "/.claude/settings.local.json\n")
+			_, _, humanErr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "human", "--timeout", "50ms")
+			want := "may be pushed: it passed the check."
+			if !tc.approved {
+				want = "may not be pushed yet: the static analyzer run failed (unreliable), so it checked nothing; run the check again."
+			}
+			if !strings.Contains(humanErr, want) {
+				t.Fatalf("push line: want %q in %s", want, humanErr)
+			}
+		})
+	}
+}

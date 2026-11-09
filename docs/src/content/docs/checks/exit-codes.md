@@ -49,7 +49,10 @@ clean review (or no review), and the static half completed with no new finding
 at or above `gate.blockOn` (or was skipped or did not run). The default push
 level is `error`; warnings and notes are advisory even when `--fail-on` makes
 them exit `1`. `--fail-on` changes the exit code, not push approval. A static
-rule may be incomplete while the completed findings still approve the tree.
+rule may be incomplete while the completed findings still approve the tree,
+but a run failure (`runFailures` in `json`) does not: it left every check of
+an analyzer run without an answer, so that run checked nothing. Run the check
+again.
 A failed review, static failure, refusal, pending or unknown status never
 approves it. A later check that does not approve the same nonempty tree removes
 its approval ref, including an override. Rerun `slopcop override` if the review

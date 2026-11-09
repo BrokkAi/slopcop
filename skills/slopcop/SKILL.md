@@ -330,7 +330,9 @@ judgment, so read the code it names before you change anything, and use
 approves the tree: `approved` is `true` in `json`, and where the push gate is
 installed, stderr says the tree may be pushed. That needs a clean review and
 no new static finding at or above the push level (`error` by default); a
-static check that ended `incomplete` does not prevent it. New static findings
+static check that ended `incomplete` does not prevent it, unless it lists
+`runFailures`: then the analyzer run failed and checked nothing, so run the
+check again. New static findings
 below the push level, warnings and notes by default, are advisory: they do not
 block the push, though they still exit `1` under the default `--fail-on`. Fix
 the real ones in this change, and tell the user about any you leave. A failed

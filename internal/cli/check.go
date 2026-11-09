@@ -1023,12 +1023,16 @@ func staticBlockingCount(response service.Response, level string) int {
 // staticPasses says whether the static half allows the tree to be approved
 // for push. A half that did not run (ai mode) or skipped an inactive
 // repository allows it; otherwise it needs a finished response of a known
-// status with no new finding at or above the push level. Findings below that
-// level are advisory, and --fail-on plays no part, so no option of a check
-// can loosen what blocks a push.
+// status with no new finding at or above the push level and no run failure.
+// Findings below that level are advisory, and --fail-on plays no part, so no
+// option of a check can loosen what blocks a push. A rule that could not
+// answer for a cause of its own (unsupported, timed out) does not block, but
+// a run failure left every check of an analyzer run without an answer, such
+// as when the analyzer process was killed, so that run checked nothing.
 func staticPasses(static staticOutcome, mode, level string) bool {
 	return mode == modeAI || static.skipped != nil ||
-		(static.response != nil && static.response.KnownStatus() && staticBlockingCount(*static.response, level) == 0)
+		(static.response != nil && static.response.KnownStatus() &&
+			staticBlockingCount(*static.response, level) == 0 && len(static.response.RunFailures) == 0)
 }
 
 // approvalReason names why a check did not approve its tree, for the line a
@@ -1047,6 +1051,9 @@ func approvalReason(empty, reviewPassed bool, verdict review.Verdict, static sta
 	if mode != modeAI && static.response != nil && static.response.KnownStatus() {
 		if n := staticBlockingCount(*static.response, level); n > 0 {
 			return fmt.Sprintf("%d static finding(s) at or above %s", n, level)
+		}
+		if failures := static.response.RunFailures; len(failures) > 0 {
+			return fmt.Sprintf("the static analyzer run failed (%s), so it checked nothing; run the check again", failures[0].Reason)
 		}
 	}
 	return "the static check did not complete (failed, pending, or unknown status)"
