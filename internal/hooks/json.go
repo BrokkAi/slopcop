@@ -66,8 +66,10 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 			}
 			// The first of SlopCop's handlers is brought up to date on
 			// install; every other one is a duplicate, and removal drops
-			// them all.
-			if install && !found {
+			// them all. A gate in a group with another matcher, as
+			// installed before the matcher changed, is dropped and added
+			// again in a group of its own.
+			if install && !found && (!h.gate || groupMatcher(group) == h.matcher) {
 				found = true
 				if !handler.equal(canonical) {
 					handler, groupChanged = canonical, true
@@ -91,7 +93,7 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	if install && !found {
 		group := newObject()
 		if h.gate {
-			group.set("matcher", "Bash")
+			group.set("matcher", h.matcher)
 		}
 		group.set("hooks", []any{canonical})
 		newStop = append(newStop, group)
@@ -114,6 +116,13 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	}
 	out.WriteByte('\n')
 	return out.Bytes(), true, nil
+}
+
+// groupMatcher is a hook group's matcher, or "" when it has none.
+func groupMatcher(group *object) string {
+	value, _ := group.get("matcher")
+	matcher, _ := value.(string)
+	return matcher
 }
 
 // decodeSettings reads a settings file's one JSON object. An empty file or

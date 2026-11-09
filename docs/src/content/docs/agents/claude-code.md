@@ -58,9 +58,11 @@ The default check includes local review and can take minutes. Run Bash with
 `run_in_background: true`, then poll TaskOutput until it finishes. The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
-reviewers run in Codex's read-only sandbox. The push gate
-installed by init is Claude Code only: it blocks `git push` and `gh pr
-create` until HEAD's tree has a passing check or valid override. After
+reviewers run in Codex's read-only sandbox. The push gate init installs in
+`.claude/settings.local.json` blocks `git push`, `gh pr create`, and the
+GitHub MCP tools that push files or open a pull request (`create_pull_request`
+and `push_files`, under any server name) until HEAD's tree has a passing
+check or valid override. After
 checking a dirty tree, commit exactly that state before pushing.
 
 The gate is a guard for the agent's workflow, not a security boundary. It

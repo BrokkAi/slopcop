@@ -177,9 +177,11 @@ leaves everything else in the file as it was:
 | `.claude/settings.local.json` in the repository | Claude Code |
 | `.codex/hooks.json` in the repository | Codex |
 
-The Claude Code settings also get a PreToolUse Bash gate. It blocks `git push`
-and `gh pr create` until HEAD's tree matches a passing check or valid override.
-No Codex push gate is installed.
+The Claude Code and Codex settings also get a PreToolUse push gate. It
+blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
+open a pull request until HEAD's tree has a passing check or valid override.
+Grok runs the Claude Code gate too, in a folder it trusts. Codex runs its gate
+only once you trust it with `/hooks`.
 
 Codex reads the repository's `.codex/hooks.json` only once you trust the
 project in Codex, and runs a new or changed hook only once you trust it too:
@@ -255,6 +257,10 @@ put `slopcop` on `PATH`, and each user still signs in.
   `command_windows = "slopcop hook codex || exit /b 0"`, `timeout = 720`).
   Managed hooks are trusted by policy, so users skip `/hooks`. Codex installs
   nothing from `managed_dir`.
+
+To keep the push gate, deploy its `PreToolUse` handler the same way
+(`"command": "slopcop gate --hook claude"`, or `slopcop gate --hook codex`,
+with no `|| true`); the Managed rollout page has both.
 
 Users then run `slopcop init --no-hooks` to install only the skill. See
 [Managed rollout](https://docs.slopcop.com/agents/managed-rollout/).

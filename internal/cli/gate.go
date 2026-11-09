@@ -58,8 +58,17 @@ func forgedApproval(command string) bool {
 // blocked.
 const forgedApprovalText = "slopcop: blocked: refs/slopcop/ holds the approvals that slopcop check and slopcop override write, and nothing else may write them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
 
-// gateInput is the part of Claude's PreToolUse payload needed to identify a
-// Bash push and the working directory from which it would run.
+// shellTools are the tool names a PreToolUse payload gives a shell command:
+// Bash from Claude Code and Codex, and run_terminal_command from Grok, which
+// runs the gate from the repository's Claude Code settings.
+var shellTools = map[string]bool{"Bash": true, "run_terminal_command": true}
+
+// githubPushTool matches the GitHub MCP tools that open a pull request or
+// push files without git, under any server name.
+var githubPushTool = regexp.MustCompile(`^mcp__.+__(create_pull_request|push_files)$`)
+
+// gateInput is the part of a PreToolUse payload needed to identify a push and
+// the working directory from which it would run.
 type gateInput struct {
 	CWD       string `json:"cwd"`
 	ToolName  string `json:"tool_name"`
@@ -87,17 +96,19 @@ func gateTree(root string) error {
 }
 
 // newGateCommand exposes a direct tree check and a hidden hook form. The hook
-// inspects only Bash push commands, matching the only payload established for
-// Claude, and reads at most four MiB so a malformed hook cannot consume an
-// unbounded stream. Invalid payloads block conservatively, as checkpoint did.
+// inspects shell push commands and the GitHub MCP tools that push or open a
+// pull request, and reads at most four MiB so a malformed hook cannot consume
+// an unbounded stream. Invalid payloads block conservatively, as checkpoint
+// did.
 func newGateCommand() *cobra.Command {
 	var root, hook string
 	command := &cobra.Command{
 		Use:   "gate",
 		Short: "Check whether HEAD's tree passed SlopCop",
 		Long: `Check whether the current committed tree has a passing SlopCop check.
-A Claude Code PreToolUse hook uses this command to block git push and gh pr
-create until the exact committed tree is reviewed. The hook reads its payload
+A Claude Code or Codex PreToolUse hook uses this command to block git push,
+gh pr create, and GitHub MCP tools that push or open a pull request, until the
+exact committed tree is reviewed. The hook reads its payload
 from stdin and blocks malformed input rather than allowing an unchecked push.`,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -112,17 +123,20 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				if err := decoder.Decode(&input); err != nil {
 					return gateBlock(cmd, fmt.Errorf("slopcop: invalid %s hook input: %w", hook, err))
 				}
-				if input.ToolName != "Bash" {
-					return nil
-				}
-				if forgedApproval(input.ToolInput.Command) {
-					return gateBlock(cmd, errors.New(forgedApprovalText))
-				}
-				if !pushCommand(input.ToolInput.Command) {
+				switch {
+				case shellTools[input.ToolName]:
+					if forgedApproval(input.ToolInput.Command) {
+						return gateBlock(cmd, errors.New(forgedApprovalText))
+					}
+					if !pushCommand(input.ToolInput.Command) {
+						return nil
+					}
+				case githubPushTool.MatchString(input.ToolName):
+				default:
 					return nil
 				}
 				if input.CWD == "" {
-					return gateBlock(cmd, errors.New("slopcop: Claude hook input is missing cwd"))
+					return gateBlock(cmd, fmt.Errorf("slopcop: %s hook input is missing cwd", hook))
 				}
 				root = input.CWD
 			}
@@ -135,8 +149,9 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 	return command
 }
 
-// gateBlock prints a reason and returns exit 2, which Claude Code interprets
-// as a blocked PreToolUse command. The installed gate handler has no `|| true`
+// gateBlock prints a reason and returns exit 2, which Claude Code, Codex and
+// Grok read as a blocked PreToolUse call; Codex and Grok need the reason on
+// stderr, and Grok shows only its first line, so it is one line. The installed gate handler has no `|| true`
 // guard, so this exit reaches Claude unchanged.
 func gateBlock(cmd *cobra.Command, err error) error {
 	if err == nil {

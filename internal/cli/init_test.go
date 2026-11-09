@@ -64,8 +64,8 @@ func TestInitRepositoryFilesAndExclude(t *testing.T) {
 		t.Fatalf("Claude gate: %s", data)
 	}
 	data, _ = os.ReadFile(filepath.Join(repo, ".codex/hooks.json"))
-	if strings.Contains(string(data), "gate") {
-		t.Fatalf("unexpected Codex gate: %s", data)
+	if !strings.Contains(string(data), `"command": "slopcop gate --hook codex"`) || strings.Contains(string(data), "slopcop gate --hook codex ||") {
+		t.Fatalf("Codex gate: %s", data)
 	}
 	path := gitAt(t, repo, "rev-parse", "--git-path", "info/exclude")
 	if !filepath.IsAbs(path) {

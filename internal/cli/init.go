@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -444,10 +443,11 @@ func newInitCommand(version string) *cobra.Command {
 	var root string
 	command := &cobra.Command{Use: "init", Short: "Install repository-local skills and hooks", Long: `Install SlopCop's skill and hooks in the current Git repository. The skill
 is written to .agents/skills/slopcop and, when Claude Code is installed,
-.claude/skills/slopcop. Claude Code gets a Stop hook and a Bash push gate in
-.claude/settings.local.json. Codex gets a Stop hook in .codex/hooks.json;
-Codex's shell hook blocking protocol is not established, so no Codex push gate
-is installed. Codex requires /hooks trust. Written paths are added to the
+.claude/skills/slopcop. Claude Code gets a Stop hook and a push gate in
+.claude/settings.local.json, which Grok also runs in a folder it trusts. Codex
+gets a Stop hook and a push gate in .codex/hooks.json, and requires /hooks
+trust for both. The push gate blocks git push, gh pr create, and GitHub MCP
+tools that push or open a pull request until HEAD's tree passed a check. Written paths are added to the
 repository's info/exclude. Tracked targets are left untouched. Grok, which
 has no repository hook location SlopCop has verified, gets a user-level Stop
 hook in hooks/slopcop.json under GROK_HOME or ~/.grok. Existing user-level
@@ -551,17 +551,24 @@ Claude Code and Codex hooks and SlopCop skills are removed, except that
 			}
 			r.Installed = append(r.Installed, user.Installed...)
 			if r.NeedsTrust {
-				fmt.Fprintln(out, "slopcop: Codex reads .codex/hooks.json only in a project you trust, and runs the Stop hook only after you trust it with /hooks")
+				fmt.Fprintln(out, "slopcop: Codex reads .codex/hooks.json only in a project you trust, and runs the Stop hook and push gate only after you trust them with /hooks")
 			}
 			if problem := agenthooks.CommandProblem(r.Installed); problem != "" {
 				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: warning: %s\n", problem)
 			}
-			// Only Claude Code gets the gate: Codex's PreToolUse payload and
-			// blocking exit were not established. Say so only when Claude
-			// Code's settings were written, not when a tracked file was left
-			// alone.
-			if slices.Contains(r.Installed, "claude") {
-				fmt.Fprintln(out, "slopcop: Claude Code now blocks git push and gh pr create until HEAD's tree passed a check; Codex has no push gate")
+			// Name the harnesses whose settings now hold the gate, not one
+			// whose tracked settings file was left alone.
+			if len(r.Gates) > 0 {
+				names := map[string]string{"claude": "Claude Code", "codex": "Codex"}
+				var gated []string
+				for _, name := range r.Gates {
+					gated = append(gated, names[name])
+				}
+				verb := "blocks"
+				if len(gated) > 1 {
+					verb = "block"
+				}
+				fmt.Fprintf(out, "slopcop: %s now %s git push, gh pr create, and GitHub MCP pushes until HEAD's tree passed a check\n", strings.Join(gated, " and "), verb)
 			}
 		}
 		if err := excludeInitPaths(repo, excluded); err != nil {

@@ -30,10 +30,11 @@ from one release to the next, so an update does not ask for it again.
 The hook is a backstop, not a replacement. The skill keeps telling the agent to
 check as it works; the hook catches a session that stopped without doing so.
 
-The Claude Code settings also get a PreToolUse Bash push gate. It blocks
-`git push` and `gh pr create` until HEAD's tree has a passing check or valid
-override. No Codex push gate is installed. The Stop hook itself remains
-hosted static-only; it does not run the local review.
+The Claude Code and Codex settings also get a PreToolUse push gate. It
+blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
+open a pull request until HEAD's tree has a passing check or valid override.
+Grok runs the Claude Code gate too, in a folder it trusts. The Stop hook
+itself remains hosted static-only; it does not run the local review.
 
 ## When it checks
 

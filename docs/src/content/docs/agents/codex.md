@@ -20,7 +20,9 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 ## The skill
 
 `slopcop init` puts the skill in `.agents/skills/slopcop/` in the
-repository, where Codex reads project skills. Codex lists it as
+repository, where Codex reads project skills. It removes SlopCop's copy from
+`~/.agents/skills`: Codex lists a skill in both places twice and then does not
+pick either for `$slopcop`. Codex lists it as
 **SlopCop**. Ask it to check its change, or mention `$slopcop` in a prompt:
 
 ```text
@@ -53,7 +55,18 @@ foreground and poll the shell session until it exits. Do not detach with
 `nohup` or `&`. The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
-reviewers run in Codex's read-only sandbox. Init installs no Codex push gate. Its PreToolUse payload and blocking semantics have not been established.
+reviewers run in Codex's read-only sandbox.
+
+## The push gate
+
+`slopcop init` also adds a `PreToolUse` hook on `Bash` to
+`.codex/hooks.json` that runs `slopcop gate --hook codex`. It blocks
+`git push` and `gh pr create` until HEAD's tree has a passing check or valid
+override, and names the reason, which Codex hands to the agent. Codex sends
+every shell command to the hook as `Bash` and blocks one when the hook exits
+`2` with a reason; this follows Codex 0.167's source and has not yet been run
+in a live session. Like the Stop hook, it runs only once you trust it with
+`/hooks`.
 
 ## The Stop hook
 

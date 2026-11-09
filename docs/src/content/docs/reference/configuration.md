@@ -37,10 +37,11 @@ version that wrote the skill and what each file held.
 ## Files the CLI edits
 
 `slopcop init` runs in the repository. It edits `.claude/settings.local.json`
-(static Stop hook and Claude push gate), `.codex/hooks.json` (static Stop
-hook), and `.git/info/exclude`. It installs the skills in `.claude/skills/`
+(static Stop hook and push gate), `.codex/hooks.json` (static Stop hook and
+push gate), and `.git/info/exclude`. It installs the skills in `.claude/skills/`
 and `.agents/skills/`, leaving tracked targets alone. It removes old
-user-level SlopCop hooks and skills. No Codex push gate is installed.
+user-level Claude Code and Codex hooks and SlopCop skills, and keeps Grok's
+user-level Stop hook.
 `slopcop init --remove-hooks` removes SlopCop's hook and nothing else. See
 [The Stop hook](/agents/stop-hook/).
 

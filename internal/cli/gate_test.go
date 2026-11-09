@@ -128,3 +128,40 @@ func TestGateBlocksForgedApprovals(t *testing.T) {
 		}
 	}
 }
+
+// TestGateHookToolNames covers the tool names other than Claude Code's Bash
+// that the gate guards: Codex sends Bash too, Grok sends its shell tool as
+// run_terminal_command, and GitHub MCP tools push or open a pull request
+// without a command. Each is blocked in a repository whose tree has no
+// approval; other tools pass.
+func TestGateHookToolNames(t *testing.T) {
+	repo := testInitRepo(t)
+	gitAt(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
+	for _, tc := range []struct {
+		hook, tool, command string
+		blocked             bool
+	}{
+		{"codex", "Bash", "git push origin HEAD", true},
+		{"codex", "Bash", "git status", false},
+		{"claude", "run_terminal_command", "git push", true},
+		{"claude", "run_terminal_command", "git update-ref refs/slopcop/reviewed/x x", true},
+		{"claude", "mcp__github__create_pull_request", "", true},
+		{"claude", "mcp__plugin_gh_github__push_files", "", true},
+		{"claude", "mcp__github__get_file_contents", "", false},
+		{"claude", "BashOutput", "git push", false},
+	} {
+		cmd := newGateCommand()
+		payload, _ := json.Marshal(map[string]any{"cwd": repo, "tool_name": tc.tool, "tool_input": map[string]string{"command": tc.command}})
+		cmd.SetIn(bytes.NewReader(payload))
+		cmd.SetArgs([]string{"--hook", tc.hook})
+		var errOut bytes.Buffer
+		cmd.SetErr(&errOut)
+		err := cmd.Execute()
+		if (err != nil) != tc.blocked {
+			t.Errorf("%s %s %q: err %v, stderr %q", tc.hook, tc.tool, tc.command, err, errOut.String())
+		}
+		if tc.blocked && strings.Count(strings.TrimSpace(errOut.String()), "\n") != 0 {
+			t.Errorf("%s: reason is not one line: %q", tc.tool, errOut.String())
+		}
+	}
+}

@@ -48,13 +48,10 @@ OpenCode sends no models, `slopcop --verbose` shows what it found.
 
 ## Kilo Code CLI
 
-<!-- TODO: since slopcop init moved the skill into the repository, check
-whether Kilo Code CLI reads a repository's .agents/skills. -->
-
-Kilo Code CLI, a fork of opencode, reads skills from `~/.agents/skills`.
-`slopcop init` now puts the skill in the repository's `.agents/skills`
-instead, and that Kilo reads it there has not been verified; the `AGENTS.md`
-line above works either way. A check run in it sends nothing
+Kilo Code CLI, a fork of opencode, reads the skill from the repository's
+`.agents/skills` and `.claude/skills` too, so the skill and the `AGENTS.md`
+line above work there. A skill of the same name in one of Kilo's own
+configuration directories, such as `~/.kilo/skills`, takes its place. A check run in it sends nothing
 about the session yet: Kilo does not name its session in the commands its agent
 runs, so the CLI cannot tell which session in its database is the one running
 the check.
