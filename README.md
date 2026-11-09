@@ -353,7 +353,12 @@ pushed, the CLI uses the merge base with `origin/HEAD` instead, so a check
 right after a push still covers the branch. `--base REV` names the branch the
 change started from and, like `git diff REV...HEAD`, uses the merge base of
 `REV` and `HEAD`, so commits that landed on `REV` after the branch point are not
-sent as reverse edits. `--base-exact REV` diffs against `REV` itself. The
+sent as reverse edits. A branch stacked on `REV` that has since merged a newer
+`origin/HEAD`, or `REV`'s own upstream, moves the base to that line's merge base
+once it holds `REV`'s, as after `REV` landed, so the merged-in commits are not
+sent either. When the lines have diverged, no fetchable commit holds both, so
+the base stays and the CLI warns that the patch carries the merged-in commits.
+`--base-exact REV` diffs against `REV` itself. The
 service must already have the base commit in its clone; a missing one comes back as the service's
 `base_not_found` message and remedy. The CLI then asks origin for its default
 branch (`git ls-remote`, no prompt, 10 second limit) and adds a line when the

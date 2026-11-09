@@ -55,7 +55,7 @@ is empty.
 
 | Flag | Meaning |
 | --- | --- |
-| `--base REV` | The branch or revision the change started from. Like `git diff REV...HEAD`, the base is the merge base of `REV` and `HEAD`, so commits that landed on `REV` after the branch point are not sent as reverse edits. Stops with an error when `REV` shares no history with `HEAD`. |
+| `--base REV` | The branch or revision the change started from. Like `git diff REV...HEAD`, the base is the merge base of `REV` and `HEAD`, so commits that landed on `REV` after the branch point are not sent as reverse edits. When a branch stacked on `REV` has since merged a newer `origin/HEAD` or `REV`'s upstream, and that line already holds `REV`'s merge base (as once `REV` has landed), the base moves to that line's merge base so the merged-in commits are not sent. When the lines have diverged, the base stays and the check warns that the patch carries them, and suggests merging the line into `REV`. Stops with an error when `REV` shares no history with `HEAD`. |
 | `--base-exact REV` | That exact commit, without a merge base. A target branch that moved on then shows up as reverse edits. |
 
 The two cannot be combined. When you check work you have already committed,
