@@ -108,12 +108,12 @@ for a request without a level is Bifrost's `warning`; pass `--fail-on warning`
 to match it. New findings that cross the threshold exit `1` even when some
 rule did not complete.
 
-The threshold applies to `definite` findings only. By default the CLI leaves
-out every `possible` and `heuristic` finding, counts them on the summary line
-and in `summary.lessCertainFindings`, and sets the status from the findings
-that remain. `--certainty all` lists them and lets them fail the check, as the
-service does. The automatic check run by agent hooks always acts on `definite`
-findings only.
+The threshold applies to `definite` findings only. By default the service
+leaves out every `possible` and `heuristic` finding before it decides the
+status, never sends them, and counts them in `summary.lessCertainFindings`,
+which the summary line prints. `--certainty all` asks for every finding and
+lets any of them fail the check. The automatic check run by agent hooks always
+uses the default.
 
 ## Waiting for the result
 

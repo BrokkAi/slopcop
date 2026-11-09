@@ -242,8 +242,8 @@ func summaryLine(response service.Response) string {
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
 	}
-	// Findings Bifrost did not prove are left out by default; say how many,
-	// so a clean line is not read as none at all.
+	// The service leaves out findings Bifrost did not prove unless asked for
+	// all; say how many, so a clean line is not read as none at all.
 	if count := response.Summary.LessCertainFindings; count > 0 {
 		scope = fmt.Sprintf("%s; %d less certain not shown (--certainty all)", scope, count)
 	}

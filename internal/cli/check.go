@@ -26,9 +26,9 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
-	// certaintyDefinite and certaintyAll are the --certainty values. A check
-	// reports and fails on definite findings only unless asked for all.
-	certaintyDefinite = service.CertaintyDefinite
+	// certaintyDefinite and certaintyAll are the --certainty values. The
+	// service answers definite findings only unless asked for all.
+	certaintyDefinite = "definite"
 	certaintyAll      = "all"
 	invalidChange     = "invalid_change"
 	baseNotFound      = "base_not_found"
@@ -60,11 +60,14 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
-	certainty := strings.ToLower(strings.TrimSpace(opts.certainty))
-	switch certainty {
-	case "":
-		certainty = certaintyDefinite
-	case certaintyDefinite, certaintyAll:
+	// Definite is the service's own default, so it is not sent: a service
+	// from before certainty refuses a field it does not know, and a check by
+	// hand keeps the fingerprint of the Stop hook's.
+	switch certainty := strings.ToLower(strings.TrimSpace(opts.certainty)); certainty {
+	case "", certaintyDefinite:
+		opts.certainty = ""
+	case certaintyAll:
+		opts.certainty = certaintyAll
 	default:
 		return fmt.Errorf("unknown certainty %q (expected definite or all)", opts.certainty)
 	}
@@ -186,12 +189,6 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(request.BaseCommit))
 	}
 	reportOptions.EmptyChange = emptyChange
-	// The Stop hook acts on definite findings only, so its state does too,
-	// whatever this check lists.
-	definite := response.OnlyDefinite()
-	if certainty == certaintyDefinite {
-		response = definite
-	}
 	if err := report.Write(stdout, response, format, reportOptions); err != nil {
 		return err
 	}
@@ -201,7 +198,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			"slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n",
 			response.Status)
 	} else {
-		rememberCheck(prepared, definite)
+		rememberCheck(prepared, response)
 	}
 	return silentExit{response.ExitCode()}
 }
@@ -436,6 +433,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		BaseCommit: base,
 		Change:     base64.StdEncoding.EncodeToString(change.Patch),
 		FailOn:     failOn,
+		Certainty:  opts.certainty,
 	}
 	if !selection.IsEmpty() {
 		request.Selection = &selection

@@ -805,73 +805,58 @@ func TestExitCodeFollowsTheServiceStatus(t *testing.T) {
 	}
 }
 
-// A check reports and fails on definite findings only. A possible or
-// heuristic one is counted on the summary line and listed, failing the check
-// again, with --certainty all; one still crossing --fail-on keeps it failed.
-func TestACheckReportsOnlyDefiniteFindingsByDefault(t *testing.T) {
+// The service decides which findings a check answers: the CLI sends no
+// certainty by default, so an older service still accepts the request, and
+// sends certainty all, on the request and when it asks again by id, for
+// --certainty all. It prints the service's count of the findings it left out.
+func TestCertaintyIsTheServicesToApply(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
-	definite := `{"policyId": "d", "severity": "note", "certainty": "definite", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "proven", "new": true}`
-	respond := func(findings ...string) *httptest.Server {
-		body := fmt.Sprintf(`{
-			"status": "findings",
-			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
-			"applied": true,
-			"summary": {"files": 1, "findings": %[1]d, "newFindings": %[1]d, "incompletePolicies": 0, "failOn": "warning"},
-			"findings": [%[2]s],
-			"incomplete": []
-		}`, len(findings), strings.Join(findings, ","))
-		return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = w.Write([]byte(body))
-		}))
-	}
-	possible := `{"policyId": "p", "severity": "error", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "maybe", "new": true}`
-	heuristic := `{"policyId": "h", "severity": "warning", "certainty": "heuristic", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "looks like", "new": true}`
-	server := respond(definite, possible, heuristic)
+	var sent []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		certainty := r.URL.Query().Get("certainty")
+		if r.Method == http.MethodPost {
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode request: %v", err)
+			}
+			value, present := request["certainty"]
+			if !present {
+				value = "<none>"
+			}
+			certainty = fmt.Sprint(value)
+			sent = append(sent, "post "+certainty)
+			// The first answer is still running, so the CLI asks by id.
+			checkRunningWithID(w, "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b")
+			return
+		}
+		sent = append(sent, "get "+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		if certainty == "all" {
+			_, _ = w.Write([]byte(`{"status": "findings", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "applied": true,
+				"summary": {"files": 1, "findings": 1, "newFindings": 1, "incompletePolicies": 0, "failOn": "finding"},
+				"findings": [{"policyId": "p", "severity": "error", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "maybe", "new": true}],
+				"incomplete": []}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"status": "clean", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "applied": true,
+			"summary": {"files": 1, "findings": 0, "newFindings": 0, "lessCertainFindings": 1, "incompletePolicies": 0, "failOn": "finding"},
+			"findings": [], "incomplete": []}`))
+	}))
 	defer server.Close()
 
-	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--fail-on", "warning")
-	if code != 0 {
-		t.Fatalf("exit = %d, want 0 (the definite note is below --fail-on); stderr = %s", code, stderr)
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+	if code != 0 || stdout != "No new findings; 1 less certain not shown (--certainty all) | Analysis complete\n" {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
 	}
-	if strings.Contains(stdout, "maybe") || strings.Contains(stdout, "looks like") || !strings.Contains(stdout, "[note] d: proven") {
-		t.Fatalf("stdout = %q", stdout)
-	}
-	if !strings.Contains(stdout, "1 new finding across 1 file(s); 2 less certain not shown (--certainty all) | Analysis complete") {
-		t.Fatalf("stdout = %q", stdout)
-	}
-
-	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--fail-on", "warning", "--format", "json")
-	var report struct {
-		Status  string `json:"status"`
-		Summary struct {
-			NewFindings         int `json:"newFindings"`
-			LessCertainFindings int `json:"lessCertainFindings"`
-		} `json:"summary"`
-		Findings []struct {
-			PolicyID string `json:"policyId"`
-		} `json:"findings"`
-	}
-	if err := json.Unmarshal([]byte(stdout), &report); err != nil {
-		t.Fatalf("stdout is not the JSON report: %q: %v", stdout, err)
-	}
-	if code != 0 || report.Status != "clean" || report.Summary.NewFindings != 1 ||
-		report.Summary.LessCertainFindings != 2 || len(report.Findings) != 1 || report.Findings[0].PolicyID != "d" {
-		t.Fatalf("exit = %d, report = %+v", code, report)
-	}
-
-	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--fail-on", "warning", "--certainty", "all")
-	if code != 1 || !strings.Contains(stdout, "[error] p: maybe") || !strings.Contains(stdout, "3 new findings") ||
-		strings.Contains(stdout, "less certain") {
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--certainty", "ALL")
+	if code != 1 || !strings.Contains(stdout, "[error] p: maybe") {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-
-	failing := respond(strings.Replace(definite, `"note"`, `"error"`, 1), possible)
-	defer failing.Close()
-	if code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", failing.URL, "--fail-on", "warning"); code != 1 {
-		t.Fatalf("exit = %d, want 1 (a definite error crosses --fail-on); stdout = %q", code, stdout)
+	want := []string{"post <none>", "get failOn=finding", "post all", "get certainty=all&failOn=finding"}
+	if fmt.Sprint(sent) != fmt.Sprint(want) {
+		t.Fatalf("sent %q, want %q", sent, want)
 	}
 
 	if code, _, stderr = runCLI(t, "check", "--root", repo, "--certainty", "likely"); code == 0 ||
@@ -957,6 +942,15 @@ func checkRunning(w http.ResponseWriter, retryAfter string) {
 		"remedy": "Run the same check again to wait for its result.",
 		"retryable": true
 	}`))
+}
+
+// checkRunningWithID answers check_running for the check id, with no wait,
+// so the client asks again by that id.
+func checkRunningWithID(w http.ResponseWriter, checkID string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Retry-After", "0")
+	w.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = fmt.Fprintf(w, `{"code": "check_running", "message": "The check is still running.", "remedy": "Wait.", "retryable": true, "checkId": %q}`, checkID)
 }
 
 const onlyPreExisting = `{

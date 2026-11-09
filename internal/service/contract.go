@@ -45,6 +45,9 @@ type Request struct {
 	Selection *Selection `json:"selection,omitempty"`
 	// FailOn is never, finding, note, warning, or error.
 	FailOn string `json:"failOn,omitempty"`
+	// Certainty is all, or empty for the service's default, definite: it
+	// then answers only definite findings and never sends the rest.
+	Certainty string `json:"certainty,omitempty"`
 	// Attribution is optional and advisory: the service validates each field
 	// on its own and drops what fails, so it never refuses a check.
 	Attribution *Attribution `json:"attribution,omitempty"`
@@ -156,10 +159,10 @@ type Summary struct {
 	// BrokkAi/bifrost-service#953 omits it.
 	RemappedIgnores int    `json:"remappedIgnores"`
 	FailOn          string `json:"failOn"`
-	// LessCertainFindings counts the findings the CLI left out because
-	// their certainty is not definite; --certainty all lists them. The
-	// service never sends it, and Findings and NewFindings no longer count
-	// them.
+	// LessCertainFindings counts the new findings the service left out
+	// because their certainty is not definite and the request did not ask
+	// for all. Findings and NewFindings do not count them and they never
+	// change the status. A service from before it omits it.
 	LessCertainFindings int `json:"lessCertainFindings,omitempty"`
 }
 
