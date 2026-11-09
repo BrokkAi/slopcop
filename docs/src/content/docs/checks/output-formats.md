@@ -74,7 +74,8 @@ slopcop check --format json
 | `applied` | whether the analysis completed; `false` whenever it did not |
 | `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores` |
 | `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, and `previouslyIgnored` with the id of an ignored finding it matches; a finding with `previouslyIgnored` is listed even when it is not new |
-| `incomplete` | rules that did not complete, each with `policyId`, `reason`, and `detail` when the service sent one; at most fifty |
+| `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
+| `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
 | `incompleteUnlisted` | present when the service cut `incomplete`: how many of `summary.incompletePolicies` it does not name |
 | `incompleteReasons` | present when a rule did not complete: the named rules grouped by `reason` and `detail`, each with a `policies` count, most common first |
 | `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `detail` when sent, `elsewhere` |
@@ -107,7 +108,9 @@ matches in `properties["slopcop.previouslyIgnored"]`, counted in the run's
 with `slopcop.reason` and, when sent, `slopcop.detail`; when the service cut
 the list, one more `warning` notification counts the rest in
 `slopcop.unlisted`, and the run carries `slopcop.incompleteUnlisted` and
-`slopcop.incompleteReasons`. Inconclusive rules appear as `note`
+`slopcop.incompleteReasons`. Each run failure is a `warning` notification with
+`slopcop.runFailure`, `slopcop.reason`, `slopcop.detail`, and
+`slopcop.policies`, and the run carries `slopcop.runFailures`. Inconclusive rules appear as `note`
 notifications with `slopcop.inconclusive`, `slopcop.elsewhere`, and, when sent,
 `slopcop.detail` properties, and the run carries `slopcop.inconclusiveUnlisted`
 when that list was cut;

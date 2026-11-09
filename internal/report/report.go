@@ -143,6 +143,10 @@ func human(response service.Response, options Options) string {
 	if notice := omittedNotice(response); notice != "" {
 		fmt.Fprintf(&out, "Omitted: %s.\n", notice)
 	}
+	for _, failure := range response.RunFailures {
+		out.WriteString(runFailureLine(failure))
+		out.WriteString("\n")
+	}
 	if line := incompleteLine(response); line != "" {
 		out.WriteString(line)
 		out.WriteString("\n")
@@ -284,12 +288,21 @@ func omittedNotice(response service.Response) string {
 // When most named checks share one reason, it is said once, up front, and
 // only the others carry their own:
 // `Incomplete (48 of 50 named: unreliable): acme.a, acme.b, acme.c (timed_out), and 157 more`.
+// When the service names run failures, their lines have said those reasons
+// already, so a check one of them covers carries only its id.
 func incompleteLine(response service.Response) string {
 	if len(response.Incomplete) == 0 {
 		return ""
 	}
 	prefix := "Incomplete: "
+	said := make(map[[2]string]bool, len(response.RunFailures))
+	for _, failure := range response.RunFailures {
+		said[[2]string{failure.Reason, failure.Detail}] = true
+	}
 	shared, ok := sharedReason(response.Incomplete)
+	if len(said) > 0 {
+		ok = false
+	}
 	if ok {
 		sharedWhy := printable(why(shared.Reason, shared.Detail))
 		if shared.Policies == len(response.Incomplete) {
@@ -300,7 +313,8 @@ func incompleteLine(response service.Response) string {
 	}
 	named := make([]string, 0, len(response.Incomplete)+1)
 	for _, policy := range response.Incomplete {
-		if ok && policy.Reason == shared.Reason && policy.Detail == shared.Detail {
+		if said[[2]string{policy.Reason, policy.Detail}] ||
+			(ok && policy.Reason == shared.Reason && policy.Detail == shared.Detail) {
 			named = append(named, printable(policy.PolicyID))
 			continue
 		}
@@ -310,6 +324,17 @@ func incompleteLine(response service.Response) string {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
 	}
 	return prefix + strings.Join(named, ", ")
+}
+
+// runFailureLine says one cause that left a whole analyzer run incomplete,
+// such as `Analyzer run failed (unreliable: type=incomplete
+// reasons=analyzer_process_failed exit_code=137): 207 check(s) did not
+// complete`.
+func runFailureLine(failure service.RunFailure) string {
+	return fmt.Sprintf(
+		"Analyzer run failed (%s): %d check(s) did not complete",
+		printable(why(failure.Reason, failure.Detail)), failure.Policies,
+	)
 }
 
 // incompleteWhy is a check's reason, followed by its detail when it has one.
@@ -505,7 +530,10 @@ type jsonReport struct {
 	IncompleteReasons []incompleteReason `json:"incompleteReasons,omitempty"`
 	// Inconclusive names the checks summary.inconclusive counts, up to the
 	// service's bound. They never change the status.
-	Inconclusive []inconclusiveCheck `json:"inconclusive"`
+	// RunFailures is the service's list of causes that left a whole analyzer
+	// run incomplete, as it sent it. It is set only when there is one.
+	RunFailures  []service.RunFailure `json:"runFailures,omitempty"`
+	Inconclusive []inconclusiveCheck  `json:"inconclusive"`
 	// InconclusiveUnlisted counts the inconclusive checks summary.inconclusive
 	// counts but inconclusive does not name. It is set only when the list was
 	// cut.
@@ -530,6 +558,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Incomplete:           response.Incomplete,
 		IncompleteUnlisted:   incompleteUnlisted(response),
 		IncompleteReasons:    incompleteReasons(response.Incomplete),
+		RunFailures:          response.RunFailures,
 		Inconclusive:         inconclusive,
 		InconclusiveUnlisted: inconclusiveUnlisted(response, inconclusive),
 		Failure:              response.Failure,
@@ -872,6 +901,21 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			)},
 		})
 	}
+	for _, failure := range response.RunFailures {
+		properties := map[string]any{
+			"slopcop.runFailure": true,
+			"slopcop.reason":     failure.Reason,
+			"slopcop.policies":   failure.Policies,
+		}
+		if failure.Detail != "" {
+			properties["slopcop.detail"] = failure.Detail
+		}
+		notifications = append(notifications, sarifNotification{
+			Level:      "warning",
+			Message:    sarifMessage{Text: runFailureLine(failure)},
+			Properties: properties,
+		})
+	}
 	if notice := omittedNotice(response); notice != "" {
 		notifications = append(notifications, sarifNotification{
 			Level:      "note",
@@ -883,6 +927,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		properties := map[string]any{"slopcop.reason": policy.Reason}
 		if policy.Detail != "" {
 			properties["slopcop.detail"] = policy.Detail
+		}
+		if policy.Scope != "" {
+			properties["slopcop.scope"] = policy.Scope
 		}
 		notifications = append(notifications, sarifNotification{
 			Level:      "warning",
@@ -935,6 +982,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	}, options)
 	if unnamed := incompleteUnlisted(response); unnamed > 0 {
 		properties["slopcop.incompleteUnlisted"] = unnamed
+	}
+	if len(response.RunFailures) > 0 {
+		properties["slopcop.runFailures"] = response.RunFailures
 	}
 	if reasons := incompleteReasons(response.Incomplete); len(reasons) > 0 {
 		properties["slopcop.incompleteReasons"] = reasons

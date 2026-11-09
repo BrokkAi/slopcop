@@ -109,6 +109,9 @@ type Response struct {
 	// InconclusiveElsewhere names the Inconclusive checks about files the
 	// change does not write, at most 50, sorted by id.
 	InconclusiveElsewhere []IncompletePolicy `json:"inconclusiveElsewhere"`
+	// RunFailures names each cause that left every check in an analyzer run
+	// incomplete, most-affected first. A service from before them omits it.
+	RunFailures []RunFailure `json:"runFailures,omitempty"`
 	// Failure says why the analysis did not complete, when it failed.
 	Failure string `json:"failure,omitempty"`
 	// RepositoryAdded says the check carried an approved add and the service
@@ -161,11 +164,27 @@ type Summary struct {
 type IncompletePolicy struct {
 	PolicyID string `json:"policyId"`
 	Reason   string `json:"reason"`
-	// Detail names, for an unsupported or other check, Bifrost's identifiers
-	// for why it did not complete as key=value pairs, such as
+	// Detail names, for an unreliable, unsupported or other check, Bifrost's
+	// identifiers for why it did not complete as key=value pairs, such as
 	// `type=failed reasons=source_read_failed`. A service from before
-	// BrokkAi/bifrost-service#993 omits it.
+	// BrokkAi/bifrost-service#993 omits it, and one from before run failures
+	// omits it for unreliable.
 	Detail string `json:"detail,omitempty"`
+	// Scope is "run" when every check in the analyzer run shares the cause,
+	// which RunFailures then names once. Empty otherwise.
+	Scope string `json:"scope,omitempty"`
+}
+
+// ScopeRun marks an incomplete check whose cause is the whole analyzer run's.
+const ScopeRun = "run"
+
+// RunFailure mirrors RunFailure: one cause that left every check in an
+// analyzer run incomplete. Policies counts every check it left incomplete,
+// including those past the listed bound.
+type RunFailure struct {
+	Reason   string `json:"reason"`
+	Detail   string `json:"detail,omitempty"`
+	Policies int    `json:"policies"`
 }
 
 // Finding mirrors CheckFinding. Text fields come from the analyzed repository

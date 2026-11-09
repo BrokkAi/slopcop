@@ -56,12 +56,13 @@ Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 ## Incomplete checks
 
 `incomplete` lists the rules that could not answer for the changed files, each
-with a `reason`, and for `unsupported` and `other` a `detail` that `human`
-prints after the reason and `sarif` carries in `properties["slopcop.detail"]`:
+with a `reason`, and often a `detail` that `human` prints after the reason and
+`sarif` carries in `properties["slopcop.detail"]`. A rule whose cause was the
+whole analyzer run's also has `scope: "run"`:
 
 | Reason | Meaning | What to do |
 | --- | --- | --- |
-| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. The findings it did report keep their certainty. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
+| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. `detail`, when present, names the cause, such as `type=incomplete reasons=analyzer_process_failed exit_code=137`. The findings it did report keep their certainty. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `timed_out` | The rule ran out of time and has no verdict. | Run the check again once. A smaller change may finish. |
 | `base_comparison_failed` | The change could not be compared with its base commit, so findings that were already there may be reported as new. The risk is extra findings, not missed ones. | Check that the change really introduced each finding before fixing it. |
 | `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
@@ -81,6 +82,21 @@ Incomplete (48 of 50 named: unreliable): bifrost.correctness.a, …, bifrost.cor
 
 Many rules with one shared reason usually means one cause in the run, not one
 per rule: report that reason once, with the count.
+
+When an analyzer run as a whole failed, the service names each cause once in
+`runFailures`, each with `reason`, `detail` when known, and `policies`: how many
+rules it left incomplete, including those past the fifty named. `json` passes
+the list through as sent, and `sarif` adds a `warning` notification per cause
+with `slopcop.runFailure` and the run property `slopcop.runFailures`. `human`
+prints one line per cause before the `Incomplete:` line, where the rules it
+covers carry only their ids:
+
+```text
+Analyzer run failed (unreliable: type=incomplete reasons=analyzer_process_failed exit_code=137): 207 check(s) did not complete
+```
+
+Report each run failure once, with its detail. It is a fault in the run, not in
+the change, so do not rewrite code to clear it.
 
 A report with incomplete checks exits `2` unless a new finding crossed
 `--fail-on`, in which case it exits `1`: the findings come first.

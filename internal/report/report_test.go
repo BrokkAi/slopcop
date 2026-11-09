@@ -1208,3 +1208,92 @@ func TestEveryFormatCarriesAnInconclusiveDetailAndTheCut(t *testing.T) {
 		t.Errorf("properties = %v", run["properties"])
 	}
 }
+
+// crashed is a check whose analyzer run failed: the service counted 207
+// incomplete checks, named 3, and named the run's cause once.
+func crashed() service.Response {
+	const detail = "type=incomplete reasons=analyzer_process_failed exit_code=137"
+	r := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		207,
+		service.IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable", Detail: detail, Scope: service.ScopeRun},
+		service.IncompletePolicy{PolicyID: "acme.b", Reason: "unreliable", Detail: detail, Scope: service.ScopeRun},
+		service.IncompletePolicy{PolicyID: "acme.c", Reason: "timed_out"},
+	)
+	r.RunFailures = []service.RunFailure{{Reason: "unreliable", Detail: detail, Policies: 206}}
+	return r
+}
+
+func TestHumanSaysEachRunFailureOnce(t *testing.T) {
+	want := "| Analysis incomplete: 207 check(s) did not complete\n" +
+		"Analyzer run failed (unreliable: type=incomplete reasons=analyzer_process_failed exit_code=137): 206 check(s) did not complete\n" +
+		"Incomplete: acme.a, acme.b, acme.c (timed_out), and 204 more\n"
+	if got := render(t, crashed(), FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("human = %q, want suffix %q", got, want)
+	}
+
+	hostile := crashed()
+	hostile.RunFailures[0].Detail = "evil\x1b[2J"
+	if got := render(t, hostile, FormatHuman); !strings.Contains(got, "Analyzer run failed (unreliable: evil�[2J)") {
+		t.Errorf("hostile = %q", got)
+	}
+}
+
+func TestJSONPassesRunFailuresThrough(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, crashed(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	want := []any{map[string]any{
+		"reason":   "unreliable",
+		"detail":   "type=incomplete reasons=analyzer_process_failed exit_code=137",
+		"policies": float64(206),
+	}}
+	if !reflect.DeepEqual(document["runFailures"], want) {
+		t.Errorf("runFailures = %v", document["runFailures"])
+	}
+	if first := document["incomplete"].([]any)[0].(map[string]any); first["scope"] != "run" {
+		t.Errorf("incomplete scope = %v", first)
+	}
+	// A service from before run failures renders as before.
+	document = map[string]any{}
+	if err := json.Unmarshal([]byte(render(t, cut(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := document["runFailures"]; ok {
+		t.Errorf("older response = %v", document)
+	}
+	if first := document["incomplete"].([]any)[0].(map[string]any); first["scope"] != nil {
+		t.Errorf("older scope = %v", first)
+	}
+}
+
+func TestSARIFNotesEachRunFailure(t *testing.T) {
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, crashed(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	want := map[string]any{
+		"level": "warning",
+		"message": map[string]any{"text": "Analyzer run failed (unreliable: type=incomplete " +
+			"reasons=analyzer_process_failed exit_code=137): 206 check(s) did not complete"},
+		"properties": map[string]any{
+			"slopcop.runFailure": true,
+			"slopcop.reason":     "unreliable",
+			"slopcop.detail":     "type=incomplete reasons=analyzer_process_failed exit_code=137",
+			"slopcop.policies":   float64(206),
+		},
+	}
+	// The overall notice, then the run failure, then each named check.
+	if len(notifications) < 3 || !reflect.DeepEqual(notifications[1], want) {
+		t.Fatalf("notifications = %v", notifications)
+	}
+	if scope := notifications[2].(map[string]any)["properties"].(map[string]any)["slopcop.scope"]; scope != "run" {
+		t.Errorf("named check scope = %v", scope)
+	}
+	if failures, ok := run["properties"].(map[string]any)["slopcop.runFailures"].([]any); !ok || len(failures) != 1 {
+		t.Errorf("properties = %v", run["properties"])
+	}
+}
