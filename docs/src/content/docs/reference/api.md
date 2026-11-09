@@ -38,7 +38,9 @@ the files it wrote. The service rejects any other field.
 The response carries `status`, `baseCommit`, `applied`, `summary`, `findings`
 (each with an `id` and `new`, and `previouslyIgnored` naming the ignored
 finding's id when the finding plausibly is one whose code changed, counted in
-`summary.remappedIgnores`), `incomplete`, `inconclusive`, `failure` when
+`summary.remappedIgnores`), `incomplete`, `inconclusive`, `inlineSuppressed`
+and `directiveWarnings` when the check met a `slopcop: ignore` comment
+(counted in `summary.inlineSuppressed` and `summary.directiveWarnings`), `failure` when
 the analysis did not complete, and `repositoryAdded: true` when the check added
 the repository to the workspace. [Output formats](/checks/output-formats/) shows
 the `json` rendering, which is this response plus `emptyChange` and

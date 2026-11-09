@@ -138,6 +138,10 @@ func human(response service.Response, options Options) string {
 	if options.ShowExisting {
 		writeBlock(&out, "Already in the code (never fail the check)", rest)
 	}
+	// A comment is the easiest way to silence a finding, so every finding one
+	// accepted is shown, not only counted.
+	writeInlineSuppressed(&out, response)
+	writeDirectiveWarnings(&out, response)
 	out.WriteString(summaryLine(response))
 	out.WriteString("\n")
 	if notice := omittedNotice(response); notice != "" {
@@ -198,6 +202,100 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 			fmt.Fprintf(out, "    %s\n", line)
 		}
 		out.WriteString("\n")
+	}
+}
+
+// writeInlineSuppressed lists the findings inline `slopcop: ignore` comments
+// accepted, with each comment, and counts the ones past the service's bound.
+func writeInlineSuppressed(out *strings.Builder, response service.Response) {
+	accepted := response.InlineSuppressed
+	total := max(response.Summary.InlineSuppressed, len(accepted))
+	if total == 0 {
+		return
+	}
+	out.WriteString("Ignored inline by slopcop: ignore (never fail the check)\n")
+	for _, finding := range accepted {
+		location := printable(finding.Path)
+		if finding.StartLine != nil {
+			location = fmt.Sprintf("%s:%d", location, *finding.StartLine)
+		}
+		fmt.Fprintf(
+			out,
+			"  [%s] %s: %s\n    Location: %s\n    Ignored by: %s\n",
+			printable(finding.Severity),
+			printable(finding.PolicyID),
+			printable(finding.Title),
+			location,
+			directiveLine(finding),
+		)
+		if finding.New {
+			out.WriteString("    In this change\n")
+		}
+		out.WriteString("\n")
+	}
+	if unlisted := total - len(accepted); unlisted > 0 {
+		fmt.Fprintf(out, "  and %d more\n\n", unlisted)
+	}
+}
+
+// directiveLine describes the comment that accepted a finding, such as
+// `blanket comment on line 11 -- generated code`.
+func directiveLine(finding service.InlineSuppressedFinding) string {
+	directive := finding.Directive
+	what := "comment"
+	if directive.Blanket {
+		what = "blanket comment"
+	} else if len(directive.Policies) > 0 {
+		what = "comment for " + printable(strings.Join(directive.Policies, ", "))
+	}
+	if directive.Line != nil {
+		what = fmt.Sprintf("%s on line %d", what, *directive.Line)
+	}
+	if directive.Reason != nil && *directive.Reason != "" {
+		what += " -- " + printable(*directive.Reason)
+	}
+	return what
+}
+
+// writeDirectiveWarnings lists the inline comments that accepted nothing,
+// each with what to do about it.
+func writeDirectiveWarnings(out *strings.Builder, response service.Response) {
+	warnings := response.DirectiveWarnings
+	total := max(response.Summary.DirectiveWarnings, len(warnings))
+	if total == 0 {
+		return
+	}
+	out.WriteString("slopcop: ignore comments that ignore nothing (never fail the check)\n")
+	for _, warning := range warnings {
+		location := printable(warning.Path)
+		if warning.Line != nil {
+			location = fmt.Sprintf("%s:%d", location, *warning.Line)
+		}
+		fmt.Fprintf(out, "  %s: %s\n", location, directiveWarningText(warning))
+	}
+	if unlisted := total - len(warnings); unlisted > 0 {
+		fmt.Fprintf(out, "  and %d more\n", unlisted)
+	}
+	out.WriteString("\n")
+}
+
+func directiveWarningText(warning service.DirectiveWarning) string {
+	switch warning.Kind {
+	case service.DirectiveMissingReason:
+		return "a blanket ignore needs a reason after `--`; it ignores nothing until it has one"
+	case service.DirectiveUnused:
+		text := "matches no finding; name the right policy, move it onto or above the finding's line, or remove it"
+		if len(warning.Policies) > 0 {
+			text = "names " + printable(strings.Join(warning.Policies, ", ")) + ", which " + text
+		}
+		return text
+	case service.DirectiveMalformed:
+		if warning.Detail != "" {
+			return "does not parse: " + printable(warning.Detail)
+		}
+		return "does not parse"
+	default:
+		return "ignores nothing (" + printable(warning.Kind) + ")"
 	}
 }
 
@@ -547,6 +645,13 @@ type jsonReport struct {
 	// RepositoryAdded is set only when the check added the repository to
 	// the workspace.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
+	// InlineSuppressed is the service's list of findings inline
+	// `slopcop: ignore` comments accepted, as it sent it; summary counts
+	// them all. It is set only when there is one.
+	InlineSuppressed []service.InlineSuppressedFinding `json:"inlineSuppressed,omitempty"`
+	// DirectiveWarnings is the service's list of inline comments that
+	// accepted nothing. It is set only when there is one.
+	DirectiveWarnings []service.DirectiveWarning `json:"directiveWarnings,omitempty"`
 	// EmptyChange is set only when the patch was empty.
 	EmptyChange bool `json:"emptyChange,omitempty"`
 	// SkillUpdated is set only when this run wrote the skill.
@@ -568,6 +673,8 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		InconclusiveUnlisted: inconclusiveUnlisted(response, inconclusive),
 		Failure:              response.Failure,
 		RepositoryAdded:      response.RepositoryAdded,
+		InlineSuppressed:     response.InlineSuppressed,
+		DirectiveWarnings:    response.DirectiveWarnings,
 		EmptyChange:          options.EmptyChange,
 		SkillUpdated:         options.SkillUpdated,
 	}, "json report")
@@ -790,6 +897,14 @@ type sarifResult struct {
 	// Properties carries the finding id `slopcop ignore` takes, when the
 	// service sent one, and the id of the ignored finding it matches.
 	Properties map[string]any `json:"properties,omitempty"`
+	// Suppressions is set only for a finding an inline comment accepted.
+	Suppressions []sarifSuppression `json:"suppressions,omitempty"`
+}
+
+// sarifSuppression is an `inSource` suppression: a comment in the code.
+type sarifSuppression struct {
+	Kind          string `json:"kind"`
+	Justification string `json:"justification,omitempty"`
 }
 
 type sarifMessage struct {
@@ -845,6 +960,12 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			rules = append(rules, finding.PolicyID)
 		}
 	}
+	for _, finding := range response.InlineSuppressed {
+		if !seen[finding.PolicyID] {
+			seen[finding.PolicyID] = true
+			rules = append(rules, finding.PolicyID)
+		}
+	}
 	sort.Strings(rules)
 	ruleIndex := make(map[string]int, len(rules))
 	driverRules := make([]sarifRule, 0, len(rules))
@@ -886,6 +1007,46 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			result.Properties["slopcop.previouslyIgnored"] = finding.PreviouslyIgnored
 		}
 		results = append(results, result)
+	}
+	// Findings an inline comment accepted are suppressed results, as the
+	// analyzer's own SARIF reports them, so a consumer hides them by default
+	// and can still audit each one.
+	for _, finding := range response.InlineSuppressed {
+		physical := sarifPhysicalLocation{
+			ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.Path), URIBaseID: "SRCROOT"},
+		}
+		if start := finding.StartLine; start != nil && *start >= 1 {
+			physical.Region = &sarifRegion{StartLine: *start}
+			if end := finding.EndLine; end != nil && *end >= *start {
+				physical.Region.EndLine = end
+			}
+		}
+		text := finding.Title
+		if text == "" {
+			text = finding.PolicyID
+		}
+		state := "unchanged"
+		if finding.New {
+			state = "new"
+		}
+		suppression := sarifSuppression{Kind: "inSource"}
+		if finding.Directive.Reason != nil {
+			suppression.Justification = *finding.Directive.Reason
+		}
+		properties := map[string]any{"slopcop.inlineBlanket": finding.Directive.Blanket}
+		if finding.Directive.Line != nil {
+			properties["slopcop.inlineLine"] = *finding.Directive.Line
+		}
+		results = append(results, sarifResult{
+			RuleID:        finding.PolicyID,
+			RuleIndex:     ruleIndex[finding.PolicyID],
+			Level:         sarifLevel(finding.Severity),
+			Message:       sarifMessage{Text: text},
+			Locations:     []sarifLocation{{PhysicalLocation: physical}},
+			BaselineState: state,
+			Properties:    properties,
+			Suppressions:  []sarifSuppression{suppression},
+		})
 	}
 
 	// The overall notice, findings left out, then one per named check, so a
@@ -975,6 +1136,20 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		})
 	}
 
+	// Inline comments that ignore nothing are warnings; they never change
+	// the status or the execution's success.
+	for _, warning := range response.DirectiveWarnings {
+		location := warning.Path
+		if warning.Line != nil {
+			location = fmt.Sprintf("%s:%d", location, *warning.Line)
+		}
+		notifications = append(notifications, sarifNotification{
+			Level:      "warning",
+			Message:    sarifMessage{Text: location + ": slopcop: ignore comment " + directiveWarningText(warning)},
+			Properties: map[string]any{"slopcop.directiveWarning": warning.Kind, "slopcop.path": warning.Path},
+		})
+	}
+
 	properties := runProperties(map[string]any{
 		"slopcop.status":                response.Status,
 		"slopcop.baseCommit":            response.BaseCommit,
@@ -985,6 +1160,8 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.remappedIgnores":       remappedCount(response),
 		"slopcop.inconclusive":          response.Summary.Inconclusive,
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
+		"slopcop.inlineSuppressed":      max(response.Summary.InlineSuppressed, len(response.InlineSuppressed)),
+		"slopcop.directiveWarnings":     max(response.Summary.DirectiveWarnings, len(response.DirectiveWarnings)),
 	}, options)
 	if unnamed := incompleteUnlisted(response); unnamed > 0 {
 		properties["slopcop.incompleteUnlisted"] = unnamed
