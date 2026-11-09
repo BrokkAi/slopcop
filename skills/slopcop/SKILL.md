@@ -215,11 +215,20 @@ Why a check is `incomplete` (`incomplete[].reason`):
 
 | Term | Meaning | What to do |
 | --- | --- | --- |
-| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. The findings it did report keep their certainty. A service from before this code says `inconclusive`. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
+| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. `detail`, when present, names the cause, such as `type=incomplete reasons=analyzer_process_failed exit_code=137`. The findings it did report keep their certainty. A service from before this code says `inconclusive`. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `timed_out` | The check ran out of time and has no verdict. | Run it again once. A smaller change may finish. |
 | `base_comparison_failed` | The change could not be compared with its base commit, so findings that were already there may be reported as new. Here the risk is extra findings, not missed ones. | Check that the change really introduced each finding before fixing it. |
 | `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `other` | It did not complete for a reason the service does not classify. `detail`, when present, gives Bifrost's completion type and reason codes, such as `type=failed reasons=source_read_failed`. | Report it, with its `detail`. |
+
+`incomplete` names at most fifty checks; `summary.incompletePolicies` counts
+them all, and `incompleteUnlisted` says how many are not named when the list
+was cut. `incompleteReasons` groups the named ones by reason and detail, most
+common first. When most share one reason, report that reason once with the
+count instead of listing every policy id. `runFailures` names each cause that
+failed a whole analyzer run once, with `policies` counting every check it left
+incomplete: report each one once with its `detail`, as a fault in the run, not
+the change, and do not rewrite code to clear it.
 
 Other bounds in the report:
 
