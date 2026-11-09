@@ -36,7 +36,9 @@ with the harness, its version, the session id, and each model and effort with
 the files it wrote. The service rejects any other field.
 
 The response carries `status`, `baseCommit`, `applied`, `summary`, `findings`
-(each with an `id` and `new`), `incomplete`, `inconclusive`, `failure` when
+(each with an `id` and `new`, and `previouslyIgnored` naming the ignored
+finding's id when the finding plausibly is one whose code changed, counted in
+`summary.remappedIgnores`), `incomplete`, `inconclusive`, `failure` when
 the analysis did not complete, and `repositoryAdded: true` when the check added
 the repository to the workspace. [Output formats](/checks/output-formats/) shows
 the `json` rendering, which is this response plus `emptyChange` and
@@ -80,6 +82,13 @@ first, 25 per page. `page` is optional, zero-based, at most 10000. It answers
 `findingId`, `title`, `path` and `startLine` are null when the finding is no
 longer recorded. A repository the workspace does not have answers
 `workspace_repository_not_found`.
+
+## MCP
+
+`POST /v1/mcp` serves the same check, ignore, unignore, and ignored routes as
+[Model Context Protocol](https://modelcontextprotocol.io) tools, over
+streamable HTTP with no session, for agents that cannot run the CLI. It takes
+the same bearer token. See [Lovable, Bolt, and MCP clients](/agents/app-builders/).
 
 ## Account
 

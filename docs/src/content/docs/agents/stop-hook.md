@@ -1,17 +1,25 @@
 ---
 title: The Stop hook
-description: "The automatic check hook slopcop init installs for Claude Code and Codex. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
+description: "The automatic check hook slopcop init installs for Claude Code, Codex and Grok. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
 sidebar:
-  order: 6
+  order: 7
 ---
 
-Inside the repository, `slopcop init` adds a static-only `Stop` hook for
-Claude Code and Codex, and leaves everything else in the file as it was:
+`slopcop init` adds a static-only `Stop` hook for Claude Code and Codex inside
+the repository, and for Grok at user level, and leaves everything else in each
+file as it was:
 
 | File | Harness |
 | --- | --- |
 | `.claude/settings.local.json` in the repository | Claude Code |
 | `.codex/hooks.json` in the repository | Codex |
+| `hooks/slopcop.json` under `GROK_HOME`, or `~/.grok` | Grok |
+
+Grok's hook stays at user level, because SlopCop has not verified where Grok
+reads a project's hooks; `slopcop init` installs it there and leaves it in
+place, and `--remove-hooks` removes it. Kimi Code keeps its hooks in
+`config.toml`, which init does not edit; see
+[Grok and Kimi Code](/agents/grok-kimi/) to add the hook there.
 
 Codex reads the repository's `.codex/hooks.json` only once you trust the
 project in Codex, and runs a new or changed hook only once you trust it too:
@@ -93,3 +101,10 @@ slopcop init --remove-hooks   # remove SlopCop's hooks and nothing else
 
 Ordinary checks do not reinstall a removed hook. The skill remains the way to
 check from other harnesses.
+
+## Deploy it for a fleet
+
+An administrator can deploy the hook through Claude Code managed settings or
+Codex's managed `requirements.toml` instead of having each user run
+`slopcop init`. Where only managed hooks may run, that is required. See
+[Managed rollout](/agents/managed-rollout/).

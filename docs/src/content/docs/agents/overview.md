@@ -13,9 +13,10 @@ the loop:
   tells an agent how to run a check, how to read the report, which exit codes
   mean what, and what to do about each. `slopcop init` installs it where your
   agents look for skills. See [The agent skill](/agents/skill/).
-- **The Stop hook.** For Claude Code and Codex, a hook that runs a check when
-  the agent stops after writing files, and hands new findings in those files
-  back to the agent to fix. See [The Stop hook](/agents/stop-hook/).
+- **The Stop hook.** For Claude Code, Codex and Grok, and Kimi Code when added
+  by hand, a hook that runs a check when the agent stops after writing files,
+  and hands new findings in those files back to the agent to fix. See
+  [The Stop hook](/agents/stop-hook/).
 
 The CLI itself is built for this: it never prompts, the static half sends one
 request, and it answers with a closed exit-code contract. Any agent that can run
@@ -84,7 +85,7 @@ so running it again is safe. See the [Quickstart](/get-started/quickstart/).
 
 ## Which models wrote what
 
-Run by Claude Code or Codex, a check also sends which models wrote each changed
+Run by Claude Code, Codex or Pi, a check also sends which models wrote each changed
 file, read from the session's own record, so a finding can be traced to the
 model that wrote its line. For static attribution, the CLI reads only the model,
 effort, and file of each edit. The local review also reads the user's messages
@@ -99,4 +100,8 @@ See [What leaves your machine](/account/privacy/).
   `CLAUDE.md`.
 - [Codex](/agents/codex/): `.agents/skills/slopcop/`,
   `$slopcop`, trusting the hook with `/hooks`, and the line for `AGENTS.md`.
+- [Pi](/agents/pi/): the skill, and the models the session file records; no
+  Stop hook.
 - [Other agents](/agents/other-agents/): opencode, and anything with a shell.
+- [Lovable, Bolt, and MCP clients](/agents/app-builders/): agents with no
+  shell, which check over SlopCop's hosted MCP server.

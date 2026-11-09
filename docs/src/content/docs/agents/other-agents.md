@@ -1,6 +1,6 @@
 ---
 title: Other agents
-description: "opencode reads both skills folders, and any agent that can run a shell command can run slopcop. What to tell an agent that has no skill support."
+description: "Any agent that can run a shell command can run slopcop. What to tell an agent that has no skill support."
 sidebar:
   order: 4
 ---
@@ -16,27 +16,19 @@ which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
 
-## opencode
+## OpenCode and Kilo Code
 
-opencode reads `.agents/skills` and `.claude/skills` in the repository, so
-`slopcop init` covers it too when run there. Add the repository to the workspace
-from its checkout with `slopcop enable` at a terminal, then ask it to check its
-change, or add the usual line to your project's `AGENTS.md`:
-
-```text
-Run `slopcop check --if-enabled` before you finish and fix what it reports.
-```
-
-There is no Stop hook for opencode; the skill is how it knows to check.
+See [OpenCode and Kilo Code](/agents/opencode/).
 
 ## Any agent with a shell
 
-Any agent that can run a shell command can run `slopcop`: it never prompts, the
-static half sends one request, and it answers with an exit code. Run outside
-Claude Code or Codex, a check sends nothing about the session, the static half
-sends only the repository URL, base commit, patch, and selected policies. The
-review half sends the diff and supplied intent to reviewer model providers
-through your harness logins. Use `--mode static` to avoid that review.
+Any agent that can run a shell command can run `slopcop`: it never prompts,
+the static half sends one request, and it answers with an exit code. Run
+outside Claude Code, Codex, OpenCode, Pi or Grok, a check sends nothing about
+the session (see [Grok and Kimi Code](/agents/grok-kimi/)): the static half
+sends only the repository URL, the base commit, and the patch. The review half
+sends the diff and supplied intent to reviewer model providers through your
+harness logins. Use `--mode static` to avoid that review.
 
 If the agent cannot load skills, give it the essentials in its instructions
 file:
@@ -64,6 +56,12 @@ When checking committed work, pass `--base <branch the change targets>`.
 The full instructions are in the skill itself, which you can read at
 [`skills/slopcop/SKILL.md`](https://github.com/BrokkAi/slopcop/blob/master/skills/slopcop/SKILL.md)
 and adapt.
+
+## Agents with no shell
+
+An agent that cannot run a command, such as the ones inside Lovable and Bolt,
+checks over SlopCop's hosted MCP server instead. See
+[Lovable, Bolt, and MCP clients](/agents/app-builders/).
 
 ## Signing in for an agent
 

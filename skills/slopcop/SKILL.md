@@ -143,7 +143,10 @@ When you check work you have already committed, pass `--base` with the branch
 the change targets, such as the PR's base (`--base origin/main`), instead of
 relying on the default. `--base REV` works like `git diff REV...HEAD`: the base
 is the merge base of `REV` and `HEAD`, so the patch covers only the branch's
-work even after the target branch has moved on. `--base-exact REV` diffs
+work even after the target branch has moved on. A branch stacked on another
+PR's branch that merged a newer `origin/HEAD` also sends only its own work once
+the prerequisite has landed; if it has not, stderr warns that the patch carries
+the merged-in commits. `--base-exact REV` diffs
 against that exact commit instead; a target branch that moved on then shows up
 as reverse edits. The two flags cannot be combined, and `--base` stops with an
 error when `REV` shares no history with `HEAD`. On the default branch with nothing unpushed, the
@@ -268,11 +271,20 @@ Why a check is `incomplete` (`incomplete[].reason`):
 
 | Term | Meaning | What to do |
 | --- | --- | --- |
-| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. The findings it did report keep their certainty. A service from before this code says `inconclusive`. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
+| `unreliable` | Bifrost judged the run unreliable, for example evaluated with a scope file it could not load. `detail`, when present, names the cause, such as `type=incomplete reasons=analyzer_process_failed exit_code=137`. The findings it did report keep their certainty. A service from before this code says `inconclusive`. | Report the policy ids. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `timed_out` | The check ran out of time and has no verdict. | Run it again once. A smaller change may finish. |
 | `base_comparison_failed` | The change could not be compared with its base commit, so findings that were already there may be reported as new. Here the risk is extra findings, not missed ones. | Check that the change really introduced each finding before fixing it. |
 | `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `other` | It did not complete for a reason the service does not classify. `detail`, when present, gives Bifrost's completion type and reason codes, such as `type=failed reasons=source_read_failed`. | Report it, with its `detail`. |
+
+`incomplete` names at most fifty checks; `summary.incompletePolicies` counts
+them all, and `incompleteUnlisted` says how many are not named when the list
+was cut. `incompleteReasons` groups the named ones by reason and detail, most
+common first. When most share one reason, report that reason once with the
+count instead of listing every policy id. `runFailures` names each cause that
+failed a whole analyzer run once, with `policies` counting every check it left
+incomplete: report each one once with its `detail`, as a fault in the run, not
+the change, and do not rewrite code to clear it.
 
 Other bounds in the report:
 
@@ -330,7 +342,9 @@ When a hosted static finding is a false positive, run `slopcop ignore <id>`
 with its id.
 That finding is not reported again for this repository. Undo a mistaken ignore
 with `slopcop unignore <id>`. List the repository's ignored findings, with
-their ids, with `slopcop ignored`.
+their ids, with `slopcop ignored`. A finding marked as matching an ignored
+finding (`previouslyIgnored`) is one you ignored before its code changed: if it
+is still a false positive, ignore its new id, and tell the user.
 
 A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
 the change, so a new rule is picked up by the next check with no extra setup.

@@ -235,6 +235,30 @@ The hook is dormant in a repository until it is enabled in the workspace. Run
 check. The hook then checks what an agent writes and hands findings back; it
 never adds a repository and sends nothing for one that is not active.
 
+### Managed rollout
+
+An administrator can deploy the `Stop` hook through managed configuration
+instead of having each user run `slopcop init`. Device management must still
+put `slopcop` on `PATH`, and each user still signs in.
+
+- **Claude Code:** add the handler `slopcop init` writes to the `hooks` key of
+  the managed settings (`managed-settings.json` or a file in
+  `managed-settings.d/`): a `Stop` group with `"type": "command"`,
+  `"command": "slopcop hook claude || true"`, `"timeout": 720` and
+  `"statusMessage": "Checking the change with SlopCop"`. Under
+  `allowManagedHooksOnly` the hooks init writes to the repository's
+  `.claude/settings.local.json`, the push gate included, are blocked, so the
+  managed hook is the only one that runs. Claude Code runs
+  an identical handler from several settings files once.
+- **Codex:** define the `Stop` hook under `[hooks]` in the managed
+  `requirements.toml` (`command = "slopcop hook codex || true"`,
+  `command_windows = "slopcop hook codex || exit /b 0"`, `timeout = 720`).
+  Managed hooks are trusted by policy, so users skip `/hooks`. Codex installs
+  nothing from `managed_dir`.
+
+Users then run `slopcop init --no-hooks` to install only the skill. See
+[Managed rollout](https://docs.slopcop.com/agents/managed-rollout/).
+
 ## Sign in
 
 ```console
@@ -333,7 +357,12 @@ pushed, the CLI uses the merge base with `origin/HEAD` instead, so a check
 right after a push still covers the branch. `--base REV` names the branch the
 change started from and, like `git diff REV...HEAD`, uses the merge base of
 `REV` and `HEAD`, so commits that landed on `REV` after the branch point are not
-sent as reverse edits. `--base-exact REV` diffs against `REV` itself. The
+sent as reverse edits. A branch stacked on `REV` that has since merged a newer
+`origin/HEAD`, or `REV`'s own upstream, moves the base to that line's merge base
+once it holds `REV`'s, as after `REV` landed, so the merged-in commits are not
+sent either. When the lines have diverged, no fetchable commit holds both, so
+the base stays and the CLI warns that the patch carries the merged-in commits.
+`--base-exact REV` diffs against `REV` itself. The
 service must already have the base commit in its clone; a missing one comes back as the service's
 `base_not_found` message and remedy. The CLI then asks origin for its default
 branch (`git ls-remote`, no prompt, 10 second limit) and adds a line when the
@@ -414,7 +443,7 @@ files, deletions, renames, mode changes, and binary content. Git-ignored files
 stay out, except selected `.slopcop/policies` rules, which must travel because
 the service evaluates them from the patched checkout.
 
-A check run by a Claude Code or Codex agent also sends which models wrote the
+A check run by a Claude Code, Codex or OpenCode agent also sends which models wrote the
 change, so the service can tie each finding to the model that wrote its file.
 The CLI finds the agent's session from its environment and reads that
 session's own record:
@@ -426,6 +455,10 @@ session's own record:
 - **Codex:** `CODEX_THREAD_ID` names the rollout under `~/.codex/sessions` (or
   `$CODEX_HOME/sessions`). Each completed file change gives the files, and its
   turn gives the model and effort. A move counts as writing its destination.
+- **OpenCode:** `OPENCODE_SESSION_ID` names the session in OpenCode's
+  database, `~/.local/share/opencode/opencode.db` (or `$OPENCODE_DB`),
+  subagents included. Each completed edit, write or patch gives the files,
+  and its step gives the model and its variant as the effort.
 
 For static attribution, it reads only those fields, never the conversation, tool
 input, or file contents from the session. What it sends is the harness, its

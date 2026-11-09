@@ -2,7 +2,7 @@
 title: The agent skill
 description: "The bundled SlopCop skill, its repository install, updates to existing copies, and local edit backups."
 sidebar:
-  order: 5
+  order: 6
 ---
 
 The `slopcop` binary carries the agent skill that teaches a coding agent how to

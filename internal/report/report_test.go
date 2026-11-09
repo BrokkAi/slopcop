@@ -308,6 +308,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 		"inconclusive":          float64(0),
 		"inconclusiveElsewhere": float64(0),
 		"omittedFindings":       float64(0),
+		"remappedIgnores":       float64(0),
 		"failOn":                "error",
 	}
 	if !reflect.DeepEqual(document["summary"], wantSummary) {
@@ -880,6 +881,119 @@ func TestEveryFormatCarriesTheFindingID(t *testing.T) {
 	}
 }
 
+// remapped is a check where one new finding and one finding already in the
+// code each match an ignore made before their code changed.
+func remapped() service.Response {
+	touched := finding("tests/test_inputs.py", 58, "warning", "acme.inheritance")
+	touched.ID = "98a2d745-fa33-467b-8289-2a9f3d05a0c8"
+	touched.PreviouslyIgnored = "f5a9bad1-80ab-4a38-9351-4131e05d1682"
+	untouched := existing("tests/test_other.py", 9, "note", "acme.inheritance")
+	untouched.ID = "1b4e28ba-2fa1-11d2-883f-0016d3cca427"
+	untouched.PreviouslyIgnored = "6fa459ea-ee8a-3ca4-894e-db77e160355e"
+	check := response(service.StatusFindings, "finding", []service.Finding{
+		touched,
+		untouched,
+		existing("server/main.rs", 4, "note", "acme.length"),
+	})
+	check.Summary.RemappedIgnores = 2
+	return check
+}
+
+func TestHumanSaysAFindingMatchesAnEarlierIgnore(t *testing.T) {
+	want := "New findings\n" +
+		"  [warning] acme.inheritance: acme.inheritance title\n" +
+		"    Location: tests/test_inputs.py:58\n" +
+		"    Certainty: definite\n" +
+		"    ID: 98a2d745-fa33-467b-8289-2a9f3d05a0c8\n" +
+		"    Matches ignored finding f5a9bad1-80ab-4a38-9351-4131e05d1682 (code changed); " +
+		"`slopcop ignore 98a2d745-fa33-467b-8289-2a9f3d05a0c8` to keep ignoring it\n" +
+		"\n" +
+		"Previously ignored, code changed (never fail the check)\n" +
+		"  [note] acme.inheritance: acme.inheritance title\n" +
+		"    Location: tests/test_other.py:9\n" +
+		"    Certainty: definite\n" +
+		"    ID: 1b4e28ba-2fa1-11d2-883f-0016d3cca427\n" +
+		"    Matches ignored finding 6fa459ea-ee8a-3ca4-894e-db77e160355e (code changed); " +
+		"`slopcop ignore 1b4e28ba-2fa1-11d2-883f-0016d3cca427` to keep ignoring it\n" +
+		"\n" +
+		"1 new finding across 1 file(s); 2 already in the code; 2 match(es) an earlier ignore | Analysis complete\n"
+	if got := render(t, remapped(), FormatHuman); got != want {
+		t.Errorf("human = %q\nwant    %q", got, want)
+	}
+
+	// Without an id to ignore it by, the match is still said.
+	anonymous := finding("cli.py", 2, "warning", "acme.eval")
+	anonymous.PreviouslyIgnored = "f5a9bad1-80ab-4a38-9351-4131e05d1682"
+	got := Findings([]service.Finding{anonymous})
+	if !strings.Contains(got, "    Matches ignored finding f5a9bad1-80ab-4a38-9351-4131e05d1682 (code changed)\n") ||
+		strings.Contains(got, "slopcop ignore") {
+		t.Errorf("findings = %q", got)
+	}
+
+	// A service from before the summary count still has its matches counted.
+	older := remapped()
+	older.Summary.RemappedIgnores = 0
+	if got := render(t, older, FormatHuman); !strings.Contains(got, "; 2 match(es) an earlier ignore |") {
+		t.Errorf("older = %q", got)
+	}
+	if got := render(t, mixed(), FormatHuman); strings.Contains(got, "earlier ignore") {
+		t.Errorf("unmatched = %q", got)
+	}
+}
+
+func TestMachineReportsCarryTheEarlierIgnore(t *testing.T) {
+	var document struct {
+		Summary  map[string]any   `json:"summary"`
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(render(t, remapped(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document.Summary["remappedIgnores"] != float64(2) {
+		t.Errorf("json summary = %v", document.Summary)
+	}
+	if len(document.Findings) != 2 ||
+		document.Findings[0]["previouslyIgnored"] != "f5a9bad1-80ab-4a38-9351-4131e05d1682" ||
+		document.Findings[1]["previouslyIgnored"] != "6fa459ea-ee8a-3ca4-894e-db77e160355e" {
+		t.Errorf("json findings = %v", document.Findings)
+	}
+	document.Findings = nil
+	if err := json.Unmarshal([]byte(render(t, mixed(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := document.Findings[0]["previouslyIgnored"]; ok {
+		t.Errorf("json invented a match: %v", document.Findings[0])
+	}
+
+	var log struct {
+		Runs []struct {
+			Results    []map[string]any `json:"results"`
+			Properties map[string]any   `json:"properties"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, remapped(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log.Runs[0]
+	if run.Properties["slopcop.remappedIgnores"] != float64(2) {
+		t.Errorf("sarif run properties = %v", run.Properties)
+	}
+	if len(run.Results) != 2 {
+		t.Fatalf("sarif results = %v", run.Results)
+	}
+	for index, want := range []struct{ id, previous, state string }{
+		{"98a2d745-fa33-467b-8289-2a9f3d05a0c8", "f5a9bad1-80ab-4a38-9351-4131e05d1682", "new"},
+		{"1b4e28ba-2fa1-11d2-883f-0016d3cca427", "6fa459ea-ee8a-3ca4-894e-db77e160355e", "unchanged"},
+	} {
+		result := run.Results[index]
+		properties, _ := result["properties"].(map[string]any)
+		if properties["slopcop.findingId"] != want.id || properties["slopcop.previouslyIgnored"] != want.previous ||
+			result["baselineState"] != want.state {
+			t.Errorf("sarif result %d = %v", index, result)
+		}
+	}
+}
+
 func TestEmptyChangeIsMarkedInMachineReports(t *testing.T) {
 	r := response(service.StatusClean, "finding", nil)
 	for _, format := range []string{FormatJSON, FormatSARIF} {
@@ -1016,5 +1130,236 @@ func TestReviewJSONHasNoUnavailableField(t *testing.T) {
 	}
 	if strings.Contains(string(data), `"unavailable"`) {
 		t.Fatal(string(data))
+	}
+}
+
+// cut is a check whose incomplete list the service cut: it counted 10 and
+// named 4, most of them for one reason.
+func cut() service.Response {
+	return withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		10,
+		service.IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable"},
+		service.IncompletePolicy{PolicyID: "acme.b", Reason: "unreliable"},
+		service.IncompletePolicy{PolicyID: "acme.c", Reason: "timed_out"},
+		service.IncompletePolicy{PolicyID: "acme.d", Reason: "unreliable"},
+	)
+}
+
+func TestHumanSaysASharedIncompleteReasonOnce(t *testing.T) {
+	want := "Incomplete (3 of 4 named: unreliable): acme.a, acme.b, acme.c (timed_out), acme.d, and 6 more\n"
+	if got := render(t, cut(), FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("most = %q", got)
+	}
+
+	all := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		2,
+		service.IncompletePolicy{PolicyID: "acme.x", Reason: "unsupported", Detail: "type=taint\x1b[2J"},
+		service.IncompletePolicy{PolicyID: "acme.y", Reason: "unsupported", Detail: "type=taint\x1b[2J"},
+	)
+	want = "Incomplete (all 2 named: unsupported: type=taint�[2J): acme.x, acme.y\n"
+	if got := render(t, all, FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("all = %q", got)
+	}
+
+	// The same reason with another detail is another reason, and half is not
+	// most.
+	split := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		4,
+		service.IncompletePolicy{PolicyID: "acme.a", Reason: "unsupported", Detail: "type=a"},
+		service.IncompletePolicy{PolicyID: "acme.b", Reason: "unsupported", Detail: "type=b"},
+		service.IncompletePolicy{PolicyID: "acme.c", Reason: "timed_out"},
+		service.IncompletePolicy{PolicyID: "acme.d", Reason: "timed_out"},
+	)
+	want = "Incomplete: acme.a (unsupported: type=a), acme.b (unsupported: type=b), acme.c (timed_out), acme.d (timed_out)\n"
+	if got := render(t, split, FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("split = %q", got)
+	}
+}
+
+func TestJSONSaysTheIncompleteListWasCut(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, cut(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["incompleteUnlisted"] != float64(6) {
+		t.Errorf("incompleteUnlisted = %v", document["incompleteUnlisted"])
+	}
+	wantReasons := []any{
+		map[string]any{"reason": "unreliable", "policies": float64(3)},
+		map[string]any{"reason": "timed_out", "policies": float64(1)},
+	}
+	if !reflect.DeepEqual(document["incompleteReasons"], wantReasons) {
+		t.Errorf("incompleteReasons = %v", document["incompleteReasons"])
+	}
+
+	whole := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		1,
+		service.IncompletePolicy{PolicyID: "acme.x", Reason: "unsupported", Detail: "type=taint"},
+	)
+	document = map[string]any{}
+	if err := json.Unmarshal([]byte(render(t, whole, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := document["incompleteUnlisted"]; ok {
+		t.Errorf("a whole list said it was cut: %v", document)
+	}
+	wantReasons = []any{map[string]any{"reason": "unsupported", "detail": "type=taint", "policies": float64(1)}}
+	if !reflect.DeepEqual(document["incompleteReasons"], wantReasons) {
+		t.Errorf("whole incompleteReasons = %v", document["incompleteReasons"])
+	}
+}
+
+func TestSARIFSaysTheIncompleteListWasCut(t *testing.T) {
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, cut(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	want := map[string]any{
+		"level":      "warning",
+		"message":    map[string]any{"text": "6 more check(s) did not complete and are not named"},
+		"properties": map[string]any{"slopcop.unlisted": float64(6)},
+	}
+	// The overall notice, the four named checks, then the unnamed ones.
+	if len(notifications) != 6 || !reflect.DeepEqual(notifications[5], want) {
+		t.Errorf("notifications = %v", notifications)
+	}
+	properties := run["properties"].(map[string]any)
+	if properties["slopcop.incompleteUnlisted"] != float64(6) {
+		t.Errorf("properties = %v", properties)
+	}
+	wantReasons := []any{
+		map[string]any{"reason": "unreliable", "policies": float64(3)},
+		map[string]any{"reason": "timed_out", "policies": float64(1)},
+	}
+	if !reflect.DeepEqual(properties["slopcop.incompleteReasons"], wantReasons) {
+		t.Errorf("incompleteReasons = %v", properties["slopcop.incompleteReasons"])
+	}
+}
+
+func TestEveryFormatCarriesAnInconclusiveDetailAndTheCut(t *testing.T) {
+	detailed := unproven()
+	detailed.Inconclusive[0].Detail = "type=failed reasons=source_read_failed"
+
+	if got := renderWith(t, detailed, FormatHuman, Options{Verbose: true}); !strings.Contains(got, "  acme.a (type=failed reasons=source_read_failed)\n") {
+		t.Errorf("verbose human = %q", got)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, detailed, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["inconclusiveUnlisted"] != float64(3) {
+		t.Errorf("inconclusiveUnlisted = %v", document["inconclusiveUnlisted"])
+	}
+	if first := document["inconclusive"].([]any)[0].(map[string]any); first["detail"] != "type=failed reasons=source_read_failed" {
+		t.Errorf("inconclusive detail = %v", first)
+	}
+
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, detailed, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	first := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)[0].(map[string]any)
+	if first["properties"].(map[string]any)["slopcop.detail"] != "type=failed reasons=source_read_failed" {
+		t.Errorf("sarif note = %v", first)
+	}
+	if run["properties"].(map[string]any)["slopcop.inconclusiveUnlisted"] != float64(3) {
+		t.Errorf("properties = %v", run["properties"])
+	}
+}
+
+// crashed is a check whose analyzer run failed: the service counted 207
+// incomplete checks, named 3, and named the run's cause once.
+func crashed() service.Response {
+	const detail = "type=incomplete reasons=analyzer_process_failed exit_code=137"
+	r := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		207,
+		service.IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable", Detail: detail, Scope: service.ScopeRun},
+		service.IncompletePolicy{PolicyID: "acme.b", Reason: "unreliable", Detail: detail, Scope: service.ScopeRun},
+		service.IncompletePolicy{PolicyID: "acme.c", Reason: "timed_out"},
+	)
+	r.RunFailures = []service.RunFailure{{Reason: "unreliable", Detail: detail, Policies: 206}}
+	return r
+}
+
+func TestHumanSaysEachRunFailureOnce(t *testing.T) {
+	want := "| Analysis incomplete: 207 check(s) did not complete\n" +
+		"Analyzer run failed (unreliable: type=incomplete reasons=analyzer_process_failed exit_code=137): 206 check(s) did not complete\n" +
+		"Incomplete: acme.a, acme.b, acme.c (timed_out), and 204 more\n"
+	if got := render(t, crashed(), FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("human = %q, want suffix %q", got, want)
+	}
+
+	hostile := crashed()
+	hostile.RunFailures[0].Detail = "evil\x1b[2J"
+	if got := render(t, hostile, FormatHuman); !strings.Contains(got, "Analyzer run failed (unreliable: evil�[2J)") {
+		t.Errorf("hostile = %q", got)
+	}
+}
+
+func TestJSONPassesRunFailuresThrough(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, crashed(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	want := []any{map[string]any{
+		"reason":   "unreliable",
+		"detail":   "type=incomplete reasons=analyzer_process_failed exit_code=137",
+		"policies": float64(206),
+	}}
+	if !reflect.DeepEqual(document["runFailures"], want) {
+		t.Errorf("runFailures = %v", document["runFailures"])
+	}
+	if first := document["incomplete"].([]any)[0].(map[string]any); first["scope"] != "run" {
+		t.Errorf("incomplete scope = %v", first)
+	}
+	// A service from before run failures renders as before.
+	document = map[string]any{}
+	if err := json.Unmarshal([]byte(render(t, cut(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := document["runFailures"]; ok {
+		t.Errorf("older response = %v", document)
+	}
+	if first := document["incomplete"].([]any)[0].(map[string]any); first["scope"] != nil {
+		t.Errorf("older scope = %v", first)
+	}
+}
+
+func TestSARIFNotesEachRunFailure(t *testing.T) {
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, crashed(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	want := map[string]any{
+		"level": "warning",
+		"message": map[string]any{"text": "Analyzer run failed (unreliable: type=incomplete " +
+			"reasons=analyzer_process_failed exit_code=137): 206 check(s) did not complete"},
+		"properties": map[string]any{
+			"slopcop.runFailure": true,
+			"slopcop.reason":     "unreliable",
+			"slopcop.detail":     "type=incomplete reasons=analyzer_process_failed exit_code=137",
+			"slopcop.policies":   float64(206),
+		},
+	}
+	// The overall notice, then the run failure, then each named check.
+	if len(notifications) < 3 || !reflect.DeepEqual(notifications[1], want) {
+		t.Fatalf("notifications = %v", notifications)
+	}
+	if scope := notifications[2].(map[string]any)["properties"].(map[string]any)["slopcop.scope"]; scope != "run" {
+		t.Errorf("named check scope = %v", scope)
+	}
+	if failures, ok := run["properties"].(map[string]any)["slopcop.runFailures"].([]any); !ok || len(failures) != 1 {
+		t.Errorf("properties = %v", run["properties"])
 	}
 }

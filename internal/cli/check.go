@@ -114,6 +114,16 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
+	// How the base was chosen applies to both halves, so it is said before
+	// either starts.
+	if prepared.base.warning != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), prepared.base.warning)
+	}
+	if opts.verbose {
+		for _, note := range prepared.base.notes {
+			fmt.Fprintln(cmd.ErrOrStderr(), note)
+		}
+	}
 	attr := attribution.Detect(prepared.repoRoot)
 	prepared.request.Attribution = attr
 	var store *review.Store
@@ -341,7 +351,11 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		}
 	}
 	if opts.verbose {
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n", client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn)
+		fmt.Fprintf(
+			cmd.ErrOrStderr(),
+			"slopcop: POST %s/v1/check base %s (%d file(s), %d bytes, fail-on %s)\n",
+			client.BaseURL, shortSHA(request.BaseCommit), prepared.files, prepared.bytes, failOn,
+		)
 		if attributed := request.Attribution; attributed != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: attribution %s session %s\n", attributed.Harness, attributed.SessionID)
 			for _, model := range attributed.Models {
@@ -560,6 +574,8 @@ type preparedCheck struct {
 	fingerprint string
 	// files and bytes describe the patch, for --verbose.
 	files, bytes int
+	// base says how the base was chosen.
+	base baseResolution
 }
 
 // prepareCheck does the local work a check needs before it can be sent: it
@@ -571,7 +587,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	bases, err := resolveBases(repoRoot, opts.base, opts.baseExact)
+	resolution, err := resolveBases(repoRoot, opts.base, opts.baseExact)
 	if err != nil {
 		return prepared, err
 	}
@@ -588,7 +604,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	}
 	var base string
 	var change gitx.WorkingChange
-	for _, candidate := range bases {
+	for _, candidate := range resolution.bases {
 		base = candidate
 		change, err = gitx.TreePatch(repoRoot, base, snapshot.PatchTree)
 		if err != nil {
@@ -598,7 +614,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 			break
 		}
 	}
-	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, files: change.Files, bytes: len(change.Patch), request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
+	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, files: change.Files, bytes: len(change.Patch), base: resolution, request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
 	if opts.mode == modeAI || opts.ai {
 		return prepared, nil
 	}
@@ -647,6 +663,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		fingerprint: fingerprintCheck(target, token, workspace, request),
 		files:       change.Files,
 		bytes:       len(change.Patch),
+		base:        resolution,
 	}, nil
 }
 
@@ -684,55 +701,141 @@ func resolveEnums(opts *checkOptions) (string, string, error) {
 // --base names the branch the change started from and, like
 // `git diff REV...HEAD`, resolves to its merge base with HEAD, so commits that
 // landed on that branch after the branch point are not sent as reverse edits.
-// --base-exact uses the named commit as is.
-func resolveBases(root, rev, exact string) ([]string, error) {
+// When HEAD has since merged a line the named branch lacks, such as a newer
+// origin default branch merged into a branch stacked on another PR, the merge
+// base alone would send every merged-in commit too; mergedInBase moves past
+// it. --base-exact uses the named commit as is.
+func resolveBases(root, rev, exact string) (baseResolution, error) {
+	var resolution baseResolution
 	rev, exact = strings.TrimSpace(rev), strings.TrimSpace(exact)
 	if rev != "" && exact != "" {
-		return nil, fmt.Errorf("--base and --base-exact cannot be used together")
+		return resolution, fmt.Errorf("--base and --base-exact cannot be used together")
 	}
 	if exact != "" {
 		base, err := gitx.ResolveCommit(root, exact)
 		if err != nil {
-			return nil, err
+			return resolution, err
 		}
-		return []string{base}, nil
+		return baseResolution{bases: []string{base}}, nil
 	}
 	if rev != "" {
 		commit, err := gitx.ResolveCommit(root, rev)
 		if err != nil {
-			return nil, err
+			return resolution, err
 		}
 		base, ok, err := gitx.MergeBase(root, "HEAD", commit)
 		if err != nil {
-			return nil, err
+			return resolution, err
 		}
 		if !ok {
-			return nil, fmt.Errorf(
+			return resolution, fmt.Errorf(
 				"%s has no merge base with HEAD; pass --base-exact %s to diff against it directly",
 				rev, rev,
 			)
 		}
-		return []string{base}, nil
+		return mergedInBase(root, rev, commit, base), nil
 	}
 	var bases []string
 	if base, ok, err := gitx.UpstreamBase(root); err != nil {
-		return nil, err
+		return resolution, err
 	} else if ok {
 		bases = append(bases, base)
 	}
 	if base, ok, err := gitx.OriginHeadBase(root); err != nil {
-		return nil, err
+		return resolution, err
 	} else if ok && (len(bases) == 0 || bases[0] != base) {
 		bases = append(bases, base)
 	}
 	if len(bases) > 0 {
-		return bases, nil
+		return baseResolution{bases: bases}, nil
 	}
 	head, err := gitx.HeadCommit(root)
 	if err != nil {
-		return nil, fmt.Errorf("this repository has no commits yet, so there is nothing to check")
+		return resolution, fmt.Errorf("this repository has no commits yet, so there is nothing to check")
 	}
-	return []string{head}, nil
+	return baseResolution{bases: []string{head}}, nil
+}
+
+// baseResolution is the bases to try, in order, and what the CLI has to say
+// about how it chose them.
+type baseResolution struct {
+	bases []string
+	// notes explain a base the CLI moved, for --verbose.
+	notes []string
+	// warning says the patch carries commits HEAD merged in from a line the
+	// base lacks, which a check always prints.
+	warning string
+}
+
+// mergedInBase settles the base for --base rev, whose merge base with HEAD
+// is base. A branch stacked on rev that has since merged a newer default
+// branch, or rev's own upstream, reaches commits rev does not, and diffing
+// from base would send all of them as the change.
+//
+// The service needs a base it can fetch, so the base stays a real commit
+// rather than a local synthetic merge: when a merged-in line's merge base
+// with HEAD descends from base, as it does once rev has landed on that line,
+// it holds everything base does and becomes the base, which leaves exactly
+// the branch's own work. When the two lines have diverged, no fetchable
+// commit holds both, so base stays and the result warns that the patch
+// carries the merged-in commits.
+func mergedInBase(root, rev, commit, base string) baseResolution {
+	type line struct{ name, mergeBase string }
+	var lines []line
+	seen := map[string]bool{commit: true}
+	for _, name := range []string{gitx.OriginHead(root), upstreamOf(root, rev)} {
+		if name == "" {
+			continue
+		}
+		tip, err := gitx.ResolveCommit(root, name)
+		if err != nil || seen[tip] {
+			continue
+		}
+		seen[tip] = true
+		mergeBase, ok, err := gitx.MergeBase(root, "HEAD", tip)
+		if err != nil || !ok {
+			continue
+		}
+		lines = append(lines, line{name, mergeBase})
+	}
+	resolution := baseResolution{bases: []string{base}}
+	for moved := true; moved; {
+		moved = false
+		for _, merged := range lines {
+			if merged.mergeBase == base || !gitx.IsAncestor(root, base, merged.mergeBase) {
+				continue
+			}
+			resolution.notes = append(resolution.notes, fmt.Sprintf(
+				"slopcop: HEAD merged %s, which already holds %s's merge base %s, so the base is %s, the merge base with %s",
+				merged.name, rev, shortSHA(base), shortSHA(merged.mergeBase), merged.name,
+			))
+			base = merged.mergeBase
+			moved = true
+		}
+	}
+	resolution.bases = []string{base}
+	for _, merged := range lines {
+		if gitx.IsAncestor(root, merged.mergeBase, base) {
+			continue
+		}
+		count := gitx.CountCommits(root, base, merged.mergeBase)
+		resolution.warning = fmt.Sprintf(
+			"slopcop: HEAD merged %d commit(s) from %s that %s does not have, so the patch carries their changes too. "+
+				"To check only this branch's work, merge %s into %s and push it, then check again; "+
+				"to check the whole stack, pass --base %s.",
+			count, merged.name, rev, merged.name, rev, merged.name,
+		)
+		break
+	}
+	return resolution
+}
+
+// upstreamOf is the upstream of the local branch rev names, or "".
+func upstreamOf(root, rev string) string {
+	if strings.HasPrefix(rev, "-") {
+		return ""
+	}
+	return gitx.UpstreamOf(root, rev)
 }
 
 // resolveSelection collects the policy selection the service should evaluate

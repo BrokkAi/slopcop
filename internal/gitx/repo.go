@@ -127,3 +127,28 @@ func IsAncestor(root, a, b string) bool {
 	_, err := Run(root, "merge-base", "--is-ancestor", a, b)
 	return err == nil
 }
+
+// UpstreamOf returns the upstream branch configured for the local branch rev
+// names, such as "origin/feature", or "" when rev is not a local branch or
+// has no upstream.
+func UpstreamOf(root, rev string) string {
+	upstream, err := Run(root, "rev-parse", "--abbrev-ref", "--symbolic-full-name", rev+"@{upstream}")
+	if err != nil {
+		return ""
+	}
+	return upstream
+}
+
+// CountCommits counts the commits reachable from to and not from from, as
+// `git rev-list --count from..to` does. It is 0 when git cannot tell.
+func CountCommits(root, from, to string) int {
+	out, err := Run(root, "rev-list", "--count", from+".."+to)
+	if err != nil {
+		return 0
+	}
+	var count int
+	if _, err := fmt.Sscan(out, &count); err != nil {
+		return 0
+	}
+	return count
+}

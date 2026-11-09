@@ -127,3 +127,41 @@ func TestInitHookAndSkillOptOutsAreIndependent(t *testing.T) {
 		}
 	})
 }
+
+// TestInitKeepsGrokHookAtUserLevel covers Grok, which has no repository hook
+// location: init installs and keeps its user-level hook while it moves Claude
+// Code's into the clone, and only --remove-hooks takes it out.
+func TestInitKeepsGrokHookAtUserLevel(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	makeHarness(t, filepath.Join(home, ".grok"))
+	repo := testInitRepo(t)
+	userClaude := filepath.Join(home, ".claude/settings.json")
+	if err := os.WriteFile(userClaude, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook claude"}]}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	grok := filepath.Join(home, ".grok/hooks/slopcop.json")
+	for run := 0; run < 2; run++ {
+		code, out, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
+		if code != 0 {
+			t.Fatal(stderr)
+		}
+		if run == 0 && !strings.Contains(out, "installed the user-level Stop hook in "+grok) {
+			t.Fatal(out)
+		}
+		data, err := os.ReadFile(grok)
+		if err != nil || !strings.Contains(string(data), "slopcop hook grok") {
+			t.Fatalf("run %d: grok hook: %s %v", run, data, err)
+		}
+	}
+	if data, _ := os.ReadFile(userClaude); strings.Contains(string(data), "slopcop hook") {
+		t.Fatalf("user-level Claude Code hook remains: %s", data)
+	}
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--remove-hooks")
+	if code != 0 {
+		t.Fatal(stderr)
+	}
+	if data, err := os.ReadFile(grok); err == nil && strings.Contains(string(data), "slopcop") {
+		t.Fatalf("grok hook remains after --remove-hooks: %s", data)
+	}
+}

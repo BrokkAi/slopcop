@@ -19,6 +19,7 @@ func isolateAgentHome(t *testing.T) string {
 	home, _ := os.UserHomeDir()
 	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude"))
 	t.Setenv("CODEX_HOME", filepath.Join(home, ".codex"))
+	t.Setenv("GROK_HOME", filepath.Join(home, ".grok"))
 	return home
 }
 func makeHarness(t *testing.T, dir string) {

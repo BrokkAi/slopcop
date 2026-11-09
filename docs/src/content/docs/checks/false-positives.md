@@ -46,6 +46,13 @@ An ignore is tied to the finding's identity, which follows the code: an
 unrelated edit elsewhere in the file keeps it, while changing the flagged code
 itself gives a new finding that is reported again.
 
+When the service recognises such a finding as one you ignored, by its rule,
+file and place, the report says so instead of presenting it as new: a
+`Matches ignored finding <old id> (code changed)` line in `human`,
+`previouslyIgnored` in `json`, and `properties["slopcop.previouslyIgnored"]` in
+`sarif`, with the count in `remappedIgnores`. The old ignore does not cover it;
+if it is still a false positive, `slopcop ignore` its new id.
+
 ## Undo an ignore
 
 Ignored the wrong finding? Unignore it:

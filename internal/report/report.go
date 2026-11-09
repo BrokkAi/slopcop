@@ -94,14 +94,45 @@ func split(findings []service.Finding) (fresh, existing []service.Finding) {
 	return fresh, existing
 }
 
-// listed is what a report lists: the new findings first, and the existing
-// ones after them only when asked for.
+// splitRemapped returns the existing findings that match an earlier ignore,
+// then the rest. A finding that matches one is always listed, so a reader
+// learns the ignore no longer covers it whether or not the service counts it
+// as new.
+func splitRemapped(existing []service.Finding) (remapped, rest []service.Finding) {
+	remapped, rest = []service.Finding{}, []service.Finding{}
+	for _, finding := range existing {
+		if finding.PreviouslyIgnored != "" {
+			remapped = append(remapped, finding)
+		} else {
+			rest = append(rest, finding)
+		}
+	}
+	return remapped, rest
+}
+
+// listed is what a report lists: the new findings first, then the existing
+// ones that match an earlier ignore, and the other existing ones after them
+// only when asked for.
 func listed(response service.Response, options Options) []service.Finding {
 	fresh, existing := split(response.Findings)
+	remapped, rest := splitRemapped(existing)
+	findings := append(fresh, remapped...)
 	if options.ShowExisting {
-		return append(fresh, existing...)
+		findings = append(findings, rest...)
 	}
-	return fresh
+	return findings
+}
+
+// remappedCount is how many findings match an earlier ignore. A service from
+// before summary.remappedIgnores sends none, so the listed ones count too.
+func remappedCount(response service.Response) int {
+	flagged := 0
+	for _, finding := range response.Findings {
+		if finding.PreviouslyIgnored != "" {
+			flagged++
+		}
+	}
+	return max(response.Summary.RemappedIgnores, flagged)
 }
 
 // human is close to Bifrost's own human report: one block per new finding,
@@ -110,14 +141,20 @@ func listed(response service.Response, options Options) []service.Finding {
 func human(response service.Response, options Options) string {
 	var out strings.Builder
 	fresh, existing := split(response.Findings)
+	remapped, rest := splitRemapped(existing)
 	writeBlock(&out, "New findings", fresh)
+	writeBlock(&out, "Previously ignored, code changed (never fail the check)", remapped)
 	if options.ShowExisting {
-		writeBlock(&out, "Already in the code (never fail the check)", existing)
+		writeBlock(&out, "Already in the code (never fail the check)", rest)
 	}
 	out.WriteString(summaryLine(response))
 	out.WriteString("\n")
 	if notice := omittedNotice(response); notice != "" {
 		fmt.Fprintf(&out, "Omitted: %s.\n", notice)
+	}
+	for _, failure := range response.RunFailures {
+		out.WriteString(runFailureLine(failure))
+		out.WriteString("\n")
 	}
 	if line := incompleteLine(response); line != "" {
 		out.WriteString(line)
@@ -166,8 +203,26 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 		if finding.ID != "" {
 			fmt.Fprintf(out, "    ID: %s\n", printable(finding.ID))
 		}
+		if line := previouslyIgnoredLine(finding); line != "" {
+			fmt.Fprintf(out, "    %s\n", line)
+		}
 		out.WriteString("\n")
 	}
+}
+
+// previouslyIgnoredLine says a finding matches an ignored one whose code
+// changed, and how to keep ignoring it, such as `Matches ignored finding
+// f5a9bad1-… (code changed); ` + "`slopcop ignore 98a2d745-…`" + ` to keep
+// ignoring it`.
+func previouslyIgnoredLine(finding service.Finding) string {
+	if finding.PreviouslyIgnored == "" {
+		return ""
+	}
+	line := fmt.Sprintf("Matches ignored finding %s (code changed)", printable(finding.PreviouslyIgnored))
+	if finding.ID == "" {
+		return line
+	}
+	return fmt.Sprintf("%s; `slopcop ignore %s` to keep ignoring it", line, printable(finding.ID))
 }
 
 // summaryLine is one line, like the first line of Bifrost's human report:
@@ -189,6 +244,9 @@ func summaryLine(response service.Response) string {
 	// and counts the rest; a service from before that also listed them.
 	if count := max(response.Summary.ExistingFindings, len(existing)); count > 0 {
 		scope = fmt.Sprintf("%s; %d already in the code", scope, count)
+	}
+	if count := remappedCount(response); count > 0 {
+		scope = fmt.Sprintf("%s; %d match(es) an earlier ignore", scope, count)
 	}
 	if response.Summary.OmittedFindings > 0 {
 		scope = fmt.Sprintf("%s; +%d not reported", scope, response.Summary.OmittedFindings)
@@ -236,32 +294,126 @@ func omittedNotice(response service.Response) string {
 // `Incomplete: acme.slow (timed_out), and 3 more`.
 // A check with a detail says it after the reason:
 // `acme.rule (unsupported: type=taint_evaluation)`.
+// When most named checks share one reason, it is said once, up front, and
+// only the others carry their own:
+// `Incomplete (48 of 50 named: unreliable): acme.a, acme.b, acme.c (timed_out), and 157 more`.
+// When the service names run failures, their lines have said those reasons
+// already, so a check one of them covers carries only its id.
 func incompleteLine(response service.Response) string {
 	if len(response.Incomplete) == 0 {
 		return ""
 	}
+	prefix := "Incomplete: "
+	said := make(map[[2]string]bool, len(response.RunFailures))
+	for _, failure := range response.RunFailures {
+		said[[2]string{failure.Reason, failure.Detail}] = true
+	}
+	shared, ok := sharedReason(response.Incomplete)
+	if len(said) > 0 {
+		ok = false
+	}
+	if ok {
+		sharedWhy := printable(why(shared.Reason, shared.Detail))
+		if shared.Policies == len(response.Incomplete) {
+			prefix = fmt.Sprintf("Incomplete (all %d named: %s): ", shared.Policies, sharedWhy)
+		} else {
+			prefix = fmt.Sprintf("Incomplete (%d of %d named: %s): ", shared.Policies, len(response.Incomplete), sharedWhy)
+		}
+	}
 	named := make([]string, 0, len(response.Incomplete)+1)
 	for _, policy := range response.Incomplete {
+		if said[[2]string{policy.Reason, policy.Detail}] ||
+			(ok && policy.Reason == shared.Reason && policy.Detail == shared.Detail) {
+			named = append(named, printable(policy.PolicyID))
+			continue
+		}
 		named = append(named, fmt.Sprintf("%s (%s)", printable(policy.PolicyID), printable(incompleteWhy(policy))))
 	}
-	if unnamed := response.Summary.IncompletePolicies - len(response.Incomplete); unnamed > 0 {
+	if unnamed := incompleteUnlisted(response); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
 	}
-	return "Incomplete: " + strings.Join(named, ", ")
+	return prefix + strings.Join(named, ", ")
+}
+
+// runFailureLine says one cause that left a whole analyzer run incomplete,
+// such as `Analyzer run failed (unreliable: type=incomplete
+// reasons=analyzer_process_failed exit_code=137): 207 check(s) did not
+// complete`.
+func runFailureLine(failure service.RunFailure) string {
+	return fmt.Sprintf(
+		"Analyzer run failed (%s): %d check(s) did not complete",
+		printable(why(failure.Reason, failure.Detail)), failure.Policies,
+	)
 }
 
 // incompleteWhy is a check's reason, followed by its detail when it has one.
 func incompleteWhy(policy service.IncompletePolicy) string {
-	if policy.Detail == "" {
-		return policy.Reason
+	return why(policy.Reason, policy.Detail)
+}
+
+func why(reason, detail string) string {
+	if detail == "" {
+		return reason
 	}
-	return policy.Reason + ": " + policy.Detail
+	return reason + ": " + detail
+}
+
+// incompleteUnlisted counts the incomplete checks the service counted but did
+// not name: it names at most 50.
+func incompleteUnlisted(response service.Response) int {
+	return max(response.Summary.IncompletePolicies-len(response.Incomplete), 0)
+}
+
+// incompleteReason is one reason, with its detail, and how many of the named
+// incomplete checks gave it.
+type incompleteReason struct {
+	Reason   string `json:"reason"`
+	Detail   string `json:"detail,omitempty"`
+	Policies int    `json:"policies"`
+}
+
+// incompleteReasons groups the named incomplete checks by reason and detail,
+// most common first, so a run where most checks failed for one cause says it
+// once.
+func incompleteReasons(policies []service.IncompletePolicy) []incompleteReason {
+	type key struct{ reason, detail string }
+	counts := make(map[key]int, len(policies))
+	for _, policy := range policies {
+		counts[key{policy.Reason, policy.Detail}]++
+	}
+	reasons := make([]incompleteReason, 0, len(counts))
+	for k, count := range counts {
+		reasons = append(reasons, incompleteReason{Reason: k.reason, Detail: k.detail, Policies: count})
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		a, b := reasons[i], reasons[j]
+		if a.Policies != b.Policies {
+			return a.Policies > b.Policies
+		}
+		if a.Reason != b.Reason {
+			return a.Reason < b.Reason
+		}
+		return a.Detail < b.Detail
+	})
+	return reasons
+}
+
+// sharedReason is the reason more than half of two or more named incomplete
+// checks share, if there is one.
+func sharedReason(policies []service.IncompletePolicy) (incompleteReason, bool) {
+	if len(policies) < 2 {
+		return incompleteReason{}, false
+	}
+	top := incompleteReasons(policies)[0]
+	return top, top.Policies*2 > len(policies)
 }
 
 // inconclusiveCheck is one inconclusive check as the reports name it.
 type inconclusiveCheck struct {
 	PolicyID string `json:"policyId"`
 	Reason   string `json:"reason"`
+	// Detail is the service's detail for the check, when it sent one.
+	Detail string `json:"detail,omitempty"`
 	// Elsewhere says the check concerns only files the change does not
 	// write. Without it, it may concern the change itself.
 	Elsewhere bool `json:"elsewhere"`
@@ -287,6 +439,7 @@ func inconclusiveChecks(response service.Response) []inconclusiveCheck {
 			checks = append(checks, inconclusiveCheck{
 				PolicyID:  policy.PolicyID,
 				Reason:    policy.Reason,
+				Detail:    policy.Detail,
 				Elsewhere: elsewhere[policy.PolicyID],
 			})
 		}
@@ -332,8 +485,7 @@ func inconclusiveLine(response service.Response) string {
 // the ones past the listed bound.
 func writeInconclusive(out *strings.Builder, response service.Response) {
 	checks := inconclusiveChecks(response)
-	total, _ := inconclusiveCounts(response, checks)
-	if total == 0 {
+	if total, _ := inconclusiveCounts(response, checks); total == 0 {
 		return
 	}
 	out.WriteString("Inconclusive (never fail the check)\n")
@@ -342,9 +494,13 @@ func writeInconclusive(out *strings.Builder, response service.Response) {
 		if check.Elsewhere {
 			where = " (only files the change does not write)"
 		}
-		fmt.Fprintf(out, "  %s%s\n", printable(check.PolicyID), where)
+		detail := ""
+		if check.Detail != "" {
+			detail = " (" + printable(check.Detail) + ")"
+		}
+		fmt.Fprintf(out, "  %s%s%s\n", printable(check.PolicyID), detail, where)
 	}
-	if unnamed := total - len(checks); unnamed > 0 {
+	if unnamed := inconclusiveUnlisted(response, checks); unnamed > 0 {
 		fmt.Fprintf(out, "  and %d more\n", unnamed)
 	}
 }
@@ -379,10 +535,24 @@ type jsonReport struct {
 	Summary    service.Summary            `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
 	Incomplete []service.IncompletePolicy `json:"incomplete"`
+	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
+	// counts but incomplete does not name, because the service names at most
+	// 50. It is set only when the list was cut.
+	IncompleteUnlisted int `json:"incompleteUnlisted,omitempty"`
+	// IncompleteReasons groups the named incomplete checks by reason and
+	// detail, most common first. It is set only when a check did not complete.
+	IncompleteReasons []incompleteReason `json:"incompleteReasons,omitempty"`
 	// Inconclusive names the checks summary.inconclusive counts, up to the
 	// service's bound. They never change the status.
-	Inconclusive []inconclusiveCheck `json:"inconclusive"`
-	Failure      string              `json:"failure,omitempty"`
+	// RunFailures is the service's list of causes that left a whole analyzer
+	// run incomplete, as it sent it. It is set only when there is one.
+	RunFailures  []service.RunFailure `json:"runFailures,omitempty"`
+	Inconclusive []inconclusiveCheck  `json:"inconclusive"`
+	// InconclusiveUnlisted counts the inconclusive checks summary.inconclusive
+	// counts but inconclusive does not name. It is set only when the list was
+	// cut.
+	InconclusiveUnlisted int    `json:"inconclusiveUnlisted,omitempty"`
+	Failure              string `json:"failure,omitempty"`
 	// RepositoryAdded is set only when the check added the repository to
 	// the workspace.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
@@ -393,21 +563,33 @@ type jsonReport struct {
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
+	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
-		Status:          status(response.Status, options),
-		Approved:        options.Approved,
-		StaticStatus:    options.StaticStatus,
-		Review:          reviewValue(options.Review),
-		BaseCommit:      response.BaseCommit,
-		Summary:         response.Summary,
-		Findings:        listed(response, options),
-		Incomplete:      response.Incomplete,
-		Inconclusive:    inconclusiveChecks(response),
-		Failure:         response.Failure,
-		RepositoryAdded: response.RepositoryAdded,
-		EmptyChange:     options.EmptyChange,
-		SkillUpdated:    options.SkillUpdated,
+		Status:               status(response.Status, options),
+		Approved:             options.Approved,
+		StaticStatus:         options.StaticStatus,
+		Review:               reviewValue(options.Review),
+		BaseCommit:           response.BaseCommit,
+		Summary:              response.Summary,
+		Findings:             listed(response, options),
+		Incomplete:           response.Incomplete,
+		IncompleteUnlisted:   incompleteUnlisted(response),
+		IncompleteReasons:    incompleteReasons(response.Incomplete),
+		RunFailures:          response.RunFailures,
+		Inconclusive:         inconclusive,
+		InconclusiveUnlisted: inconclusiveUnlisted(response, inconclusive),
+		Failure:              response.Failure,
+		RepositoryAdded:      response.RepositoryAdded,
+		EmptyChange:          options.EmptyChange,
+		SkillUpdated:         options.SkillUpdated,
 	}, "json report")
+}
+
+// inconclusiveUnlisted counts the inconclusive checks the service counted but
+// did not name.
+func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck) int {
+	total, _ := inconclusiveCounts(response, checks)
+	return total - len(checks)
 }
 
 // pendingReport is the document `--format json` prints for a check that was
@@ -637,7 +819,7 @@ type sarifResult struct {
 	// `unchanged` for one already in the code.
 	BaselineState string `json:"baselineState"`
 	// Properties carries the finding id `slopcop ignore` takes, when the
-	// service sent one.
+	// service sent one, and the id of the ignored finding it matches.
 	Properties map[string]any `json:"properties,omitempty"`
 }
 
@@ -725,8 +907,14 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Locations:     []sarifLocation{{PhysicalLocation: physical}},
 			BaselineState: baselineState(finding),
 		}
+		if finding.ID != "" || finding.PreviouslyIgnored != "" {
+			result.Properties = map[string]any{}
+		}
 		if finding.ID != "" {
-			result.Properties = map[string]any{"slopcop.findingId": finding.ID}
+			result.Properties["slopcop.findingId"] = finding.ID
+		}
+		if finding.PreviouslyIgnored != "" {
+			result.Properties["slopcop.previouslyIgnored"] = finding.PreviouslyIgnored
 		}
 		results = append(results, result)
 	}
@@ -749,6 +937,21 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			)},
 		})
 	}
+	for _, failure := range response.RunFailures {
+		properties := map[string]any{
+			"slopcop.runFailure": true,
+			"slopcop.reason":     failure.Reason,
+			"slopcop.policies":   failure.Policies,
+		}
+		if failure.Detail != "" {
+			properties["slopcop.detail"] = failure.Detail
+		}
+		notifications = append(notifications, sarifNotification{
+			Level:      "warning",
+			Message:    sarifMessage{Text: runFailureLine(failure)},
+			Properties: properties,
+		})
+	}
 	if notice := omittedNotice(response); notice != "" {
 		notifications = append(notifications, sarifNotification{
 			Level:      "note",
@@ -761,6 +964,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		if policy.Detail != "" {
 			properties["slopcop.detail"] = policy.Detail
 		}
+		if policy.Scope != "" {
+			properties["slopcop.scope"] = policy.Scope
+		}
 		notifications = append(notifications, sarifNotification{
 			Level:      "warning",
 			Message:    sarifMessage{Text: fmt.Sprintf("%s did not complete (%s)", policy.PolicyID, incompleteWhy(policy))},
@@ -768,20 +974,35 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Properties: properties,
 		})
 	}
+	// The service names at most 50 incomplete checks; say how many it left
+	// out, so a consumer does not take the named ones for all of them. A run
+	// that failed has already said why none of them completed.
+	if unnamed := incompleteUnlisted(response); unnamed > 0 && response.Failure == "" {
+		notifications = append(notifications, sarifNotification{
+			Level:      "warning",
+			Message:    sarifMessage{Text: fmt.Sprintf("%d more check(s) did not complete and are not named", unnamed)},
+			Properties: map[string]any{"slopcop.unlisted": unnamed},
+		})
+	}
 	// Inconclusive checks are notes: they never change the status or the
 	// execution's success.
-	for _, check := range inconclusiveChecks(response) {
+	inconclusive := inconclusiveChecks(response)
+	for _, check := range inconclusive {
+		checkProperties := map[string]any{
+			"slopcop.reason":       check.Reason,
+			"slopcop.inconclusive": true,
+			"slopcop.elsewhere":    check.Elsewhere,
+		}
+		if check.Detail != "" {
+			checkProperties["slopcop.detail"] = check.Detail
+		}
 		notifications = append(notifications, sarifNotification{
 			Level: "note",
 			Message: sarifMessage{Text: fmt.Sprintf(
-				"%s could not prove there is nothing more to find (%s)", check.PolicyID, check.Reason,
+				"%s could not prove there is nothing more to find (%s)", check.PolicyID, why(check.Reason, check.Detail),
 			)},
 			Descriptor: &sarifDescriptor{ID: check.PolicyID},
-			Properties: map[string]any{
-				"slopcop.reason":       check.Reason,
-				"slopcop.inconclusive": true,
-				"slopcop.elsewhere":    check.Elsewhere,
-			},
+			Properties: checkProperties,
 		})
 	}
 
@@ -791,9 +1012,22 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.failOn":                response.Summary.FailOn,
 		"slopcop.newFindings":           response.Summary.NewFindings,
 		"slopcop.existingFindings":      response.Summary.ExistingFindings,
+		"slopcop.remappedIgnores":       remappedCount(response),
 		"slopcop.inconclusive":          response.Summary.Inconclusive,
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 	}, options)
+	if unnamed := incompleteUnlisted(response); unnamed > 0 {
+		properties["slopcop.incompleteUnlisted"] = unnamed
+	}
+	if len(response.RunFailures) > 0 {
+		properties["slopcop.runFailures"] = response.RunFailures
+	}
+	if reasons := incompleteReasons(response.Incomplete); len(reasons) > 0 {
+		properties["slopcop.incompleteReasons"] = reasons
+	}
+	if unnamed := inconclusiveUnlisted(response, inconclusive); unnamed > 0 {
+		properties["slopcop.inconclusiveUnlisted"] = unnamed
+	}
 
 	return encode(w, sarifLogWithReview(options, sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{

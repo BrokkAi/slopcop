@@ -171,7 +171,9 @@ message.
 Run inside a repository to install local skills and static-only Stop hooks
 for Claude Code and Codex, plus a Claude Code push gate. Tracked files are
 left alone; paths are added to `.git/info/exclude`. Init removes old
-user-level SlopCop hooks and skill copies. See
+user-level SlopCop hooks for Claude Code and Codex, and SlopCop skill copies.
+Grok's Stop hook stays at user level, in `hooks/slopcop.json` under
+`GROK_HOME` or `~/.grok`. See
 [The agent skill](/agents/skill/) and [The Stop hook](/agents/stop-hook/).
 
 | Flag | Meaning |
@@ -181,11 +183,13 @@ user-level SlopCop hooks and skill copies. See
 | `--no-hooks` | do not install or update the automatic check hook |
 | `--remove-hooks` | remove SlopCop's automatic check hook and nothing else |
 
-## `slopcop hook <claude|codex>`
+## `slopcop hook <claude|codex|grok|kimi>`
 
-Run a check from a Claude Code or Codex Stop hook. It reads the hook's input on
-stdin and answers in the harness's hook protocol. `slopcop init` installs it as
-`slopcop hook claude || true` and `slopcop hook codex || true`; it is not meant
+Run a check from a Claude Code, Codex, Grok or Kimi Code Stop hook. It reads
+the hook's input on stdin and answers in the harness's hook protocol.
+`slopcop init` installs it as `slopcop hook claude || true`,
+`slopcop hook codex || true` and `slopcop hook grok || true`; Kimi Code's is
+added by hand (see [Grok and Kimi Code](/agents/grok-kimi/)). It is not meant
 to be run by hand.
 
 ## `slopcop config` and `slopcop override`
@@ -219,6 +223,9 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
 | `CODEX_THREAD_ID`, `CODEX_HOME` | set by Codex; the same |
+| `OPENCODE_SESSION_ID`, `OPENCODE_DB`, `XDG_DATA_HOME` | set by OpenCode or you; the same |
+| `GROK_SESSION_ID`, `GROK_HOME` | set by Grok; the same |
+| `KIMI_CODE_HOME` | Kimi Code's data directory, read by its Stop hook |
 
 See [Configuration](/reference/configuration/) for precedence and the files
 the CLI writes.

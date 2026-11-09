@@ -448,10 +448,12 @@ is written to .agents/skills/slopcop and, when Claude Code is installed,
 .claude/settings.local.json. Codex gets a Stop hook in .codex/hooks.json;
 Codex's shell hook blocking protocol is not established, so no Codex push gate
 is installed. Codex requires /hooks trust. Written paths are added to the
-repository's info/exclude. Tracked targets are left untouched. Existing
-user-level SlopCop hooks and skills are removed, except that --no-hooks keeps
-the user-level hooks and --no-skill the user-level skills. --remove-hooks removes both
-repository and user-level hooks. Init probes available reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+repository's info/exclude. Tracked targets are left untouched. Grok, which
+has no repository hook location SlopCop has verified, gets a user-level Stop
+hook in hooks/slopcop.json under GROK_HOME or ~/.grok. Existing user-level
+Claude Code and Codex hooks and SlopCop skills are removed, except that
+--no-hooks keeps the user-level hooks and --no-skill the user-level skills.
+--remove-hooks removes both repository and user-level hooks, Grok's included. Init probes available reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		repo, err := gitx.Toplevel(root)
 		if err != nil {
 			return fmt.Errorf("slopcop init requires a Git repository: %w", err)
@@ -465,9 +467,15 @@ repository and user-level hooks. Init probes available reviewers unless --no-rev
 			return false
 		}
 		// --no-hooks and --no-skill leave the user-level hooks and skills
-		// alone as well; init removes only what it would replace.
+		// alone as well; init removes only what it would replace. Grok's
+		// hook has no repository location yet, so only --remove-hooks takes
+		// it out.
 		if !noHooks {
-			user, err := agenthooks.Remove()
+			removeUser := agenthooks.RemoveReplaced
+			if removeHooks {
+				removeUser = agenthooks.Remove
+			}
+			user, err := removeUser()
 			for _, p := range user.ChangedPaths {
 				fmt.Fprintf(out, "slopcop: removed the user-level hook from %s\n", p)
 			}
@@ -534,6 +542,14 @@ repository and user-level hooks. Init probes available reviewers unless --no-rev
 					excluded = append(excluded, "/"+filepath.ToSlash(rel))
 				}
 			}
+			user, err := agenthooks.InstallUserOnly()
+			for _, p := range user.ChangedPaths {
+				fmt.Fprintf(out, "slopcop: installed the user-level Stop hook in %s\n", p)
+			}
+			if err != nil {
+				return err
+			}
+			r.Installed = append(r.Installed, user.Installed...)
 			if r.NeedsTrust {
 				fmt.Fprintln(out, "slopcop: Codex reads .codex/hooks.json only in a project you trust, and runs the Stop hook only after you trust it with /hooks")
 			}

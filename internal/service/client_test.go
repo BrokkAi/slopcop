@@ -105,6 +105,38 @@ func TestCheckDecodesAnIncompleteResponse(t *testing.T) {
 	}
 }
 
+func TestCheckDecodesRunFailures(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "incomplete",
+			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+			"applied": true,
+			"summary": {"files": 1, "incompletePolicies": 207, "incompletePolicyIds": ["acme.a"], "failOn": "finding"},
+			"findings": [],
+			"incomplete": [{"policyId": "acme.a", "reason": "unreliable", "detail": "type=incomplete reasons=analyzer_process_failed exit_code=137", "scope": "run"}],
+			"runFailures": [{"reason": "unreliable", "detail": "type=incomplete reasons=analyzer_process_failed exit_code=137", "policies": 207}]
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	const detail = "type=incomplete reasons=analyzer_process_failed exit_code=137"
+	if want := (IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable", Detail: detail, Scope: ScopeRun}); len(response.Incomplete) != 1 || response.Incomplete[0] != want {
+		t.Fatalf("incomplete = %+v", response.Incomplete)
+	}
+	if want := (RunFailure{Reason: "unreliable", Detail: detail, Policies: 207}); len(response.RunFailures) != 1 || response.RunFailures[0] != want {
+		t.Fatalf("runFailures = %+v", response.RunFailures)
+	}
+}
+
 func TestCheckFillsMissingLists(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -483,6 +515,34 @@ func TestCheckReadsTheFindingID(t *testing.T) {
 	}
 	if response.Findings[0].ID != "0f8fad5b-d9cb-469f-a165-70867728950e" || response.Findings[1].ID != "" {
 		t.Errorf("findings = %+v", response.Findings)
+	}
+}
+
+func TestCheckReadsAMatchToAnEarlierIgnore(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{
+			"status": "findings",
+			"summary": {"newFindings": 2, "remappedIgnores": 1},
+			"findings": [
+				{"id": "98a2d745-fa33-467b-8289-2a9f3d05a0c8", "policyId": "a", "new": true, "previouslyIgnored": "f5a9bad1-80ab-4a38-9351-4131e05d1682"},
+				{"id": "0f8fad5b-d9cb-469f-a165-70867728950e", "policyId": "b", "new": true}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	response, err := client.Check(context.Background(), Request{})
+	if err != nil {
+		t.Fatalf("Check: %v", err)
+	}
+	if response.Summary.RemappedIgnores != 1 ||
+		response.Findings[0].PreviouslyIgnored != "f5a9bad1-80ab-4a38-9351-4131e05d1682" ||
+		response.Findings[1].PreviouslyIgnored != "" {
+		t.Errorf("response = %+v", response)
 	}
 }
 
