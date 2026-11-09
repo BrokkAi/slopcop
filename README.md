@@ -396,6 +396,7 @@ Flags:
 | `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
+| `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |

@@ -103,6 +103,7 @@ work passed.
 | `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`); see [Output formats](/checks/output-formats/) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
+| `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable); see [Repository rules](/checks/repository-rules/) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`); a check still running then exits `3` |
@@ -120,6 +121,13 @@ included, is worth fixing before the change lands. The service's own default
 for a request without a level is Bifrost's `warning`; pass `--fail-on warning`
 to match it. New findings that cross the threshold exit `1` even when some
 rule did not complete.
+
+The threshold applies to `definite` findings only. By default the service
+leaves out every `possible` and `heuristic` finding before it decides the
+status, never sends them, and counts them in `summary.lessCertainFindings`,
+which the summary line prints. `--certainty all` asks for every finding and
+lets any of them fail the check. The automatic check run by agent hooks always
+uses the default.
 
 ## Waiting for the result
 

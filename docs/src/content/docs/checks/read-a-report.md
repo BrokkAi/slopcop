@@ -51,6 +51,12 @@ them. In `sarif`, each result's `baselineState` is `new`.
 | `possible` | The match depends on something Bifrost could not settle: an ambiguous receiver or dispatch, name-based resolution, several candidate declarations, or a "may" relation. It can be a false positive: read the code before changing it. |
 | `heuristic` | A text-pattern match, such as a secret-like string. Confirm it the same way. |
 
+A check lists only `definite` findings unless run with `--certainty all`. The
+others are counted, in `human` on the summary line ("2 less certain not
+shown"), in `json` as `summary.lessCertainFindings`, and in `sarif` as
+`properties["slopcop.lessCertainFindings"]`; they do not count in
+`newFindings` and do not change the status.
+
 Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 `properties["slopcop.findingId"]` in `sarif`. It is what
 [`slopcop ignore`](/checks/false-positives/) takes.

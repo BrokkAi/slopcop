@@ -28,8 +28,12 @@ import (
 const (
 	policyDirectory = ".slopcop/policies"
 	failOnFinding   = "finding"
-	invalidChange   = "invalid_change"
-	baseNotFound    = "base_not_found"
+	// certaintyDefinite and certaintyAll are the --certainty values. The
+	// service answers definite findings only unless asked for all.
+	certaintyDefinite = "definite"
+	certaintyAll      = "all"
+	invalidChange     = "invalid_change"
+	baseNotFound      = "base_not_found"
 	// addRepositoryNeedsWorkspace is the usage error for --add-repository
 	// without --workspace: the approval is for one workspace, so the flag
 	// names it rather than trusting wherever the login points.
@@ -78,6 +82,17 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	format, failOn, err := resolveEnums(opts)
 	if err != nil {
 		return err
+	}
+	// Definite is the service's own default, so it is not sent: a service
+	// from before certainty refuses a field it does not know, and a check by
+	// hand keeps the fingerprint of the Stop hook's.
+	switch certainty := strings.ToLower(strings.TrimSpace(opts.certainty)); certainty {
+	case "", certaintyDefinite:
+		opts.certainty = ""
+	case certaintyAll:
+		opts.certainty = certaintyAll
+	default:
+		return fmt.Errorf("unknown certainty %q (expected definite or all)", opts.certainty)
 	}
 	if opts.addRepository && strings.TrimSpace(opts.workspace) == "" {
 		return errors.New(addRepositoryNeedsWorkspace)
@@ -659,6 +674,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		BaseCommit: base,
 		Change:     base64.StdEncoding.EncodeToString(change.Patch),
 		FailOn:     failOn,
+		Certainty:  opts.certainty,
 	}
 	if !selection.IsEmpty() {
 		request.Selection = &selection

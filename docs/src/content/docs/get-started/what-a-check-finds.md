@@ -55,9 +55,12 @@ instance of the pattern:
 | `possible` | The match depends on something Bifrost could not settle: an ambiguous receiver or dispatch, name-based resolution, several candidate declarations, or a "may" relation. | Read the code before changing it. It can be a false positive. |
 | `heuristic` | A text-pattern match, such as a secret-like string. | Confirm it the same way. |
 
-A `possible` finding is still reported and still fails the check, because an
-agent that reads the code can usually settle it in seconds. When it is wrong,
-[ignore it](/checks/false-positives/) and later checks leave it out.
+By default a check reports and fails on `definite` findings only: the
+`possible` and `heuristic` ones are counted on the summary line, not listed.
+`slopcop check --certainty all` lists them and lets them fail the check, for a
+reader who wants every candidate; an agent that reads the code can usually
+settle one in seconds. When one is wrong, [ignore it](/checks/false-positives/)
+and later checks leave it out.
 
 ## What a finding looks like
 

@@ -154,17 +154,21 @@ as reverse edits. The two flags cannot be combined, and `--base` stops with an
 error when `REV` shares no history with `HEAD`. On the default branch with nothing unpushed, the
 default base is `HEAD` and the patch is empty.
 
-Flags worth knowing: `--format human|json|sarif` (default `human`), `--fail-on
-never|finding|note|warning|error` (default `finding`, so any new finding fails
-the check; the service alone defaults to `warning`), `--policy PATH` for a
-repository-relative `.rqlp` file (repeatable), and `--no-policy-discovery` to
-drop the `.slopcop/policies/**/*.rqlp` rules that otherwise join automatically.
-`--timeout DURATION` bounds the whole wait for a result (default 10 minutes) and
-`--verbose` prints the resolved request to stderr. `--if-enabled` is the
-automatic path for the static half: it sends nothing when the repository is
-inactive, but local review still runs. `--add-repository`, with `--workspace`,
-adds the repository once the user has approved it (see above); prefer `slopcop
-enable`, which asks the person directly.
+Flags worth knowing: `--format human|json|sarif` (default `human`),
+`--fail-on never|finding|note|warning|error` (default `finding`, so any new
+finding fails the check; the service alone defaults to `warning`),
+`--certainty definite|all` (default `definite`: only findings Bifrost proved
+are listed and can fail the check; `all` adds `possible` and `heuristic`
+ones, which `summary.lessCertainFindings` otherwise counts), `--policy
+PATH` for a repository-relative `.rqlp` file (repeatable), and
+`--no-policy-discovery` to drop the `.slopcop/policies/**/*.rqlp` rules that
+otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
+result (default 10 minutes) and `--verbose` prints the resolved request to
+stderr. `--if-enabled` is the automatic path for the static half: it sends
+nothing when the repository is inactive, but local review still runs.
+`--add-repository`, with `--workspace`, adds the repository once the user has
+approved it (see above); prefer `slopcop enable`, which asks the person
+directly.
 
 When the service reports a newer release, the CLI prints one line on stderr,
 at most once a day, starting `slopcop vX.Y.Z is available`. It never touches
@@ -268,6 +272,8 @@ Finding `certainty`:
 | `definite` | Bifrost proved the pattern or relation holds at this location. Fix it. |
 | `possible` | The match depends on something Bifrost could not settle, such as an ambiguous receiver or dispatch, name-based resolution, several candidate declarations, or a "may" relation. It can be a false positive: read the code before changing it, and tell the user when it is wrong. |
 | `heuristic` | A text-pattern match, such as a secret-like string. Confirm it the same way. |
+
+A check lists `possible` and `heuristic` findings only with `--certainty all`; otherwise `summary.lessCertainFindings` counts them and they do not change the status.
 
 Why a check is `incomplete` (`incomplete[].reason`):
 

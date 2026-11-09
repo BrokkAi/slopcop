@@ -47,6 +47,7 @@ slopcop --root ../repo --base origin/main
 | `--base-exact REV` | exact base commit or revision, used without taking a merge base |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--fail-on never\|finding\|note\|warning\|error` | exit `1` when a new finding is at or above this level (default `finding`) |
+| `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` policy file to evaluate (repeatable) |
 | `--no-policy-discovery` | do not include `.slopcop/policies` rules automatically |
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
