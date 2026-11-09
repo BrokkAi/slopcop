@@ -27,7 +27,7 @@ Support/slopcop/` on macOS, `%AppData%\slopcop\` on Windows.
 
 | File | Purpose |
 | --- | --- |
-| `config.json` | service URL, token, mode (default `both`), and review settings, written owner-only; logout clears the token |
+| `config.json` | service URL, token, mode (unset: `both` where reviewers are configured and not in CI, otherwise `static`), and review settings, written owner-only; logout clears the token |
 | `update-notice` | the time of the last [upgrade notice](/get-started/install/#upgrade-notices), so it prints at most once a day |
 | `skill-backups/<harness>-<time>/` | a copy of a skill with local edits that an update replaced; see [The agent skill](/agents/skill/) |
 

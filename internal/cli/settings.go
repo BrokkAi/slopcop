@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/BrokkAi/slopcop/internal/config"
@@ -15,8 +16,45 @@ const (
 	modeAI     = "ai"
 )
 
-// resolveMode applies flag, config, and default mode precedence.
-func resolveMode(flagMode string, static, ai bool, cfg config.Config) (string, error) {
+// Reasons a check with no mode set runs only the static half.
+const (
+	staticForCI          = "CI"
+	staticForNoReviewers = "no reviewers"
+)
+
+// resolveMode applies flag, config, and default mode precedence. A mode a
+// person chose, by flag or in the config file, is used as is. With none, the
+// check runs both halves only where the review can run: reviewers are
+// configured and it is not a CI job. Otherwise it runs the static half, which
+// is what a check did before the review existed, so a CI job or a machine
+// that never ran slopcop init keeps its exit code. fallback names why.
+func resolveMode(flagMode string, static, ai bool, cfg config.Config, getenv func(string) string) (mode, fallback string, err error) {
+	mode, err = chosenMode(flagMode, static, ai, cfg)
+	if err != nil || mode != "" {
+		return mode, "", err
+	}
+	if inCI(getenv) {
+		return modeStatic, staticForCI, nil
+	}
+	if cfg.Review == nil || len(cfg.Review.Reviewers) == 0 {
+		return modeStatic, staticForNoReviewers, nil
+	}
+	return modeBoth, "", nil
+}
+
+// inCI reports whether the check runs as a CI job. Most CI services set CI;
+// Azure Pipelines sets TF_BUILD and Jenkins sets JENKINS_URL.
+func inCI(getenv func(string) string) bool {
+	switch strings.ToLower(strings.TrimSpace(getenv("CI"))) {
+	case "", "0", "false", "no":
+	default:
+		return true
+	}
+	return strings.TrimSpace(getenv("TF_BUILD")) != "" || strings.TrimSpace(getenv("JENKINS_URL")) != ""
+}
+
+// chosenMode is the mode a flag or the config file names, or "" for none.
+func chosenMode(flagMode string, static, ai bool, cfg config.Config) (string, error) {
 	if static && ai {
 		return "", fmt.Errorf("--static and --ai cannot be used together")
 	}
@@ -41,7 +79,7 @@ func resolveMode(flagMode string, static, ai bool, cfg config.Config) (string, e
 		mode, source = flagMode, "--mode flag"
 	}
 	if mode == "" {
-		return modeBoth, nil
+		return "", nil
 	}
 	switch mode {
 	case modeBoth, modeStatic, modeAI:

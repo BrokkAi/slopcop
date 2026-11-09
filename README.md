@@ -381,7 +381,7 @@ Flags:
 
 | Flag | Meaning |
 | --- | --- |
-| `--mode both\|static\|ai` | choose both halves (default), static only, or review only |
+| `--mode both\|static\|ai` | both halves (the default where reviewers are configured, outside CI), static only (the default otherwise), or review only |
 | `--static`, `--ai` | shortcuts for the corresponding mode |
 | `--intent TEXT` | user request when no session transcript is found |
 | `--review-timeout DURATION` | local review timeout (default `20m`) |

@@ -107,6 +107,11 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("GROK_HOME", "")
 	t.Setenv("GROK_HOOK_EVENT", "")
 	t.Setenv("KIMI_CODE_HOME", "")
+	// A check with no mode set runs only the static half in CI; tests run
+	// the same everywhere.
+	t.Setenv("CI", "")
+	t.Setenv("TF_BUILD", "")
+	t.Setenv("JENKINS_URL", "")
 	// Fail rather than let a test touch the real credential or skill install
 	// if either location ever depends on something not isolated above.
 	configPath, err := config.Path()

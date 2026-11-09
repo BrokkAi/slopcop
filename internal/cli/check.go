@@ -50,6 +50,10 @@ const (
 	// patch, so a clean result is not read as a pass for work never sent.
 	emptyChangeNotice = "slopcop: the working tree matches the base %s, so the patch is empty and no change was checked. " +
 		"To check committed work, pass --base with the branch it targets, for example --base origin/main."
+	// noReviewersNotice is printed when a check with no mode set runs only
+	// the static half because no reviewers are configured.
+	noReviewersNotice = "slopcop: no reviewers are configured, so only the static check ran. " +
+		"Run `slopcop init` in the repository to add the local review, or `slopcop config set mode static` to stop this notice."
 	reviewInterruptedText = "slopcop: local reviewers were stopped before the review finished; run the same check again to retry it."
 	showExistingNotice    = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
@@ -90,9 +94,15 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
-	mode, err := resolveMode(opts.mode, opts.static, opts.ai, cfg)
+	mode, fallback, err := resolveMode(opts.mode, opts.static, opts.ai, cfg, os.Getenv)
 	if err != nil {
 		return err
+	}
+	// A CI job keeps its static-only output as before. Elsewhere, say once
+	// per check why the review did not run and how to turn it on or quiet
+	// this line.
+	if fallback == staticForNoReviewers {
+		fmt.Fprintln(cmd.ErrOrStderr(), noReviewersNotice)
 	}
 	var settings review.Settings
 	if mode != modeStatic {

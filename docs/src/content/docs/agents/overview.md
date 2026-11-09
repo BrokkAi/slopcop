@@ -26,7 +26,8 @@ repository is inactive; local review still runs in default `both` mode.
 ## Local review
 
 By default, `slopcop check` runs the hosted static check and local review
-concurrently. `--mode static` runs only the hosted check; `--mode ai` runs only
+concurrently, once reviewers are configured (`slopcop init` picks them). With
+none configured, or in a CI job, it runs only the static check. `--mode static` runs only the hosted check; `--mode ai` runs only
 review without a SlopCop login, enabled repository, or supported origin.
 `--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
 existing harness logins. The prompt carries the captured diff. Reviewers read repository content,

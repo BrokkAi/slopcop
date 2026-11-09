@@ -35,9 +35,10 @@ from the checkout at a terminal, or once a person has approved it, pass
 `--add-repository --workspace <name>`. See [Repositories](/account/repositories/).
 </Aside>
 
-Use `--mode static` in CI unless the runner has Node.js and existing
-reviewer harness logins. Default `both` mode also runs local review and
-can take minutes. The prompt carries the captured diff. Reviewers read repository content,
+A CI job, one with `CI` set (or `TF_BUILD` or `JENKINS_URL`), runs only the
+static check unless `--mode`, `--ai`, or `mode` in the config file asks for
+the review, so an existing job keeps its exit code. Ask for it only where the
+runner has Node.js and reviewer harness logins: the review can take minutes. The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox.

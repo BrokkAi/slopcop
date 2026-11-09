@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -99,7 +100,19 @@ func configValue(cfg config.Config, key string) (string, error) {
 		if cfg.Mode != "" {
 			return cfg.Mode, nil
 		}
-		return modeBoth, nil
+		// Unset, the mode follows the reviewers and the environment; say
+		// what a check here would run and why.
+		mode, fallback, err := resolveMode("", false, false, cfg, os.Getenv)
+		if err != nil {
+			return "", err
+		}
+		switch fallback {
+		case staticForCI:
+			return mode + " (not set; a CI job runs static)", nil
+		case staticForNoReviewers:
+			return mode + " (not set; no reviewers are configured)", nil
+		}
+		return mode + " (not set)", nil
 	case "review.reviewers":
 		if cfg.Review != nil && len(cfg.Review.Reviewers) > 0 {
 			return strings.Join(cfg.Review.Reviewers, ","), nil

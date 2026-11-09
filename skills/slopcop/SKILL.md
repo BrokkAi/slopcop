@@ -84,7 +84,9 @@ names, whether the workspace has it and whether it is active.
 
 ## Modes and reviewer requirements
 
-Default `both` mode runs the hosted static half and local review concurrently.
+Where reviewers are configured, a check runs the hosted static half and local
+review concurrently (`both` mode). With none configured, or in CI, a check with
+no mode set runs only the static half and, outside CI, says so on stderr.
 `--mode static` or `--static` runs only the hosted half; `--mode ai` or `--ai`
 runs only review. `--if-enabled` skips only an inactive static half. The Stop
 hook and `slopcop enable` remain static-only. A single captured snapshot

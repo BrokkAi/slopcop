@@ -9,7 +9,7 @@ import (
 
 func TestConfigCommandGetSetUnset(t *testing.T) {
 	isolateUserConfig(t)
-	for _, tc := range []struct{ key, want string }{{"mode", "both"}, {"review.reviewers", "(not set)"}, {"review.timeout", "20m0s"}} {
+	for _, tc := range []struct{ key, want string }{{"mode", "static (not set; no reviewers are configured)"}, {"review.reviewers", "(not set)"}, {"review.timeout", "20m0s"}} {
 		code, out, errOut := runCLI(t, "config", "get", tc.key)
 		if code != 0 || strings.TrimSpace(out) != tc.want {
 			t.Fatalf("get %s: code=%d out=%q err=%q", tc.key, code, out, errOut)
