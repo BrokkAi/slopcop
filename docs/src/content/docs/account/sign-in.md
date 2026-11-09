@@ -11,6 +11,10 @@ slopcop login --token "$SLOPCOP_TOKEN"  # existing credential, for CI and agents
 slopcop logout                          # forget the stored credential
 ```
 
+The [one-command install](/get-started/install/#one-command) from Agent setup
+signs in for you: the code in its address is a login approved for you in your
+browser when you made the command, so neither of these is needed.
+
 ## The browser flow
 
 `slopcop login` prints a link that opens the approval page with the code filled

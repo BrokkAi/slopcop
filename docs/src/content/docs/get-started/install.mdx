@@ -7,6 +7,33 @@ sidebar:
 
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
+## One command
+
+On macOS or Linux, one command installs the CLI, signs it in, and adds its
+agent skill and hooks. Sign in at [slopcop.com](https://slopcop.com), open
+**Agent setup**, choose **Create install command**, and run what it gives you:
+
+```console
+curl -fsSL https://slopcop.com/install/<your code> | sh
+```
+
+It takes the latest release, verifies the archive against `checksums.txt`,
+installs `slopcop` to `$HOME/.local/bin` and adds that directory to the shell
+profile, signs in to the workspace you made the command in, and runs
+`slopcop init` to add the [agent skill](/agents/skill/) and the
+[Stop hook](/agents/stop-hook/).
+
+The code in the command is yours: it signs in once and expires after 30
+minutes, so don't share it. Running the same command again later only upgrades
+the CLI and keeps the login the machine already has. `SLOPCOP_VERSION`,
+`SLOPCOP_INSTALL_DIR`, and `SLOPCOP_NO_MODIFY_PATH` override its defaults.
+
+Without a code, `curl -fsSL https://slopcop.com/install | sh` does the same and
+signs in through the [browser device flow](/account/sign-in/) instead. Either
+way, run `slopcop enable` next in each repository you want checked.
+
+## Other channels
+
 npm, PyPI, the release archive, and the shell and PowerShell installers all
 install the same release binary for macOS, Linux, and Windows on x64 and arm64,
 so `slopcop version` reports which release it came from. The Go toolchain can
@@ -128,7 +155,7 @@ Use the channel you installed from:
 | --- | --- |
 | npm | `npm install --global @brokkai/slopcop@latest` |
 | pip | `pip install --upgrade brokk-slopcop` (or `pipx upgrade brokk-slopcop`, `uv tool upgrade brokk-slopcop`) |
-| Shell or PowerShell installer | run the installer again |
+| One command, shell or PowerShell installer | run the installer again |
 | Release archive | download the new archive and replace the binary |
 | Go | `go install github.com/BrokkAi/slopcop/cmd/slopcop@latest` |
 
