@@ -281,32 +281,105 @@ func omittedNotice(response service.Response) string {
 // `Incomplete: acme.slow (timed_out), and 3 more`.
 // A check with a detail says it after the reason:
 // `acme.rule (unsupported: type=taint_evaluation)`.
+// When most named checks share one reason, it is said once, up front, and
+// only the others carry their own:
+// `Incomplete (48 of 50 named: unreliable): acme.a, acme.b, acme.c (timed_out), and 157 more`.
 func incompleteLine(response service.Response) string {
 	if len(response.Incomplete) == 0 {
 		return ""
 	}
+	prefix := "Incomplete: "
+	shared, ok := sharedReason(response.Incomplete)
+	if ok {
+		sharedWhy := printable(why(shared.Reason, shared.Detail))
+		if shared.Policies == len(response.Incomplete) {
+			prefix = fmt.Sprintf("Incomplete (all %d named: %s): ", shared.Policies, sharedWhy)
+		} else {
+			prefix = fmt.Sprintf("Incomplete (%d of %d named: %s): ", shared.Policies, len(response.Incomplete), sharedWhy)
+		}
+	}
 	named := make([]string, 0, len(response.Incomplete)+1)
 	for _, policy := range response.Incomplete {
+		if ok && policy.Reason == shared.Reason && policy.Detail == shared.Detail {
+			named = append(named, printable(policy.PolicyID))
+			continue
+		}
 		named = append(named, fmt.Sprintf("%s (%s)", printable(policy.PolicyID), printable(incompleteWhy(policy))))
 	}
-	if unnamed := response.Summary.IncompletePolicies - len(response.Incomplete); unnamed > 0 {
+	if unnamed := incompleteUnlisted(response); unnamed > 0 {
 		named = append(named, fmt.Sprintf("and %d more", unnamed))
 	}
-	return "Incomplete: " + strings.Join(named, ", ")
+	return prefix + strings.Join(named, ", ")
 }
 
 // incompleteWhy is a check's reason, followed by its detail when it has one.
 func incompleteWhy(policy service.IncompletePolicy) string {
-	if policy.Detail == "" {
-		return policy.Reason
+	return why(policy.Reason, policy.Detail)
+}
+
+func why(reason, detail string) string {
+	if detail == "" {
+		return reason
 	}
-	return policy.Reason + ": " + policy.Detail
+	return reason + ": " + detail
+}
+
+// incompleteUnlisted counts the incomplete checks the service counted but did
+// not name: it names at most 50.
+func incompleteUnlisted(response service.Response) int {
+	return max(response.Summary.IncompletePolicies-len(response.Incomplete), 0)
+}
+
+// incompleteReason is one reason, with its detail, and how many of the named
+// incomplete checks gave it.
+type incompleteReason struct {
+	Reason   string `json:"reason"`
+	Detail   string `json:"detail,omitempty"`
+	Policies int    `json:"policies"`
+}
+
+// incompleteReasons groups the named incomplete checks by reason and detail,
+// most common first, so a run where most checks failed for one cause says it
+// once.
+func incompleteReasons(policies []service.IncompletePolicy) []incompleteReason {
+	type key struct{ reason, detail string }
+	counts := make(map[key]int, len(policies))
+	for _, policy := range policies {
+		counts[key{policy.Reason, policy.Detail}]++
+	}
+	reasons := make([]incompleteReason, 0, len(counts))
+	for k, count := range counts {
+		reasons = append(reasons, incompleteReason{Reason: k.reason, Detail: k.detail, Policies: count})
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		a, b := reasons[i], reasons[j]
+		if a.Policies != b.Policies {
+			return a.Policies > b.Policies
+		}
+		if a.Reason != b.Reason {
+			return a.Reason < b.Reason
+		}
+		return a.Detail < b.Detail
+	})
+	return reasons
+}
+
+// sharedReason is the reason more than half of two or more named incomplete
+// checks share, if there is one.
+func sharedReason(policies []service.IncompletePolicy) (incompleteReason, bool) {
+	if len(policies) < 2 {
+		return incompleteReason{}, false
+	}
+	top := incompleteReasons(policies)[0]
+	return top, top.Policies*2 > len(policies)
 }
 
 // inconclusiveCheck is one inconclusive check as the reports name it.
 type inconclusiveCheck struct {
 	PolicyID string `json:"policyId"`
 	Reason   string `json:"reason"`
+	// Detail is the service's detail for the check, when it sent one.
+	Detail string `json:"detail,omitempty"`
 	// Elsewhere says the check concerns only files the change does not
 	// write. Without it, it may concern the change itself.
 	Elsewhere bool `json:"elsewhere"`
@@ -332,6 +405,7 @@ func inconclusiveChecks(response service.Response) []inconclusiveCheck {
 			checks = append(checks, inconclusiveCheck{
 				PolicyID:  policy.PolicyID,
 				Reason:    policy.Reason,
+				Detail:    policy.Detail,
 				Elsewhere: elsewhere[policy.PolicyID],
 			})
 		}
@@ -377,8 +451,7 @@ func inconclusiveLine(response service.Response) string {
 // the ones past the listed bound.
 func writeInconclusive(out *strings.Builder, response service.Response) {
 	checks := inconclusiveChecks(response)
-	total, _ := inconclusiveCounts(response, checks)
-	if total == 0 {
+	if total, _ := inconclusiveCounts(response, checks); total == 0 {
 		return
 	}
 	out.WriteString("Inconclusive (never fail the check)\n")
@@ -387,9 +460,13 @@ func writeInconclusive(out *strings.Builder, response service.Response) {
 		if check.Elsewhere {
 			where = " (only files the change does not write)"
 		}
-		fmt.Fprintf(out, "  %s%s\n", printable(check.PolicyID), where)
+		detail := ""
+		if check.Detail != "" {
+			detail = " (" + printable(check.Detail) + ")"
+		}
+		fmt.Fprintf(out, "  %s%s%s\n", printable(check.PolicyID), detail, where)
 	}
-	if unnamed := total - len(checks); unnamed > 0 {
+	if unnamed := inconclusiveUnlisted(response, checks); unnamed > 0 {
 		fmt.Fprintf(out, "  and %d more\n", unnamed)
 	}
 }
@@ -419,10 +496,21 @@ type jsonReport struct {
 	Summary    service.Summary            `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
 	Incomplete []service.IncompletePolicy `json:"incomplete"`
+	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
+	// counts but incomplete does not name, because the service names at most
+	// 50. It is set only when the list was cut.
+	IncompleteUnlisted int `json:"incompleteUnlisted,omitempty"`
+	// IncompleteReasons groups the named incomplete checks by reason and
+	// detail, most common first. It is set only when a check did not complete.
+	IncompleteReasons []incompleteReason `json:"incompleteReasons,omitempty"`
 	// Inconclusive names the checks summary.inconclusive counts, up to the
 	// service's bound. They never change the status.
 	Inconclusive []inconclusiveCheck `json:"inconclusive"`
-	Failure      string              `json:"failure,omitempty"`
+	// InconclusiveUnlisted counts the inconclusive checks summary.inconclusive
+	// counts but inconclusive does not name. It is set only when the list was
+	// cut.
+	InconclusiveUnlisted int    `json:"inconclusiveUnlisted,omitempty"`
+	Failure              string `json:"failure,omitempty"`
 	// RepositoryAdded is set only when the check added the repository to
 	// the workspace.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
@@ -433,18 +521,29 @@ type jsonReport struct {
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
+	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
-		Status:          response.Status,
-		BaseCommit:      response.BaseCommit,
-		Summary:         response.Summary,
-		Findings:        listed(response, options),
-		Incomplete:      response.Incomplete,
-		Inconclusive:    inconclusiveChecks(response),
-		Failure:         response.Failure,
-		RepositoryAdded: response.RepositoryAdded,
-		EmptyChange:     options.EmptyChange,
-		SkillUpdated:    options.SkillUpdated,
+		Status:               response.Status,
+		BaseCommit:           response.BaseCommit,
+		Summary:              response.Summary,
+		Findings:             listed(response, options),
+		Incomplete:           response.Incomplete,
+		IncompleteUnlisted:   incompleteUnlisted(response),
+		IncompleteReasons:    incompleteReasons(response.Incomplete),
+		Inconclusive:         inconclusive,
+		InconclusiveUnlisted: inconclusiveUnlisted(response, inconclusive),
+		Failure:              response.Failure,
+		RepositoryAdded:      response.RepositoryAdded,
+		EmptyChange:          options.EmptyChange,
+		SkillUpdated:         options.SkillUpdated,
 	}, "json report")
+}
+
+// inconclusiveUnlisted counts the inconclusive checks the service counted but
+// did not name.
+func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck) int {
+	total, _ := inconclusiveCounts(response, checks)
+	return total - len(checks)
 }
 
 // pendingReport is the document `--format json` prints for a check that was
@@ -792,20 +891,35 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Properties: properties,
 		})
 	}
+	// The service names at most 50 incomplete checks; say how many it left
+	// out, so a consumer does not take the named ones for all of them. A run
+	// that failed has already said why none of them completed.
+	if unnamed := incompleteUnlisted(response); unnamed > 0 && response.Failure == "" {
+		notifications = append(notifications, sarifNotification{
+			Level:      "warning",
+			Message:    sarifMessage{Text: fmt.Sprintf("%d more check(s) did not complete and are not named", unnamed)},
+			Properties: map[string]any{"slopcop.unlisted": unnamed},
+		})
+	}
 	// Inconclusive checks are notes: they never change the status or the
 	// execution's success.
-	for _, check := range inconclusiveChecks(response) {
+	inconclusive := inconclusiveChecks(response)
+	for _, check := range inconclusive {
+		checkProperties := map[string]any{
+			"slopcop.reason":       check.Reason,
+			"slopcop.inconclusive": true,
+			"slopcop.elsewhere":    check.Elsewhere,
+		}
+		if check.Detail != "" {
+			checkProperties["slopcop.detail"] = check.Detail
+		}
 		notifications = append(notifications, sarifNotification{
 			Level: "note",
 			Message: sarifMessage{Text: fmt.Sprintf(
-				"%s could not prove there is nothing more to find (%s)", check.PolicyID, check.Reason,
+				"%s could not prove there is nothing more to find (%s)", check.PolicyID, why(check.Reason, check.Detail),
 			)},
 			Descriptor: &sarifDescriptor{ID: check.PolicyID},
-			Properties: map[string]any{
-				"slopcop.reason":       check.Reason,
-				"slopcop.inconclusive": true,
-				"slopcop.elsewhere":    check.Elsewhere,
-			},
+			Properties: checkProperties,
 		})
 	}
 
@@ -819,6 +933,15 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.inconclusive":          response.Summary.Inconclusive,
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 	}, options)
+	if unnamed := incompleteUnlisted(response); unnamed > 0 {
+		properties["slopcop.incompleteUnlisted"] = unnamed
+	}
+	if reasons := incompleteReasons(response.Incomplete); len(reasons) > 0 {
+		properties["slopcop.incompleteReasons"] = reasons
+	}
+	if unnamed := inconclusiveUnlisted(response, inconclusive); unnamed > 0 {
+		properties["slopcop.inconclusiveUnlisted"] = unnamed
+	}
 
 	return encode(w, sarifLog(sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{

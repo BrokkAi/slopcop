@@ -221,6 +221,12 @@ Why a check is `incomplete` (`incomplete[].reason`):
 | `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `other` | It did not complete for a reason the service does not classify. `detail`, when present, gives Bifrost's completion type and reason codes, such as `type=failed reasons=source_read_failed`. | Report it, with its `detail`. |
 
+`incomplete` names at most fifty checks; `summary.incompletePolicies` counts
+them all, and `incompleteUnlisted` says how many are not named when the list
+was cut. `incompleteReasons` groups the named ones by reason and detail, most
+common first. When most share one reason, report that reason once with the
+count instead of listing every policy id.
+
 Other bounds in the report:
 
 - `summary.inconclusive`: checks that ran but could not prove there is

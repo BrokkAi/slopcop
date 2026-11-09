@@ -67,6 +67,21 @@ prints after the reason and `sarif` carries in `properties["slopcop.detail"]`:
 | `unsupported` | Bifrost could not evaluate the rule here because the analysis it needs is not available for this code. `detail` names what it lacked, such as `type=query_domain domain=execution_scope capability=seed_scope reason=query_source_not_scope_aware`. A service from before this code says `other`. | Report the policy id with its `detail`. Rerunning gives the same answer, so do not loop on it, and do not rewrite working code only to clear it. |
 | `other` | It did not complete for a reason the service does not classify. `detail`, when present, gives Bifrost's completion type and reason codes, such as `type=failed reasons=source_read_failed`. | Report it, with its `detail`. |
 
+The service names at most fifty incomplete rules; `summary.incompletePolicies`
+counts them all. When it cut the list, `json` says how many it left out in
+`incompleteUnlisted`, `sarif` in a `warning` notification and the run's
+`properties["slopcop.incompleteUnlisted"]`, and `human` ends the
+`Incomplete:` line with `and N more`. `json` also groups the named rules by
+reason and detail in `incompleteReasons`, most common first, and `human` says a
+reason that most named rules share once, before the list:
+
+```text
+Incomplete (48 of 50 named: unreliable): bifrost.correctness.a, …, bifrost.correctness.z (timed_out), and 157 more
+```
+
+Many rules with one shared reason usually means one cause in the run, not one
+per rule: report that reason once, with the count.
+
 A report with incomplete checks exits `2` unless a new finding crossed
 `--fail-on`, in which case it exits `1`: the findings come first.
 
@@ -80,10 +95,12 @@ gap, and it never changes the status or the exit code.
 Each report still says where they are, so a reviewer can judge what a `clean`
 result is worth. `human` prints one `Inconclusive:` line with the count and how
 many concern only files the change does not write; `--verbose` names each rule.
-`json` lists them in `inconclusive`, each with `policyId`, `reason`, and
-`elsewhere` (`true` when it concerns only files the change does not write),
-beside the `summary.inconclusive` count. `sarif` adds a `note` notification per
-rule. The service names at most fifty; the counts cover the rest.
+`json` lists them in `inconclusive`, each with `policyId`, `reason`, `detail`
+when the service sent one, and `elsewhere` (`true` when it concerns only files
+the change does not write), beside the `summary.inconclusive` count. `sarif`
+adds a `note` notification per rule. The service names at most fifty; the
+counts cover the rest, and `json`'s `inconclusiveUnlisted` says how many it
+left out when it cut the list.
 
 Do nothing about them: do not rerun, rewrite code, or ignore or disable a
 policy because of them. Name them only when someone asks how much a `clean`

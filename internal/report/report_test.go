@@ -1066,3 +1066,145 @@ func TestSkillUpdateIsInEveryMachineReport(t *testing.T) {
 		}
 	}
 }
+
+// cut is a check whose incomplete list the service cut: it counted 10 and
+// named 4, most of them for one reason.
+func cut() service.Response {
+	return withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		10,
+		service.IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable"},
+		service.IncompletePolicy{PolicyID: "acme.b", Reason: "unreliable"},
+		service.IncompletePolicy{PolicyID: "acme.c", Reason: "timed_out"},
+		service.IncompletePolicy{PolicyID: "acme.d", Reason: "unreliable"},
+	)
+}
+
+func TestHumanSaysASharedIncompleteReasonOnce(t *testing.T) {
+	want := "Incomplete (3 of 4 named: unreliable): acme.a, acme.b, acme.c (timed_out), acme.d, and 6 more\n"
+	if got := render(t, cut(), FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("most = %q", got)
+	}
+
+	all := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		2,
+		service.IncompletePolicy{PolicyID: "acme.x", Reason: "unsupported", Detail: "type=taint\x1b[2J"},
+		service.IncompletePolicy{PolicyID: "acme.y", Reason: "unsupported", Detail: "type=taint\x1b[2J"},
+	)
+	want = "Incomplete (all 2 named: unsupported: type=taint�[2J): acme.x, acme.y\n"
+	if got := render(t, all, FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("all = %q", got)
+	}
+
+	// The same reason with another detail is another reason, and half is not
+	// most.
+	split := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		4,
+		service.IncompletePolicy{PolicyID: "acme.a", Reason: "unsupported", Detail: "type=a"},
+		service.IncompletePolicy{PolicyID: "acme.b", Reason: "unsupported", Detail: "type=b"},
+		service.IncompletePolicy{PolicyID: "acme.c", Reason: "timed_out"},
+		service.IncompletePolicy{PolicyID: "acme.d", Reason: "timed_out"},
+	)
+	want = "Incomplete: acme.a (unsupported: type=a), acme.b (unsupported: type=b), acme.c (timed_out), acme.d (timed_out)\n"
+	if got := render(t, split, FormatHuman); !strings.HasSuffix(got, want) {
+		t.Errorf("split = %q", got)
+	}
+}
+
+func TestJSONSaysTheIncompleteListWasCut(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, cut(), FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["incompleteUnlisted"] != float64(6) {
+		t.Errorf("incompleteUnlisted = %v", document["incompleteUnlisted"])
+	}
+	wantReasons := []any{
+		map[string]any{"reason": "unreliable", "policies": float64(3)},
+		map[string]any{"reason": "timed_out", "policies": float64(1)},
+	}
+	if !reflect.DeepEqual(document["incompleteReasons"], wantReasons) {
+		t.Errorf("incompleteReasons = %v", document["incompleteReasons"])
+	}
+
+	whole := withIncomplete(
+		response(service.StatusClean, "finding", []service.Finding{}),
+		1,
+		service.IncompletePolicy{PolicyID: "acme.x", Reason: "unsupported", Detail: "type=taint"},
+	)
+	document = map[string]any{}
+	if err := json.Unmarshal([]byte(render(t, whole, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if _, ok := document["incompleteUnlisted"]; ok {
+		t.Errorf("a whole list said it was cut: %v", document)
+	}
+	wantReasons = []any{map[string]any{"reason": "unsupported", "detail": "type=taint", "policies": float64(1)}}
+	if !reflect.DeepEqual(document["incompleteReasons"], wantReasons) {
+		t.Errorf("whole incompleteReasons = %v", document["incompleteReasons"])
+	}
+}
+
+func TestSARIFSaysTheIncompleteListWasCut(t *testing.T) {
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, cut(), FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	want := map[string]any{
+		"level":      "warning",
+		"message":    map[string]any{"text": "6 more check(s) did not complete and are not named"},
+		"properties": map[string]any{"slopcop.unlisted": float64(6)},
+	}
+	// The overall notice, the four named checks, then the unnamed ones.
+	if len(notifications) != 6 || !reflect.DeepEqual(notifications[5], want) {
+		t.Errorf("notifications = %v", notifications)
+	}
+	properties := run["properties"].(map[string]any)
+	if properties["slopcop.incompleteUnlisted"] != float64(6) {
+		t.Errorf("properties = %v", properties)
+	}
+	wantReasons := []any{
+		map[string]any{"reason": "unreliable", "policies": float64(3)},
+		map[string]any{"reason": "timed_out", "policies": float64(1)},
+	}
+	if !reflect.DeepEqual(properties["slopcop.incompleteReasons"], wantReasons) {
+		t.Errorf("incompleteReasons = %v", properties["slopcop.incompleteReasons"])
+	}
+}
+
+func TestEveryFormatCarriesAnInconclusiveDetailAndTheCut(t *testing.T) {
+	detailed := unproven()
+	detailed.Inconclusive[0].Detail = "type=failed reasons=source_read_failed"
+
+	if got := renderWith(t, detailed, FormatHuman, Options{Verbose: true}); !strings.Contains(got, "  acme.a (type=failed reasons=source_read_failed)\n") {
+		t.Errorf("verbose human = %q", got)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, detailed, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["inconclusiveUnlisted"] != float64(3) {
+		t.Errorf("inconclusiveUnlisted = %v", document["inconclusiveUnlisted"])
+	}
+	if first := document["inconclusive"].([]any)[0].(map[string]any); first["detail"] != "type=failed reasons=source_read_failed" {
+		t.Errorf("inconclusive detail = %v", first)
+	}
+
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, detailed, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	first := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)[0].(map[string]any)
+	if first["properties"].(map[string]any)["slopcop.detail"] != "type=failed reasons=source_read_failed" {
+		t.Errorf("sarif note = %v", first)
+	}
+	if run["properties"].(map[string]any)["slopcop.inconclusiveUnlisted"] != float64(3) {
+		t.Errorf("properties = %v", run["properties"])
+	}
+}
