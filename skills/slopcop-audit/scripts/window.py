@@ -148,11 +148,13 @@ def plan(args):
                 continue
             for name, part in chunk(mod["name"], members, args.max_lines):
                 windows.append({"name": name, "module": mod["name"],
-                                "description": mod.get("description", ""),
+                                "modules": [{"name": mod["name"],
+                                             "description": mod.get("description", "")}],
                                 "files": [p for p, _ in part],
                                 "lines": sum(l for _, l in part)})
     for name, part in by_directory(unmapped, args.max_lines):
-        windows.append({"name": name, "module": None, "files": [p for p, _ in part],
+        windows.append({"name": name, "module": None, "modules": [],
+                        "files": [p for p, _ in part],
                         "lines": sum(l for _, l in part)})
     # Merge the smallest windows until under the cap, unmapped ones first so
     # mapped modules stay whole.
@@ -174,13 +176,15 @@ def plan(args):
         merged += 1
         same = a["module"] if a["module"] == b["module"] else None
         windows.append({"name": f"{a['name']}+{b['name']}", "module": same,
-                        "description": a.get("description", "") if same else "",
+                        "modules": a["modules"] + [m for m in b["modules"]
+                                                   if m not in a["modules"]],
                         "files": a["files"] + b["files"],
                         "lines": a["lines"] + b["lines"]})
     windows.sort(key=lambda w: w["name"])
     for i, w in enumerate(windows, 1):
         w["slug"] = f"{i:02d}-" + re.sub(r"[^A-Za-z0-9._-]+", "_", w["name"])[:60]
         w["paths"] = w.pop("files")
+        w.pop("module")
     json.dump({"base": git(args.repo, "rev-parse", args.base).decode().strip(),
                "head": git(args.repo, "rev-parse", args.head).decode().strip(),
                "files": len(files), "lines": sum(l for _, l in files),
