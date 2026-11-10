@@ -1470,3 +1470,57 @@ func TestJSONAndSARIFCarryTheExclusions(t *testing.T) {
 		t.Errorf("a tree without [check] carries no exclusions: %v", plain)
 	}
 }
+
+func TestSimilarityCandidatesAndReadinessNotices(t *testing.T) {
+	match := finding("new.go", 3, "info", "slopcop.similarity")
+	match.Certainty = "heuristic"
+	match.RelatedLocations = []service.RelatedLocation{{
+		Path: "old file.go", StartLine: 8, EndLine: 10, Message: "P(combine) = 0.87",
+	}}
+	r := response(service.StatusClean, "finding", []service.Finding{match})
+	r.Checks = []service.CheckNotice{{PolicyID: "slopcop.similarity", Status: "future_status", Message: "Readiness detail."}}
+
+	humanReport := render(t, r, FormatHuman)
+	for _, want := range []string{"Candidate: old file.go:8 — P(combine) = 0.87", "Note: slopcop.similarity (future_status): Readiness detail."} {
+		if !strings.Contains(humanReport, want) {
+			t.Errorf("human report missing %q: %s", want, humanReport)
+		}
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, r, FormatJSON)), &document); err != nil {
+		t.Fatal(err)
+	}
+	findings := document["findings"].([]any)
+	if len(findings) != 1 || findings[0].(map[string]any)["relatedLocations"].([]any)[0].(map[string]any)["message"] != "P(combine) = 0.87" {
+		t.Fatalf("JSON omitted similarity candidate: %v", document)
+	}
+	checks := document["checks"].([]any)
+	if len(checks) != 1 || checks[0].(map[string]any)["status"] != "future_status" {
+		t.Fatalf("JSON omitted notice: %v", document)
+	}
+
+	if err := json.Unmarshal([]byte(render(t, r, FormatSARIF)), &document); err != nil {
+		t.Fatal(err)
+	}
+	run := document["runs"].([]any)[0].(map[string]any)
+	result := run["results"].([]any)[0].(map[string]any)
+	if result["level"] != "note" || result["properties"].(map[string]any)["slopcop.severity"] != "info" {
+		t.Fatalf("SARIF did not preserve info severity: %v", result)
+	}
+	related := result["relatedLocations"].([]any)[0].(map[string]any)
+	physical := related["physicalLocation"].(map[string]any)
+	if physical["artifactLocation"].(map[string]any)["uri"] != "old%20file.go" || related["message"].(map[string]any)["text"] != "P(combine) = 0.87" {
+		t.Fatalf("SARIF candidate was malformed: %v", related)
+	}
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	foundNotice := false
+	for _, value := range notifications {
+		notice := value.(map[string]any)
+		if notice["properties"].(map[string]any)["slopcop.checkStatus"] == "future_status" && notice["level"] == "note" {
+			foundNotice = true
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("SARIF notice missing: %v", notifications)
+	}
+}

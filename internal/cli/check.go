@@ -885,6 +885,9 @@ func resolveSelection(root string, opts *checkOptions) (service.Selection, error
 		files = append(files, relative)
 	}
 	selection.Files = dedupe(files)
+	selection.PolicyIDs = dedupe(opts.policyIDs)
+	selection.Packs = dedupe(opts.policyPacks)
+	selection.Categories = dedupe(opts.policyCategories)
 	return selection, nil
 }
 

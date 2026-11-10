@@ -98,6 +98,7 @@ func (s Selection) IsEmpty() bool {
 // Response is the successful POST /v1/check body, mirrored from
 // CheckResponse. The service answers structure only; the client renders it.
 type Response struct {
+	Checks []CheckNotice `json:"checks"`
 	// CheckID is the check that answered. A service from before it omits it.
 	CheckID    string             `json:"checkId,omitempty"`
 	Status     string             `json:"status"`
@@ -259,6 +260,7 @@ type RunFailure struct {
 // Finding mirrors CheckFinding. Text fields come from the analyzed repository
 // and are hostile.
 type Finding struct {
+	RelatedLocations []RelatedLocation `json:"relatedLocations,omitempty"`
 	// ID names this finding for `slopcop ignore`. A service from before
 	// findings could be ignored omits it.
 	ID        string `json:"id,omitempty"`
@@ -277,6 +279,21 @@ type Finding struct {
 	// ignore` with ID does. A service from before
 	// BrokkAi/bifrost-service#953 omits it.
 	PreviouslyIgnored string `json:"previouslyIgnored,omitempty"`
+}
+
+// RelatedLocation identifies a candidate location reported alongside a finding.
+type RelatedLocation struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"startLine"`
+	EndLine   int    `json:"endLine"`
+	Message   string `json:"message"`
+}
+
+// CheckNotice describes a check's readiness independently of analysis completeness.
+type CheckNotice struct {
+	PolicyID string `json:"policyId"`
+	Status   string `json:"status"`
+	Message  string `json:"message"`
 }
 
 // KnownStatus reports whether this client knows the response status.

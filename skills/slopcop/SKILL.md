@@ -275,6 +275,15 @@ Finding `certainty`:
 
 A check lists `possible` and `heuristic` findings only with `--certainty all`; otherwise `summary.lessCertainFindings` counts them and they do not change the status.
 
+The hosted `slopcop.similarity` check runs by default and reports similar
+existing functions for functions in the change, with candidate paths, lines,
+and a probability. Similarity findings have `info` severity and are always
+shown regardless of `--certainty`; they never gate the check or affect its
+exit code. Readiness notices are notes, not incomplete checks. To select only
+similarity, use `--policy-id slopcop.similarity`. Function source from the
+change is sent to third-party embedding and model providers used by the hosted
+service.
+
 Why a check is `incomplete` (`incomplete[].reason`):
 
 | Term | Meaning | What to do |

@@ -429,12 +429,25 @@ Flags:
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
+| `--policy-id ID` | built-in policy ID (repeatable) |
+| `--policy-pack PACK` | policy pack (repeatable) |
+| `--policy-category CATEGORY` | policy category (repeatable) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's |
 | `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` without sending a check |
 | `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
+
+The hosted `slopcop.similarity` check runs by default. It reports similar
+existing functions for functions in the change, with candidate paths, lines,
+and a probability. Similarity findings have `info` severity, are always shown
+regardless of `--certainty`, and never affect the check's exit code. Check
+readiness notices appear as notes and do not make analysis incomplete. To
+select only similarity, pass `--policy-id slopcop.similarity`.
+
+For this check, function source from the change is sent to third-party
+embedding and model providers used by the hosted service.
 
 ### Modes and local review
 
