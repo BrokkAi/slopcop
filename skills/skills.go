@@ -1,9 +1,10 @@
-// Package skills carries the agent skill the CLI installs.
+// Package skills carries the agent skills the CLI installs.
 package skills
 
 import "embed"
 
-// Files is the skill tree: slopcop/SKILL.md and its harness metadata.
+// Files is the skill tree: one folder per skill, each with its SKILL.md and
+// harness metadata. slopcop checks a change; slopcop-audit audits landed code.
 //
-//go:embed slopcop
+//go:embed slopcop slopcop-audit
 var Files embed.FS

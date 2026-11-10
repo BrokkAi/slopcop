@@ -160,15 +160,18 @@ its version; in a clone, `make install` stamps the version from `git describe`.
 
 ## Set it up in an agent
 
-The binary carries the agent skill that teaches a coding agent how to run
-slopcop, plus an automatic check hook for Claude Code and Codex. Run
-`slopcop init` inside the repository. It installs the skill into the
-repository-local directories below and names what it did:
+The binary carries two agent skills. `slopcop` teaches a coding agent how
+to check a change. `slopcop-audit` audits code that has already landed: it
+splits a commit range into module slices and checks them in parallel with
+hosted checks, then triages the findings into a fix plan. The binary also
+carries an automatic check hook for Claude Code and Codex. Run `slopcop init`
+inside the repository. It installs both skills into the repository-local
+directories below and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `.agents/skills/slopcop/` | Codex and other agents |
-| `.claude/skills/slopcop/` | Claude Code and other agents |
+| `.agents/skills/slopcop/`, `.agents/skills/slopcop-audit/` | Codex and other agents |
+| `.claude/skills/slopcop/`, `.claude/skills/slopcop-audit/` | Claude Code and other agents |
 
 Init adds these paths to `.git/info/exclude`, leaves tracked files alone, and
 removes SlopCop's old user-level skill copies and hooks.

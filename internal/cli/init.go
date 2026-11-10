@@ -22,8 +22,15 @@ import (
 	"github.com/BrokkAi/slopcop/skills"
 )
 
-// skillName is the folder the skill occupies: <skills directory>/slopcop/SKILL.md.
+// skillName is the folder the check skill occupies: <skills directory>/slopcop/SKILL.md.
 const skillName = "slopcop"
+
+// auditSkillName is the folder of the skill that audits landed code by module.
+const auditSkillName = "slopcop-audit"
+
+// bundledSkillNames are the skills this binary carries, each a folder in
+// skills.Files, installed and kept current side by side.
+var bundledSkillNames = []string{skillName, auditSkillName}
 
 // skillFileName is the file every harness looks for inside that folder.
 const skillFileName = "SKILL.md"
@@ -104,33 +111,35 @@ type skillInstall struct {
 // is never rewritten, so local edits survive.
 func installBundledSkill(version string) (skillInstall, error) {
 	var result skillInstall
-	files, err := bundledSkillFiles()
-	if err != nil {
-		return result, err
-	}
 	targets, err := skillTargets()
 	if err != nil {
 		return result, err
 	}
-	for _, root := range targets {
-		dir := filepath.Join(root.dir, skillName)
-		written, err := installSkillAt(root.dir, files, version)
+	for _, name := range bundledSkillNames {
+		files, err := bundledSkillFiles(name)
 		if err != nil {
 			return result, err
 		}
-		if written {
-			result.installed = append(result.installed, dir)
-			continue
+		for _, root := range targets {
+			dir := filepath.Join(root.dir, name)
+			written, err := installSkillAt(root.dir, name, files, version)
+			if err != nil {
+				return result, err
+			}
+			if written {
+				result.installed = append(result.installed, dir)
+				continue
+			}
+			result.present = append(result.present, dir)
 		}
-		result.present = append(result.present, dir)
 	}
 	return result, nil
 }
 
-// installSkillAt writes the bundled skill into a skills directory unless a
-// skill is already there. The boolean reports whether it wrote.
-func installSkillAt(root string, files []skillFile, version string) (bool, error) {
-	dir := filepath.Join(root, skillName)
+// installSkillAt writes the bundled skill name into a skills directory unless
+// a skill is already there. The boolean reports whether it wrote.
+func installSkillAt(root, name string, files []skillFile, version string) (bool, error) {
+	dir := filepath.Join(root, name)
 	if _, err := os.Stat(filepath.Join(dir, skillFileName)); err == nil {
 		return false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
@@ -176,18 +185,30 @@ func syncBundledSkill(repoRoot, version string) ([]report.SkillUpdate, error) {
 	if repoRoot == "" {
 		return updates, nil
 	}
-	files, err := bundledSkillFiles()
-	if err != nil {
-		return updates, err
-	}
 	roots, err := skillRoots()
 	if err != nil {
 		return updates, err
 	}
-	dirs := []string{filepath.Join(repoRoot, ".claude", "skills", skillName), filepath.Join(repoRoot, ".agents", "skills", skillName)}
-	for _, root := range roots {
-		dirs = append(dirs, filepath.Join(root.dir, skillName))
+	for _, name := range bundledSkillNames {
+		files, err := bundledSkillFiles(name)
+		if err != nil {
+			return updates, err
+		}
+		dirs := []string{filepath.Join(repoRoot, ".claude", "skills", name), filepath.Join(repoRoot, ".agents", "skills", name)}
+		for _, root := range roots {
+			dirs = append(dirs, filepath.Join(root.dir, name))
+		}
+		updates, err = syncSkillDirs(updates, repoRoot, dirs, files, version)
+		if err != nil {
+			return updates, err
+		}
 	}
+	return updates, nil
+}
+
+// syncSkillDirs syncs each existing, untracked copy in dirs to files and
+// appends what it wrote to updates.
+func syncSkillDirs(updates []report.SkillUpdate, repoRoot string, dirs []string, files []skillFile, version string) ([]report.SkillUpdate, error) {
 	for _, dir := range dirs {
 		if _, err := os.Stat(filepath.Join(dir, skillFileName)); errors.Is(err, fs.ErrNotExist) {
 			continue
@@ -249,7 +270,7 @@ func syncSkillAndReport(out, errOut io.Writer, repoRoot, version string) []repor
 		fmt.Fprintln(out, skillNotice(update))
 	}
 	if err != nil {
-		fmt.Fprintf(errOut, "slopcop: could not install the slopcop skill: %v\n", err)
+		fmt.Fprintf(errOut, "slopcop: could not install the slopcop skills: %v\n", err)
 	}
 	return updates
 }
@@ -258,15 +279,16 @@ func syncSkillAndReport(out, errOut io.Writer, repoRoot, version string) []repor
 // copy of local edits went, so an agent that loaded the old skill knows to
 // reread it.
 func skillNotice(update report.SkillUpdate) string {
+	name := filepath.Base(update.Dir)
 	if update.From == "" {
-		return fmt.Sprintf("slopcop: installed the slopcop skill at %s", update.Dir)
+		return fmt.Sprintf("slopcop: installed the %s skill at %s", name, update.Dir)
 	}
 	from := update.From
 	if from == skillVersionUnknown {
 		from = "an unrecognised version"
 	}
-	text := fmt.Sprintf("slopcop: updated the slopcop skill at %s from %s to %s (changed: %s). Reread it if you loaded the old one.",
-		update.Dir, from, update.To, strings.Join(update.Changed, ", "))
+	text := fmt.Sprintf("slopcop: updated the %s skill at %s from %s to %s (changed: %s). Reread it if you loaded the old one.",
+		name, update.Dir, from, update.To, strings.Join(update.Changed, ", "))
 	if releaseTag.MatchString(update.To) {
 		text += " Release notes: " + releaseNotesURL + update.To
 	}
@@ -283,21 +305,21 @@ type skillFile struct {
 	data     []byte
 }
 
-// bundledSkillFiles is the skill compiled into this binary.
-func bundledSkillFiles() ([]skillFile, error) {
+// bundledSkillFiles is the skill name as compiled into this binary.
+func bundledSkillFiles(name string) ([]skillFile, error) {
 	var files []skillFile
-	err := fs.WalkDir(skills.Files, skillName, func(name string, entry fs.DirEntry, err error) error {
+	err := fs.WalkDir(skills.Files, name, func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		if entry.IsDir() {
 			return nil
 		}
-		data, err := skills.Files.ReadFile(name)
+		data, err := skills.Files.ReadFile(path)
 		if err != nil {
 			return err
 		}
-		relative, err := filepath.Rel(skillName, filepath.FromSlash(name))
+		relative, err := filepath.Rel(name, filepath.FromSlash(path))
 		if err != nil {
 			return err
 		}
@@ -305,7 +327,7 @@ func bundledSkillFiles() ([]skillFile, error) {
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("read the bundled skill: %w", err)
+		return nil, fmt.Errorf("read the bundled %s skill: %w", name, err)
 	}
 	return files, nil
 }
@@ -497,10 +519,6 @@ Claude Code and Codex hooks and SlopCop skills are removed, except that
 		}
 		var excluded []string
 		if !noSkill {
-			files, err := bundledSkillFiles()
-			if err != nil {
-				return err
-			}
 			targets := []string{filepath.Join(repo, ".agents", "skills")}
 			home, _ := os.UserHomeDir()
 			claude := os.Getenv("CLAUDE_CONFIG_DIR")
@@ -510,20 +528,26 @@ Claude Code and Codex hooks and SlopCop skills are removed, except that
 			if isDirectory(claude) {
 				targets = append(targets, filepath.Join(repo, ".claude", "skills"))
 			}
-			for _, target := range targets {
-				dir := filepath.Join(target, skillName)
-				if skip(dir) {
-					continue
-				}
-				written, err := installSkillAt(target, files, version)
+			for _, name := range bundledSkillNames {
+				files, err := bundledSkillFiles(name)
 				if err != nil {
 					return err
 				}
-				if written {
-					fmt.Fprintf(out, "slopcop: installed the slopcop skill at %s\n", dir)
+				for _, target := range targets {
+					dir := filepath.Join(target, name)
+					if skip(dir) {
+						continue
+					}
+					written, err := installSkillAt(target, name, files, version)
+					if err != nil {
+						return err
+					}
+					if written {
+						fmt.Fprintf(out, "slopcop: installed the %s skill at %s\n", name, dir)
+					}
+					rel, _ := filepath.Rel(repo, dir)
+					excluded = append(excluded, "/"+filepath.ToSlash(rel)+"/")
 				}
-				rel, _ := filepath.Rel(repo, dir)
-				excluded = append(excluded, "/"+filepath.ToSlash(rel)+"/")
 			}
 		}
 		if !noHooks {

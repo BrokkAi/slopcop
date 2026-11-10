@@ -1,0 +1,4 @@
+interface:
+  display_name: "SlopCop audit"
+  short_description: "Audit landed code by module with hosted checks"
+  default_prompt: "Use $slopcop-audit to audit what landed on the default branch since the last audit and triage the findings into a fix plan."
