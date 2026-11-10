@@ -8,7 +8,6 @@ const { title = entry.data.title, tagline, actions = [] } = entry.data.hero ?? {
 
 <div class="sc-hero">
   <div class="sc-hero__copy">
-    <p class="sc-eyebrow">SlopCop documentation</p>
     <h1 id="_top" data-page-title set:html={title} />
     {tagline && <p class="sc-hero__tagline" set:html={tagline} />}
     {
@@ -28,7 +27,7 @@ const { title = entry.data.title, tagline, actions = [] } = entry.data.hero ?? {
     <figcaption data-os="generic">
       <span class="sc-wc sc-wc--mac" aria-hidden="true"><i class="close"></i><i class="min"></i><i class="max"></i></span>
       <span class="sc-wc sc-wc--generic" aria-hidden="true"><i></i><i></i><i></i></span>
-      <b>terminal</b>
+      <b>check report</b>
       <span class="sc-wc sc-wc--windows" aria-hidden="true">
         <i class="min"><svg viewBox="0 0 10 10"><path d="M0 5h10" /></svg></i>
         <i class="max"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" /></svg></i>
@@ -52,6 +51,7 @@ const { title = entry.data.title, tagline, actions = [] } = entry.data.hero ?? {
 Analysis complete
 <i>$</i> echo $?
 1</code></pre>
+    <p class="sc-hero__terminal-foot">Static analysis · proven data flows · read-only</p>
   </figure>
 </div>
 
@@ -74,16 +74,17 @@ Analysis complete
       grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
       gap: clamp(1.5rem, 4vw, 4rem);
       align-items: center;
-      padding-block: clamp(1rem, 4vw, 3rem) 1rem;
+      padding-block: clamp(1.5rem, 6vw, 5rem) clamp(1rem, 3vw, 2.5rem);
     }
     .sc-hero h1 {
-      font-size: clamp(2.4rem, 5vw, 3.9rem);
+      font-size: clamp(2.6rem, 5.5vw, 4.25rem);
       line-height: 1.02;
       letter-spacing: -0.03em;
       font-weight: 800;
       color: var(--sc-text);
       margin: 0;
     }
+    .sc-hero h1 :global(span) { display: block; color: var(--sc-accent); }
     .sc-hero__tagline { font-size: clamp(1.05rem, 1.6vw, 1.25rem); line-height: 1.55; color: var(--sl-color-gray-2); margin: 1.25rem 0 0; max-width: 46ch; }
     .sc-hero__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
     .sc-hero__actions :global(.sl-link-button) { border-radius: 0; clip-path: var(--sc-chamfer-sm); font-weight: 650; }
@@ -137,11 +138,22 @@ Analysis complete
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
+    .sc-hero__terminal-foot {
+      margin: 0;
+      padding: 0.6rem 1.1rem;
+      border-top: 1px solid var(--sc-line-soft);
+      background: var(--sc-surface);
+      font-family: var(--sc-font-mono);
+      font-size: 0.625rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--sc-text-3);
+    }
     :root[data-theme='light'] .sc-hero__terminal pre { color: #2a2b2a; }
     .sc-hero__terminal pre i { font-style: normal; color: var(--sc-text-3); }
     .sc-hero__terminal pre em { font-style: normal; color: var(--sc-text); font-weight: 700; }
     .sc-hero__terminal pre u { text-decoration: none; color: var(--sc-accent-text); }
-    @media (max-width: 64rem) {
+    @media (max-width: 50rem) {
       .sc-hero { grid-template-columns: 1fr; }
     }
   }
