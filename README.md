@@ -29,6 +29,30 @@ was skipped.
 
 ## Install
 
+### One command
+
+On macOS or Linux, one command installs the CLI, signs it in, and adds its
+agent skill and hooks. Sign in at <https://slopcop.com>, open **Agent setup**,
+choose **Create install command**, and run what it gives you:
+
+```console
+curl -fsSL https://slopcop.com/install/<your code> | sh
+```
+
+It takes the latest release, verifies the archive against `checksums.txt`,
+installs `slopcop` to `$HOME/.local/bin` and adds that directory to the shell
+profile, signs in to the workspace you made the command in, and runs
+`slopcop init`. The code is yours: it signs in once and expires after 30
+minutes, so don't share the command. Running it again later only upgrades the
+CLI, and keeps the login the machine has. `SLOPCOP_VERSION`,
+`SLOPCOP_INSTALL_DIR`, and `SLOPCOP_NO_MODIFY_PATH` override its defaults.
+
+Without a code, `curl -fsSL https://slopcop.com/install | sh` does the same and
+signs in through the browser device flow instead (see [Sign in](#sign-in)).
+Then run `slopcop enable` in each repository you want checked.
+
+### Other channels
+
 npm, PyPI, the release archive, and the shell and PowerShell installers all
 install the same release binary for macOS, Linux, and Windows on x64 and
 arm64, so `slopcop version` reports which release it came from. The Go
@@ -36,6 +60,7 @@ toolchain can build that binary from source instead.
 
 | Channel | Platforms | Needs |
 | --- | --- | --- |
+| [One command](#one-command) | macOS, Linux | curl, a slopcop.com account |
 | [npm](#npm) | macOS, Linux, Windows | Node 22 or newer |
 | [PyPI](#pypi) | macOS, Linux, Windows | Python 3.9 or newer |
 | [Release archive](#release-archive) | macOS, Linux, Windows | nothing |
@@ -271,6 +296,9 @@ Users then run `slopcop init --no-hooks` to install only the skill. See
 slopcop login                           # browser device flow
 slopcop login --token "$SLOPCOP_TOKEN"  # existing credential, for CI and agents
 ```
+
+The [one-command install](#one-command) signs in for you: its code is a login
+already approved in your browser, so it needs neither.
 
 The browser flow prints a link that opens the approval page with the code
 filled in, plus the page and code to type in instead, and stores the token once
