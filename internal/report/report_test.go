@@ -1363,3 +1363,110 @@ func TestSARIFNotesEachRunFailure(t *testing.T) {
 		t.Errorf("properties = %v", run["properties"])
 	}
 }
+
+func excluded(only bool) service.Response {
+	r := response(service.StatusClean, "finding", []service.Finding{})
+	r.Summary.ExcludedFiles = 1
+	r.Summary.ExcludedPairs = 2
+	r.Summary.OnlyExcluded = only
+	r.Exclusions = &service.Exclusions{
+		Config: ".slopcop/config.toml",
+		Scopes: []service.ExclusionScope{
+			{Paths: []string{"vendor/**"}, AllRules: true, Files: []string{"vendor/a.js"}, FileCount: 1},
+			{
+				Paths:        []string{"fixtures/**"},
+				RulePatterns: []string{"bifrost.java.*", "bifrost.renamed.rule"},
+				Rules:        []string{"bifrost.java.x"},
+				RuleCount:    1,
+				Reason:       "Pinned\x1b fixtures",
+				Files:        []string{"fixtures/A.java", "fixtures/B.java"},
+				FileCount:    3,
+				Pairs:        3,
+				NotRun:       []string{"bifrost.java.x"},
+			},
+		},
+		Warnings:      []service.ExclusionWarning{{Kind: "unmatched_rule", Rule: "bifrost.renamed.rule"}},
+		ExcludedFiles: 1,
+		ExcludedPairs: 2,
+		OnlyExcluded:  only,
+	}
+	return r
+}
+
+func TestHumanListsExclusionsAndNeverCallsAnExcludedChangeClean(t *testing.T) {
+	got := render(t, excluded(true), FormatHuman)
+	want := "Nothing checked: every changed file is excluded by .slopcop/config.toml | Analysis complete\n" +
+		"Excluded by .slopcop/config.toml: 1 changed file(s) for every rule, 2 (file, rule) pair(s) for named rules\n" +
+		"  vendor/** for every rule: 1 changed file(s)\n" +
+		"  fixtures/** for bifrost.java.*, bifrost.renamed.rule: 3 changed file(s) (Pinned\uFFFD fixtures)\n" +
+		"Warning: [check] rule bifrost.renamed.rule matches no selected policy, so it excludes nothing\n" +
+		"  --verbose lists the files and rules each one resolved to.\n"
+	if got != want {
+		t.Errorf("only excluded = %q", got)
+	}
+	got = renderWith(t, excluded(false), FormatHuman, Options{Verbose: true})
+	for _, want := range []string{
+		"No new findings | Analysis complete\n",
+		"  vendor/** for every rule: 1 changed file(s)\n    Files: vendor/a.js\n",
+		"    Rules: bifrost.java.x\n",
+		"    Not run (excluded on every changed file): bifrost.java.x\n",
+		"    Files: fixtures/A.java, fixtures/B.java and 1 more\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verbose lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "--verbose lists") {
+		t.Errorf("verbose still points at --verbose:\n%s", got)
+	}
+	if clean := render(t, response(service.StatusClean, "finding", []service.Finding{}), FormatHuman); strings.Contains(clean, "Excluded") {
+		t.Errorf("a tree without [check] says nothing of it: %q", clean)
+	}
+}
+
+func TestJSONAndSARIFCarryTheExclusions(t *testing.T) {
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, excluded(true), FormatJSON)), &document); err != nil {
+		t.Fatal(err)
+	}
+	summary := document["summary"].(map[string]any)
+	if summary["onlyExcluded"] != true || summary["excludedFiles"] != float64(1) || summary["excludedPairs"] != float64(2) {
+		t.Errorf("summary = %v", summary)
+	}
+	exclusions := document["exclusions"].(map[string]any)
+	if scopes := exclusions["scopes"].([]any); len(scopes) != 2 || scopes[1].(map[string]any)["reason"] != "Pinned\x1b fixtures" {
+		t.Errorf("exclusions = %v", exclusions)
+	}
+
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, excluded(true), FormatSARIF)), &log); err != nil {
+		t.Fatal(err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	properties := run["properties"].(map[string]any)
+	if properties["slopcop.onlyExcluded"] != true || properties["slopcop.exclusions"] == nil {
+		t.Errorf("properties = %v", properties)
+	}
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	var texts []string
+	for _, notification := range notifications {
+		texts = append(texts, notification.(map[string]any)["message"].(map[string]any)["text"].(string))
+	}
+	joined := strings.Join(texts, "\n")
+	for _, want := range []string{
+		"[check] rule bifrost.renamed.rule matches no selected policy",
+		"Nothing checked: every changed file is excluded by .slopcop/config.toml",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("notifications lack %q: %s", want, joined)
+		}
+	}
+
+	var plain map[string]any
+	if err := json.Unmarshal([]byte(render(t, response(service.StatusClean, "finding", []service.Finding{}), FormatJSON)), &plain); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := plain["exclusions"]; ok {
+		t.Errorf("a tree without [check] carries no exclusions: %v", plain)
+	}
+}

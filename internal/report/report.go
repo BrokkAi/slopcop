@@ -43,7 +43,9 @@ type Options struct {
 	// to the CLI's note on stderr.
 	EmptyChange bool
 	// Verbose lists the inconclusive checks in the human format, which
-	// otherwise only counts them. The machine formats always list them.
+	// otherwise only counts them, and the files and rules each
+	// .slopcop/config.toml exclusion resolved to. The machine formats always
+	// list them.
 	Verbose bool
 	// SkillUpdated lists the skills directories whose slopcop skill this run
 	// installed or replaced, so an agent knows to reread its instructions.
@@ -169,7 +171,87 @@ func human(response service.Response, options Options) string {
 		out.WriteString(line)
 		out.WriteString("\n")
 	}
+	writeExclusions(&out, response.Exclusions, options.Verbose)
 	return out.String()
+}
+
+// onlyExcluded says .slopcop/config.toml [check] left the change nothing to
+// check, so its clean status means nothing ran.
+func onlyExcluded(response service.Response) bool {
+	return response.Summary.OnlyExcluded ||
+		(response.Exclusions != nil && response.Exclusions.OnlyExcluded && response.Status == service.StatusClean)
+}
+
+// writeExclusions lists what .slopcop/config.toml [check] excluded, each
+// scope with its reason, and warns about every rule that matched nothing.
+// Verbose adds the changed files and rules each scope resolved to. An
+// exclusion is never silent, so the scopes are listed either way.
+func writeExclusions(out *strings.Builder, exclusions *service.Exclusions, verbose bool) {
+	if exclusions == nil {
+		return
+	}
+	fmt.Fprintf(
+		out,
+		"Excluded by %s: %d changed file(s) for every rule, %d (file, rule) pair(s) for named rules\n",
+		printable(exclusions.Config), exclusions.ExcludedFiles, exclusions.ExcludedPairs,
+	)
+	for _, scope := range exclusions.Scopes {
+		rules := "every rule"
+		if !scope.AllRules {
+			rules = printableList(scope.RulePatterns)
+		}
+		fmt.Fprintf(out, "  %s for %s: %d changed file(s)", printableList(scope.Paths), rules, scope.FileCount)
+		if scope.Reason != "" {
+			fmt.Fprintf(out, " (%s)", printable(scope.Reason))
+		}
+		out.WriteString("\n")
+		if !verbose {
+			continue
+		}
+		if !scope.AllRules {
+			fmt.Fprintf(out, "    Rules: %s%s\n", valueOrNone(printableList(scope.Rules)), more(scope.RuleCount, len(scope.Rules)))
+			if len(scope.NotRun) > 0 {
+				fmt.Fprintf(out, "    Not run (excluded on every changed file): %s\n", printableList(scope.NotRun))
+			}
+		}
+		fmt.Fprintf(out, "    Files: %s%s\n", valueOrNone(printableList(scope.Files)), more(scope.FileCount, len(scope.Files)))
+	}
+	for _, warning := range exclusions.Warnings {
+		fmt.Fprintf(
+			out,
+			"Warning: [check] rule %s matches no selected policy, so it excludes nothing\n",
+			printable(warning.Rule),
+		)
+	}
+	if exclusions.ExcludedFindings > 0 {
+		fmt.Fprintf(out, "  %d finding(s) on excluded files were dropped\n", exclusions.ExcludedFindings)
+	}
+	if !verbose && len(exclusions.Scopes) > 0 {
+		out.WriteString("  --verbose lists the files and rules each one resolved to.\n")
+	}
+}
+
+func printableList(values []string) string {
+	shown := make([]string, len(values))
+	for i, value := range values {
+		shown[i] = printable(value)
+	}
+	return strings.Join(shown, ", ")
+}
+
+func valueOrNone(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
+}
+
+// more says how many a list left out, such as ` and 3 more`.
+func more(total, listed int) string {
+	if total > listed {
+		return fmt.Sprintf(" and %d more", total-listed)
+	}
+	return ""
 }
 
 // Findings lists findings the way a human report lists its new ones, for a
@@ -230,6 +312,9 @@ func previouslyIgnoredLine(finding service.Finding) string {
 func summaryLine(response service.Response) string {
 	fresh, existing := split(response.Findings)
 	scope := "No new findings"
+	if onlyExcluded(response) {
+		scope = "Nothing checked: every changed file is excluded by .slopcop/config.toml"
+	}
 	switch len(fresh) {
 	case 0:
 	case 1:
@@ -563,6 +648,9 @@ type jsonReport struct {
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
 	// EmptyChange is set only when the patch was empty.
 	EmptyChange bool `json:"emptyChange,omitempty"`
+	// Exclusions is what .slopcop/config.toml [check] excluded, as the
+	// service sent it. It is set only when the checked tree has [check].
+	Exclusions *service.Exclusions `json:"exclusions,omitempty"`
 	// SkillUpdated is set only when this run wrote the skill.
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
@@ -587,6 +675,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		RepositoryAdded:      response.RepositoryAdded,
 		EmptyChange:          options.EmptyChange,
 		SkillUpdated:         options.SkillUpdated,
+		Exclusions:           response.Exclusions,
 	}, "json report")
 }
 
@@ -1033,6 +1122,27 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	}
 	if unnamed := inconclusiveUnlisted(response, inconclusive); unnamed > 0 {
 		properties["slopcop.inconclusiveUnlisted"] = unnamed
+	}
+	// What .slopcop/config.toml [check] excluded is never silent: the run
+	// carries it, and each rule that matched nothing is a warning.
+	if exclusions := response.Exclusions; exclusions != nil {
+		properties["slopcop.exclusions"] = exclusions
+		properties["slopcop.onlyExcluded"] = onlyExcluded(response)
+		for _, warning := range exclusions.Warnings {
+			notifications = append(notifications, sarifNotification{
+				Level: "warning",
+				Message: sarifMessage{Text: fmt.Sprintf(
+					"[check] rule %s matches no selected policy, so it excludes nothing", warning.Rule,
+				)},
+				Properties: map[string]any{"slopcop.exclusionWarning": warning.Kind},
+			})
+		}
+		if onlyExcluded(response) {
+			notifications = append(notifications, sarifNotification{
+				Level:   "note",
+				Message: sarifMessage{Text: "Nothing checked: every changed file is excluded by .slopcop/config.toml"},
+			})
+		}
 	}
 
 	return encode(w, sarifLogWithReview(options, sarifRun{

@@ -111,7 +111,7 @@ work passed.
 | `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` and send nothing. For automatic checks; see [Repositories](/account/repositories/) |
 | `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
 | `--service URL` | the check service (also `SLOPCOP_SERVICE`) |
-| `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
+| `--verbose` | print the resolved request to stderr, and in `human` name each inconclusive check and the files and rules each [`.slopcop/config.toml` exclusion](/checks/false-positives/#exclude-paths-from-checks) resolved to |
 
 ### The threshold
 
