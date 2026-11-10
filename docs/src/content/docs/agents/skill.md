@@ -1,6 +1,6 @@
 ---
 title: The agent skill
-description: "The bundled SlopCop skill, its repository install, updates to existing copies, and local edit backups."
+description: "The bundled SlopCop skills, their repository install, updates to existing copies, and local edit backups."
 sidebar:
   order: 6
 ---
@@ -12,6 +12,26 @@ file at
 [`skills/slopcop/SKILL.md`](https://github.com/BrokkAi/slopcop/blob/master/skills/slopcop/SKILL.md)
 in the repository, with a small `agents/openai.yaml` beside it that gives Codex
 the skill's display name and default prompt.
+
+The binary also carries a second skill, `slopcop-audit`, at
+[`skills/slopcop-audit/SKILL.md`](https://github.com/BrokkAi/slopcop/blob/master/skills/slopcop-audit/SKILL.md).
+It audits code that has already landed, such as everything merged to the
+default branch since the last audit:
+
+- It splits the commit range into slices along a module map, or along
+  directories when there is none. The agent proposes a map when none exists,
+  and you can check it in as `.slopcop/audit-modules.json`.
+- Each slice is a worktree at the range's base commit with only that module's
+  part of the range applied. `slopcop check --base-exact` checks each slice.
+  Up to four slices run at once, each in its own subagent.
+- Each finding is triaged as real, with a failure scenario and a fix sketch;
+  a false positive; or unsure.
+- The agent ignores only false positives it has read and confirmed, never a
+  definite security finding. It writes a report with a fix plan under
+  `.git/slopcop-audit/`.
+
+It runs unattended, so it suits a nightly scheduled agent. Every slice is one
+hosted check, billed like any other, and the audit never fixes code itself.
 
 ## Local review
 
@@ -38,13 +58,13 @@ is not enabled.
 
 ## Where it goes
 
-Run `slopcop init` inside each repository. It installs the skill in these
+Run `slopcop init` inside each repository. It installs both skills in these
 repository-local directories and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `.agents/skills/slopcop/` | Codex and other agents |
-| `.claude/skills/slopcop/` | Claude Code and other agents |
+| `.agents/skills/slopcop/`, `.agents/skills/slopcop-audit/` | Codex and other agents |
+| `.claude/skills/slopcop/`, `.claude/skills/slopcop-audit/` | Claude Code and other agents |
 
 Init adds these paths to `.git/info/exclude`, leaves tracked targets alone,
 and removes old user-level SlopCop skill copies. An existing skill is left

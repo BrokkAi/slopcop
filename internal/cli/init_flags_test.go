@@ -17,11 +17,11 @@ func TestInitNoHooksNoSkillKeepUserLevelInstalls(t *testing.T) {
 	if _, err := agenthooks.Install(); err != nil {
 		t.Fatal(err)
 	}
-	files, err := bundledSkillFiles()
+	files, err := bundledSkillFiles(skillName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := installSkillAt(filepath.Join(home, ".claude", "skills"), files, "test"); err != nil {
+	if _, err := installSkillAt(filepath.Join(home, ".claude", "skills"), skillName, files, "test"); err != nil {
 		t.Fatal(err)
 	}
 	settings := filepath.Join(home, ".claude", "settings.json")

@@ -72,9 +72,14 @@ func TestInitRepositoryFilesAndExclude(t *testing.T) {
 		path = filepath.Join(repo, path)
 	}
 	data, _ = os.ReadFile(path)
-	for _, p := range []string{"/.agents/skills/slopcop/", "/.claude/skills/slopcop/", "/.claude/settings.local.json", "/.codex/hooks.json"} {
+	for _, p := range []string{"/.agents/skills/slopcop/", "/.claude/skills/slopcop/", "/.agents/skills/slopcop-audit/", "/.claude/skills/slopcop-audit/", "/.claude/settings.local.json", "/.codex/hooks.json"} {
 		if strings.Count(string(data), p) != 1 {
 			t.Errorf("exclude %s: %s", p, data)
+		}
+	}
+	for _, p := range []string{".agents/skills/slopcop-audit/SKILL.md", ".claude/skills/slopcop-audit/scripts/window.py"} {
+		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
+			t.Errorf("audit skill: %v", err)
 		}
 	}
 }
@@ -174,6 +179,30 @@ func TestBundledSkillIsDiscoverable(t *testing.T) {
 	}
 }
 
+// The audit skill ships its planner script and the frontmatter a harness
+// reads to find it.
+func TestBundledAuditSkillIsDiscoverable(t *testing.T) {
+	files, err := bundledSkillFiles(auditSkillName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, file := range files {
+		got[filepath.ToSlash(file.relative)] = string(file.data)
+	}
+	for _, want := range []string{"SKILL.md", "agents/openai.yaml", "scripts/window.py"} {
+		if _, ok := got[want]; !ok {
+			t.Errorf("the audit skill lacks %s", want)
+		}
+	}
+	frontmatter := strings.SplitN(got["SKILL.md"], "---\n", 3)[1]
+	for _, want := range []string{"name: slopcop-audit\n", "description: "} {
+		if !strings.Contains(frontmatter, want) {
+			t.Errorf("frontmatter %q lacks %q", frontmatter, want)
+		}
+	}
+}
+
 func TestSkillOriginKnowsReleasesBeforeTheStamp(t *testing.T) {
 	v009 := map[string]string{
 		"SKILL.md":           "506acaa83b67693f56aff616f32d0224091d5602462e1b330166ade1840bd7f8",
@@ -192,7 +221,7 @@ func TestSkillOriginKnowsReleasesBeforeTheStamp(t *testing.T) {
 // stamp brought up to date, without a notice.
 func TestMatchingSkillOnlyGetsANewStamp(t *testing.T) {
 	isolateAgentHome(t)
-	files, err := bundledSkillFiles()
+	files, err := bundledSkillFiles(skillName)
 	if err != nil {
 		t.Fatal(err)
 	}
