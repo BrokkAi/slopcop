@@ -70,6 +70,46 @@ Lost the id? `slopcop ignored` lists the findings your workspace ignored in
 this repository, newest first, with each one's id, location, rule, and when and
 by whom it was ignored. It shows 25 at a time; pass `--page 2` for the next.
 
+## Exclude paths from checks
+
+Some files are wrong on purpose, such as test inputs whose findings are their
+expected output. Rather than ignore each finding, keep their paths out of
+checks with a `[check]` section in `.slopcop/config.toml`, committed at the
+root of the repository:
+
+```toml
+[check]
+# Paths no rule checks (gitignore syntax).
+exclude = ["vendor/**"]
+
+# Paths only the listed rules skip: exact rule ids, or a prefix ending in `*`.
+[[check.exclude_rules]]
+paths = ["fixtures/policy/**"]
+rules = ["bifrost.java-codeql-quality.undocumented-*"]
+reason = "Policy fixtures are deliberately minimal test inputs."
+```
+
+The service reads the file from the code it checks, so `slopcop check`, the
+MCP `check` tool and pull request checks all use the same scope, and a change
+to it is reviewed like any other code. Unlike `.bifrostignore`, it changes only
+what SlopCop checks, never what Bifrost analyzes elsewhere. `.bifrostignore`
+still applies first; `[check]` only removes more.
+
+- `exclude` keeps the files it matches from every rule.
+- An `exclude_rules` entry drops only its rules' findings on its paths. Every
+  other rule keeps checking those files.
+- An exclusion is never silent. Every report lists each scope with its reason,
+  `--verbose` adds the changed files and rules each one resolved to, and the
+  summary counts the excluded files and `(file, rule)` pairs. In `json` they
+  are `exclusions` and `summary.excludedFiles`/`excludedPairs`; in `sarif`,
+  `properties["slopcop.exclusions"]`.
+- A rule that matches no rule the check runs, such as one that was renamed, is
+  a warning.
+- A change that touches only excluded files says `Nothing checked` instead of
+  `No new findings` (`summary.onlyExcluded`); it still exits `0`.
+- A `[check]` the service cannot read fails the check with
+  `check_config_invalid` rather than check nothing.
+
 ## Alternatives
 
 - **Pre-existing findings** need no ignore: they never fail a check and are not
