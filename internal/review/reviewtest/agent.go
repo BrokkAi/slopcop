@@ -31,7 +31,7 @@ func options(model, mode string) []acp.SessionConfigOption {
 	for _, value := range strings.Split(model, ",") {
 		m = append(m, acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId(value), Name: value})
 	}
-	err := acp.SessionConfigSelectOptionsUngrouped{{Value: "high", Name: "High"}}
+	err := acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}, {Value: "medium", Name: "Medium"}, {Value: "high", Name: "High"}}
 	if mode == "no-high" {
 		err = acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
 	}

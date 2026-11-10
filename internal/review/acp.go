@@ -95,7 +95,7 @@ func scrubEnvironment(env []string) []string {
 // reviewerEnvironment gives dsh an absolute data directory beside review logs.
 func reviewerEnvironment(f Family, root, data string, env []string) []string {
 	env = scrubEnvironment(env)
-	if f != Flash {
+	if AdapterName(f) != "dsh" {
 		return env
 	}
 	for i, v := range env {
@@ -209,7 +209,7 @@ func (s *runner) stop() {
 	<-s.conn.Done()
 	s.closeFiles()
 }
-func (s *runner) prepare(root string) error {
+func (s *runner) prepare(root, wantedEffort string) error {
 	session, err := s.conn.NewSession(s.ctx, acp.NewSessionRequest{Cwd: root, McpServers: []acp.McpServer{}})
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
@@ -230,23 +230,17 @@ func (s *runner) prepare(root string) error {
 		effortOptions = session.ConfigOptions
 	}
 	effort := configOption(effortOptions, "effort")
-	if effort == nil {
-		return fmt.Errorf("no effort option")
+	used := bestEffort(wantedEffort, choices(effort))
+	if used != wantedEffort {
+		fmt.Fprintf(s.stderr, "reviewer effort %s unavailable; using %q\n", wantedEffort, used)
 	}
-	found := false
-	for _, v := range choices(effort) {
-		if string(v.Value) == "high" {
-			found = true
+	if used != "" {
+		response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: effort.Id, Value: acp.SessionConfigValueId(used)}})
+		if err != nil {
+			return fmt.Errorf("select %s effort: %w", used, err)
 		}
 	}
-	if !found {
-		return fmt.Errorf("high effort unavailable")
-	}
-	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
-	if err != nil {
-		return fmt.Errorf("select high effort: %w", err)
-	}
-	s.result.Effort = "high"
+	s.result.Effort = used
 	modeOptions := response.ConfigOptions
 	key, value := reviewerMode(s.result.Family)
 	option := configOption(modeOptions, key)

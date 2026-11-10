@@ -647,16 +647,16 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 	review.TrimLogs(probeParent)
 	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt")
 	results := review.Probe(ctx, repo, logDir, review.Families, settings)
-	var names []string
 	for _, r := range results {
 		if r.Available {
 			fmt.Fprintf(out, "slopcop: %s available (%s)\n", r.Family, r.Model)
-			if len(names) < review.DefaultReviewerCount {
-				names = append(names, string(r.Family))
-			}
 		} else {
 			fmt.Fprintf(out, "slopcop: %s unavailable: %s\n", r.Family, r.Reason)
 		}
+	}
+	var names []string
+	for _, family := range review.DefaultReviewers(results) {
+		names = append(names, string(family))
 	}
 	if len(names) == 0 {
 		fmt.Fprintln(out, "slopcop: no reviewers available; log in to Codex or Claude Code, set DEEPSEEK_API_KEY or configure the dsh adapter with --api-key-file, then rerun init; or set review.reviewers by hand, or use mode static")

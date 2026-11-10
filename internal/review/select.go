@@ -14,9 +14,9 @@ func DefaultCommand(f Family) []string {
 	switch f {
 	case Terra, Sol:
 		return []string{"npx", "--yes", "@agentclientprotocol/codex-acp@2.5.0"}
-	case Flash:
+	case DeepSeek, Flash:
 		return []string{"npx", "--yes", "@brokkai/dsh-acp@0.6.0"}
-	case Haiku:
+	case Sonnet, Haiku:
 		return []string{"npx", "--yes", "@agentclientprotocol/claude-agent-acp@0.100.0"}
 	}
 	return nil
@@ -27,9 +27,9 @@ func AdapterName(f Family) string {
 	switch f {
 	case Terra, Sol:
 		return "codex"
-	case Flash:
+	case DeepSeek, Flash:
 		return "dsh"
-	case Haiku:
+	case Sonnet, Haiku:
 		return "claude"
 	}
 	return ""
@@ -64,6 +64,10 @@ func FamilyOf(model string) (Family, bool) {
 		return Terra, true
 	case strings.HasPrefix(m, "gpt-") && has("sol"):
 		return Sol, true
+	case m == "sonnet" || strings.HasPrefix(m, "claude-") && has("sonnet"):
+		return Sonnet, true
+	case strings.HasPrefix(m, "deepseek-") && has("pro"):
+		return DeepSeek, true
 	case strings.HasPrefix(m, "deepseek-") && has("flash"):
 		return Flash, true
 	case m == "haiku" || strings.HasPrefix(m, "claude-") && has("haiku"):
@@ -165,13 +169,57 @@ func bestModel(f Family, options []acp.SessionConfigSelectOption) (string, bool)
 }
 
 func reviewerMode(f Family) (string, string) {
-	if f == Flash {
+	if AdapterName(f) == "dsh" {
 		return "permission_mode", "ask"
 	}
-	if f == Haiku {
+	if AdapterName(f) == "claude" {
 		return "mode", "default"
 	}
 	return "mode", "read-only"
+}
+
+// defaultEfforts matches Mjolnir's two-reviewer presets. Sol uses medium in
+// the Terra/Sol pair; the repeated-family fallback uses high for both slots.
+func defaultEfforts(reviewers []Family) map[Family]string {
+	efforts := map[Family]string{}
+	for _, f := range reviewers {
+		efforts[f] = "high"
+	}
+	if len(reviewers) == 2 && reviewers[0] == Terra && reviewers[1] == Sol {
+		efforts[Sol] = "medium"
+	}
+	return efforts
+}
+
+// bestEffort uses the requested effort, the closest offered effort below it,
+// or the lowest offered effort if every choice is higher (as in Mjolnir).
+func bestEffort(requested string, options []acp.SessionConfigSelectOption) string {
+	levels := []string{"minimal", "low", "medium", "high", "xhigh", "max"}
+	available := map[string]bool{}
+	for _, o := range options {
+		available[string(o.Value)] = true
+	}
+	if available[requested] {
+		return requested
+	}
+	below := ""
+	for _, level := range levels {
+		if level == requested {
+			break
+		}
+		if available[level] {
+			below = level
+		}
+	}
+	if below != "" {
+		return below
+	}
+	for _, level := range levels {
+		if available[level] {
+			return level
+		}
+	}
+	return ""
 }
 
 func hasChoice(option *acp.SessionConfigOptionSelect, value string) bool {

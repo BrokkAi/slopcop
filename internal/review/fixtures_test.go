@@ -14,7 +14,7 @@ func TestAdapterConfigFixtures(t *testing.T) {
 		file   string
 		family Family
 		model  string
-	}{{"codex-2.5-options.json", Terra, "gpt-6.10-terra"}, {"dsh-0.6-options.json", Flash, "deepseek-flash"}, {"mj-codex-options.json", Terra, "gpt-6.10-terra"}} {
+	}{{"codex-2.5-options.json", Terra, "gpt-6.10-terra"}, {"dsh-0.6-options.json", Flash, "deepseek-flash"}, {"dsh-0.6-options.json", DeepSeek, "deepseek-v4-pro"}, {"mj-codex-options.json", Terra, "gpt-6.10-terra"}} {
 		t.Run(tc.file, func(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join("testdata", tc.file))
 			if err != nil {
@@ -50,7 +50,7 @@ func TestNamespacedFamily(t *testing.T) {
 	for _, tc := range []struct {
 		model  string
 		family Family
-	}{{"openai/gpt-6.10-terra", Terra}, {"brokkai/deepseek-flash", Flash}, {"anthropic/claude-haiku-5-5", Haiku}, {"haiku", Haiku}, {"openai/gpt-6.1-sol", Sol}} {
+	}{{"openai/gpt-6.10-terra", Terra}, {"brokkai/deepseek-flash", Flash}, {"brokkai/deepseek-v4-pro", DeepSeek}, {"anthropic/claude-sonnet-5-5", Sonnet}, {"sonnet", Sonnet}, {"anthropic/claude-haiku-5-5", Haiku}, {"haiku", Haiku}, {"openai/gpt-6.1-sol", Sol}} {
 		family, ok := FamilyOf(tc.model)
 		if !ok || family != tc.family {
 			t.Fatalf("%q: %q", tc.model, family)
@@ -85,9 +85,31 @@ func TestBestModelUsesDisplayVersion(t *testing.T) {
 }
 
 func TestFamilyOfRejectsOtherModels(t *testing.T) {
-	for _, m := range []string{"gpt-6-astra", "gpt-6-luna", "deepseek-v4-pro", "gpt-6-solar", "claude-haikuish"} {
+	for _, m := range []string{"gpt-6-astra", "gpt-6-luna", "deepseek-v4", "deepseek-prose", "gpt-6-solar", "claude-haikuish", "claude-sonnetish"} {
 		if f, ok := FamilyOf(m); ok {
 			t.Fatalf("%s: %s", m, f)
+		}
+	}
+}
+
+func TestBestEffort(t *testing.T) {
+	for _, tc := range []struct {
+		requested string
+		offered   []string
+		want      string
+	}{
+		{"medium", []string{"low", "medium", "high"}, "medium"},
+		{"high", []string{"low", "medium", "max"}, "medium"},
+		{"medium", []string{"high", "max"}, "high"},
+		{"high", []string{"low"}, "low"},
+		{"high", nil, ""},
+	} {
+		var options []acp.SessionConfigSelectOption
+		for _, effort := range tc.offered {
+			options = append(options, acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId(effort)})
+		}
+		if got := bestEffort(tc.requested, options); got != tc.want {
+			t.Fatalf("requested %s, offered %v: got %q, want %q", tc.requested, tc.offered, got, tc.want)
 		}
 	}
 }

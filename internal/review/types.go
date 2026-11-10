@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// Family is a reviewer model family, in the order reviewers are chosen.
+// Family is a reviewer model family.
 type Family string
 
 const (
@@ -17,18 +17,21 @@ const (
 	Terra Family = "terra"
 	// Sol is GPT Sol through the Codex ACP adapter.
 	Sol Family = "sol"
+	// Sonnet is Claude Sonnet through the Claude ACP adapter.
+	Sonnet Family = "sonnet"
+	// DeepSeek is DeepSeek Pro through the dsh ACP adapter.
+	DeepSeek Family = "deepseek"
 	// Flash is DeepSeek Flash through the dsh ACP adapter.
 	Flash Family = "flash"
 	// Haiku is Claude Haiku through the Claude ACP adapter.
 	Haiku Family = "haiku"
 )
 
-// Families lists every family in priority order.
-var Families = []Family{Terra, Sol, Flash, Haiku}
+// Families lists every family probed by init. DefaultReviewers chooses slots.
+var Families = []Family{Terra, Sol, Sonnet, DeepSeek, Flash, Haiku}
 
 const (
-	MaxReviewers         = 4
-	DefaultReviewerCount = 2
+	MaxReviewers = 4
 	// DefaultTimeout bounds each reviewer, from adapter launch to its reply.
 	DefaultTimeout = 20 * time.Minute
 	// CleanReply is the exact reply that approves the change.

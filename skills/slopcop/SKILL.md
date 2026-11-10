@@ -93,12 +93,18 @@ hook and `slopcop enable` remain static-only. A single captured snapshot
 includes committed, uncommitted, and untracked work, excluding ignored
 files. Reviewers read `git diff <baseTree> <snapshotTree>` themselves.
 
-Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
-Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
-through Claude ACP. Each uses the newest model of its family at high effort.
+Reviewer defaults follow Mjolnir for the supported adapters: GPT Terra (`terra`)
+at high effort and GPT Sol (`sol`) at medium through Codex ACP; otherwise two
+Claude Sonnet (`sonnet`) reviewers through Claude ACP; otherwise two DeepSeek
+Pro (`deepseek`) reviewers through dsh ACP. Other families use high effort.
+Each uses the newest advertised model in its family and the closest supported
+effort below the requested one, or the lowest offered effort if all are higher.
+Claude Haiku (`haiku`) and DeepSeek Flash (`flash`) remain available. If only
+Terra, Sol, Haiku, or Flash works, init saves two of that family (full models
+first). Grok and Kimi adapters are not supported.
 Every reviewer must reply exactly `No findings.` for a clean review. `slopcop
 init` probes each family once when reviewers are not configured and the mode is
-not static, then saves the first two that work (or one). Probe prompts use your
+not static, then saves that selection. Probe prompts use your
 logins. Already configured reviewers are left alone; unset `review.reviewers`
 and run init to pick again. `slopcop init --no-reviewers` skips probing.
 A check runs exactly the configured reviewers. It never reorders or replaces

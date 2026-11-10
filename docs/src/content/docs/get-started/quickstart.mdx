@@ -96,8 +96,11 @@ are free, and so is your first repository.
 
 By default, a check also runs local review. It needs Node.js with `npx`
 and your existing harness logins. `slopcop init` probes reviewer families when
-none are configured and saves the first two that work (or one). Probe prompts
-use your own logins. Use `slopcop init --no-reviewers` to skip probing.
+none are configured. It saves Terra/high and Sol/medium when both work;
+otherwise two Sonnet/high reviewers, then two DeepSeek Pro/high reviewers,
+then two of another available supported family. See
+[review settings](/reference/configuration/#review-settings-and-state).
+Probe prompts use your own logins. Use `slopcop init --no-reviewers` to skip probing.
 Use `--mode ai` for review without SlopCop login or repository enablement.
 The Claude Code and Codex push gates installed by init require HEAD's tree to
 match a passing check or valid override.

@@ -77,6 +77,43 @@ func TestEmptyReviewers(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 }
+
+func TestReviewerModelsAndEfforts(t *testing.T) {
+	for _, tc := range []struct {
+		family Family
+		models string
+		model  string
+		effort string
+	}{
+		{Terra, "gpt-6-terra,gpt-6.10-terra", "gpt-6.10-terra", "high"},
+		{Sol, "gpt-6-sol,gpt-6.1-sol", "gpt-6.1-sol", "high"},
+		{Sonnet, "claude-sonnet-4-5,claude-sonnet-5-5,claude-haiku-5-5", "claude-sonnet-5-5", "high"},
+		{DeepSeek, "deepseek-v4-pro,deepseek-v4.1-pro,deepseek-flash", "deepseek-v4.1-pro", "high"},
+	} {
+		t.Run(string(tc.family), func(t *testing.T) {
+			root, capture, store := reviewRepo(t)
+			o := Options{Root: root, Settings: Settings{Reviewers: []Family{tc.family, tc.family}, Adapters: map[string][]string{AdapterName(tc.family): fakeAdapter("clean", tc.models, "")}}}
+			v := Run(context.Background(), store, capture, o)
+			if v.Status != StatusClean || len(v.Reviewers) != 2 {
+				t.Fatalf("%+v", v)
+			}
+			for _, r := range v.Reviewers {
+				if r.Model != tc.model || r.Effort != tc.effort {
+					t.Fatalf("%+v", r)
+				}
+			}
+		})
+	}
+}
+
+func TestTerraSolEfforts(t *testing.T) {
+	root, capture, store := reviewRepo(t)
+	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Sol}, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6-terra,gpt-6-sol", "")}}}
+	v := Run(context.Background(), store, capture, o)
+	if v.Status != StatusClean || len(v.Reviewers) != 2 || v.Reviewers[0].Effort != "high" || v.Reviewers[1].Effort != "medium" {
+		t.Fatalf("%+v", v)
+	}
+}
 func TestNoEchoAndNoAllow(t *testing.T) {
 	for _, tc := range []struct {
 		mode string

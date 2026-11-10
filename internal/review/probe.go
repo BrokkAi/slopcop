@@ -16,6 +16,27 @@ type ProbeResult struct {
 	Reason    string
 }
 
+// DefaultReviewers matches Mjolnir's autoconfiguration for our supported
+// adapters: Terra and Sol together, otherwise two of the preferred family.
+// Reduced models remain a last resort when no full model is available.
+func DefaultReviewers(results []ProbeResult) []Family {
+	available := map[Family]bool{}
+	for _, r := range results {
+		if r.Available {
+			available[r.Family] = true
+		}
+	}
+	if available[Terra] && available[Sol] {
+		return []Family{Terra, Sol}
+	}
+	for _, f := range []Family{Sonnet, DeepSeek, Terra, Sol, Haiku, Flash} {
+		if available[f] {
+			return []Family{f, f}
+		}
+	}
+	return nil
+}
+
 // Probe checks families without changing the configured review list.
 func Probe(ctx context.Context, root, logDir string, families []Family, settings Settings) []ProbeResult {
 	results := make([]ProbeResult, len(families))
@@ -34,7 +55,13 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 		}
 		s, err := startRunner(ctx, root, argv, f, fmt.Sprintf("%d-%s", i+1, f), logDir, 3*time.Minute)
 		if err == nil {
-			err = s.prepare(root)
+			// Probe Sol at the Terra/Sol preset's effort. A lone-family
+			// fallback can still select the nearest supported effort later.
+			effort := "high"
+			if f == Sol {
+				effort = "medium"
+			}
+			err = s.prepare(root, effort)
 		}
 		if err != nil {
 			results[i].Reason = err.Error()

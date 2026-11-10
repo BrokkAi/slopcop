@@ -1,26 +1,29 @@
 package cli
 
 import (
-	"github.com/BrokkAi/slopcop/internal/config"
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/BrokkAi/slopcop/internal/config"
 )
 
 func TestInitPicksReviewers(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		codex, claude []string
-		want          string
+		name               string
+		codex, claude, dsh []string
+		want               string
 	}{
-		{"codex", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{"/missing/claude"}, "terra,sol"},
-		{"claude", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, "haiku"},
+		{"codex", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=claude-4-sonnet,claude-4-haiku"}, []string{"/missing/dsh"}, "terra,sol"},
+		{"claude", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=claude-4-sonnet,claude-4-haiku"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=deepseek-v4-pro,deepseek-flash"}, "sonnet,sonnet"},
+		{"deepseek", []string{"/missing/codex"}, []string{"/missing/claude"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=deepseek-v4-pro,deepseek-flash"}, "deepseek,deepseek"},
+		{"haiku only", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, []string{"/missing/dsh"}, "haiku,haiku"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateUserConfig(t)
 			t.Setenv("SLOPCOP_FAKE_ACP", "1")
 			repo := newRepo(t, "")
-			cfg := config.Config{Review: &config.Review{Adapters: map[string]config.Adapter{"codex": {Command: tc.codex}, "dsh": {Command: []string{"/missing/dsh"}}, "claude": {Command: tc.claude}}}}
+			cfg := config.Config{Review: &config.Review{Adapters: map[string]config.Adapter{"codex": {Command: tc.codex}, "dsh": {Command: tc.dsh}, "claude": {Command: tc.claude}}}}
 			if _, err := config.Save(cfg); err != nil {
 				t.Fatal(err)
 			}

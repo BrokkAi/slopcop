@@ -44,6 +44,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	in := discoverIntent(opts.Intent)
 	v.IntentSource = in.Source
 	commands := map[Family][]string{}
+	efforts := defaultEfforts(order)
 	for _, f := range order {
 		cmd := opts.Settings.Adapters[AdapterName(f)]
 		if len(cmd) == 0 {
@@ -51,7 +52,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		}
 		commands[f] = cmd
 	}
-	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, in.Text, opts.Version, order, commands})
+	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, in.Text, opts.Version, order, commands, efforts})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
 	previous, err := store.Last()
@@ -102,7 +103,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		name := fmt.Sprintf("%d-%s", i+1, f)
 		s, err := startRunner(ctx, opts.Root, commands[f], f, name, dir, timeout)
 		if err == nil {
-			err = s.prepare(opts.Root)
+			err = s.prepare(opts.Root, efforts[f])
 		}
 		if err != nil {
 			failed = true

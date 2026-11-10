@@ -69,6 +69,16 @@ example, keep a DeepSeek key in a file with:
 
 Otherwise dsh reads `DEEPSEEK_API_KEY`.
 
+When reviewers are unset, `slopcop init` follows Mjolnir's defaults for the
+supported adapters: Terra at high effort plus Sol at medium; otherwise two
+Sonnet reviewers at high; otherwise two DeepSeek Pro reviewers at high.
+The family names are `terra`, `sol`, `sonnet`, and `deepseek`. Existing lists
+are preserved. `haiku` and `flash` also remain supported; if none of the
+preferred combinations works, init chooses two of the first available family
+from Terra, Sol, Haiku, and Flash. Effort uses the closest supported level
+below the requested one, or the lowest offered level if every choice is higher.
+Grok and Kimi adapters are not supported.
+
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Checks that
 approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
