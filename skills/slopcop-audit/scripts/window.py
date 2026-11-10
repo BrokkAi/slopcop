@@ -24,6 +24,7 @@ import sys
 
 
 def git(repo, *args, data=None, check=True):
+    """Run git in repo and return stdout; exit on failure when check is set."""
     r = subprocess.run(["git", "-C", repo, *args], input=data,
                        capture_output=True, check=False)
     if check and r.returncode != 0:
@@ -55,6 +56,7 @@ def matches(path, globs):
 
 
 def load_modules(path):
+    """Read a module map: a list, or {"modules": [...]}, of {name, paths}."""
     with open(path) as f:
         data = json.load(f)
     mods = data["modules"] if isinstance(data, dict) else data
@@ -65,6 +67,7 @@ def load_modules(path):
 
 
 def by_directory(files, max_lines):
+    """Group files by directory, deeper or by file until under max_lines."""
     pending = [(1, k, v) for k, v in group(files, 1).items()]
     out = []
     while pending:
@@ -115,6 +118,7 @@ def chunk(key, members, limit):
 
 
 def group(files, depth):
+    """Key each file by its first `depth` directory segments."""
     groups = {}
     for path, lines in files:
         segs = path.split("/")
@@ -124,6 +128,7 @@ def group(files, depth):
 
 
 def plan(args):
+    """Print the slices for base..head as JSON."""
     files, dropped = excluded(args.repo, args.head,
                               changed(args.repo, args.base, args.head), args.exclude)
     windows, unmapped = [], files
@@ -191,6 +196,7 @@ def plan(args):
 
 
 def prepare(args):
+    """Make a worktree at base with only these paths' part of base..head."""
     wt = os.path.abspath(os.path.join(args.workdir, args.name))
     if os.path.exists(wt):
         sys.exit(f"{wt} already exists; run cleanup first")
@@ -205,6 +211,7 @@ def prepare(args):
 
 
 def cleanup(args):
+    """Remove every worktree under workdir."""
     root = os.path.abspath(args.workdir)
     out = git(args.repo, "worktree", "list", "--porcelain").decode()
     for line in out.splitlines():
@@ -215,6 +222,7 @@ def cleanup(args):
 
 
 def main():
+    """Parse the subcommand and run it."""
     p = argparse.ArgumentParser()
     sp = p.add_subparsers(dest="cmd", required=True)
     a = sp.add_parser("plan")
