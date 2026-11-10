@@ -154,16 +154,52 @@ starlight-tabs [role='tab'][aria-selected='true'] { color: var(--sc-accent-text)
 
 /* Shared home-page vocabulary (index.mdx). */
 .sc-eyebrow { font-family: var(--sc-font-mono); font-size: 0.6875rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-text-3); margin: 0 0 0.75rem; }
-.sc-section { margin-top: 3.5rem; }
-.sc-section > h2 { font-size: clamp(1.5rem, 2.6vw, 2rem); letter-spacing: -0.02em; margin: 0 0 0.5rem; }
+.sc-section { margin-top: clamp(3.5rem, 8vw, 6rem); }
+.sc-section > h2 { font-size: clamp(1.5rem, 2.6vw, 2rem); letter-spacing: -0.02em; margin: 0 0 1.25rem; color: var(--sc-text); }
 .sc-section > p { color: var(--sl-color-gray-2); max-width: 62ch; margin: 0 0 1.25rem; }
-.sc-flow { display: grid; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); gap: 1px; background: var(--sc-line-soft); border: 1px solid var(--sc-line-soft); margin: 1.5rem 0 0; counter-reset: step; }
-.sc-flow article { background: var(--sc-surface); padding: 1.1rem 1.2rem 1.2rem; display: flex; flex-direction: column; }
-.sc-flow article small { display: block; font-family: var(--sc-font-mono); font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-accent-text); margin-bottom: 0.5rem; }
-.sc-flow article h3 { font-size: 1rem; line-height: 1.3; margin: 0 0 0.4rem; color: var(--sc-text); }
-.sc-flow article p { margin: 0; font-size: 0.9rem; color: var(--sl-color-gray-2); line-height: 1.55; }
-.sc-flow article code { font-size: 0.8125rem; }
-.sc-exit { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.75rem; margin: 1.25rem 0 0; }
-.sc-exit div { border: 1px solid var(--sc-line); background: var(--sc-surface); padding: 0.9rem 1rem; clip-path: var(--sc-chamfer-sm); }
-.sc-exit b { display: block; font-family: var(--sc-font-mono); font-size: 1.5rem; font-weight: 700; color: var(--sc-text); line-height: 1; margin-bottom: 0.4rem; }
-.sc-exit span { font-size: 0.85rem; color: var(--sl-color-gray-2); }
+.sc-section--center { text-align: center; scroll-margin-top: calc(var(--sl-nav-height, 3.5rem) + 1.5rem); }
+.sc-section--center > h2 { font-size: clamp(1.75rem, 3.4vw, 2.5rem); line-height: 1.15; max-width: 24ch; margin-inline: auto; margin-bottom: 0.75rem; }
+.sc-section--center > p { margin-inline: auto; }
+
+/* How a check works: four steps that alternate either side of one rail. */
+.sc-timeline { --sc-rail-gap: 2.75rem; position: relative; display: grid; grid-template-columns: 1fr 1fr; column-gap: calc(var(--sc-rail-gap) * 2); row-gap: 1.5rem; margin: 2.5rem 0 0; padding: 0 0 3rem; list-style: none; text-align: start; }
+.sc-timeline::before { position: absolute; inset-block: 0; inset-inline-start: 50%; width: 1px; background: var(--sc-accent); content: ''; opacity: 0.6; }
+.sc-timeline li { position: relative; margin: 0; padding: 1.1rem 1.25rem 1.25rem; border: 1px solid var(--sc-line); background: var(--sc-surface); }
+.sc-timeline li:nth-child(odd) { grid-column: 1; }
+.sc-timeline li:nth-child(even) { grid-column: 2; margin-top: 2.5rem; margin-bottom: -2.5rem; }
+/* The connector from each card to the rail, and its dot on the rail. */
+.sc-timeline li::before { position: absolute; top: 1.6rem; width: var(--sc-rail-gap); height: 1px; background: var(--sc-accent); content: ''; opacity: 0.6; }
+.sc-timeline li::after { position: absolute; top: calc(1.6rem - 0.3rem); width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--sc-accent); box-shadow: 0 0 0 4px var(--sc-accent-dim); content: ''; }
+.sc-timeline li:nth-child(odd)::before { inset-inline-start: 100%; }
+.sc-timeline li:nth-child(odd)::after { inset-inline-start: calc(100% + var(--sc-rail-gap) - 0.3rem); }
+.sc-timeline li:nth-child(even)::before { inset-inline-end: 100%; }
+.sc-timeline li:nth-child(even)::after { inset-inline-end: calc(100% + var(--sc-rail-gap) - 0.3rem); }
+.sc-timeline small { display: block; font-family: var(--sc-font-mono); font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-accent-text); margin-bottom: 0.5rem; }
+.sc-timeline h3 { font-size: 1.0625rem; line-height: 1.3; margin: 0 0 0.4rem; color: var(--sc-text); }
+.sc-timeline p { margin: 0; font-size: 0.9rem; color: var(--sl-color-gray-2); line-height: 1.55; }
+.sc-timeline code { font-size: 0.8125rem; }
+.sc-loop { display: inline-flex; align-items: center; gap: 0.6rem; margin: 1.25rem 0 0 !important; font-family: var(--sc-font-mono); font-size: 0.6875rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-text-3) !important; }
+.sc-loop span { display: grid; place-items: center; width: 1.75rem; height: 1.75rem; border: 1px solid var(--sc-accent); border-radius: 50%; color: var(--sc-accent-text); }
+.sc-loop svg { width: 0.875rem; height: 0.875rem; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+@media (max-width: 50rem) {
+  .sc-timeline { grid-template-columns: 1fr; padding: 0 0 0 calc(var(--sc-rail-gap)); }
+  .sc-timeline::before { inset-inline-start: 0.3rem; }
+  .sc-timeline li:nth-child(n) { grid-column: 1; margin: 0; }
+  .sc-timeline li:nth-child(n)::before { inset-inline: auto 100%; width: calc(var(--sc-rail-gap) - 0.3rem); }
+  .sc-timeline li:nth-child(n)::after { inset-inline: calc(-1 * var(--sc-rail-gap)) auto; }
+}
+
+/* Card grids. */
+.sc-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1rem; }
+@media (max-width: 64rem) { .sc-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 40rem) { .sc-grid { grid-template-columns: 1fr; } }
+
+/* Closing band. */
+.sc-cta { display: flex; align-items: center; gap: 1.25rem; margin-top: clamp(3.5rem, 8vw, 5rem); padding: 1.5rem 1.75rem; border: 1px solid color-mix(in srgb, var(--sc-accent) 35%, var(--sc-line)); background: var(--sc-accent-dim); }
+.sc-cta > div { flex: 1; min-width: 0; }
+.sc-cta__mark { flex: none; width: 1.5rem; height: 1.5rem; fill: none; stroke: var(--sc-accent); stroke-width: 2; stroke-linecap: round; }
+.sc-cta__title { margin: 0; font-size: 1.25rem; font-weight: 700; color: var(--sc-text); }
+.sc-cta__body { margin: 0.2rem 0 0; font-size: 0.9rem; color: var(--sl-color-gray-2); }
+.sc-cta__button { flex: none; display: inline-flex; gap: 0.6rem; padding: 0.7rem 1.1rem; background: var(--sc-accent); color: #f4f1ec; font-weight: 650; text-decoration: none; clip-path: var(--sc-chamfer-sm); }
+.sc-cta__button:hover { background: #d8372c; color: #f4f1ec; }
+@media (max-width: 40rem) { .sc-cta { flex-wrap: wrap; } }
