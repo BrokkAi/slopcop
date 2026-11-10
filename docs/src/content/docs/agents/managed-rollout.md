@@ -5,11 +5,13 @@ sidebar:
   order: 8
 ---
 
-`slopcop init` writes [the Stop hook](/agents/stop-hook/) into each user's own
-settings. An administrator who manages Claude Code or Codex across a fleet can
-deploy the same hook through managed configuration instead. Where managed
-configuration allows only managed hooks, this is the only way the hook runs:
-the one init writes is a user hook, and it is blocked.
+`slopcop init` writes [the Stop hook](/agents/stop-hook/) into each
+repository's local settings. An administrator who manages Claude Code or Codex
+across a fleet can deploy the same hook through managed configuration instead.
+Where managed configuration allows only managed hooks, this is the only way the
+hook runs: the one init writes is a local hook, and it is blocked. So is
+Claude Code's push gate, the `PreToolUse` hook on `Bash` that runs
+`slopcop gate --hook claude`; deploy it the same way to keep it.
 
 <!-- TODO: neither path below has been tested end to end yet (#35). Test each
 one on a managed machine before relying on it. -->
@@ -42,7 +44,7 @@ An older `slopcop` that cannot run the hook answers something else. The hook
 command ends in `|| true`, so the agent still stops, but no check runs.
 
 Users still get the skill from `slopcop init --no-hooks`, which installs the
-skill and leaves hooks alone. See [The agent skill](/agents/skill/).
+skill and leaves hooks alone. It installs no push gate either. See [The agent skill](/agents/skill/).
 
 ## Claude Code
 
@@ -96,9 +98,37 @@ Keep the handler identical to the one above:
   way in several settings files once. A user who also runs `slopcop init`
   then gets one check, not two.
 
+### The push gate
+
+To keep the [push gate](/agents/claude-code/) under managed hooks, add its
+`PreToolUse` group beside the `Stop` one, exactly as `slopcop init` writes it:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^(Bash|mcp__.+__(create_pull_request|push_files))$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "slopcop gate --hook claude"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Leave off `|| true` here: the gate blocks a push by exiting `2`. It allows
+everything outside a Git repository and every command that does not push, so
+it is safe to deploy machine-wide.
+
 Under `allowManagedHooksOnly`, Claude Code blocks user, project, and local
-hooks, including the one `slopcop init` writes to `~/.claude/settings.json`;
-only the managed hook runs. Without it, user hooks run beside managed ones,
+hooks, including the Stop hook and push gate `slopcop init` writes to the
+repository's `.claude/settings.local.json`;
+only the managed hooks run. Without it, user hooks run beside managed ones,
 and a user's `slopcop init --remove-hooks` removes only their own copy, never
 the managed one.
 
@@ -130,10 +160,22 @@ timeout = 720
 The Windows command differs because Codex runs hooks there through `cmd`,
 which has no `true`.
 
+To keep the push gate, add its `PreToolUse` hook too. Codex sends every shell
+command to it as `Bash`:
+
+```toml
+[[hooks.PreToolUse]]
+matcher = "Bash"
+
+[[hooks.PreToolUse.hooks]]
+type = "command"
+command = "slopcop gate --hook codex"
+```
+
 Codex does not install anything from `managed_dir`; device management must
 put `slopcop` on `PATH` itself, as above.
 
 `allow_managed_hooks_only = true` makes Codex ignore user, project, session,
-and plugin hooks, including the one in `~/.codex/hooks.json` that
-`slopcop init` writes. Without it, give users `slopcop init --no-hooks`, so
+and plugin hooks, including the one in the repository's `.codex/hooks.json`
+that `slopcop init` writes. Without it, give users `slopcop init --no-hooks`, so
 they are not also asked to trust a second copy of the hook.

@@ -22,8 +22,7 @@ With no flags, login starts the browser device flow: it prints a link that
 opens the approval page with the code filled in, then waits for approval. Pass --token to store an existing credential,
 which is what CI and agent harnesses use.
 
-Login also installs the agent skill into every well-known skills directory
-whose harness is installed here, as every check does.`,
+Run slopcop init in a repository to install the agent skill and hooks.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
@@ -57,9 +56,6 @@ whose harness is installed here, as every check does.`,
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: logged in to %s (%s)\n", target, path)
-			// Signing in is the one step every user takes, so it also puts
-			// the agent skill in place; every check keeps it current.
-			syncSkillAndReport(cmd.OutOrStdout(), cmd.ErrOrStderr(), version)
 			return nil
 		},
 	}

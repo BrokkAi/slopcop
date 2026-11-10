@@ -5,6 +5,18 @@ sidebar:
   order: 4
 ---
 
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently, once reviewers are configured (`slopcop init` picks them). With
+none configured, or in a CI job, it runs only the static check. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
+
 ## OpenCode and Kilo Code
 
 See [OpenCode and Kilo Code](/agents/opencode/).
@@ -12,10 +24,12 @@ See [OpenCode and Kilo Code](/agents/opencode/).
 ## Any agent with a shell
 
 Any agent that can run a shell command can run `slopcop`: it never prompts,
-every check it sends makes one request, and it answers with an exit code. Run
-outside Claude Code, Codex, OpenCode, Pi or Grok, a check sends nothing about the
-session (see [Grok and Kimi Code](/agents/grok-kimi/)), only the repository URL,
-the base commit, and the patch.
+the static half sends one request, and it answers with an exit code. Run
+outside Claude Code, Codex, OpenCode, Pi or Grok, a check sends nothing about
+the session (see [Grok and Kimi Code](/agents/grok-kimi/)): the static half
+sends only the repository URL, the base commit, and the patch. The review half
+sends the diff and supplied intent to reviewer model providers through your
+harness logins. Use `--mode static` to avoid that review.
 
 If the agent cannot load skills, give it the essentials in its instructions
 file:

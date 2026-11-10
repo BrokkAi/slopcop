@@ -7,8 +7,8 @@ sidebar:
 
 ## The skill
 
-opencode reads both `~/.agents/skills` and `~/.claude/skills`, so
-`slopcop init` covers it too. Add the repository to the workspace from its
+opencode reads `.agents/skills` and `.claude/skills` in the repository, so
+`slopcop init` covers it too when run there. Add the repository to the workspace from its
 checkout with `slopcop enable` at a terminal, then ask it to check its change,
 or add the usual line to your project's `AGENTS.md`:
 
@@ -48,8 +48,10 @@ OpenCode sends no models, `slopcop --verbose` shows what it found.
 
 ## Kilo Code CLI
 
-Kilo Code CLI, a fork of opencode, reads skills from `~/.agents/skills` too,
-so the skill and the `AGENTS.md` line above work there. A check run in it sends nothing
+Kilo Code CLI, a fork of opencode, reads the skill from the repository's
+`.agents/skills` and `.claude/skills` too, so the skill and the `AGENTS.md`
+line above work there. A skill of the same name in one of Kilo's own
+configuration directories, such as `~/.kilo/skills`, takes its place. A check run in it sends nothing
 about the session yet: Kilo does not name its session in the commands its agent
 runs, so the CLI cannot tell which session in its database is the one running
 the check.

@@ -87,12 +87,9 @@ func newRoot(version string) *cobra.Command {
 	serviceURL := ""
 	root := &cobra.Command{
 		Use:   "slopcop",
-		Short: "Check a change through the hosted SlopCop check API",
-		Long: `SlopCop checks a working-tree change through the hosted check API.
-
-Running slopcop with no subcommand runs the check. There is no local
-analyzer: the service applies the change to the base commit and returns the
-report, so a check never needs a Bifrost install.`,
+		Short: "Check a change with static analysis and local LLM review",
+		Long: `SlopCop checks a working-tree change with the hosted static analyzer and local LLM reviewers.
+Running slopcop with no subcommand runs the check.`,
 		Version:       version,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
@@ -112,6 +109,8 @@ report, so a check never needs a Bifrost install.`,
 		newUnignoreCommand(&serviceURL, version),
 		newIgnoredCommand(&serviceURL, version),
 		newInitCommand(version),
+		newGateCommand(),
+		newOverrideCommand(),
 		newHookCommand(&serviceURL, version),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(),
@@ -119,6 +118,7 @@ report, so a check never needs a Bifrost install.`,
 		newWhoamiCommand(&serviceURL, version),
 		newWorkspaceCommand(&serviceURL, version),
 		newRepoCommand(&serviceURL, version),
+		newConfigCommand(),
 	)
 	return root
 }
@@ -126,7 +126,7 @@ report, so a check never needs a Bifrost install.`,
 func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "check",
-		Short: "Check the working tree through the hosted check API",
+		Short: "Check the working tree with static analysis and local LLM review",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runCheck(cmd, opts, *serviceURL, version)
@@ -137,18 +137,23 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 }
 
 type checkOptions struct {
-	root         string
-	base         string
-	baseExact    string
-	format       string
-	failOn       string
-	certainty    string
-	policies     []string
-	noDiscovery  bool
-	verbose      bool
-	showExisting bool
-	timeout      time.Duration
-	workspace    string
+	root          string
+	mode          string
+	static        bool
+	ai            bool
+	intent        string
+	reviewTimeout time.Duration
+	base          string
+	baseExact     string
+	format        string
+	failOn        string
+	certainty     string
+	policies      []string
+	noDiscovery   bool
+	verbose       bool
+	showExisting  bool
+	timeout       time.Duration
+	workspace     string
 	// addRepository carries the user's approval of adding the repository to
 	// the workspace --workspace names, which then pays for it.
 	addRepository bool
@@ -160,6 +165,11 @@ type checkOptions struct {
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags := command.Flags()
 	flags.StringVar(&opts.root, "root", ".", "repository path to check")
+	flags.StringVar(&opts.mode, "mode", "", "check mode: both, static, or ai")
+	flags.BoolVar(&opts.static, "static", false, "run only the hosted static check")
+	flags.BoolVar(&opts.ai, "ai", false, "run only the local LLM review")
+	flags.StringVar(&opts.intent, "intent", "", "agent-supplied intent when no user transcript is available")
+	flags.DurationVar(&opts.reviewTimeout, "review-timeout", 0, "reviewer timeout (0 uses config or default)")
 	flags.StringVar(&opts.base, "base", "", "branch or revision the change started from; the base is its merge base with HEAD (default: merge base with the upstream branch)")
 	flags.StringVar(&opts.baseExact, "base-exact", "", "exact base commit or revision, used without taking a merge base")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")

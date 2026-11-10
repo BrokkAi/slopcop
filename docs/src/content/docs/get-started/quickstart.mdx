@@ -7,8 +7,8 @@ sidebar:
 
 import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-Once per machine: install the CLI, add its skill to your agents, and sign in.
-Then enable each repository you want checked, at a terminal. You need a
+Install the CLI once. Run init inside each repository, then sign in and
+enable repositories you want checked by the hosted static service. You need a
 [slopcop.com](https://slopcop.com) account only to approve the sign-in. Checks
 are free, and so is your first repository.
 
@@ -48,12 +48,13 @@ are free, and so is your first repository.
    [Install the CLI](/get-started/install/) covers the release archive,
    checksums, and upgrades.
 
-2. **Teach your agent.** `slopcop init` installs the SlopCop skill into the
-   skills directory of every agent it finds on this machine (Claude Code, Codex,
-   opencode), and a Stop hook for Claude Code and Codex that checks what a
-   session wrote when the agent stops.
+2. **Teach your agent.** `slopcop init` installs the SlopCop skill into
+   repository-local directories for Claude Code, Codex, and other agents, and a
+   Stop hook for Claude Code and Codex that checks what a session wrote when the
+   agent stops.
 
    ```console
+   cd /path/to/repository
    slopcop init
    ```
 
@@ -85,6 +86,14 @@ are free, and so is your first repository.
    connection. A check never adds a repository by itself.
 
 </Steps>
+
+By default, a check also runs local review. It needs Node.js with `npx`
+and your existing harness logins. `slopcop init` probes reviewer families when
+none are configured and saves the first two that work (or one). Probe prompts
+use your own logins. Use `slopcop init --no-reviewers` to skip probing.
+Use `--mode ai` for review without SlopCop login or repository enablement.
+The Claude Code and Codex push gates installed by init require HEAD's tree to
+match a passing check or valid override.
 
 ## What you will see
 

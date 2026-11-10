@@ -474,3 +474,82 @@ func TestCommandProblemProbesTheSlopcopOnPath(t *testing.T) {
 		}
 	}
 }
+
+func TestRepositoryHooksInstallAndRemove(t *testing.T) {
+	repo := t.TempDir()
+	for i := 0; i < 2; i++ {
+		if _, err := Repository(repo, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	claude := readConfig(t, filepath.Join(repo, ".claude/settings.local.json"))
+	if bytes.Count(claude, []byte("slopcop gate --hook claude")) != 1 || bytes.Count(claude, []byte("slopcop hook claude")) != 1 {
+		t.Fatalf("duplicate or missing hook: %s", claude)
+	}
+	if !bytes.Contains(claude, []byte(`"matcher": "^(Bash|mcp__.+__(create_pull_request|push_files))$"`)) {
+		t.Fatalf("gate matcher: %s", claude)
+	}
+	codex := readConfig(t, filepath.Join(repo, ".codex/hooks.json"))
+	if bytes.Count(codex, []byte("slopcop gate --hook codex")) != 1 || bytes.Count(codex, []byte(`"slopcop hook codex || true"`)) != 1 ||
+		!bytes.Contains(codex, []byte(`"matcher": "Bash"`)) {
+		t.Fatalf("duplicate or missing Codex hook or gate: %s", codex)
+	}
+	if !GateInstalled(repo) {
+		t.Fatal("GateInstalled = false after install")
+	}
+	if _, err := Repository(repo, false, nil); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{".claude/settings.local.json", ".codex/hooks.json"} {
+		if data := readConfig(t, filepath.Join(repo, path)); bytes.Contains(data, []byte("slopcop")) {
+			t.Fatalf("hook remains in %s: %s", path, data)
+		}
+	}
+	if GateInstalled(repo) {
+		t.Fatal("GateInstalled = true after removal")
+	}
+}
+
+// TestRepositoryGateMovesToTheNewMatcher covers a gate installed when its
+// matcher was Bash: install moves it to a group with the current matcher and
+// keeps another hook that shared its old group.
+func TestRepositoryGateMovesToTheNewMatcher(t *testing.T) {
+	repo := t.TempDir()
+	settings := filepath.Join(repo, ".claude/settings.local.json")
+	if err := os.MkdirAll(filepath.Dir(settings), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"},{"type":"command","command":"other-guard"}]}]}}`
+	if err := os.WriteFile(settings, []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := Repository(repo, true, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data := readConfig(t, settings)
+	var parsed struct {
+		Hooks struct {
+			PreToolUse []struct {
+				Matcher string `json:"matcher"`
+				Hooks   []struct {
+					Command string `json:"command"`
+				} `json:"hooks"`
+			} `json:"PreToolUse"`
+		} `json:"hooks"`
+	}
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatal(err)
+	}
+	groups := map[string][]string{}
+	for _, group := range parsed.Hooks.PreToolUse {
+		for _, handler := range group.Hooks {
+			groups[group.Matcher] = append(groups[group.Matcher], handler.Command)
+		}
+	}
+	if len(groups) != 2 || len(groups["Bash"]) != 1 || groups["Bash"][0] != "other-guard" ||
+		len(groups[claudeGateMatcher]) != 1 || groups[claudeGateMatcher][0] != "slopcop gate --hook claude" {
+		t.Fatalf("groups = %v\n%s", groups, data)
+	}
+}

@@ -13,11 +13,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/review/reviewtest"
 	"github.com/BrokkAi/slopcop/internal/service"
 	"github.com/BrokkAi/slopcop/internal/update"
 )
@@ -27,6 +31,7 @@ import (
 // workspace already checks. Tests about the gate stand the lookup in
 // themselves.
 func TestMain(m *testing.M) {
+	reviewtest.Main()
 	checkRepository = func(context.Context, *service.Client, string) (statusRepository, error) {
 		return statusRepository{State: statusActive, Enabled: true, Active: true}, nil
 	}
@@ -102,10 +107,23 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("GROK_HOME", "")
 	t.Setenv("GROK_HOOK_EVENT", "")
 	t.Setenv("KIMI_CODE_HOME", "")
+	// A check with no mode set runs only the static half in CI; tests run
+	// the same everywhere.
+	t.Setenv("CI", "")
+	t.Setenv("TF_BUILD", "")
+	t.Setenv("JENKINS_URL", "")
 	// Fail rather than let a test touch the real credential or skill install
 	// if either location ever depends on something not isolated above.
 	configPath, err := config.Path()
 	requireUnder(t, home, configPath, err)
+	if err == nil && !strings.HasPrefix(t.Name(), "TestConfig") {
+		if e := os.MkdirAll(filepath.Dir(configPath), 0700); e != nil {
+			t.Fatal(e)
+		}
+		if e := os.WriteFile(configPath, []byte(`{"mode":"static"}`), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
 	userHome, err := os.UserHomeDir()
 	requireUnder(t, home, userHome, err)
 }
@@ -1602,5 +1620,545 @@ func TestBaseNotFoundHintNamesOriginsDefaultBranch(t *testing.T) {
 	hint = describeBase(work, local, "master")
 	if !strings.Contains(hint, "is not on origin/master") || !strings.Contains(hint, "--base origin/master") {
 		t.Errorf("an unpushed base got hint %q", hint)
+	}
+}
+
+func TestAILocalReviewAndOverride(t *testing.T) {
+	for _, tc := range []struct {
+		mode   string
+		want   int
+		status string
+	}{{"clean", 0, "clean"}, {"findings", 1, "findings"}, {"empty", 2, "incomplete"}} {
+		t.Run(tc.mode, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "")
+			writeFile(t, repo, "README.md", "changed\n")
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + tc.mode}}}}}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json")
+			if code != tc.want {
+				t.Fatalf("exit %d want %d, stdout %s stderr %s", code, tc.want, out, stderr)
+			}
+			var doc struct {
+				Status string `json:"status"`
+				Review struct {
+					Status string `json:"status"`
+				} `json:"review"`
+			}
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc.Status != tc.status {
+				t.Fatalf("status %q want %q", doc.Status, tc.status)
+			}
+			snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			ref := "refs/slopcop/reviewed/" + snapshot.Tree
+			_, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", ref)
+			if (err == nil) != (tc.mode == "clean") {
+				t.Fatalf("approval before override: %v", err)
+			}
+			if tc.mode == "clean" {
+				code, _, _ = runCLI(t, "override", "--root", repo, "--reason", "false positive")
+				if code != 2 {
+					t.Fatalf("clean review override exit %d", code)
+				}
+			}
+			if tc.mode == "findings" {
+				code, out, stderr = runCLI(t, "override", "--root", repo, "--reason", "false positive")
+				if code != 0 {
+					t.Fatalf("override %d %s %s", code, out, stderr)
+				}
+			}
+		})
+	}
+}
+
+func TestBothReviewRunsWhenStaticCannotStart(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$"}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json")
+	if code != 2 {
+		t.Fatalf("exit %d out %s stderr %s", code, out, stderr)
+	}
+	var doc struct {
+		Status       string `json:"status"`
+		StaticStatus string `json:"staticStatus"`
+		Review       struct {
+			Status string `json:"status"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Status != "failed" || doc.Review.Status != "clean" {
+		t.Fatalf("%+v", doc)
+	}
+}
+
+func TestCombinedExitAndStatus(t *testing.T) {
+	cases := []struct {
+		name, static, agent, failOn, wantStatus, wantStatic string
+		wantExit                                            int
+	}{
+		{"static findings review clean", "findings", "clean", "finding", "findings", "", 1},
+		{"static clean review findings", "clean", "findings", "finding", "findings", "clean", 1},
+		{"person review findings", "person", "findings", "finding", "findings", "failed", 1},
+		{"person review clean", "person", "clean", "finding", "failed", "", 4},
+		{"static clean review failed", "clean", "empty", "finding", "incomplete", "clean", 2},
+		{"static pending review clean", "pending", "clean", "finding", "pending", "", 3},
+		{"static pending review failed", "pending", "empty", "finding", "pending", "", 3},
+		{"fail never review findings", "clean", "findings", "never", "clean", "", 0},
+		{"static incomplete review clean", "incomplete", "clean", "finding", "incomplete", "", 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "README.md", "changed\n")
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + tc.agent}}}}}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				switch tc.static {
+				case "person":
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"code":"repository_not_enabled","message":"not enabled","retryable":false}`))
+				case "pending":
+					checkRunning(w, "5")
+				default:
+					_, _ = fmt.Fprintf(w, `{"status":%q,"baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":0,"incompletePolicies":0,"failOn":%q},"findings":[],"incomplete":[]}`, tc.static, tc.failOn)
+				}
+			}))
+			defer server.Close()
+			args := []string{"check", "--root", repo, "--service", server.URL, "--format", "json", "--timeout", "50ms", "--fail-on", tc.failOn}
+			code, out, stderr := runCLI(t, args...)
+			if code != tc.wantExit {
+				t.Fatalf("exit %d want %d: stdout %s stderr %s", code, tc.wantExit, out, stderr)
+			}
+			var doc struct {
+				Status       string `json:"status"`
+				StaticStatus string `json:"staticStatus"`
+				Review       struct {
+					Status string `json:"status"`
+				} `json:"review"`
+			}
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc.Status != tc.wantStatus || doc.StaticStatus != tc.wantStatic {
+				t.Fatalf("status %+v want %q/%q", doc, tc.wantStatus, tc.wantStatic)
+			}
+			if tc.agent == "empty" && doc.Review.Status != "failed" {
+				t.Fatalf("failed review hidden: %+v", doc)
+			}
+			if tc.name == "static incomplete review clean" || tc.name == "static pending review clean" {
+				snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				_, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", "refs/slopcop/reviewed/"+snapshot.Tree)
+				want := tc.name == "static incomplete review clean"
+				if (err == nil) != want {
+					t.Fatalf("approval ref exists=%v want %v: %v", err == nil, want, err)
+				}
+			}
+		})
+	}
+}
+
+func TestReviewInterruptStopsAdapter(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "")
+	writeFile(t, repo, "README.md", "changed\n")
+	trace := filepath.Join(t.TempDir(), "agent.trace")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=hang", "--fake-trace=" + trace}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		deadline := time.After(10 * time.Second)
+		for {
+			data, _ := os.ReadFile(trace)
+			if strings.Contains(string(data), "prompt\n") {
+				cancel()
+				return
+			}
+			select {
+			case <-deadline:
+				cancel()
+				return
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+	}()
+	var stdout, stderr bytes.Buffer
+	code := execute(ctx, []string{"check", "--root", repo, "--format", "json"}, "test", &stdout, &stderr)
+	<-done
+	if code != 130 || !strings.Contains(stderr.String(), "reviewers were stopped") {
+		t.Fatalf("exit %d stderr %q", code, stderr.String())
+	}
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid string
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "pid=") {
+			pid = strings.TrimPrefix(line, "pid=")
+			break
+		}
+	}
+	if pid == "" {
+		t.Fatalf("missing agent pid: %s", data)
+	}
+	if runtime.GOOS != "windows" {
+		for i := 0; i < 20; i++ {
+			if exec.Command("kill", "-0", pid).Run() != nil {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+		t.Fatalf("agent %s still running", pid)
+	}
+}
+
+func TestStaticIncompleteApprovesNonemptyTree(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "README.md", "changed\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"incomplete","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":0,"incompletePolicies":1},"findings":[],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--mode", "static", "--format", "json")
+	if code != 2 {
+		t.Fatalf("exit %d out %s err %s", code, out, stderr)
+	}
+	snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(repo, "show-ref", "--verify", "--quiet", "refs/slopcop/reviewed/"+snapshot.Tree); err != nil {
+		t.Fatalf("missing approval: %v", err)
+	}
+}
+
+func TestOverrideAfterStaticIncomplete(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"incomplete","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":0,"incompletePolicies":1},"findings":[],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	if code != 1 {
+		t.Fatalf("exit %d out %s err %s", code, out, stderr)
+	}
+	code, out, stderr = runCLI(t, "override", "--root", repo, "--reason", "false positive")
+	if code != 0 {
+		t.Fatalf("override exit %d out %s err %s", code, out, stderr)
+	}
+	snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(repo, "show-ref", "--verify", "--quiet", "refs/slopcop/reviewed/"+snapshot.Tree); err != nil {
+		t.Fatalf("missing approval: %v", err)
+	}
+}
+
+func TestPushApprovalLevel(t *testing.T) {
+	for _, tc := range []struct {
+		name, severity, level, failOn string
+		approved                      bool
+		exit                          int
+	}{
+		{"warning advisory", "warning", "", "finding", true, 1},
+		{"error blocks", "error", "", "finding", false, 1},
+		{"unknown severity blocks", "mystery", "", "finding", false, 1},
+		{"warning threshold", "warning", "warning", "finding", false, 1},
+		{"never threshold", "error", "never", "finding", true, 1},
+		{"finding threshold", "note", "finding", "finding", false, 1},
+		{"fail never does not approve", "error", "", "never", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "README.md", "changed\n")
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=clean"}}}}}
+			if tc.level != "" {
+				cfg.Gate = &config.Gate{BlockOn: tc.level}
+			}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				status := "findings"
+				if tc.failOn == "never" {
+					status = "clean"
+				}
+				_, _ = fmt.Fprintf(w, `{"status":%q,"baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":1,"failOn":%q},"findings":[{"policyId":"p","severity":%q,"new":true,"path":"README.md","title":"issue"}],"incomplete":[]}`, status, tc.failOn, tc.severity)
+			}))
+			defer server.Close()
+			code, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json", "--timeout", "50ms", "--fail-on", tc.failOn)
+			if code != tc.exit {
+				t.Fatalf("exit %d want %d: %s %s", code, tc.exit, out, stderr)
+			}
+			var doc struct {
+				Approved bool `json:"approved"`
+			}
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatal(err)
+			}
+			if doc.Approved != tc.approved {
+				t.Fatalf("approved=%v want %v: %s", doc.Approved, tc.approved, out)
+			}
+			snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", "refs/slopcop/reviewed/"+snapshot.Tree)
+			if (err == nil) != tc.approved {
+				t.Fatalf("approval ref=%v want %v", err == nil, tc.approved)
+			}
+			if tc.name == "warning advisory" || tc.name == "error blocks" {
+				// The push line is printed only where init installed the
+				// gate, so install it the way init does, kept out of the
+				// snapshot by the repository's exclude file.
+				writeFile(t, repo, ".claude/settings.local.json", `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`)
+				writeFile(t, repo, ".git/info/exclude", "/.claude/settings.local.json\n")
+				_, _, humanErr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "human", "--timeout", "50ms")
+				want := "may not be pushed yet: 1 static finding(s) at or above error."
+				if tc.approved {
+					want = "may be pushed: it passed the check."
+				}
+				if !strings.Contains(humanErr, want) {
+					t.Fatalf("human stderr %q missing %q", humanErr, want)
+				}
+			}
+		})
+	}
+}
+
+func TestInvalidPushApprovalConfig(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Config{Gate: &config.Gate{BlockOn: "bogus"}}
+	path, err := config.Save(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	code, _, stderr := runCLI(t, "check", "--root", repo, "--static")
+	if code == 0 || !strings.Contains(stderr, path) {
+		t.Fatalf("code=%d stderr=%s", code, stderr)
+	}
+	code, _, stderr = runCLI(t, "config", "set", "gate.blockOn", "error")
+	if code == 0 || !strings.Contains(stderr, path) || !strings.Contains(stderr, "edited by hand") {
+		t.Fatalf("code=%d stderr=%s", code, stderr)
+	}
+}
+
+func TestOverrideStaticPushLevel(t *testing.T) {
+	for _, tc := range []struct {
+		severity string
+		allowed  bool
+	}{{"warning", true}, {"error", false}} {
+		t.Run(tc.severity, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "README.md", "changed\n")
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"status":"findings","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":1},"findings":[{"policyId":"p","severity":%q,"new":true,"path":"README.md","title":"issue"}],"incomplete":[]}`, tc.severity)
+			}))
+			defer server.Close()
+			code, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+			if code != 1 {
+				t.Fatalf("check exit %d: %s %s", code, out, stderr)
+			}
+			code, out, stderr = runCLI(t, "override", "--root", repo, "--reason", "review finding is wrong")
+			if (code == 0) != tc.allowed {
+				t.Fatalf("override exit %d: %s %s", code, out, stderr)
+			}
+			if !tc.allowed && !strings.Contains(stderr, "static finding") {
+				t.Fatalf("reason: %s", stderr)
+			}
+		})
+	}
+}
+
+func TestLaterReviewWithdrawsApproval(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	adapter := config.Adapter{Command: []string{os.Args[0], "-test.run=^TestFakeAgent$"}}
+	cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": adapter}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json")
+	if code != 0 {
+		t.Fatalf("approval check: %d %s %s", code, out, stderr)
+	}
+	snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "refs/slopcop/reviewed/" + snapshot.Tree
+	if _, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", ref); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Review.Adapters["codex"] = config.Adapter{Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}
+	if _, err = config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr = runCLI(t, "check", "--root", repo, "--format", "json")
+	if code != 1 {
+		t.Fatalf("findings check: %d %s %s", code, out, stderr)
+	}
+	if _, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", ref); err == nil {
+		t.Fatal("stale approval ref")
+	}
+}
+
+func TestEmptyCheckPreservesApproval(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$"}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "refs/slopcop/reviewed/" + snapshot.Tree
+	gitAt(t, repo, "update-ref", ref, snapshot.Tree)
+	_, _, _ = runCLI(t, "check", "--root", repo, "--format", "json")
+	if _, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", ref); err != nil {
+		t.Fatalf("empty check removed approval: %v", err)
+	}
+}
+
+func TestStaticApprovalWithdrawnByBothReview(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"clean","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":0},"findings":[]}`))
+	}))
+	defer server.Close()
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--mode", "static", "--format", "json")
+	if code != 0 {
+		t.Fatalf("static: %d %s %s", code, out, stderr)
+	}
+	snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ref := "refs/slopcop/reviewed/" + snapshot.Tree
+	if _, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", ref); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL, "--mode", "both", "--format", "json")
+	if code != 1 {
+		t.Fatalf("both: %d %s %s", code, out, stderr)
+	}
+	if _, err = gitx.Run(repo, "show-ref", "--verify", "--quiet", ref); err == nil {
+		t.Fatal("stale static approval")
+	}
+}
+
+// TestPushApprovalWithIncompleteRules covers an incomplete static result with
+// no findings and a clean review: a rule that could not answer for a cause of
+// its own does not block the push, but a run failure, which left the whole
+// analyzer run without an answer, does, and the push line says why.
+func TestPushApprovalWithIncompleteRules(t *testing.T) {
+	for _, tc := range []struct {
+		name, incomplete, runFailures string
+		approved                      bool
+	}{
+		{"own cause approves", `[{"policyId":"p","reason":"unsupported"}]`, `[]`, true},
+		{"run failure blocks", `[{"policyId":"p","reason":"unreliable","detail":"type=incomplete reasons=analyzer_process_failed exit_code=137","scope":"run"}]`,
+			`[{"reason":"unreliable","detail":"type=incomplete reasons=analyzer_process_failed exit_code=137","policies":1}]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "README.md", "changed\n")
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=clean"}}}}}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"status":"incomplete","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"incompletePolicies":1,"failOn":"finding"},"findings":[],"incomplete":%s,"runFailures":%s}`, tc.incomplete, tc.runFailures)
+			}))
+			defer server.Close()
+			_, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json", "--timeout", "50ms")
+			var doc struct {
+				Approved bool `json:"approved"`
+			}
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatalf("%v: %s %s", err, out, stderr)
+			}
+			if doc.Approved != tc.approved {
+				t.Fatalf("approved=%v want %v: %s", doc.Approved, tc.approved, out)
+			}
+			writeFile(t, repo, ".claude/settings.local.json", `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`)
+			writeFile(t, repo, ".git/info/exclude", "/.claude/settings.local.json\n")
+			_, _, humanErr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "human", "--timeout", "50ms")
+			want := "may be pushed: it passed the check."
+			if !tc.approved {
+				want = "may not be pushed yet: the static analyzer run failed (unreliable), so it checked nothing; run the check again."
+			}
+			if !strings.Contains(humanErr, want) {
+				t.Fatalf("push line: want %q in %s", want, humanErr)
+			}
+		})
 	}
 }
