@@ -67,7 +67,7 @@ func (s *hookState) completed(workspace, fingerprint string, response service.Re
 	s.Fingerprint, s.Status = fingerprint, response.Status
 	s.Findings = nil
 	for _, finding := range response.Findings {
-		if finding.New {
+		if finding.New && finding.Severity != "info" {
 			s.Findings = append(s.Findings, finding)
 		}
 	}

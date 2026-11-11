@@ -27,7 +27,8 @@ type fakeService struct {
 	// active names the repositories the workspace checks.
 	active []string
 	// findings are the paths the check reports a new finding in.
-	findings []string
+	findings   []string
+	severities []string
 	// refusal, when set, is the error body every request is answered with.
 	refusal string
 	// outages is how many requests a gateway answers with a bare 503 first.
@@ -69,9 +70,13 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			response := service.Response{Status: service.StatusClean, BaseCommit: base, Applied: true, Findings: []service.Finding{}, Incomplete: []service.IncompletePolicy{}}
 			line := 1
 			for i, path := range f.findings {
+				severity := "warning"
+				if i < len(f.severities) {
+					severity = f.severities[i]
+				}
 				response.Status = service.StatusFindings
 				response.Findings = append(response.Findings, service.Finding{
-					ID: fakeFindingID(i), PolicyID: "demo.policy", Severity: "warning", Certainty: "definite",
+					ID: fakeFindingID(i), PolicyID: "demo.policy", Severity: severity, Certainty: "definite",
 					Path: path, StartLine: &line, Title: "Fix " + path, New: true,
 				})
 			}
@@ -90,6 +95,34 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 	}))
 	t.Cleanup(server.Close)
 	return server
+}
+
+func TestHookInfoFindingsAreAdvisory(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		severities []string
+		wantBlock  bool
+	}{
+		{"info only", []string{"info"}, false},
+		{"info and error", []string{"info", "error"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateHook(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			writeSessionEdits(t, repo, "demo.go")
+			paths := make([]string, len(tc.severities))
+			for i := range paths {
+				paths[i] = "demo.go"
+			}
+			fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: paths, severities: tc.severities}
+			server := fake.start(t, repo)
+			output := runTestHook(t, server.URL, stopPayload(repo, false))
+			if (output.Decision == "block") != tc.wantBlock {
+				t.Fatalf("output = %+v, wantBlock=%v", output, tc.wantBlock)
+			}
+		})
+	}
 }
 
 // fakeFindingID is the id the fake service gives its i-th finding.

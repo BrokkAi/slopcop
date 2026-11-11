@@ -1943,6 +1943,12 @@ func TestPushApprovalLevel(t *testing.T) {
 		exit                          int
 	}{
 		{"warning advisory", "warning", "", "finding", true, 1},
+		{"info advisory default error level", "info", "", "finding", true, 1},
+		{"info advisory finding level", "info", "finding", "finding", true, 1},
+		{"info advisory note level", "info", "note", "finding", true, 1},
+		{"info advisory warning level", "info", "warning", "finding", true, 1},
+		{"info advisory error level", "info", "error", "finding", true, 1},
+		{"info advisory never level", "info", "never", "finding", true, 1},
 		{"error blocks", "error", "", "finding", false, 1},
 		{"unknown severity blocks", "mystery", "", "finding", false, 1},
 		{"warning threshold", "warning", "warning", "finding", false, 1},
@@ -1992,7 +1998,7 @@ func TestPushApprovalLevel(t *testing.T) {
 			if (err == nil) != tc.approved {
 				t.Fatalf("approval ref=%v want %v", err == nil, tc.approved)
 			}
-			if tc.name == "warning advisory" || tc.name == "error blocks" {
+			if tc.name == "warning advisory" || tc.name == "error blocks" || strings.Contains(tc.name, "info advisory") {
 				// The push line is printed only where init installed the
 				// gate, so install it the way init does, kept out of the
 				// snapshot by the repository's exclude file.

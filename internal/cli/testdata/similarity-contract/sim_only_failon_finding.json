@@ -1,0 +1,43 @@
+{
+  "status": "clean",
+  "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+  "applied": true,
+  "summary": {
+    "files": 1,
+    "findings": 1,
+    "newFindings": 1,
+    "existingFindings": 0,
+    "incompletePolicies": 0,
+    "incompletePolicyIds": [],
+    "inconclusive": 0,
+    "inconclusiveElsewhere": 0,
+    "omittedFindings": 0,
+    "lessCertainFindings": 0,
+    "failOn": "finding"
+  },
+  "findings": [
+    {
+      "id": "6b1f0c0e-0000-4000-8000-000000000001",
+      "policyId": "slopcop.similarity",
+      "severity": "info",
+      "certainty": "heuristic",
+      "path": "src/new.rs",
+      "startLine": 4,
+      "endLine": 9,
+      "title": "`added` is similar to existing functions: `src/old.rs:10` `existing` (0.87)",
+      "relatedLocations": [
+        {
+          "endLine": 20,
+          "message": "P(combine) = 0.87",
+          "path": "src/old.rs",
+          "startLine": 10
+        }
+      ],
+      "new": true
+    }
+  ],
+  "incomplete": [],
+  "checks": [],
+  "inconclusive": [],
+  "inconclusiveElsewhere": []
+}

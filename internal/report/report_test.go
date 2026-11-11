@@ -1524,3 +1524,37 @@ func TestSimilarityCandidatesAndReadinessNotices(t *testing.T) {
 		t.Fatalf("SARIF notice missing: %v", notifications)
 	}
 }
+
+func TestInfoOnlySummaryIsAdvisory(t *testing.T) {
+	r := response(service.StatusClean, "finding", []service.Finding{finding("new.go", 3, "info", "slopcop.similarity")})
+	r.Findings[0].Title = "Similar existing function"
+	got := summaryLine(r)
+	if strings.Contains(got, "1 new finding") || !strings.Contains(got, "No new findings; 1 note: Similar existing function") {
+		t.Fatalf("summary = %q", got)
+	}
+}
+
+func TestPartialSimilarityNoticeRendersInAllFormats(t *testing.T) {
+	r := response(service.StatusClean, "finding", nil)
+	r.Checks = []service.CheckNotice{{PolicyID: "slopcop.similarity", Status: "partial", Message: "Compared 8 of 10 changed functions."}}
+	if got := render(t, r, FormatHuman); !strings.Contains(got, "Note: slopcop.similarity (partial): Compared 8 of 10 changed functions.") || strings.Contains(got, "incomplete") {
+		t.Fatalf("human = %q", got)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, r, FormatJSON)), &document); err != nil {
+		t.Fatal(err)
+	}
+	checks := document["checks"].([]any)
+	if checks[0].(map[string]any)["status"] != "partial" || document["status"] != service.StatusClean {
+		t.Fatalf("JSON = %v", document)
+	}
+	if err := json.Unmarshal([]byte(render(t, r, FormatSARIF)), &document); err != nil {
+		t.Fatal(err)
+	}
+	runs := document["runs"].([]any)
+	notifications := runs[0].(map[string]any)["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	notice := notifications[0].(map[string]any)
+	if notice["level"] != "note" || notice["message"].(map[string]any)["text"] != "Compared 8 of 10 changed functions." || notice["properties"].(map[string]any)["slopcop.checkStatus"] != "partial" {
+		t.Fatalf("SARIF notice = %v", notice)
+	}
+}

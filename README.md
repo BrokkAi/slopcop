@@ -439,12 +439,14 @@ Flags:
 | `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
-The hosted `slopcop.similarity` check runs by default. It reports similar
+The hosted `slopcop.similarity` check runs by default, including when the
+repository has `.slopcop/policies` files. It reports similar
 existing functions for functions in the change, with candidate paths, lines,
 and a probability. Similarity findings have `info` severity, are always shown
-regardless of `--certainty`, and never affect the check's exit code. Check
-readiness notices appear as notes and do not make analysis incomplete. To
-select only similarity, pass `--policy-id slopcop.similarity`.
+regardless of `--certainty`, and are advisory: they never affect the push gate
+or the check's exit code. Check notices, including partial comparison notices,
+appear as notes and do not make analysis incomplete. To select only
+similarity, pass `--policy-id slopcop.similarity`.
 
 For this check, function source from the change is sent to third-party
 embedding and model providers used by the hosted service.

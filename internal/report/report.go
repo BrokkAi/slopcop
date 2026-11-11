@@ -325,19 +325,35 @@ func previouslyIgnoredLine(finding service.Finding) string {
 // the new findings, then how many were already in the code.
 func summaryLine(response service.Response) string {
 	fresh, existing := split(response.Findings)
+	var notes []service.Finding
+	var blocking []service.Finding
+	for _, finding := range fresh {
+		if finding.Severity == "info" {
+			notes = append(notes, finding)
+		} else {
+			blocking = append(blocking, finding)
+		}
+	}
 	scope := "No new findings"
 	if onlyExcluded(response) {
 		scope = "Nothing checked: every changed file is excluded by .slopcop/config.toml"
 	}
-	switch len(fresh) {
+	switch len(blocking) {
 	case 0:
 	case 1:
 		scope = "1 new finding"
 	default:
-		scope = fmt.Sprintf("%d new findings", len(fresh))
+		scope = fmt.Sprintf("%d new findings", len(blocking))
 	}
-	if len(fresh) > 0 {
-		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(fresh))
+	if len(blocking) > 0 {
+		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(blocking))
+	}
+	if len(notes) > 0 {
+		noun := "notes"
+		if len(notes) == 1 {
+			noun = "note"
+		}
+		scope = fmt.Sprintf("%s; %d %s: %s", scope, len(notes), noun, printable(notes[0].Title))
 	}
 	// The service lists only the findings the change introduced or touched
 	// and counts the rest; a service from before that also listed them.

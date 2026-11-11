@@ -1025,7 +1025,7 @@ func staticBlockingCount(response service.Response, level string) int {
 	threshold := rank[level]
 	count := 0
 	for _, finding := range response.Findings {
-		if !finding.New {
+		if !finding.New || finding.Severity == "info" {
 			continue
 		}
 		severity := rank[finding.Severity]
