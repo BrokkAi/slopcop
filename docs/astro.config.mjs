@@ -67,7 +67,8 @@ export default defineConfig({
         ThemeSelect: './src/components/SlopCopThemeSelect.astro',
       },
       logo: {
-        src: './src/assets/helmet.svg',
+        light: './src/assets/gumshoe-light.svg',
+        dark: './src/assets/gumshoe-dark.svg',
         alt: 'SlopCop',
       },
       favicon: '/favicon.svg',
