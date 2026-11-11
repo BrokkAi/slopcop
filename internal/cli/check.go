@@ -260,6 +260,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	reportOptions.EmptyChange = prepared.bytes == 0
 	if prepared.bytes == 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(prepared.request.BaseCommit))
+		// A base the CLI moved explains an empty patch the user did not
+		// expect from the base they named, so say so even without --verbose.
+		if !opts.verbose {
+			for _, note := range prepared.base.notes {
+				fmt.Fprintln(cmd.ErrOrStderr(), note)
+			}
+		}
 	}
 	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean
 	staticPassed := staticPasses(static, mode, blockLevel)
@@ -805,10 +812,15 @@ type baseResolution struct {
 // the branch's own work. When the two lines have diverged, no fetchable
 // commit holds both, so base stays and the result warns that the patch
 // carries the merged-in commits.
+//
+// A line HEAD is already on, such as a commit that has landed on the default
+// branch, is skipped: its merge base with HEAD is HEAD itself, HEAD merged
+// nothing from it, and moving the base there would empty the patch.
 func mergedInBase(root, rev, commit, base string) baseResolution {
 	type line struct{ name, mergeBase string }
 	var lines []line
 	seen := map[string]bool{commit: true}
+	head, _ := gitx.HeadCommit(root)
 	for _, name := range []string{gitx.OriginHead(root), upstreamOf(root, rev)} {
 		if name == "" {
 			continue
@@ -819,7 +831,7 @@ func mergedInBase(root, rev, commit, base string) baseResolution {
 		}
 		seen[tip] = true
 		mergeBase, ok, err := gitx.MergeBase(root, "HEAD", tip)
-		if err != nil || !ok {
+		if err != nil || !ok || mergeBase == head {
 			continue
 		}
 		lines = append(lines, line{name, mergeBase})
