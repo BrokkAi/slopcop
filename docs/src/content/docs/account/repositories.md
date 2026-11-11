@@ -54,9 +54,8 @@ An agent following the skill never adds a repository. When a check reports
 
 ## Active and disabled
 
-Every repository a workspace has is **active** or **disabled**. Every active
-repository after a workspace's first costs credits every 30 days
-([Credits](/account/credits/)); a disabled one is not checked or charged, and
+Every repository a workspace has is **active** or **disabled**. Repositories
+are free ([Credits](/account/credits/)); a disabled one is not checked, and
 keeps its reports, findings, and settings. A check of a disabled repository
 answers `repository_disabled`; `slopcop whoami` names the workspace that
 disabled it.
