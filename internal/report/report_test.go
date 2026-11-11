@@ -37,10 +37,11 @@ func existing(path string, at int, severity, policy string) service.Finding {
 }
 
 func sampleFindings() []service.Finding {
+	note := finding("new file.py", 1, "info", "bifrost.maintainability.complexity")
 	return []service.Finding{
 		finding("cli.py", 2, "warning", "bifrost.correctness.dynamic-evaluation"),
 		finding("cli.py", 5, "warning", "bifrost.correctness.dynamic-evaluation"),
-		finding("new file.py", 1, "note", "bifrost.maintainability.complexity"),
+		note,
 	}
 }
 
@@ -123,11 +124,12 @@ func TestHumanListsEachFindingThenTheSummary(t *testing.T) {
 		"    Location: cli.py:5\n" +
 		"    Certainty: definite\n" +
 		"\n" +
-		"  [note] bifrost.maintainability.complexity: bifrost.maintainability.complexity title\n" +
+		"Notes\n" +
+		"  [info] bifrost.maintainability.complexity: bifrost.maintainability.complexity title\n" +
 		"    Location: new file.py:1\n" +
 		"    Certainty: definite\n" +
 		"\n" +
-		"3 new findings across 2 file(s) | Analysis complete\n"
+		"2 new findings across 1 file(s); 1 note: bifrost.maintainability.complexity title | Analysis complete\n"
 	if got != want {
 		t.Errorf("the file count is files with findings, not changed files:\n%s", got)
 	}
@@ -244,7 +246,7 @@ func TestOmittedFindingsAreSaidInEveryFormat(t *testing.T) {
 		"a check may report; the most severe are listed"
 
 	got := render(t, cut, FormatHuman)
-	want := "\n3 new findings across 2 file(s); +45 not reported | Analysis complete\n" +
+	want := "\n2 new findings across 1 file(s); 1 note: bifrost.maintainability.complexity title; +45 not reported | Analysis complete\n" +
 		"Omitted: " + notice + ".\n"
 	if !strings.HasSuffix(got, want) {
 		t.Errorf("human = %q", got)
@@ -316,7 +318,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 	}
 	wantFinding := map[string]any{
 		"policyId":  "bifrost.maintainability.complexity",
-		"severity":  "note",
+		"severity":  "info",
 		"certainty": "definite",
 		"path":      "new file.py",
 		"startLine": float64(1),
@@ -1528,9 +1530,15 @@ func TestSimilarityCandidatesAndReadinessNotices(t *testing.T) {
 func TestInfoOnlySummaryIsAdvisory(t *testing.T) {
 	r := response(service.StatusClean, "finding", []service.Finding{finding("new.go", 3, "info", "slopcop.similarity")})
 	r.Findings[0].Title = "Similar existing function"
+	r.Findings[0].RelatedLocations = []service.RelatedLocation{{Path: "old.go", StartLine: 8, Message: "matching function"}}
 	got := summaryLine(r)
 	if strings.Contains(got, "1 new finding") || !strings.Contains(got, "No new findings; 1 note: Similar existing function") {
 		t.Fatalf("summary = %q", got)
+	}
+	got = render(t, r, FormatHuman)
+	if !strings.Contains(got, "Notes\n  [info] slopcop.similarity: Similar existing function\n") ||
+		!strings.Contains(got, "Candidate: old.go:8 — matching function\n") || strings.Contains(got, "New findings\n") {
+		t.Fatalf("human = %q", got)
 	}
 }
 

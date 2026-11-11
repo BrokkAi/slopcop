@@ -81,7 +81,8 @@ type AttributedModel struct {
 
 // Selection mirrors CheckSelection. File entries are repository-relative
 // .rqlp paths resolved inside the patched tree, which the service runs on top
-// of its hosted catalog. The CLI sends only Files.
+// of its hosted catalog. The CLI sends the selected files, policy IDs, packs,
+// and categories.
 type Selection struct {
 	Files      []string `json:"files,omitempty"`
 	Packs      []string `json:"packs,omitempty"`

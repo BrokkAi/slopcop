@@ -143,8 +143,17 @@ func remappedCount(response service.Response) int {
 func human(response service.Response, options Options) string {
 	var out strings.Builder
 	fresh, existing := split(response.Findings)
+	var blocking, notes []service.Finding
+	for _, finding := range fresh {
+		if finding.Severity == "info" {
+			notes = append(notes, finding)
+		} else {
+			blocking = append(blocking, finding)
+		}
+	}
 	remapped, rest := splitRemapped(existing)
-	writeBlock(&out, "New findings", fresh)
+	writeBlock(&out, "New findings", blocking)
+	writeBlock(&out, "Notes", notes)
 	writeBlock(&out, "Previously ignored, code changed (never fail the check)", remapped)
 	if options.ShowExisting {
 		writeBlock(&out, "Already in the code (never fail the check)", rest)
