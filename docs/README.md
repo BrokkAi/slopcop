@@ -22,5 +22,9 @@ docs change to `master`, on a `v*.*.*` tag, on a `deploy-docs`
 builds. The page [This documentation](src/content/docs/contribute/docs.md)
 has the details.
 
-The fonts under `public/fonts/` are the ones slopcop.com uses, each under the
-SIL Open Font License (see the license file beside each).
+The theme is in `src/styles/`: `tokens.css` holds every colour, face and size,
+and `slopcop.css` maps them onto Starlight. `rehype-reading.mjs` keeps a flag such
+as `--base` on one line and gives each table cell its column's heading, which
+the stylesheet uses to set a table as rows on a phone. The fonts under `public/fonts/` are
+the ones slopcop.com uses (Redaction 20, Overused Grotesk, Commit Mono), each
+under the SIL Open Font License (see the license file beside each).

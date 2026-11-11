@@ -1,24 +1,17 @@
 ---
-// A landing-page tile: an icon square, a title, one line of description, and
-// an arrow, all one link. Used by the home page's card grids.
-import { Icon } from '@astrojs/starlight/components';
-import type { StarlightIcon } from '@astrojs/starlight/types';
-
+// A home-page card: a tag that is one link, with a title and one quiet line.
 interface Props {
   title: string;
   description: string;
   href: string;
-  icon: StarlightIcon;
 }
 
-const { title, description, href, icon } = Astro.props;
+const { title, description, href } = Astro.props;
 ---
 
-<a class="sc-navcard" href={href}>
-  <span class="sc-navcard__icon" aria-hidden="true"><Icon name={icon} size="1.05rem" /></span>
+<a class="sc-tag is-pressable sc-navcard" href={href}>
   <span class="sc-navcard__title">{title}</span>
   <span class="sc-navcard__desc">{description}</span>
-  <span class="sc-navcard__arrow" aria-hidden="true">→</span>
 </a>
 
 <style>
@@ -27,35 +20,24 @@ const { title, description, href, icon } = Astro.props;
       display: flex;
       flex-direction: column;
       min-height: 100%;
-      padding: 1.25rem 1.25rem 1rem;
-      border: 1px solid var(--sc-line);
-      background: var(--sc-surface);
-      clip-path: var(--sc-chamfer);
-      color: inherit;
+      padding: var(--sc-4) var(--sc-5) var(--sc-6);
+      color: var(--sc-fg);
       text-decoration: none;
-      transition: background 140ms ease, border-color 140ms ease;
     }
-    .sc-navcard:hover { background: var(--sc-surface-hover); border-color: var(--sc-line-strong); }
-    .sc-navcard__icon {
-      display: grid;
-      place-items: center;
-      width: 2.25rem;
-      height: 2.25rem;
-      margin-bottom: 1.75rem;
-      background: var(--sc-well);
-      border: 1px solid var(--sc-line-soft);
-      color: var(--sc-text-2);
+    .sc-navcard__title {
+      padding-inline-end: var(--sc-4);
+      font-size: var(--sc-t-item);
+      line-height: 1.25;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      text-wrap: balance;
     }
-    .sc-navcard:hover .sc-navcard__icon { color: var(--sc-accent-text); }
-    .sc-navcard__title { font-size: 1.0625rem; font-weight: 700; color: var(--sc-text); line-height: 1.3; }
-    .sc-navcard__desc { margin-top: 0.4rem; font-size: 0.9rem; line-height: 1.55; color: var(--sl-color-gray-2); }
-    .sc-navcard__arrow {
-      margin-top: auto;
-      padding-top: 1.25rem;
-      align-self: flex-end;
-      color: var(--sc-text-3);
-      transition: transform 140ms ease, color 140ms ease;
+    .sc-navcard__desc {
+      margin-top: 6px;
+      max-width: 26em;
+      color: var(--sc-quiet);
+      font-size: var(--sc-t-small);
+      line-height: 1.45;
     }
-    .sc-navcard:hover .sc-navcard__arrow { color: var(--sc-accent-text); transform: translateX(3px); }
   }
 </style>

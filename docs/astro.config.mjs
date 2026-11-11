@@ -2,6 +2,8 @@ import { unified } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import rehypeBasePathLinks from './rehype-base-path-links.mjs';
+import rehypeReading from './rehype-reading.mjs';
+import { slopcopField, slopcopPaper } from './src/code-themes.mjs';
 
 // The deploy workflow sets PUBLIC_DOCS_SITE and PUBLIC_DOCS_BASE. A local
 // `astro dev` always serves from `/`.
@@ -11,6 +13,8 @@ const isDev = process.argv.includes('dev');
 const base = isDev ? '/' : productionBase;
 const socialCardPath = [productionBase.replace(/^\/+|\/+$/g, ''), 'og.png'].filter(Boolean).join('/');
 const socialCardUrl = new URL(`/${socialCardPath}`, site).href;
+// The text face is on every page, so every page preloads its regular weight.
+const textFaceUrl = `/${[base.replace(/^\/+|\/+$/g, ''), 'fonts/OverusedGrotesk-400.woff2'].filter(Boolean).join('/')}`;
 const socialCardAlt =
   'SlopCop documentation: static analysis deep enough for CI, fast enough for your coding agent to run on every edit.';
 
@@ -19,7 +23,7 @@ export default defineConfig({
   base,
   markdown: {
     processor: unified({
-      rehypePlugins: [[rehypeBasePathLinks, { base }]],
+      rehypePlugins: [[rehypeBasePathLinks, { base }], rehypeReading],
     }),
   },
   integrations: [
@@ -37,27 +41,53 @@ export default defineConfig({
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
         { tag: 'meta', attrs: { name: 'twitter:image', content: socialCardUrl } },
         { tag: 'meta', attrs: { name: 'twitter:image:alt', content: socialCardAlt } },
+        {
+          tag: 'link',
+          attrs: { rel: 'preload', href: textFaceUrl, as: 'font', type: 'font/woff2', crossorigin: true },
+        },
       ],
-      customCss: ['./src/styles/slopcop.css'],
+      customCss: ['./src/styles/tokens.css', './src/styles/slopcop.css'],
+      routeMiddleware: './src/route-data.ts',
+      // Code sits in a well with no frame, in the mono face at 13 on 21, in four inks.
       expressiveCode: {
+        themes: [slopcopField, slopcopPaper],
+        minSyntaxHighlightingColorContrast: 0,
         styleOverrides: {
           borderRadius: '0',
-          borderColor: 'var(--sc-line)',
-          borderWidth: '1px',
-          codeFontFamily: 'var(--sc-font-mono)',
+          borderColor: 'transparent',
+          borderWidth: '0px',
+          codeFontFamily: 'var(--sc-mono)',
+          codeFontSize: 'var(--sc-t-mono)',
+          codeLineHeight: '21px',
+          codePaddingBlock: 'var(--sc-4)',
+          codePaddingInline: 'var(--sc-5)',
           codeBackground: 'var(--sc-well)',
+          codeForeground: 'var(--sc-fg)',
+          uiFontFamily: 'var(--sc-sans)',
+          uiFontSize: 'var(--sc-ui-small)',
+          focusBorder: 'var(--sc-fg)',
           frames: {
             shadowColor: 'transparent',
-            terminalTitlebarBackground: 'var(--sc-surface)',
-            terminalTitlebarBorderBottomColor: 'var(--sc-line-soft)',
-            terminalTitlebarDotsForeground: 'var(--sc-line-strong)',
-            terminalTitlebarDotsOpacity: '1',
-            editorTabBarBackground: 'var(--sc-surface)',
+            frameBoxShadowCssValue: 'none',
+            editorBackground: 'var(--sc-well)',
+            editorTabBarBackground: 'var(--sc-well)',
+            editorTabBarBorderColor: 'transparent',
+            editorTabBarBorderBottomColor: 'var(--sc-hair)',
             editorActiveTabBackground: 'var(--sc-well)',
-            editorActiveTabIndicatorTopColor: 'var(--sc-accent)',
-            editorTabBarBorderBottomColor: 'var(--sc-line-soft)',
-            tooltipSuccessBackground: 'var(--sc-accent-dim)',
-            tooltipSuccessForeground: 'var(--sc-accent-text)',
+            editorActiveTabForeground: 'var(--sc-quiet)',
+            editorActiveTabBorderColor: 'transparent',
+            editorActiveTabIndicatorTopColor: 'transparent',
+            editorActiveTabIndicatorBottomColor: 'transparent',
+            terminalBackground: 'var(--sc-well)',
+            terminalTitlebarBackground: 'var(--sc-well)',
+            terminalTitlebarForeground: 'var(--sc-quiet)',
+            terminalTitlebarBorderBottomColor: 'var(--sc-hair)',
+            terminalTitlebarDotsOpacity: '0',
+            inlineButtonBackground: 'var(--sc-fg)',
+            inlineButtonForeground: 'var(--sc-fg)',
+            inlineButtonBorder: 'var(--sc-fg)',
+            tooltipSuccessBackground: 'var(--sc-fg)',
+            tooltipSuccessForeground: 'var(--sc-bg)',
           },
         },
       },
