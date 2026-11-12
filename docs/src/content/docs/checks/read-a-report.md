@@ -16,15 +16,17 @@ completed.
 
 | Status | Meaning |
 | --- | --- |
-| `clean` | Every selected rule completed for the files the change writes (an inconclusive one counts as completed), and no new finding crossed `--fail-on`. The only status that supports "nothing found", and only for those rules, files, and lines. Exit `0`. |
-| `findings` | A new finding crossed `--fail-on`. Other rules may still be incomplete. Exit `1`. |
-| `incomplete` | No new finding crossed `--fail-on`, but some rule could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. Exit `2`. |
+| `clean` | Every selected rule completed for the files the change writes (an inconclusive one counts as completed), and the change has no new finding. The only status that supports "nothing found", and only for those rules, files, and lines. Exit `0`. |
+| `findings` | The change has new findings. Other rules may still be incomplete. Exit `1` when one crossed `--fail-on`; below the threshold, or with `--fail-on never`, the exit is what it would be without them: `0`, or `2` when a rule did not complete. |
+| `incomplete` | The change has no new finding, but some rule could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. Exit `2`. |
 | `pending` | Not a result yet: the check was still running when `--timeout` ran out. Run the same check again. Exit `3`. |
 | `failed` | The service refused or could not run the check. Carries a `code`, `message`, and `remedy`. Exit `4` when only a person can clear it, `2` otherwise. |
 | `skipped` | The CLI sent nothing because `--if-enabled` found the repository not active. Carries `code: repository_not_enabled`, the repository, and its state. Exit `0`; this is not a check result. |
 
 The CLI merges static and review statuses. Top-level JSON `status` matches
-the exit code; `staticStatus` keeps the service status when it differs.
+the exit code, except that new findings below `--fail-on` (or with
+`--fail-on never`) still read `findings`; `staticStatus` keeps the static
+half's status when it differs.
 Review details are in `review`, including each configured reviewer, its error
 if it could not run, and its log path. Exit `0` can include a static skip or empty review;
 inspect those statuses before calling the change checked.

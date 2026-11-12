@@ -582,8 +582,11 @@ whichever is used.
 | `4` | The service refused the check, and only a person can clear it |
 | `130`, `143` | Interrupted before the check answered: `130` for Ctrl-C, `143` for SIGTERM |
 
-Only `clean` exits `0`: a status this CLI does not know exits `2`, so a newer
-service can never pass a check by accident, and stderr names the status. An
+`--fail-on` decides only the exit code: `status` is `findings` whenever the
+change has new findings, so `--fail-on never` reports them and still exits `0`.
+Otherwise only `clean` exits `0`: a status this CLI does not know exits `2`, so
+a newer service can never pass a check by accident, and stderr names the
+status. An
 interrupted check prints no report. Interrupted before it was sent, nothing
 reached the service; after, a service that received it keeps running it, and
 running the same check again picks up its result.

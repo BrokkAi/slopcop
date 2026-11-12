@@ -250,6 +250,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	case service.ExitPending:
 		status = "pending"
 	}
+	// Status says what the check found and --fail-on only what exits
+	// nonzero, so findings below the threshold, or with --fail-on never,
+	// still read as findings.
+	if static.status == service.StatusFindings || verdict.Status == review.StatusFindings {
+		status = service.StatusFindings
+	}
 	reportOptions.Status = status
 	if mode != modeAI && status != static.status {
 		reportOptions.StaticStatus = static.status
@@ -426,7 +432,28 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	} else {
 		rememberCheck(prepared, response)
 	}
-	return staticOutcome{response: &response, exit: response.ExitCode(), status: response.Status}
+	exit := response.ExitCode()
+	// The service's status follows failOn, so with --fail-on never, or new
+	// findings below the threshold, it answers clean or incomplete. The
+	// report's status names the result instead; the exit keeps the threshold.
+	if response.KnownStatus() && hasNewFindings(response) {
+		response.Status = service.StatusFindings
+	}
+	return staticOutcome{response: &response, exit: exit, status: response.Status}
+}
+
+// hasNewFindings says the change introduced or touched a finding, listed or
+// omitted past the service's bound.
+func hasNewFindings(response service.Response) bool {
+	if response.Summary.NewFindings > 0 || response.Summary.OmittedFindings > 0 {
+		return true
+	}
+	for _, finding := range response.Findings {
+		if finding.New {
+			return true
+		}
+	}
+	return false
 }
 
 // checkFailure prints a service failure's code, message, and remedy on

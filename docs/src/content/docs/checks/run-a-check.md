@@ -122,6 +122,11 @@ for a request without a level is Bifrost's `warning`; pass `--fail-on warning`
 to match it. New findings that cross the threshold exit `1` even when some
 rule did not complete.
 
+The threshold decides only the exit code. The report's `status` is `findings`
+whenever the change has new findings, so `--fail-on never` reports
+`"status": "findings"` and exits `0`, and `--fail-on error` does the same for
+a change whose new findings are all warnings or notes.
+
 The threshold applies to `definite` findings only. By default the service
 leaves out every `possible` and `heuristic` finding before it decides the
 status, never sends them, and counts them in `summary.lessCertainFindings`,

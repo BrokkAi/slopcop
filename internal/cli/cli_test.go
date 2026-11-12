@@ -452,6 +452,81 @@ func TestCheckSendsTheChangeAndAppliesFailOn(t *testing.T) {
 	}
 }
 
+// TestCheckStatusNamesFindingsWhateverFailOn covers BrokkAi/slopcop#120: the
+// service's status follows failOn, but the report's status names the result,
+// and only the exit follows --fail-on.
+func TestCheckStatusNamesFindingsWhateverFailOn(t *testing.T) {
+	cases := []struct {
+		failOn, service string
+		incomplete      bool
+		wantStatus      string
+		wantExit        int
+	}{
+		{"finding", "findings", false, "findings", 1},
+		{"note", "findings", false, "findings", 1},
+		{"warning", "findings", false, "findings", 1},
+		{"error", "clean", false, "findings", 0},
+		{"never", "clean", false, "findings", 0},
+		{"never", "incomplete", true, "findings", 2},
+	}
+	for _, tc := range cases {
+		name := tc.failOn
+		if tc.incomplete {
+			name += " incomplete"
+		}
+		t.Run(name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			incomplete, incompleteCount := `[]`, 0
+			if tc.incomplete {
+				incomplete, incompleteCount = `[{"policyId": "slow", "reason": "timed_out"}]`, 1
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{
+					"status": %q,
+					"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+					"applied": true,
+					"summary": {"files": 1, "findings": 1, "newFindings": 1, "incompletePolicies": %d, "failOn": %q},
+					"findings": [{"id": "f1", "policyId": "local", "severity": "warning", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "example", "new": true}],
+					"incomplete": %s
+				}`, tc.service, incompleteCount, tc.failOn, incomplete)
+			}))
+			defer server.Close()
+			for _, format := range []string{"json", "sarif"} {
+				code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", format, "--fail-on", tc.failOn)
+				if code != tc.wantExit {
+					t.Fatalf("%s exit = %d want %d, stderr = %s", format, code, tc.wantExit, stderr)
+				}
+				var got string
+				if format == "json" {
+					var doc struct {
+						Status string `json:"status"`
+					}
+					if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+						t.Fatalf("stdout is not json: %v", err)
+					}
+					got = doc.Status
+				} else {
+					var doc struct {
+						Runs []struct {
+							Properties map[string]any `json:"properties"`
+						} `json:"runs"`
+					}
+					if err := json.Unmarshal([]byte(stdout), &doc); err != nil || len(doc.Runs) == 0 {
+						t.Fatalf("stdout is not sarif: %v\n%s", err, stdout)
+					}
+					got, _ = doc.Runs[0].Properties["slopcop.status"].(string)
+				}
+				if got != tc.wantStatus {
+					t.Fatalf("%s status = %q want %q:\n%s", format, got, tc.wantStatus, stdout)
+				}
+			}
+		})
+	}
+}
+
 func TestCheckPrintsTheServiceRemedy(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
@@ -1719,7 +1794,7 @@ func TestCombinedExitAndStatus(t *testing.T) {
 		{"static clean review failed", "clean", "empty", "finding", "incomplete", "clean", 2},
 		{"static pending review clean", "pending", "clean", "finding", "pending", "", 3},
 		{"static pending review failed", "pending", "empty", "finding", "pending", "", 3},
-		{"fail never review findings", "clean", "findings", "never", "clean", "", 0},
+		{"fail never review findings", "clean", "findings", "never", "findings", "clean", 0},
 		{"static incomplete review clean", "incomplete", "clean", "finding", "incomplete", "", 2},
 	}
 	for _, tc := range cases {
