@@ -179,6 +179,14 @@ site-search button[data-close-modal] { color: var(--sc-fg); text-decoration: und
 
 /* On this page. No line between the page and its contents list: the space between them is enough. */
 .right-sidebar { border-inline-start: 0; }
+/* The text and "On this page" are centred as one block beside the sidebar. Starlight reserves the sidebar's
+   width for the contents list, whose text is narrower, so the block reads as left of centre. Where there is
+   room it sits 48px further right (Alex, 2026-11-12); the contents column is never narrower than the sidebar. */
+@media (min-width: 72rem) {
+  :root { --sc-spare: calc((100% - var(--sl-content-width) - var(--sl-sidebar-width)) / 2); --sc-right: clamp(0px, var(--sc-spare), 48px); }
+  [data-has-sidebar][data-has-toc] .main-pane { width: min(calc(100% - var(--sl-sidebar-width)), calc(var(--sl-content-width) + var(--sc-spare) + var(--sc-right))); }
+  [data-has-sidebar][data-has-toc] .right-sidebar-container { width: max(var(--sl-sidebar-width), calc(var(--sl-sidebar-width) + var(--sc-spare) - var(--sc-right))); }
+}
 .right-sidebar-panel { padding-top: var(--sc-6); }
 .right-sidebar-panel h2 { font-size: var(--sc-ui-small); line-height: 18px; font-weight: 400; color: var(--sc-quiet); margin-bottom: var(--sc-2); }
 .right-sidebar-panel :where(a) { font-size: var(--sc-ui-body); line-height: 20px; color: var(--sc-quiet); }
