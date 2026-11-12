@@ -173,8 +173,8 @@ site-search button[data-close-modal] { color: var(--sc-fg); text-decoration: und
 .sidebar-content a[aria-current='page'], .sidebar-content a[aria-current='page']:hover, .sidebar-content a[aria-current='page']:focus { color: var(--sc-fg); background: var(--sc-tint); font-weight: 500; }
 @media (pointer: coarse) { .sidebar-content a { padding-block: 11px; } }
 
-/* On this page. */
-.right-sidebar { border-inline-start-color: var(--sc-hair); }
+/* On this page. No line between the page and its contents list: the space between them is enough. */
+.right-sidebar { border-inline-start: 0; }
 .right-sidebar-panel { padding-top: var(--sc-6); }
 .right-sidebar-panel h2 { font-size: var(--sc-ui-small); line-height: 18px; font-weight: 400; color: var(--sc-quiet); margin-bottom: var(--sc-2); }
 .right-sidebar-panel :where(a) { font-size: var(--sc-ui-body); line-height: 20px; color: var(--sc-quiet); }
@@ -188,7 +188,8 @@ mobile-starlight-toc .dropdown { border-color: var(--sc-hair); box-shadow: none;
 mobile-starlight-toc .dropdown a { font-size: var(--sc-ui-body); }
 
 /* ---- A guide: one column at the reading size, the sans throughout. ---- */
-.content-panel + .content-panel { border-top-color: var(--sc-hair); }
+/* The title and the body are one column: no line closes the title band. */
+.content-panel + .content-panel { border-top: 0; }
 .content-panel h1:where(:not(.sc-hero h1)) { font-size: var(--sl-text-h1); line-height: 1.08; font-weight: 600; letter-spacing: -.028em; text-wrap: balance; }
 .sl-markdown-content { font-size: 18px; line-height: 1.6; }
 @media (min-width: 50em) { .sl-markdown-content { font-size: var(--sc-t-read); } }
