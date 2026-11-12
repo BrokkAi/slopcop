@@ -351,6 +351,7 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		return failed(prepared.staticErr)
 	}
 	client, request := prepared.client, prepared.request
+	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
 		return failed(err)
@@ -694,7 +695,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		return prepared, nil
 	}
 	target := resolveServiceURL(cfg, serviceFlag)
-	token := resolveToken(cfg)
+	token := resolveToken(cfg, target)
 	client, err := service.New(target, token, "slopcop/"+version, opts.timeout)
 	if err != nil {
 		if opts.mode == "" {
@@ -1020,21 +1021,22 @@ func resolveServiceURL(cfg config.Config, flagValue string) string {
 	for _, candidate := range []string{
 		flagValue,
 		os.Getenv("SLOPCOP_SERVICE"),
-		cfg.ServiceURL,
-		config.DefaultServiceURL,
 	} {
 		if value := strings.TrimSpace(candidate); value != "" {
 			return value
 		}
 	}
-	return config.DefaultServiceURL
+	return cfg.DefaultService()
 }
 
-func resolveToken(cfg config.Config) string {
+// resolveToken is the credential for the service a command talks to:
+// $SLOPCOP_TOKEN, which CI sets for the one service it uses, else the login
+// stored for that service. A login stored for another service is never sent.
+func resolveToken(cfg config.Config, serviceURL string) string {
 	if token := strings.TrimSpace(os.Getenv("SLOPCOP_TOKEN")); token != "" {
 		return token
 	}
-	return strings.TrimSpace(cfg.Token)
+	return cfg.TokenFor(serviceURL)
 }
 
 func valueOr(value, fallback string) string {

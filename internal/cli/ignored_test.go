@@ -243,7 +243,7 @@ func TestIgnoredPrintsTheServiceRemedy(t *testing.T) {
 	if code != 2 || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	if want := "This workspace has no such repository.\nRun a check of it first.\nList them with `slopcop repo list`.\n"; stderr != want {
+	if want := "slopcop: using service " + server.URL + "\n" + "This workspace has no such repository.\nRun a check of it first.\nList them with `slopcop repo list`.\n"; stderr != want {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 }

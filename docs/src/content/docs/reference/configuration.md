@@ -13,8 +13,8 @@ edited in the config file.
 
 | Value | Order |
 | --- | --- |
-| Service URL | `--service`, `SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
-| Token | `SLOPCOP_TOKEN`, stored value |
+| Service URL | `--service`, `SLOPCOP_SERVICE`, the default stored by `slopcop login --default` or `slopcop service use`, `https://slopcop.com` |
+| Token | `SLOPCOP_TOKEN`, the login stored for that service |
 | Workspace (`check`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `SLOPCOP_WORKSPACE`, the one the login is bound to |
 | Base commit (`check`) | `--base-exact`, `--base`, merge base with the upstream, merge base with `origin/HEAD`, `HEAD` |
 | Policy selection (`check`) | `--policy` files, plus `.slopcop/policies/**/*.rqlp` unless `--no-policy-discovery` |
@@ -27,7 +27,7 @@ Support/slopcop/` on macOS, `%AppData%\slopcop\` on Windows.
 
 | File | Purpose |
 | --- | --- |
-| `config.json` | service URL, token, mode (unset: `both` where reviewers are configured and not in CI, otherwise `static`), and review settings, written owner-only; logout clears the token |
+| `config.json` | default service URL, one login per service, mode (unset: `both` where reviewers are configured and not in CI, otherwise `static`), and review settings, written owner-only; logout forgets one service's login |
 | `update-notice` | the time of the last [upgrade notice](/get-started/install/#upgrade-notices), so it prints at most once a day |
 | `skill-backups/<harness>-<time>/` | a copy of a skill with local edits that an update replaced; see [The agent skill](/agents/skill/) |
 
@@ -94,5 +94,7 @@ slopcop --service https://staging.slopcop.com login
 slopcop --service https://staging.slopcop.com
 ```
 
-A login is stored with the service it was made against. `SLOPCOP_SERVICE` in
-the environment saves repeating the flag.
+Each service keeps its own login, and a login is only sent to the service that
+issued it. `SLOPCOP_SERVICE` in the environment saves repeating the flag;
+`slopcop service use <url>` makes a deployment the default. See
+[Sign in](/account/sign-in/#the-service-url).

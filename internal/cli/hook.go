@@ -132,7 +132,7 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 		return hookOutput{}
 	}
 	cfg, err := config.Load()
-	if err != nil || resolveToken(cfg) == "" {
+	if err != nil || resolveToken(cfg, resolveServiceURL(cfg, serviceURL)) == "" {
 		return hookOutput{}
 	}
 	path := hookStatePath(input.Harness, input.SessionID, repoRoot)

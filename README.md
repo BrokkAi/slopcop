@@ -306,18 +306,26 @@ already approved in your browser, so it needs neither.
 The browser flow prints a link that opens the approval page with the code
 filled in, plus the page and code to type in instead, and stores the token once
 the login is approved. Approve only if the page shows the code your terminal
-printed. The service URL defaults to `https://slopcop.com`; `--service`,
-`$SLOPCOP_SERVICE`, or a stored value override it.
+printed.
 
-The credential lives in `slopcop/config.json` under the user config directory
-and is written owner-only. `slopcop logout` clears it.
+The service URL defaults to `https://slopcop.com`; `--service` or
+`$SLOPCOP_SERVICE` names another for one command. Each service keeps its own
+login: `slopcop --service <url> login` leaves the others signed in and the
+default as it is, and a login is only sent to the service that issued it.
+`slopcop login --default` or `slopcop service use <url>` changes the default,
+and `slopcop service list` shows the stored logins. A command that talks to
+another service than `https://slopcop.com` says so on stderr.
+
+The credentials live in `slopcop/config.json` under the user config directory,
+which is written owner-only. `slopcop logout` forgets the login for one
+service, and `slopcop logout --all` every one.
 
 Precedence:
 
 | Value | Order |
 | --- | --- |
-| Service URL | `--service`, `$SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
-| Token | `$SLOPCOP_TOKEN`, stored value |
+| Service URL | `--service`, `$SLOPCOP_SERVICE`, the default stored by `slopcop login --default` or `slopcop service use`, `https://slopcop.com` |
+| Token | `$SLOPCOP_TOKEN`, the login stored for that service |
 | Workspace (`check`, `enable`, `status`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
 
 ## Workspace and repositories

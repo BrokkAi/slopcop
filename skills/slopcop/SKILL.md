@@ -43,15 +43,29 @@ named.
 - `slopcop login` runs the browser device flow.
 - `slopcop login --token "$SLOPCOP_TOKEN"` stores an existing credential, which
   is how CI and agents sign in. `$SLOPCOP_TOKEN` alone also works, with no login.
-- `--service` or `$SLOPCOP_SERVICE` names another deployment; the default is
-  `https://slopcop.com`. `slopcop logout` forgets the stored credential.
+- `--service` or `$SLOPCOP_SERVICE` names another deployment for one command;
+  the default is `https://slopcop.com`. Each service keeps its own login, so
+  `slopcop --service <url> login` leaves the others signed in and does not
+  change the default, and a login is only ever sent to the service that issued
+  it. `slopcop service list` shows the stored logins and marks the default.
+- A command that talks to a service other than `https://slopcop.com` says
+  `slopcop: using service <url>` on stderr. If the user did not ask for that
+  service, tell them before you go on.
+- `slopcop login --default` and `slopcop service use <url>` change the default
+  service for every command and agent on the machine. `service use` asks the
+  person at a terminal and refuses when stdin is not one; do not try to answer
+  it, and do not pass `--default` unless the user asked for it.
+- `slopcop logout` forgets the login for one service (the default, or the one
+  `--service` names); `--all` forgets every one.
 
 ## Know which workspace pays
 
 A login runs its checks and ignores in, and bills, one workspace. When it
 matters which one, run `slopcop whoami` before a check: it prints the account,
 the workspace (name, kind, role), its plan (Pro or Free) and the service URL
-(`--format json` for `service`, `account`, `workspace` and `plan`).
+(`--format json` for `service`, `account`, `workspace`, `plan` and
+`services`). Each service has its own login, bound to its own workspace: with
+more than one stored, `whoami` also lists them and marks the default.
 `slopcop status` shows the same for this checkout: the repository `origin`
 names, whether the workspace has it and whether it is active.
 

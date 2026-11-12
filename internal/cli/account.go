@@ -27,10 +27,12 @@ func accountClient(cmd *cobra.Command, serviceFlag, version string) (*service.Cl
 	if err != nil {
 		return nil, err
 	}
-	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, accountTimeout)
+	target := resolveServiceURL(cfg, serviceFlag)
+	client, err := service.New(target, resolveToken(cfg, target), "slopcop/"+version, accountTimeout)
 	if err != nil {
 		return nil, err
 	}
+	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	return client, nil
 }
@@ -97,13 +99,17 @@ service URL. Run it before a check when it matters which workspace pays.`,
 				return serviceFailure(cmd, err)
 			}
 			out := cmd.OutOrStdout()
+			// A configuration that cannot be read was already refused.
+			cfg, _ := config.Load()
+			services := storedServices(cfg)
 			if format == "json" {
 				return writeJSON(out, struct {
 					Service   string            `json:"service"`
 					Account   service.Account   `json:"account"`
 					Workspace service.Workspace `json:"workspace"`
 					Plan      string            `json:"plan"`
-				}{client.BaseURL, whoami.Account, whoami.Workspace, whoami.Plan})
+					Services  []storedService   `json:"services"`
+				}{client.BaseURL, whoami.Account, whoami.Workspace, whoami.Plan, services})
 			}
 			account := whoami.Account.Username
 			if whoami.Account.Email != "" {
@@ -113,6 +119,16 @@ service URL. Run it before a check when it matters which workspace pays.`,
 			fmt.Fprintf(out, "Workspace: %s (%s, %s)\n", whoami.Workspace.Name, whoami.Workspace.Kind, whoami.Workspace.Role)
 			fmt.Fprintf(out, "Plan:      %s\n", planName(whoami.Plan))
 			fmt.Fprintf(out, "Service:   %s\n", client.BaseURL)
+			if len(services) > 1 {
+				// Only worth saying once there is more than one to mix up.
+				for _, entry := range services {
+					text := loginText(entry.SignedIn)
+					if entry.Default {
+						text += ", default"
+					}
+					fmt.Fprintf(out, "Stored:    %s (%s)\n", entry.Service, text)
+				}
+			}
 			return nil
 		},
 	}
