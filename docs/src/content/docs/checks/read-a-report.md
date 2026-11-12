@@ -55,7 +55,9 @@ A check lists only `definite` findings unless run with `--certainty all`. The
 others are counted, in `human` on the summary line ("2 less certain not
 shown"), in `json` as `summary.lessCertainFindings`, and in `sarif` as
 `properties["slopcop.lessCertainFindings"]`; they do not count in
-`newFindings` and do not change the status.
+`newFindings` and do not change the status. Under `--certainty all` the
+count is `0`, and `json` and `sarif` still carry it, so you can tell the
+filter took effect.
 
 Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 `properties["slopcop.findingId"]` in `sarif`. It is what
