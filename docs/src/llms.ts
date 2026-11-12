@@ -209,7 +209,8 @@ export function toMarkdown(source: string, { mdx, resolve, where }: Options): st
     // Code is copied as it is written.
     if (fence) {
       top.lines.push(line);
-      if (new RegExp(`^\\${fence.char}{${fence.length},}$`).test(text)) fence = undefined;
+      // A fence closes on a line of its own character, at least as many as opened it.
+      if (text.length >= fence.length && text === fence.char.repeat(text.length)) fence = undefined;
       continue;
     }
     const opening = /^(`{3,}|~{3,})/.exec(text);
