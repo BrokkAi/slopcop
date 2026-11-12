@@ -866,8 +866,15 @@ func TestLoginsAreKeptPerService(t *testing.T) {
 		t.Fatalf("service list: exit = %d, stdout = %q", code, stdout)
 	}
 
-	// login --default moves the default; logout --all forgets every login
-	// and keeps it.
+	// login --default moves the default, which only a person at a terminal
+	// may do; logout --all forgets every login and keeps it.
+	if code, _, stderr := runCLI(t, "login", "--service", staging, "--token", "staging-2", "--default"); code != 2 || !strings.Contains(stderr, "login --default moves every agent") {
+		t.Fatalf("login --default off a terminal: exit = %d, stderr = %q", code, stderr)
+	}
+	if cfg, err = config.Load(); err != nil || cfg.TokenFor(staging) != "staging-token" || cfg.DefaultService() != config.DefaultServiceURL {
+		t.Fatalf("a refused login --default changed the config: %+v, err = %v", cfg, err)
+	}
+	typed(t, "y\n")
 	if code, _, stderr := runCLI(t, "login", "--service", staging, "--token", "staging-2", "--default"); code != 0 || strings.Contains(stderr, "still") {
 		t.Fatalf("login --default: exit = %d, stderr = %q", code, stderr)
 	}

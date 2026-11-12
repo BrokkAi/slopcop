@@ -52,9 +52,12 @@ named.
   `slopcop: using service <url>` on stderr. If the user did not ask for that
   service, tell them before you go on.
 - `slopcop login --default` and `slopcop service use <url>` change the default
-  service for every command and agent on the machine. `service use` asks the
-  person at a terminal and refuses when stdin is not one; do not try to answer
-  it, and do not pass `--default` unless the user asked for it.
+  service for every command and agent on the machine. Both ask the person at
+  a terminal and refuse when stdin is not one; do not try to answer, and
+  leave either to the user.
+- A service that redirects a request to another host is refused, not
+  followed. Report the address it named to the user; do not retry with
+  `--service` set to it yourself.
 - `slopcop logout` forgets the login for one service (the default, or the one
   `--service` names); `--all` forgets every one.
 

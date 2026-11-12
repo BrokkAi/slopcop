@@ -75,11 +75,15 @@ slopcop service use https://staging.slopcop.com
 slopcop service list
 ```
 
-`service use` moves every command and agent on the machine, so it asks at a
-terminal and refuses when stdin is not one. `service list` shows the default
+Either one moves every command and agent on the machine, so both ask at a
+terminal and refuse when stdin is not one. `service list` shows the default
 and every stored login. Whenever a command talks to a service other than
 `https://slopcop.com` it says `slopcop: using service <url>` on stderr, and
 `login` names the service before the approval link.
+
+The CLI does not follow a redirect to another host or port, or from https to
+http: the request carries your change, so it stops and names the address
+instead. Pass that address to `--service` if it is the one you mean.
 
 A config file from an older release, with one service URL and one token, is
 read as a login for that service, which stays the default.

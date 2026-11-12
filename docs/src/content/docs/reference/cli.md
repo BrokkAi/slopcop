@@ -105,7 +105,7 @@ waits for approval. Login does not install the agent skill. See
 | Flag | Meaning |
 | --- | --- |
 | `--token TOKEN` | store an existing token instead of starting the browser flow |
-| `--default` | also make this service the default for every command |
+| `--default` | also make this service the default for every command. It asks at a terminal and refuses when stdin is not one |
 
 Each service keeps its own login. With `--service`, login signs in to that
 service, leaves the other logins as they are, and does not change the default

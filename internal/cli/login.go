@@ -25,7 +25,8 @@ which is what CI and agent harnesses use.
 
 Each service keeps its own login. --service or $SLOPCOP_SERVICE signs in to
 another deployment and leaves the other logins, and the default service, as
-they are; pass --default to also make it the default for every command.
+they are; pass --default to also make it the default for every command,
+which asks at a terminal like service use does.
 
 Run slopcop init in a repository to install the agent skill and hooks.`,
 		Args: cobra.NoArgs,
@@ -43,6 +44,13 @@ Run slopcop init in a repository to install the agent skill and hooks.`,
 				return err
 			}
 			hosted := config.Origin(target) == config.DefaultServiceURL
+			if makeDefault && config.Origin(target) != config.Origin(cfg.DefaultService()) {
+				// The same step as service use, so the same question, and
+				// before anything is sent or stored.
+				if err := confirmDefaultService(cmd, cfg, target, "login --default"); err != nil {
+					return err
+				}
+			}
 			if credential == "" {
 				if !hosted {
 					fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: signing in to %s\n", config.Origin(target))
@@ -78,7 +86,7 @@ Run slopcop init in a repository to install the agent skill and hooks.`,
 		},
 	}
 	command.Flags().StringVar(&token, "token", "", "store an existing token instead of starting the browser flow")
-	command.Flags().BoolVar(&makeDefault, "default", false, "also make this service the default for every command")
+	command.Flags().BoolVar(&makeDefault, "default", false, "also make this service the default for every command; asks at a terminal")
 	return command
 }
 

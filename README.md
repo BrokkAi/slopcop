@@ -313,7 +313,7 @@ The service URL defaults to `https://slopcop.com`; `--service` or
 login: `slopcop --service <url> login` leaves the others signed in and the
 default as it is, and a login is only sent to the service that issued it.
 `slopcop login --default` or `slopcop service use <url>` changes the default,
-and `slopcop service list` shows the stored logins. A command that talks to
+after asking at a terminal, and `slopcop service list` shows the stored logins. A command that talks to
 another service than `https://slopcop.com` says so on stderr.
 
 The credentials live in `slopcop/config.json` under the user config directory,

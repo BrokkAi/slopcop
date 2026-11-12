@@ -132,16 +132,8 @@ service once, pass --service to that command instead.`,
 			}
 			current := config.Origin(cfg.DefaultService())
 			if target != current {
-				question := fmt.Sprintf("Every slopcop command on this machine without --service, agents' included, will then go to %s. Make it the default?", target)
-				yes, err := confirmYes(cmd, question)
-				if errors.Is(err, errNotATerminal) {
-					return fmt.Errorf("service use moves every agent on this machine, so it must be confirmed at a terminal; to use %s once, pass --service %s to that command", target, target)
-				}
-				if err != nil {
+				if err := confirmDefaultService(cmd, cfg, target, "service use"); err != nil {
 					return err
-				}
-				if !yes {
-					return fmt.Errorf("the default service is still %s", current)
 				}
 				cfg.ServiceURL = client.BaseURL
 				if _, err := config.Save(cfg); err != nil {
@@ -155,4 +147,25 @@ service once, pass --service to that command instead.`,
 			return nil
 		},
 	}
+}
+
+// confirmDefaultService asks the person at the terminal before the default
+// service moves to target. Every agent and script on the machine then sends
+// its checks, and the changes in them, to that service, so an agent cannot
+// approve it: when stdin is not a terminal the answer is an error naming the
+// way to use the service once. command is the one that asked.
+func confirmDefaultService(cmd *cobra.Command, cfg config.Config, target, command string) error {
+	target = config.Origin(target)
+	question := fmt.Sprintf("Every slopcop command on this machine without --service, agents' included, will then go to %s. Make it the default?", target)
+	yes, err := confirmYes(cmd, question)
+	if errors.Is(err, errNotATerminal) {
+		return fmt.Errorf("%s moves every agent on this machine, so it must be confirmed at a terminal; to use %s once, pass --service %s to that command", command, target, target)
+	}
+	if err != nil {
+		return err
+	}
+	if !yes {
+		return fmt.Errorf("the default service is still %s", config.Origin(cfg.DefaultService()))
+	}
+	return nil
 }
