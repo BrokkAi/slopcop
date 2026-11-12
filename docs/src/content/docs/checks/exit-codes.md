@@ -29,8 +29,10 @@ report before calling the change checked. A status this CLI does not know exits
 status. An inconclusive rule never changes the exit code (see [Read a
 report](/checks/read-a-report/#inconclusive-checks)).
 
-In JSON, top-level `status` matches the exit code. `staticStatus` keeps
-the service status when it differs. `review.status` is `clean`, `findings`,
+In JSON, top-level `status` matches the exit code, except that it is
+`findings` whenever the change has new static or review findings, even when
+`--fail-on` lets them exit `0` (below the threshold, or `--fail-on never`).
+`staticStatus` keeps the static half's status when it differs. `review.status` is `clean`, `findings`,
 `failed`, or `empty`; `review.reviewers` explain the outcome, with an error on
 each reviewer that could not run. Review findings count toward exit `1` unless `--fail-on never` is
 set. A complete review is reused when its inputs have not changed.
