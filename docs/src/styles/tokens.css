@@ -79,7 +79,9 @@
    --sc-quiet   secondary text (6.2:1 on paper, 7.4:1 on the field)
    --sc-faint   placeholders, disabled text (decorative or large only: 3.3:1)
    --sc-hair    a rule between items: one pixel, solid, quiet
-   --sc-line    the outline of a tag or a control
+   --sc-line    the outline of a control
+   --sc-tag-line   the outline of a tag: the text colour at 46%, so a card is marked off without shouting
+   --sc-tag-found  the outline of the tag that warns: the highlight at 72%
    --sc-tint    a row under the pointer, the current item: the only fill besides the ground and the well
    --sc-well    where a machine's text sits: a code block, an input
    --sc-mark    the highlight as a line or a dot
@@ -91,6 +93,7 @@
   --sc-faint: color-mix(in srgb, var(--sc-night) 48%, var(--sc-white));
   --sc-hair: color-mix(in srgb, var(--sc-night) 22%, transparent);
   --sc-line: var(--sc-night);
+  --sc-tag-line: color-mix(in srgb, var(--sc-night) 46%, var(--sc-white)); --sc-tag-found: color-mix(in srgb, var(--sc-red) 72%, var(--sc-white));
   --sc-tint: color-mix(in srgb, var(--sc-night) 5%, var(--sc-white));
   --sc-well: color-mix(in srgb, var(--sc-night) 3.5%, var(--sc-white));
   --sc-mark: var(--sc-red); --sc-mark-text: var(--sc-red-ink);
@@ -103,6 +106,7 @@
   --sc-faint: color-mix(in srgb, var(--sc-white) 40%, var(--sc-night));
   --sc-hair: color-mix(in srgb, var(--sc-white) 22%, transparent);
   --sc-line: var(--sc-white);
+  --sc-tag-line: color-mix(in srgb, var(--sc-white) 46%, var(--sc-night)); --sc-tag-found: color-mix(in srgb, var(--sc-red) 72%, var(--sc-night));
   --sc-tint: color-mix(in srgb, var(--sc-white) 7%, var(--sc-night));
   --sc-well: color-mix(in srgb, #000000 28%, var(--sc-night));
   --sc-mark: var(--sc-red); --sc-mark-text: var(--sc-red);

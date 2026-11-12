@@ -83,7 +83,7 @@ p { text-wrap: pretty; }
    The line is the box's own background and ::before, one pixel in, is the surface; both clips pass 5 px
    outside the three square sides, which leaves room for the focus ring. ---- */
 .sc-tag, .starlight-aside, .pagination-links a, .card, .sl-link-card, .sc-theme__menu, site-search dialog {
-  isolation: isolate; --cut: var(--sc-cut); --surface: var(--sc-bg); --line: var(--sc-line);
+  isolation: isolate; --cut: var(--sc-cut); --surface: var(--sc-bg); --line: var(--sc-tag-line);
   border: 0; border-radius: 0; box-shadow: none; background: var(--line);
   clip-path: polygon(-5px -5px, calc(100% - var(--cut) - 5px) -5px, calc(100% + 5px) calc(var(--cut) + 5px), calc(100% + 5px) calc(100% + 5px), -5px calc(100% + 5px));
 }
@@ -238,8 +238,8 @@ mobile-starlight-toc .dropdown a { font-size: var(--sc-ui-body); }
 /* An aside is a tag with a few lines. The one that warns of harm has the red line; none has a
    coloured bar down one side, a fill or a pictogram. */
 .starlight-aside { padding: var(--sc-4) var(--sc-5) 18px; color: var(--sc-fg); font-size: var(--sc-t-body); line-height: 1.5; }
-.starlight-aside--note, .starlight-aside--tip, .starlight-aside--caution, .starlight-aside--danger { --sl-color-asides-text-accent: var(--sc-fg); --sl-color-asides-border: var(--sc-line); background-color: var(--line); }
-.starlight-aside--danger { --line: var(--sc-mark); }
+.starlight-aside--note, .starlight-aside--tip, .starlight-aside--caution, .starlight-aside--danger { --sl-color-asides-text-accent: var(--sc-fg); --sl-color-asides-border: var(--sc-tag-line); background-color: var(--line); }
+.starlight-aside--danger { --line: var(--sc-tag-found); }
 .starlight-aside__title { font-size: inherit; line-height: inherit; font-weight: 600; color: var(--sc-fg); }
 .starlight-aside__icon { display: none; }
 .starlight-aside__title + .starlight-aside__content { margin-top: var(--sc-1); }
