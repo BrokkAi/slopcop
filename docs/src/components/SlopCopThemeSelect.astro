@@ -142,57 +142,58 @@ const options = [
       display: flex;
       align-items: center;
       justify-content: center;
-      width: 2rem;
-      height: 2rem;
+      width: 36px;
+      height: 36px;
       padding: 0;
       border: 0;
       background: transparent;
-      color: var(--sl-color-gray-2);
+      color: var(--sc-fg);
       cursor: pointer;
-      font-size: 1.05rem;
+      font-size: 18px;
     }
     .sc-theme__button:hover,
-    .sc-theme__button[aria-expanded='true'] { color: var(--sc-accent-text); }
+    .sc-theme__button[aria-expanded='true'] { background: var(--sc-tint); }
+    /* The menu is a small tag (slopcop.css draws its line and its cut corner). */
     .sc-theme__menu {
       position: absolute;
-      top: calc(100% + 0.5rem);
+      top: calc(100% + var(--sc-2));
       inset-inline-end: 0;
       z-index: var(--sl-z-index-navbar);
       display: grid;
-      min-width: 9.5rem;
-      padding: 0.3rem;
-      border: 1px solid var(--sc-line);
-      background: var(--sc-surface);
-      box-shadow: 0 16px 40px rgb(0 0 0 / 0.35);
-      clip-path: var(--sc-chamfer-sm);
+      min-width: 152px;
+      padding: var(--sc-1);
+      --cut: var(--sc-cut-s);
     }
     .sc-theme__menu[hidden] { display: none; }
     .sc-theme__menu [role='menuitemradio'] {
       display: flex;
       align-items: center;
-      gap: 0.6rem;
+      gap: 10px;
       width: 100%;
-      padding: 0.5rem 0.65rem;
+      height: 36px;
+      padding: 0 var(--sc-2);
       border: 0;
       background: transparent;
-      color: var(--sl-color-gray-2);
-      font-family: var(--sc-font-mono);
-      font-size: 0.6875rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
+      color: var(--sc-quiet);
+      font: 500 var(--sc-ui-body) / 22px var(--sc-sans);
       text-align: start;
       cursor: pointer;
     }
-    .sc-theme__menu [role='menuitemradio'] :global(svg) { font-size: 1rem; }
-    .sc-theme__menu [role='menuitemradio']:hover,
-    .sc-theme__menu [role='menuitemradio']:focus-visible { background: var(--sc-surface-hover); color: var(--sc-text); outline: none; }
-    .sc-theme__menu [role='menuitemradio'][aria-checked='true'] { color: var(--sc-accent-text); }
+    .sc-theme__menu [role='menuitemradio'] :global(svg) { font-size: 16px; }
+    .sc-theme__menu [role='menuitemradio']:hover { background: var(--sc-tint); color: var(--sc-fg); }
+    .sc-theme__menu [role='menuitemradio']:focus-visible { outline-offset: -2px; color: var(--sc-fg); }
+    /* The theme in use: ink, and a solid square. */
+    .sc-theme__menu [role='menuitemradio'][aria-checked='true'] { color: var(--sc-fg); }
     .sc-theme__menu [role='menuitemradio'][aria-checked='true']::after {
       content: '';
       margin-inline-start: auto;
-      width: 0.4rem;
-      height: 0.4rem;
-      background: var(--sc-accent);
+      width: 8px;
+      height: 8px;
+      background: var(--sc-fg);
+    }
+    @media (pointer: coarse) {
+      .sc-theme__button { width: 44px; height: 44px; }
+      .sc-theme__menu [role='menuitemradio'] { height: 44px; }
     }
   }
 </style>

@@ -56,10 +56,6 @@ jobs:
         run: npm ci
         working-directory: docs
 
-      - name: Render social card
-        run: npm run social-card
-        working-directory: docs
-
       - name: Build docs
         run: npm run build
         working-directory: docs

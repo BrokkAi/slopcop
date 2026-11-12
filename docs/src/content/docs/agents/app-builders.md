@@ -37,7 +37,7 @@ once it lands. -->
   a checkout at a terminal; see
   [Repositories](/account/repositories/). The `check` tool can add it too, but
   only when the call sets `addRepository`, which the tool tells the agent to
-  send only after you agree, since the workspace then pays for it.
+  send only after you agree, since the workspace then pays for its checks.
 
 ## Make an agent token
 

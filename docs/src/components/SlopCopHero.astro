@@ -1,5 +1,4 @@
 ---
-import { LinkButton } from '@astrojs/starlight/components';
 import type { StarlightRouteData } from '@astrojs/starlight/route-data';
 
 const { entry } = (Astro.locals as { starlightRoute: StarlightRouteData }).starlightRoute;
@@ -9,152 +8,79 @@ const { title = entry.data.title, tagline, actions = [] } = entry.data.hero ?? {
 <div class="sc-hero">
   <div class="sc-hero__copy">
     <h1 id="_top" data-page-title set:html={title} />
-    {tagline && <p class="sc-hero__tagline" set:html={tagline} />}
+    {tagline && <p class="sc-hero__lead" set:html={tagline} />}
     {
       actions.length > 0 && (
         <div class="sc-hero__actions">
-          {actions.map(({ attrs: { class: className, ...attrs } = {}, icon, link: href, text, variant }) => (
-            <LinkButton {href} {variant} icon={icon?.name} class:list={[className]} {...attrs}>
+          {/* One solid button a view: the primary action. The rest are line buttons. */}
+          {actions.map(({ attrs: { class: className, ...attrs } = {}, link: href, text, variant }) => (
+            <a href={href} class:list={['sc-button', variant === 'primary' ? 'is-solid' : 'is-line', className]} {...attrs}>
               {text}
-              {icon?.html && <Fragment set:html={icon.html} />}
-            </LinkButton>
+            </a>
           ))}
         </div>
       )
     }
   </div>
-  <figure class="sc-hero__terminal" aria-label="A SlopCop check run from a terminal">
-    <figcaption data-os="generic">
-      <span class="sc-wc sc-wc--mac" aria-hidden="true"><i class="close"></i><i class="min"></i><i class="max"></i></span>
-      <span class="sc-wc sc-wc--generic" aria-hidden="true"><i></i><i></i><i></i></span>
-      <b>check report</b>
-      <span class="sc-wc sc-wc--windows" aria-hidden="true">
-        <i class="min"><svg viewBox="0 0 10 10"><path d="M0 5h10" /></svg></i>
-        <i class="max"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" /></svg></i>
-        <i class="close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" /></svg></i>
-      </span>
-      <span class="sc-wc sc-wc--linux" aria-hidden="true">
-        <i class="min"><svg viewBox="0 0 10 10"><path d="M2 7h6" /></svg></i>
-        <i class="max"><svg viewBox="0 0 10 10"><rect x="2" y="2" width="6" height="6" /></svg></i>
-        <i class="close"><svg viewBox="0 0 10 10"><path d="M2.5 2.5l5 5M7.5 2.5l-5 5" /></svg></i>
-      </span>
-    </figcaption>
-    <pre><code><i>$</i> slopcop
-<em>orders/ExportServlet.java:48</em>  <u>definite · error</u>
-  request parameter reaches SQL text
-  ID: 0f8fad5b-d9cb-469f-a165-70867728950e
-  bifrost.security.java.servlet-parameter-to-jdbc:
-  req.getParameter("q") reaches Statement.executeQuery
-  through OrderQuery.build (OrderQuery.java:21)
-
-1 new finding across 1 file(s); 72 already in the code
-Analysis complete
-<i>$</i> echo $?
-1</code></pre>
-    <p class="sc-hero__terminal-foot">Static analysis · proven data flows · read-only</p>
+  <figure class="sc-hero__report" aria-label="A SlopCop check run from a terminal">
+    <div class="sc-tag is-lead">
+      {/* One span a line, so a line too long for a phone wraps under itself and not back at the margin. */}
+      <pre><code><span><i>$</i> slopcop</span><span><em>orders/ExportServlet.java:48</em>  <u>definite · error</u></span><span class="in">  request parameter reaches SQL text</span><span class="in">  ID: 0f8fad5b-d9cb-469f-a165-70867728950e</span><span class="in">  bifrost.security.java.servlet-parameter-to-jdbc:</span><span class="in">  req.getParameter("q") reaches Statement.executeQuery</span><span class="in">  through OrderQuery.build (OrderQuery.java:21)</span><span class="gap"></span><span>1 new finding across 1 file(s); 72 already in the code</span><span>Analysis complete</span><span><i>$</i> echo $?</span><span>1</span></code></pre>
+    </div>
+    <figcaption>Static analysis · proven data flows · read-only</figcaption>
   </figure>
 </div>
-
-{/* Inlined so the controls match the visitor's OS before the figure paints. */}
-<script is:inline>
-  (() => {
-    const caption = document.querySelector('.sc-hero__terminal figcaption');
-    if (!caption) return;
-    const hint = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || navigator.userAgent || '';
-    const text = hint.toLowerCase();
-    caption.dataset.os =
-      /mac|iphone|ipad|ipod/.test(text) ? 'mac' : /win/.test(text) ? 'windows' : /linux|cros|x11|android/.test(text) ? 'linux' : 'generic';
-  })();
-</script>
 
 <style>
   @layer starlight.user {
     .sc-hero {
       display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr);
-      gap: clamp(1.5rem, 4vw, 4rem);
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: var(--sc-8) var(--sc-9);
       align-items: center;
-      padding-block: clamp(1.5rem, 6vw, 5rem) clamp(1rem, 3vw, 2.5rem);
+      padding-block: var(--sc-9) var(--sc-4);
     }
+    /* The page's one headline, in the display face. */
     .sc-hero h1 {
-      font-size: clamp(2.6rem, 5.5vw, 4.25rem);
-      line-height: 1.02;
-      letter-spacing: -0.03em;
-      font-weight: 800;
-      color: var(--sc-text);
       margin: 0;
+      font: 400 var(--sc-t-display) / 0.96 var(--sc-display);
+      letter-spacing: -0.022em;
+      text-wrap: balance;
+      color: var(--sc-fg);
     }
-    .sc-hero h1 :global(span) { display: block; color: var(--sc-accent); }
-    .sc-hero__tagline { font-size: clamp(1.05rem, 1.6vw, 1.25rem); line-height: 1.55; color: var(--sl-color-gray-2); margin: 1.25rem 0 0; max-width: 46ch; }
-    .sc-hero__actions { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 1.75rem; }
-    .sc-hero__actions :global(.sl-link-button) { border-radius: 0; clip-path: var(--sc-chamfer-sm); font-weight: 650; }
-    .sc-hero__actions :global(.sl-link-button.primary) { background: var(--sc-accent); border-color: var(--sc-accent); color: #f4f1ec; }
-    .sc-hero__actions :global(.sl-link-button.primary:hover) { background: #d8372c; }
-    .sc-hero__actions :global(.sl-link-button.minimal) { color: var(--sc-text); }
-    .sc-hero__terminal {
+    .sc-hero h1 :global(span) { display: block; }
+    .sc-hero__lead {
+      margin: var(--sc-6) 0 0;
+      max-width: 30em;
+      font-size: var(--sc-t-lead);
+      line-height: 1.4;
+      color: var(--sc-fg);
+    }
+    .sc-hero__lead :global(code) { font-family: var(--sc-mono); font-size: 0.86em; padding: 0.08em 0.3em; background: var(--sc-well); }
+    .sc-hero__actions { display: flex; flex-wrap: wrap; gap: var(--sc-3); margin-top: var(--sc-7); }
+    .sc-hero__report { margin: 0; min-width: 0; }
+    /* What the machine printed, on a tag that leads. Red is the finding's and nothing else's. */
+    .sc-hero__report pre {
       margin: 0;
-      border: 1px solid var(--sc-line);
-      background: var(--sc-well);
-      clip-path: var(--sc-chamfer);
-      min-width: 0;
-    }
-    .sc-hero__terminal figcaption {
-      display: flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.6rem 0.9rem;
-      border-bottom: 1px solid var(--sc-line-soft);
-      background: var(--sc-surface);
-    }
-    .sc-hero__terminal figcaption b { margin-inline-start: auto; font-family: var(--sc-font-mono); font-weight: 400; font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--sc-text-3); }
-    /* Window controls follow the visitor's OS (data-os is set by the inline script; generic until then). */
-    .sc-wc { display: none; align-items: center; gap: 0.5rem; }
-    figcaption[data-os='generic'] .sc-wc--generic,
-    figcaption[data-os='mac'] .sc-wc--mac,
-    figcaption[data-os='windows'] .sc-wc--windows,
-    figcaption[data-os='linux'] .sc-wc--linux { display: flex; }
-    .sc-wc i { display: block; }
-    .sc-wc--generic i { width: 0.55rem; height: 0.55rem; border: 1px solid var(--sc-line-strong); }
-    .sc-wc--mac { gap: 0.45rem; }
-    .sc-wc--mac i { width: 0.7rem; height: 0.7rem; border-radius: 50%; }
-    .sc-wc--mac .close { background: #ff5f57; }
-    .sc-wc--mac .min { background: #febc2e; }
-    .sc-wc--mac .max { background: #28c840; }
-    .sc-wc--windows, .sc-wc--linux { margin-inline-start: 0.9rem; }
-    .sc-wc--windows { gap: 0.9rem; }
-    .sc-wc--windows i, .sc-wc--linux i { width: 0.6rem; height: 0.6rem; color: var(--sc-text-2); }
-    .sc-wc--windows svg, .sc-wc--linux svg { display: block; width: 100%; height: 100%; fill: none; stroke: currentColor; stroke-width: 1.1; }
-    .sc-wc--linux { gap: 0.4rem; }
-    .sc-wc--linux i { width: 1rem; height: 1rem; padding: 0.2rem; border-radius: 50%; background: var(--sc-surface-hover); color: var(--sc-text); box-sizing: border-box; }
-    .sc-wc--linux svg { stroke-width: 1.4; }
-    .sc-hero__terminal pre {
-      margin: 0;
-      padding: 1rem 1.1rem 1.2rem;
-      font-family: var(--sc-font-mono);
-      font-size: 0.78rem;
-      line-height: 1.6;
-      color: #c9c6c0;
-      overflow-x: auto;
+      padding: var(--sc-5) var(--sc-6) var(--sc-6);
+      font: 400 var(--sc-t-mono) / 21px var(--sc-mono);
+      color: var(--sc-fg);
       white-space: pre-wrap;
       overflow-wrap: anywhere;
     }
-    .sc-hero__terminal-foot {
-      margin: 0;
-      padding: 0.6rem 1.1rem;
-      border-top: 1px solid var(--sc-line-soft);
-      background: var(--sc-surface);
-      font-family: var(--sc-font-mono);
-      font-size: 0.625rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: var(--sc-text-3);
+    .sc-hero__report pre span { display: block; padding-inline-start: 2ch; text-indent: -2ch; }
+    .sc-hero__report pre span.in { padding-inline-start: 4ch; text-indent: -4ch; }
+    .sc-hero__report pre span.gap { height: 21px; }
+    .sc-hero__report pre i { font-style: normal; color: var(--sc-quiet); }
+    .sc-hero__report pre em { font-style: normal; font-weight: 700; }
+    .sc-hero__report pre u { text-decoration: none; color: var(--sc-mark-text); white-space: nowrap; }
+    .sc-hero__report figcaption { margin-top: var(--sc-2); color: var(--sc-quiet); font-size: var(--sc-t-note); line-height: 20px; }
+    /* Side by side only where the report's longest line fits its half without breaking. */
+    @media (max-width: 72rem) {
+      .sc-hero { grid-template-columns: 1fr; padding-block-start: var(--sc-8); }
     }
-    :root[data-theme='light'] .sc-hero__terminal pre { color: #2a2b2a; }
-    .sc-hero__terminal pre i { font-style: normal; color: var(--sc-text-3); }
-    .sc-hero__terminal pre em { font-style: normal; color: var(--sc-text); font-weight: 700; }
-    .sc-hero__terminal pre u { text-decoration: none; color: var(--sc-accent-text); }
-    @media (max-width: 50rem) {
-      .sc-hero { grid-template-columns: 1fr; }
+    @media (max-width: 40rem) {
+      .sc-hero__report pre { padding: var(--sc-4) var(--sc-4) var(--sc-5); }
     }
   }
 </style>

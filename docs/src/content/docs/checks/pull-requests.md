@@ -82,9 +82,10 @@ diff, and a binary file holds no finding's line.
 
 ## What it costs
 
-A pull request check is free, like any check. The repository counts as an
-active repository of the workspace that checks it, as it would after a
-`slopcop check`. See [Credits and what it costs](/account/credits/).
+A pull request check costs what any check costs: it uses one of the
+workspace's 1,000 free checks each calendar month, then credits. The
+repository itself is free. See [Credits and what it costs](/account/credits/)
+and the [pricing page](https://slopcop.com/pricing).
 
 ## Compared with CI
 

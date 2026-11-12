@@ -53,7 +53,7 @@ slopcop --root ../repo --base origin/main
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
 | `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
 | `--if-enabled` | check only if the repository is active in the workspace; otherwise exit `0` without sending a check |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
+| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 Exit codes: `0` clean, `1` new findings, `2` incomplete or failed, `3` still

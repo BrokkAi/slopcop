@@ -9,7 +9,8 @@ import { Aside } from '@astrojs/starlight/components';
 
 The same command that an agent runs gates a change in CI: no prompts in static
 mode, one request, and the [exit code](/checks/exit-codes/) says what happened.
-A check of unpushed or branch work is free and never uses credits.
+A check in CI costs what any check costs: it uses one of the workspace's
+1,000 free checks each calendar month, then [credits](/account/credits/).
 
 On GitHub, [pull request checks](/checks/pull-requests/) give each pull request
 the same check with no workflow or token: the SlopCop GitHub App posts it. Run
