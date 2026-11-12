@@ -281,6 +281,57 @@ func TestOmittedFindingsAreSaidInEveryFormat(t *testing.T) {
 	}
 }
 
+// lessCertainFindings is 0 under --certainty all, and every format must still
+// carry it then, so a consumer can tell the filter took effect. A service from
+// before the field omits it, and no format may claim 0 for that.
+func TestLessCertainFindingsSurviveZeroAndAbsence(t *testing.T) {
+	cases := []struct {
+		name  string
+		sent  string
+		want  any
+		human string
+	}{
+		{"all", `"lessCertainFindings": 0,`, float64(0), "No new findings | Analysis complete\n"},
+		{"definite", `"lessCertainFindings": 2,`, float64(2),
+			"No new findings; 2 less certain not shown (--certainty all) | Analysis complete\n"},
+		{"older service", ``, nil, "No new findings | Analysis complete\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var decoded service.Response
+			body := `{"status": "clean", "baseCommit": "` + baseCommit + `", "applied": true,
+				"summary": {"files": 1, "findings": 0, "newFindings": 0, ` + tc.sent + ` "incompletePolicies": 0, "failOn": "finding"},
+				"findings": [], "incomplete": []}`
+			if err := json.Unmarshal([]byte(body), &decoded); err != nil {
+				t.Fatal(err)
+			}
+
+			if got := render(t, decoded, FormatHuman); got != tc.human {
+				t.Errorf("human = %q, want %q", got, tc.human)
+			}
+
+			var document map[string]any
+			if err := json.Unmarshal([]byte(render(t, decoded, FormatJSON)), &document); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			got, present := document["summary"].(map[string]any)["lessCertainFindings"]
+			if present != (tc.want != nil) || got != tc.want {
+				t.Errorf("json lessCertainFindings = %v (present %v), want %v", got, present, tc.want)
+			}
+
+			var log map[string]any
+			if err := json.Unmarshal([]byte(render(t, decoded, FormatSARIF)), &log); err != nil {
+				t.Fatalf("sarif: %v", err)
+			}
+			properties := log["runs"].([]any)[0].(map[string]any)["properties"].(map[string]any)
+			got, present = properties["slopcop.lessCertainFindings"]
+			if present != (tc.want != nil) || got != tc.want {
+				t.Errorf("sarif slopcop.lessCertainFindings = %v (present %v), want %v", got, present, tc.want)
+			}
+		})
+	}
+}
+
 func TestJSONIsTheStructuredReport(t *testing.T) {
 	got := render(t, response(service.StatusClean, "error", sampleFindings()), FormatJSON)
 	if !strings.HasSuffix(got, "}\n") || !strings.Contains(got, "\n  \"status\"") {

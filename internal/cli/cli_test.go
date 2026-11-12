@@ -853,7 +853,7 @@ func TestCertaintyIsTheServicesToApply(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if certainty == "all" {
 			_, _ = w.Write([]byte(`{"status": "findings", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "applied": true,
-				"summary": {"files": 1, "findings": 1, "newFindings": 1, "incompletePolicies": 0, "failOn": "finding"},
+				"summary": {"files": 1, "findings": 1, "newFindings": 1, "lessCertainFindings": 0, "incompletePolicies": 0, "failOn": "finding"},
 				"findings": [{"policyId": "p", "severity": "error", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "maybe", "new": true}],
 				"incomplete": []}`))
 			return
@@ -872,7 +872,13 @@ func TestCertaintyIsTheServicesToApply(t *testing.T) {
 	if code != 1 || !strings.Contains(stdout, "[error] p: maybe") {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := []string{"post <none>", "get failOn=finding", "post all", "get certainty=all&failOn=finding"}
+	// Under --certainty all the count is 0, and the JSON still carries it.
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--certainty", "all", "--format", "json")
+	if code != 1 || !strings.Contains(stdout, `"lessCertainFindings": 0`) {
+		t.Fatalf("exit = %d, stdout = %s", code, stdout)
+	}
+	want := []string{"post <none>", "get failOn=finding", "post all", "get certainty=all&failOn=finding",
+		"post all", "get certainty=all&failOn=finding"}
 	if fmt.Sprint(sent) != fmt.Sprint(want) {
 		t.Fatalf("sent %q, want %q", sent, want)
 	}
