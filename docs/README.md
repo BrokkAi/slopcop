@@ -9,7 +9,6 @@ npm run dev          # http://localhost:4321
 npm run check        # astro check
 npm run build        # renders dist/ and checks every internal link
 PUBLIC_DOCS_BASE=/slopcop npm run build   # proves links hold below a path prefix
-npm run social-card  # re-renders public/og.png from src/assets/social-card.svg
 ```
 
 Pages live under `src/content/docs/`, grouped by section; the sidebar is in

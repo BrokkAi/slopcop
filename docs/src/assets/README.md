@@ -11,4 +11,4 @@ the public landing page. The subset and its SIL Open Font License are in
 The headline of the documentation home page is Redaction 20 Regular, text is
 Overused Grotesk, and code is Commit Mono, as on slopcop.com
 (`src/styles/tokens.css`).
-The social card uses outlines from the wordmark subset for reproducible rendering.
+The social card is the finished picture `public/og.png`; nothing renders it at build time.

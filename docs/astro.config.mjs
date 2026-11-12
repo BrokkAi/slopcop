@@ -16,7 +16,7 @@ const socialCardUrl = new URL(`/${socialCardPath}`, site).href;
 // The text face is on every page, so every page preloads its regular weight.
 const textFaceUrl = `/${[base.replace(/^\/+|\/+$/g, ''), 'fonts/OverusedGrotesk-400.woff2'].filter(Boolean).join('/')}`;
 const socialCardAlt =
-  'SlopCop documentation: static analysis deep enough for CI, fast enough for your coding agent to run on every edit.';
+  'SlopCop documentation. A detective on a ladder takes a box from tall shelves of evidence boxes under a hanging lamp.';
 
 export default defineConfig({
   site,

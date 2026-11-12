@@ -48,8 +48,8 @@ npm run check      # astro check
 Node 22 or newer. `PUBLIC_DOCS_BASE=/slopcop npm run build` proves the links
 also hold when the site is served below a path prefix.
 
-The social card is rendered from `src/assets/social-card.svg` into
-`public/og.png` by `npm run social-card`; rerun it after changing the card.
+The social card is the picture `public/og.png`, 1200 by 630 pixels. Its alt
+text is `socialCardAlt` in `astro.config.mjs`; change both together.
 
 ## Deploy
 
