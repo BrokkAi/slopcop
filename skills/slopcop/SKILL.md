@@ -49,8 +49,9 @@ named.
   change the default, and a login is only ever sent to the service that issued
   it. `slopcop service list` shows the stored logins and marks the default.
 - A command that talks to a service other than `https://slopcop.com` says
-  `slopcop: using service <url>` on stderr. If the user did not ask for that
-  service, tell them before you go on.
+  `slopcop: using service <url>` on stderr, and the Stop hook says once a
+  session that `the automatic check uses service <url>`. If the user did not
+  ask for that service, tell them before you go on.
 - `slopcop login --default` and `slopcop service use <url>` change the default
   service for every command and agent on the machine. Both ask the person at
   a terminal and refuse when stdin is not one; do not try to answer, and

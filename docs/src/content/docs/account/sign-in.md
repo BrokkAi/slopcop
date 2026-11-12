@@ -79,7 +79,8 @@ Either one moves every command and agent on the machine, so both ask at a
 terminal and refuse when stdin is not one. `service list` shows the default
 and every stored login. Whenever a command talks to a service other than
 `https://slopcop.com` it says `slopcop: using service <url>` on stderr, and
-`login` names the service before the approval link.
+`login` names the service before the approval link. The
+[Stop hook](/agents/stop-hook/#how-it-stays-quiet) says it once a session.
 
 The CLI does not follow a redirect to another host or port, or from https to
 http: the request carries your change, so it stops and names the address

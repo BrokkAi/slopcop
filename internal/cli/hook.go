@@ -125,7 +125,8 @@ func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output ho
 // nothing when no one is signed in, when the session wrote nothing here,
 // when the workspace does not check the repository, or when it already has
 // the result for this tree; and it says nothing unless there is something to
-// act on. The cheapest of those tests come first.
+// act on, but for naming, once, a service other than the hosted one that a
+// check went to. The cheapest of those tests come first.
 func stopHook(ctx context.Context, input hookInput, serviceURL, version string) hookOutput {
 	repoRoot, err := gitx.Toplevel(input.CWD)
 	if err != nil {
@@ -166,11 +167,18 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	if fresh {
 		prepared.request.Attribution = attributed
 		if message, ok := sendHookCheck(ctx, prepared, &state); !ok {
+			output := hookOutput{SystemMessage: message}
+			if message != "" {
+				output = state.namingService(prepared.client.BaseURL, output)
+			}
 			saveHookState(path, state)
-			return hookOutput{SystemMessage: message}
+			return output
 		}
 	}
 	output := state.answer(written, fresh, input.StopHookActive, loaded)
+	if fresh {
+		output = state.namingService(prepared.client.BaseURL, output)
+	}
 	saveHookState(path, state)
 	return output
 }

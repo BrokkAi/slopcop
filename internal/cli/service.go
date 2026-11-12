@@ -14,7 +14,8 @@ import (
 
 // noticeService says on stderr which service a command talks to when it is
 // not the hosted one, so a default that was moved, or a --service left in an
-// alias, shows on every command. Stdout stays the report.
+// alias, shows on every command. Stdout stays the report. The Stop hook has
+// no stderr anyone reads and says it through hookState.namingService.
 func noticeService(stderr io.Writer, serviceURL string) {
 	if origin := config.Origin(serviceURL); origin != config.DefaultServiceURL {
 		fmt.Fprintf(stderr, "slopcop: using service %s\n", origin)
