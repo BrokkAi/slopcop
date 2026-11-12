@@ -645,17 +645,18 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 		return err
 	}
 	review.TrimLogs(probeParent)
-	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt")
-	results := review.Probe(ctx, repo, logDir, review.Families, settings)
-	var names []string
-	for _, r := range results {
+	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt and can take a few minutes the first time, while npx downloads each adapter")
+	results := review.Probe(ctx, repo, logDir, review.Families, settings, func(r review.ProbeResult) {
 		if r.Available {
 			fmt.Fprintf(out, "slopcop: %s available (%s)\n", r.Family, r.Model)
-			if len(names) < review.DefaultReviewerCount {
-				names = append(names, string(r.Family))
-			}
 		} else {
 			fmt.Fprintf(out, "slopcop: %s unavailable: %s\n", r.Family, r.Reason)
+		}
+	})
+	var names []string
+	for _, r := range results {
+		if r.Available && len(names) < review.DefaultReviewerCount {
+			names = append(names, string(r.Family))
 		}
 	}
 	if len(names) == 0 {

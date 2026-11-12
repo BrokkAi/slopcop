@@ -69,6 +69,11 @@ example, keep a DeepSeek key in a file with:
 
 Otherwise dsh reads `DEEPSEEK_API_KEY`.
 
+When `review.reviewers` is unset, `slopcop init` picks reviewers by sending
+each family a short prompt. It tries different adapters at the same time and
+prints each result as it arrives. It skips flash without a dsh command override
+when `DEEPSEEK_API_KEY` is not set.
+
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Checks that
 approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
