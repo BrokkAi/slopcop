@@ -12,8 +12,14 @@ PUBLIC_DOCS_BASE=/slopcop npm run build   # proves links hold below a path prefi
 ```
 
 Pages live under `src/content/docs/`, grouped by section; the sidebar is in
-`astro.config.mjs`. Link between pages with root-relative paths and a trailing
+`src/sidebar.mjs`. Link between pages with root-relative paths and a trailing
 slash (`/checks/exit-codes/`).
+
+The build also writes the site for language models and agents, after
+<https://llmstxt.org>: `/llms.txt` (an index by sidebar group), `/llms-full.txt`
+(every page in one file), and a Markdown version of each page at its address
+with `.md` (`/get-started/quickstart.md`). `src/llms.ts` makes all three from
+the pages' sources.
 
 `.github/workflows/docs.yml` builds and deploys the site to GitHub Pages on a
 docs change to `master`, on a `v*.*.*` tag, on a `deploy-docs`

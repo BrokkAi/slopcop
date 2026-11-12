@@ -25,7 +25,7 @@ sidebar:
 ---
 ```
 
-The sidebar is declared in `docs/astro.config.mjs`; add a new page there so it
+The sidebar is declared in `docs/src/sidebar.mjs`; add a new page there so it
 appears. Link between pages with root-relative paths and a trailing slash
 (`/checks/exit-codes/`); the build rewrites them for the deployment base and
 fails on a link to a page that does not exist.
@@ -34,6 +34,29 @@ Write in the repository's voice: plain sentences, the exact command or code
 name, and no claim the CLI or service does not make. The README and the agent
 skill are the source of truth for CLI behavior; keep them and this site in
 step.
+
+## Markdown versions and llms.txt
+
+The build writes the site a second time for language models and agents, in
+the form [llmstxt.org](https://llmstxt.org) describes:
+
+| Address | What it is |
+| --- | --- |
+| `/llms.txt` | An index: what SlopCop is, then one line for each page under its sidebar group, with the page's `description`. The Contribute group is listed under `Optional`. |
+| `/llms-full.txt` | Every page in the sidebar as Markdown in one file, in the sidebar's order. |
+| `/<page>.md` | One page as Markdown, such as `/get-started/quickstart.md`. The home page is `/index.md`. |
+
+Every HTML page names its Markdown version with
+`<link rel="alternate" type="text/markdown">` and the index with
+`<link rel="describedby">`.
+
+`docs/src/llms.ts` makes all three from the pages' sources, so there is
+nothing to keep in step by hand: a page needs a `description` and a place in
+the sidebar. A link to another page becomes the address of that page's
+Markdown version. In an MDX page the imports are taken out and each component
+is written as plain Markdown: an aside as a quotation, a tab as its label in
+bold, steps as their list. A component `llms.ts` does not know fails the
+build; give it a Markdown form there.
 
 ## Preview locally
 
