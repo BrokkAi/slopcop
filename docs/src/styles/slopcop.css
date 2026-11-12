@@ -99,7 +99,11 @@ p { text-wrap: pretty; }
 .sc-button { display: inline-flex; align-items: center; justify-content: center; gap: var(--sc-2); height: 46px; padding: 0 var(--sc-5); font: 500 16px/1 var(--sc-sans); white-space: nowrap; text-decoration: none; color: var(--sc-fg); cursor: pointer; }
 .sc-button.is-solid { background: var(--sc-fg); color: var(--sc-bg); }
 .sc-button.is-line { box-shadow: inset 0 0 0 1px currentColor; }
-.sc-button.is-line:hover { background: var(--sc-tint); }
+/* Under the pointer a button's fill moves one step and nothing else does, as on slopcop.com. */
+@media (hover: hover) {
+  .sc-button.is-solid:hover { background: color-mix(in srgb, var(--sc-fg) 82%, var(--sc-bg)); }
+  .sc-button.is-line:hover { background: var(--sc-tint); }
+}
 @media (prefers-reduced-motion: no-preference) {
   .sc-button { transition: transform var(--sc-press) var(--sc-ease-out), background-color var(--sc-press) ease; }
   .sc-button:active { transform: translateY(1px); }
