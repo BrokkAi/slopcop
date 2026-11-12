@@ -111,13 +111,14 @@ p { text-wrap: pretty; }
 
 /* ---- The bar across the top. ---- */
 header.header { border-bottom: 1px solid var(--sc-hair); background: var(--sc-bg); }
-.site-title { gap: 10px; color: var(--sc-fg); text-decoration: none; }
-.site-title img { width: 28px; height: 28px; flex: none; }
-.site-title span { font: 400 28px/1 var(--sc-wordmark); letter-spacing: -.012em; color: var(--sc-fg); overflow: visible; }
+/* The mark beside the name, as on slopcop.com. Both are drawn in whole pixels, 50 to the em: the mark is 48
+   of them square, so at 0.96em one pixel of the mark is one pixel of a letter. It stands 9 pixels from the
+   name, with its hat 7 pixels above the capitals and its lapels 6 below the baseline. */
+.site-title { gap: .18em; font-size: 28px; color: var(--sc-fg); text-decoration: none; }
+.site-title img { width: .96em; height: .96em; flex: none; position: relative; top: -.07em; }
+.site-title span { font: 400 1em/1 var(--sc-wordmark); letter-spacing: -.012em; color: var(--sc-fg); overflow: visible; }
 @media (max-width: 49.99em) {
-  .site-title { gap: var(--sc-2); }
-  .site-title img { width: 22px; height: 22px; }
-  .site-title span { font-size: 22px; }
+  .site-title { font-size: 22px; }
 }
 
 /* Search: a field in the bar, a leading tag when open. */

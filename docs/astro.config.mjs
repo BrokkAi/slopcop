@@ -16,6 +16,7 @@ const socialCardPath = [productionBase.replace(/^\/+|\/+$/g, ''), 'og.png'].filt
 const socialCardUrl = new URL(`/${socialCardPath}`, site).href;
 // The text face is on every page, so every page preloads its regular weight.
 const textFaceUrl = `/${[base.replace(/^\/+|\/+$/g, ''), 'fonts/OverusedGrotesk-400.woff2'].filter(Boolean).join('/')}`;
+const iconUrl = (file) => `/${[base.replace(/^\/+|\/+$/g, ''), file].filter(Boolean).join('/')}`;
 const socialCardAlt =
   'SlopCop documentation. A detective on a ladder takes a box from tall shelves of evidence boxes under a hanging lamp.';
 
@@ -46,6 +47,11 @@ export default defineConfig({
           tag: 'link',
           attrs: { rel: 'preload', href: textFaceUrl, as: 'font', type: 'font/woff2', crossorigin: true },
         },
+        // Starlight links favicon.svg, the tab icon. Search results and home screens want a bitmap: Google
+        // asks for a multiple of 48 pixels, and iOS takes the apple-touch-icon.
+        { tag: 'link', attrs: { rel: 'icon', href: iconUrl('favicon.ico'), sizes: '16x16 32x32 48x48' } },
+        { tag: 'link', attrs: { rel: 'icon', href: iconUrl('icon-192.png'), sizes: '192x192', type: 'image/png' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: iconUrl('apple-touch-icon.png') } },
       ],
       customCss: ['./src/styles/tokens.css', './src/styles/slopcop.css'],
       routeMiddleware: './src/route-data.ts',
