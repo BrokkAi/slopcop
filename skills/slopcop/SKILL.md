@@ -199,7 +199,7 @@ Each finding also carries its
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, or skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
+| `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, has only findings below `--fail-on` (`status` then says `findings`), or was skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
 | `1` | A new static finding crossed `--fail-on`, or a reviewer reported findings (unless `--fail-on never`). Fix the real ones and run the check again. |
 | `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed (a reviewer failed, timed out or replied empty, or too few reviewers were available), or the CLI or service failed. Read the errors and log paths. |
 | `3` | The static check was still running when `--timeout` ran out. Run the same check again; a complete review of the same content is reused. |
@@ -208,7 +208,9 @@ Each finding also carries its
 
 The CLI prioritizes interrupt, findings, a static refusal needing a person,
 failure or incompleteness, static pending, then clean. JSON `status` matches
-the exit code; `staticStatus` keeps a different service status. Read
+the exit code, except that it is `findings` whenever there are new static or
+review findings, even when `--fail-on` lets them exit `0`; `staticStatus` keeps
+a different static status. Read
 `review.status`, `review.reviewers`, `review.error`,
 and `review.logDir`. Prompt and reviewer logs are under `<git-dir>/slopcop/`.
 
@@ -260,9 +262,9 @@ Status:
 
 | Term | Meaning |
 | --- | --- |
-| `clean` | Every selected check completed for the files the change writes (an inconclusive one counts as completed), and no new finding crossed `--fail-on`. The only status that supports "nothing found", and only for those checks, files, and lines. |
-| `findings` | A new finding crossed `--fail-on`. Other checks may still be incomplete. |
-| `incomplete` | No new finding crossed `--fail-on`, but some check could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. |
+| `clean` | Every selected check completed for the files the change writes (an inconclusive one counts as completed), and the change has no new finding. The only status that supports "nothing found", and only for those checks, files, and lines. |
+| `findings` | The change has new findings, whatever `--fail-on` is; `--fail-on` decides only whether they exit `1`. Other checks may still be incomplete. |
+| `incomplete` | The change has no new finding, but some check could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. |
 | `pending` | Not a result yet. Run the same check again. |
 
 Finding `certainty`:
