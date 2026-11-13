@@ -159,6 +159,31 @@ func omittedScopeDigest(files []report.OmittedFile) string {
 // ignored it, in the repository at dir, so its Stop hook does not hand the
 // finding back.
 func forgetFinding(dir, findingID string) {
+	forgetFindings(dir, func(_ string, finding service.Finding) bool {
+		return strings.EqualFold(finding.ID, findingID)
+	})
+}
+
+// forgetWord drops, as forgetFinding does, the finding findingID names and,
+// from a check in the same workspace, every finding whose suggested word that
+// workspace's dictionary now holds. workspace is the name or id the command
+// was given, empty for the login's own; a check named differently keeps its
+// findings until it runs again. findingID may be empty when a word was added
+// on its own.
+func forgetWord(dir, workspace, findingID, word string) {
+	forgetFindings(dir, func(stateWorkspace string, finding service.Finding) bool {
+		if findingID != "" && strings.EqualFold(finding.ID, findingID) {
+			return true
+		}
+		return word != "" && strings.EqualFold(stateWorkspace, workspace) &&
+			strings.EqualFold(finding.SuggestedWord, word)
+	})
+}
+
+// forgetFindings drops the findings drop picks, given the workspace their
+// check ran in, from the state of the session that runs this command, in the
+// repository at dir.
+func forgetFindings(dir string, drop func(workspace string, finding service.Finding) bool) {
 	sessions := attribution.HookSessions()
 	if len(sessions) == 0 {
 		return
@@ -175,7 +200,7 @@ func forgetFinding(dir, findingID string) {
 		}
 		kept := make([]service.Finding, 0, len(state.Findings))
 		for _, finding := range state.Findings {
-			if !strings.EqualFold(finding.ID, findingID) {
+			if !drop(state.Workspace, finding) {
 				kept = append(kept, finding)
 			}
 		}

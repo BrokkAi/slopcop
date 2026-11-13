@@ -29,6 +29,8 @@ type fakeService struct {
 	// findings are the paths the check reports a new finding in.
 	findings   []string
 	severities []string
+	// words are the suggested words of the findings, by index.
+	words []string
 	// dependency, when set, is the dependency evidence every finding carries.
 	dependency *service.Dependency
 	// refusal, when set, is the error body every request is answered with.
@@ -82,6 +84,9 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 					Path: path, StartLine: &line, Title: "Fix " + path, New: true,
 					Dependency: f.dependency,
 				})
+				if i < len(f.words) {
+					response.Findings[i].SuggestedWord = f.words[i]
+				}
 			}
 			response.Summary.Findings = len(response.Findings)
 			response.Summary.NewFindings = len(response.Findings)
@@ -92,6 +97,16 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			status := strings.TrimPrefix(r.URL.Path, "/v1/") + "d"
 			_ = json.NewEncoder(w).Encode(service.IgnoreResponse{FindingID: body.FindingID, Status: status})
+		case "/v1/dictionary":
+			var body service.DictionaryAddRequest
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			word := strings.ToLower(body.Word)
+			for i := range f.words {
+				if fakeFindingID(i) == body.FindingID {
+					word = f.words[i]
+				}
+			}
+			_ = json.NewEncoder(w).Encode(service.DictionaryAddResponse{Word: word, Status: "added"})
 		default:
 			t.Errorf("path = %s", r.URL.Path)
 		}
@@ -632,6 +647,66 @@ func TestAnIgnoredFindingIsNotHandedBack(t *testing.T) {
 	}
 	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
 		t.Fatalf("output after the ignore = %+v", output)
+	}
+}
+
+func TestADictionaryWordDropsEveryFindingOfIt(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeFile(t, repo, "other.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go", "other.go")
+	fake := &fakeService{
+		active:   []string{"BrokkAi/slopcop"},
+		findings: []string{"demo.go", "other.go"},
+		words:    []string{"parsr", "parsr"},
+	}
+	server := fake.start(t, repo)
+
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	if output.Decision != "block" || !strings.Contains(output.Reason, "slopcop dictionary add "+fakeFindingID(0)) {
+		t.Fatalf("first output = %+v", output)
+	}
+	t.Chdir(repo)
+	if code, _, stderr := runCLI(t, "dictionary", "add", fakeFindingID(0), "--service", server.URL); code != 0 {
+		t.Fatalf("dictionary add exit = %d, stderr = %s", code, stderr)
+	}
+	// The word covers the other finding too, so neither is handed back.
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
+		t.Fatalf("output after the dictionary add = %+v", output)
+	}
+}
+
+func TestADictionaryWordInAnotherWorkspaceKeepsTheOtherFindings(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeFile(t, repo, "other.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go", "other.go")
+	fake := &fakeService{
+		active:   []string{"BrokkAi/slopcop"},
+		findings: []string{"demo.go", "other.go"},
+		words:    []string{"parsr", "parsr"},
+	}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("first output = %+v", output)
+	}
+	t.Chdir(repo)
+	// The word goes into another workspace's dictionary. The finding named
+	// is dropped, but the other one came from a check in the login's own
+	// workspace, whose dictionary does not hold the word.
+	if code, _, stderr := runCLI(t, "dictionary", "add", fakeFindingID(0), "-w", teamID, "--service", server.URL); code != 0 {
+		t.Fatalf("dictionary add exit = %d, stderr = %s", code, stderr)
+	}
+	// A stop after a hold reports what remains instead of holding again.
+	output := runTestHook(t, server.URL, stopPayload(repo, true))
+	if !strings.Contains(output.SystemMessage, "ID: "+fakeFindingID(1)) ||
+		strings.Contains(output.SystemMessage, fakeFindingID(0)) {
+		t.Fatalf("output after the dictionary add elsewhere = %+v", output)
 	}
 }
 

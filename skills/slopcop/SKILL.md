@@ -288,7 +288,7 @@ the usual codes mean:
 | `no_access` | The account needs access to the repository. |
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. Follow that line. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
-| `finding_not_found` | `slopcop ignore` or `unignore` got an id that is not from a check run with this login; use one a check printed. |
+| `finding_not_found` | `slopcop ignore`, `unignore` or `dictionary add` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `repository_not_enabled` | The repository is not added to this workspace, so nothing was checked. When the user asked for the check, tell them to run `slopcop enable` at a terminal; when the check was automatic, continue without mentioning it. |
@@ -432,6 +432,17 @@ with `slopcop unignore <id>`. List the repository's ignored findings, with
 their ids, with `slopcop ignored`. A finding marked as matching an ignored
 finding (`previouslyIgnored`) is one you ignored before its code changed: if it
 is still a false positive, ignore its new id, and tell the user.
+
+A misspelled-identifier finding names the flagged part of the identifier as
+its `suggestedWord`. When that part is a real word in the project, such as a
+domain term, product name, or abbreviation, run
+`slopcop dictionary add <id>` instead of `slopcop ignore <id>`: it adds the
+word to the workspace dictionary, so no later check in the workspace reports
+it, in any file. Use `ignore` only when the word is a typo you are keeping on
+purpose. `slopcop dictionary add --word <word>` adds a word directly,
+`slopcop dictionary list` lists the words, and
+`slopcop dictionary remove <word>` removes one. Tell the user which words you
+added.
 
 A finding can also be ignored with a comment at the code, in the language's
 own comment syntax:
