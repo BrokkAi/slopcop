@@ -480,7 +480,15 @@ func Find() map[string]Presence {
 	found := map[string]Presence{}
 	for _, h := range userHarnesses() {
 		p := found[h.name]
-		p.Configured, _ = harnessDirExists(h.dir)
+		configured, err := harnessDirExists(h.dir)
+		if err != nil {
+			// A directory that cannot be inspected may hold the harness;
+			// install could not reach it either.
+			p.Configured, p.Invalid = true, h.dir
+			found[h.name] = p
+			continue
+		}
+		p.Configured = configured
 		p.NeedsTrust = p.NeedsTrust || h.needsTrust
 		path := filepath.Join(h.dir, h.file)
 		holds, err := fileHolds(path, h, true)
@@ -525,6 +533,11 @@ func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 // missing file holds none; one that cannot be read, or that install could not
 // reconcile, holds none and returns the reason.
 func fileHolds(path string, h harness, matcher bool) (bool, error) {
+	// Install writes through a link, and refuses one to nowhere.
+	path, err := resolveLink(path)
+	if err != nil {
+		return false, err
+	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil

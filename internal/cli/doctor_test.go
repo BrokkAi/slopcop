@@ -102,6 +102,20 @@ func TestDoctorStates(t *testing.T) {
 		t.Fatalf("misshapen settings not named: %+v", report.Notes)
 	}
 
+	// A link to nowhere is one init refuses to replace.
+	if err := os.Remove(settings); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(home, "missing.json"), settings); err != nil {
+		t.Fatal(err)
+	}
+	if report := doctorJSON(t, dir); !strings.Contains(strings.Join(report.Notes, "\n"), settings+" cannot be read as hook settings") {
+		t.Fatalf("dangling link not named: %+v", report.Notes)
+	}
+	if err := os.Remove(settings); err != nil {
+		t.Fatal(err)
+	}
+
 	// A Stop hook of another type or under another event, and a gate whose
 	// matcher misses the shell, would not run, so they do not count.
 	misplaced := `{"hooks":{"Stop":[{"hooks":[{"type":"prompt","command":"slopcop hook codex || true"}]}],` +
