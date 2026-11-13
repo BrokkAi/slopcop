@@ -387,6 +387,32 @@ their ids, with `slopcop ignored`. A finding marked as matching an ignored
 finding (`previouslyIgnored`) is one you ignored before its code changed: if it
 is still a false positive, ignore its new id, and tell the user.
 
+A finding can also be ignored with a comment at the code, in the language's
+own comment syntax:
+
+```
+// slopcop: ignore[bifrost.security.sql-injection] -- the input is a constant
+x = query(input)  // slopcop: ignore[bifrost.security.sql-injection]
+// slopcop: ignore -- generated code, reviewed upstream
+```
+
+A comment alone on its line covers the next line with code; one after code
+covers its own line. Name the finding's `policyId` in `[...]`, and give the
+reason after `--`. A comment with no `[...]` ignores every finding on the line
+and needs a reason, or it ignores nothing. Prefer a comment when the code is
+right and the reviewer should see why: it shows in the diff and moves with the
+line. Prefer `slopcop ignore <id>` when the finding itself is wrong: it holds
+for the workspace and leaves the code alone. Never add a comment only to get a
+clean check, and never a blanket one where you can name the policy.
+
+Every finding a comment ignored is still listed, under `inlineSuppressed` in
+the JSON report with the comment's line and reason, and comments that ignore
+nothing are listed under `directiveWarnings` (`unused`, `missing_reason`,
+`malformed`). Neither changes the exit code. Fix a warning for a comment your
+change added: name the right policy, move it onto or above the finding's line,
+add the reason, or remove it. Tell the user about every finding your change
+ignored with a comment.
+
 A repository rule is a `.slopcop/policies/*.rqlp` file that travels with
 the change, so a new rule is picked up by the next check with no extra setup.
 

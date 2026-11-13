@@ -123,6 +123,15 @@ type Response struct {
 	// added the repository to the workspace. A service from before it omits
 	// it.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
+	// InlineSuppressed lists every finding an inline `slopcop: ignore`
+	// comment accepted, the change's own first, at most 300;
+	// Summary.InlineSuppressed counts them all. They never change the status.
+	// A service or analyzer from before BrokkAi/bifrost-service#1089 omits it.
+	InlineSuppressed []InlineSuppressedFinding `json:"inlineSuppressed,omitempty"`
+	// DirectiveWarnings lists each inline `slopcop: ignore` comment that
+	// accepted nothing, at most 300; Summary.DirectiveWarnings counts them
+	// all. They are warnings, never findings, and never change the status.
+	DirectiveWarnings []DirectiveWarning `json:"directiveWarnings,omitempty"`
 	// Exclusions is what the [check] section of the checked tree's
 	// .slopcop/config.toml excluded. Nil when the tree has none, or from a
 	// service from before BrokkAi/bifrost-service#1103.
@@ -179,6 +188,54 @@ type ExclusionWarning struct {
 	Rule string `json:"rule"`
 }
 
+// InlineSuppressedFinding mirrors InlineSuppressedFinding: a finding an inline
+// comment accepted. Text fields come from the analyzed repository and are
+// hostile.
+type InlineSuppressedFinding struct {
+	PolicyID  string `json:"policyId"`
+	Severity  string `json:"severity"`
+	Certainty string `json:"certainty"`
+	Path      string `json:"path"`
+	StartLine *int   `json:"startLine"`
+	EndLine   *int   `json:"endLine"`
+	Title     string `json:"title"`
+	// New says the change wrote the finding's lines or the comment's line.
+	New       bool            `json:"new"`
+	Directive InlineDirective `json:"directive"`
+}
+
+// InlineDirective is the comment that accepted an InlineSuppressedFinding.
+type InlineDirective struct {
+	// Line is the comment's one-based line.
+	Line *int `json:"line"`
+	// Blanket says the comment names no policy and accepts any finding on its
+	// line.
+	Blanket  bool     `json:"blanket"`
+	Policies []string `json:"policies"`
+	Reason   *string  `json:"reason"`
+}
+
+// DirectiveWarning mirrors DirectiveWarning: an inline comment that accepted
+// nothing. Kind is unused, missing_reason, malformed or unknown.
+type DirectiveWarning struct {
+	Kind     string   `json:"kind"`
+	Path     string   `json:"path"`
+	Line     *int     `json:"line"`
+	Policies []string `json:"policies"`
+	Reason   string   `json:"reason,omitempty"`
+	// Detail says what does not parse, for a malformed comment.
+	Detail string `json:"detail,omitempty"`
+	// New says the change wrote the comment's line.
+	New bool `json:"new"`
+}
+
+// Directive warning kinds.
+const (
+	DirectiveUnused        = "unused"
+	DirectiveMissingReason = "missing_reason"
+	DirectiveMalformed     = "malformed"
+)
+
 // Summary mirrors CheckSummary.
 type Summary struct {
 	Files int `json:"files"`
@@ -228,6 +285,13 @@ type Summary struct {
 	ExcludedFiles int  `json:"excludedFiles,omitempty"`
 	ExcludedPairs int  `json:"excludedPairs,omitempty"`
 	OnlyExcluded  bool `json:"onlyExcluded,omitempty"`
+	// InlineSuppressed counts the findings inline `slopcop: ignore` comments
+	// accepted, listed in Response.InlineSuppressed up to its bound. A
+	// service from before it omits it.
+	InlineSuppressed int `json:"inlineSuppressed,omitempty"`
+	// DirectiveWarnings counts the inline comments that accepted nothing,
+	// listed in Response.DirectiveWarnings up to its bound.
+	DirectiveWarnings int `json:"directiveWarnings,omitempty"`
 }
 
 // IncompletePolicy mirrors IncompletePolicy: a check that did not complete

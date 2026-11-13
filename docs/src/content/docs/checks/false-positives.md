@@ -17,6 +17,39 @@ one finding, its rule plus its place in the code, in its repository for your
 workspace; the rule keeps reporting everything else. Ignoring a finding twice
 is fine.
 
+## Ignore in the code
+
+A finding can also be ignored with a comment next to the code, in the
+language's own comment syntax:
+
+```text
+// slopcop: ignore[bifrost.security.sql-injection] -- the input is a constant
+x = query(input)  // slopcop: ignore[bifrost.security.sql-injection]
+// slopcop: ignore -- generated code, reviewed upstream
+```
+
+- A comment alone on its line covers the next line with code; one after code
+  covers its own line.
+- `[...]` lists the rules it ignores, by the finding's `policyId`, separated by
+  commas. Without a list it ignores every finding on the line, and then it
+  must give a reason after `--`, or it ignores nothing.
+- Text after `--` is the reason; give one even when it is optional.
+
+Use a comment when the code is right and a reviewer should see why: it shows
+in the diff, moves with the line, and applies to everyone who checks the
+repository. Use `slopcop ignore <id>` when the finding itself is wrong: it
+holds for your workspace and leaves the code alone.
+
+A comment never hides what it ignored. Every finding one ignored is still
+listed, apart from the findings and without failing the check: in `human`
+under *Ignored inline by slopcop: ignore*, in `json` under `inlineSuppressed`
+with the comment's line and reason, and in `sarif` as a suppressed result.
+A comment that ignores nothing is a warning, also never failing the check:
+`unused` when it matches no finding (the rule or the line is wrong),
+`missing_reason` for a list-less comment without a reason, and `malformed`
+when it does not parse. Comments are read only in files where a check has a
+finding, so a stale comment in a file without one is not reported.
+
 ## Read before you ignore
 
 A `definite` finding is one Bifrost proved; it is rarely wrong. A `possible`
@@ -112,6 +145,8 @@ still applies first; `[check]` only removes more.
 
 ## Alternatives
 
+- **A comment at the code** ignores a finding for everyone who checks the
+  repository; see [Ignore in the code](#ignore-in-the-code).
 - **Pre-existing findings** need no ignore: they never fail a check and are not
   listed. See [Read a report](/checks/read-a-report/#new-and-existing-findings).
 - **A whole rule** cannot be turned off from the CLI. If one is noisy for your

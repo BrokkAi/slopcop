@@ -83,7 +83,7 @@ slopcop check --format json
 | `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
-| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it |
+| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it; and, when the check met a `slopcop: ignore` comment, `inlineSuppressed` and `directiveWarnings` |
 | `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, and `previouslyIgnored` with the id of an ignored finding it matches; a finding with `previouslyIgnored` is listed even when it is not new |
 | `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
@@ -91,6 +91,8 @@ slopcop check --format json
 | `incompleteReasons` | present when a rule did not complete: the named rules grouped by `reason` and `detail`, each with a `policies` count, most common first |
 | `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `detail` when sent, `elsewhere` |
 | `inconclusiveUnlisted` | present when the service cut `inconclusive`: how many of `summary.inconclusive` it does not name |
+| `inlineSuppressed` | present when a [`slopcop: ignore` comment](/checks/false-positives/#ignore-in-the-code) ignored a finding: each one with the fields of a finding except `id`, and `directive` with the comment's `line`, `blanket`, `policies` and `reason`; at most 300 |
+| `directiveWarnings` | present when a `slopcop: ignore` comment ignored nothing: each with `kind` (`unused`, `missing_reason`, `malformed`), `path`, `line`, `policies`, `detail` for a malformed one, and `new`; at most 300 |
 | `failure` | present when the analysis as a whole did not complete |
 | `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
@@ -130,6 +132,11 @@ the list, one more `warning` notification counts the rest in
 notifications with `slopcop.inconclusive`, `slopcop.elsewhere`, and, when sent,
 `slopcop.detail` properties, and the run carries `slopcop.inconclusiveUnlisted`
 when that list was cut;
+a finding a `slopcop: ignore` comment ignored is a result with an `inSource`
+suppression whose `justification` is the comment's reason, and each comment
+that ignored nothing is a `warning` notification with
+`slopcop.directiveWarning`; the run counts both in `slopcop.inlineSuppressed`
+and `slopcop.directiveWarnings`;
 an empty change sets `properties["slopcop.emptyChange"]`; a skill update sits in
 `properties["slopcop.skillUpdated"]`. The first run's
 `properties["slopcop.approved"]` says whether the checked tree got push

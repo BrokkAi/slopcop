@@ -1417,6 +1417,151 @@ func TestSARIFNotesEachRunFailure(t *testing.T) {
 	}
 }
 
+// inlineIgnored is a clean check where inline `slopcop: ignore` comments
+// accepted two findings, one past the listed bound, and two comments ignore
+// nothing (BrokkAi/bifrost-service#1089).
+func inlineIgnored() service.Response {
+	r := response("clean", "warning", nil)
+	reason := "the input is a constant"
+	r.InlineSuppressed = []service.InlineSuppressedFinding{{
+		PolicyID:  "bifrost.security.sql-injection",
+		Severity:  "error",
+		Certainty: "definite",
+		Path:      "app.py",
+		StartLine: line(12),
+		EndLine:   line(12),
+		Title:     "Query built from input",
+		New:       true,
+		Directive: service.InlineDirective{
+			Line:     line(11),
+			Policies: []string{"bifrost.security.sql-injection"},
+			Reason:   &reason,
+		},
+	}}
+	r.DirectiveWarnings = []service.DirectiveWarning{
+		{Kind: service.DirectiveMissingReason, Path: "app.py", Line: line(20), Policies: []string{}, New: true},
+		{Kind: service.DirectiveUnused, Path: "lib.py", Line: line(3), Policies: []string{"p.wrong"}},
+	}
+	r.Summary.InlineSuppressed = 2
+	r.Summary.DirectiveWarnings = 2
+	return r
+}
+
+func TestHumanListsInlineIgnoresAndCommentsThatIgnoreNothing(t *testing.T) {
+	got := render(t, inlineIgnored(), FormatHuman)
+	for _, want := range []string{
+		"Ignored inline by slopcop: ignore (never fail the check)\n" +
+			"  [error] bifrost.security.sql-injection: Query built from input\n" +
+			"    Location: app.py:12\n" +
+			"    Ignored by: comment for bifrost.security.sql-injection on line 11 -- the input is a constant\n" +
+			"    In this change\n",
+		"  and 1 more\n",
+		"slopcop: ignore comments that ignore nothing (never fail the check)\n" +
+			"  app.py:20: a blanket ignore needs a reason after `--`; it ignores nothing until it has one\n" +
+			"  lib.py:3: names p.wrong, which matches no finding;",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("human report lacks %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(render(t, response("clean", "warning", nil), FormatHuman), "slopcop: ignore") {
+		t.Fatal("a check without comments mentions them")
+	}
+}
+
+func TestHumanKeepsHostileReasonsOffTheTerminal(t *testing.T) {
+	r := inlineIgnored()
+	reason := "fine\x1b[2J\u202e"
+	r.InlineSuppressed[0].Directive.Reason = &reason
+	got := render(t, r, FormatHuman)
+	if strings.ContainsAny(got, "\x1b\u202e") {
+		t.Fatalf("control characters reached the terminal: %q", got)
+	}
+}
+
+func TestJSONCarriesInlineIgnoresAsSent(t *testing.T) {
+	var got map[string]any
+	if err := json.Unmarshal([]byte(render(t, inlineIgnored(), FormatJSON)), &got); err != nil {
+		t.Fatal(err)
+	}
+	accepted := got["inlineSuppressed"].([]any)[0].(map[string]any)
+	directive := accepted["directive"].(map[string]any)
+	if directive["line"] != float64(11) || directive["reason"] != "the input is a constant" {
+		t.Fatalf("directive = %v", directive)
+	}
+	if kind := got["directiveWarnings"].([]any)[0].(map[string]any)["kind"]; kind != "missing_reason" {
+		t.Fatalf("first warning kind = %v", kind)
+	}
+	summary := got["summary"].(map[string]any)
+	if summary["inlineSuppressed"] != float64(2) || summary["directiveWarnings"] != float64(2) {
+		t.Fatalf("summary = %v", summary)
+	}
+	var clean map[string]any
+	if err := json.Unmarshal([]byte(render(t, response("clean", "warning", nil), FormatJSON)), &clean); err != nil {
+		t.Fatal(err)
+	}
+	for _, absent := range []string{"inlineSuppressed", "directiveWarnings"} {
+		if _, ok := clean[absent]; ok {
+			t.Fatalf("a check without comments carries %s", absent)
+		}
+	}
+}
+
+func TestSARIFSuppressesInlineIgnoresInSource(t *testing.T) {
+	var log struct {
+		Runs []struct {
+			Results []struct {
+				RuleID        string `json:"ruleId"`
+				BaselineState string `json:"baselineState"`
+				Suppressions  []struct {
+					Kind          string `json:"kind"`
+					Justification string `json:"justification"`
+				} `json:"suppressions"`
+			} `json:"results"`
+			Invocations []struct {
+				ExecutionSuccessful bool `json:"executionSuccessful"`
+				Notifications       []struct {
+					Level   string `json:"level"`
+					Message struct {
+						Text string `json:"text"`
+					} `json:"message"`
+				} `json:"toolExecutionNotifications"`
+			} `json:"invocations"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, inlineIgnored(), FormatSARIF)), &log); err != nil {
+		t.Fatal(err)
+	}
+	run := log.Runs[0]
+	if len(run.Results) != 1 {
+		t.Fatalf("results = %+v", run.Results)
+	}
+	result := run.Results[0]
+	if result.RuleID != "bifrost.security.sql-injection" || result.BaselineState != "new" ||
+		len(result.Suppressions) != 1 || result.Suppressions[0].Kind != "inSource" ||
+		result.Suppressions[0].Justification != "the input is a constant" {
+		t.Fatalf("result = %+v", result)
+	}
+	if !run.Invocations[0].ExecutionSuccessful {
+		t.Fatal("comments that ignore nothing failed the execution")
+	}
+	warnings := 0
+	for _, notification := range run.Invocations[0].Notifications {
+		if notification.Level == "warning" && strings.Contains(notification.Message.Text, "slopcop: ignore comment") {
+			warnings++
+		}
+	}
+	if warnings != 2 {
+		t.Fatalf("directive warnings = %d, want 2", warnings)
+	}
+}
+
+func TestInlineIgnoresNeverChangeTheExitCode(t *testing.T) {
+	if code := inlineIgnored().ExitCode(); code != service.ExitClean {
+		t.Fatalf("exit code = %d", code)
+	}
+}
+
 func excluded(only bool) service.Response {
 	r := response(service.StatusClean, "finding", []service.Finding{})
 	r.Summary.ExcludedFiles = 1
