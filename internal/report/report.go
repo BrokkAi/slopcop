@@ -22,6 +22,17 @@ const (
 	FormatSARIF = "sarif"
 )
 
+// Reasons the local review did not run, as the reports name them.
+const (
+	// ReviewSkippedNoReviewers is a check with no mode set on a machine
+	// whose config names no reviewers.
+	ReviewSkippedNoReviewers = "noReviewers"
+	// ReviewSkippedCI is a check with no mode set that ran as a CI job.
+	ReviewSkippedCI = "ci"
+	// ReviewSkippedStaticMode is static mode chosen by flag or config file.
+	ReviewSkippedStaticMode = "staticMode"
+)
+
 const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
 // Options shape what a report lists. Rendering never changes the check, so
@@ -35,6 +46,10 @@ type Options struct {
 	Approved bool
 	// Review is the local reviewers' verdict, when one ran.
 	Review *review.Verdict
+	// ReviewSkipped is why the local review did not run, one of the
+	// ReviewSkipped constants, or "" when it ran. A static-only report must
+	// not read like a clean review.
+	ReviewSkipped string
 	// Status overrides the service status with the combined check status.
 	Status string
 	// StaticStatus preserves the service status when it differs.
@@ -802,11 +817,14 @@ type jsonReport struct {
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Review is the local verdict, when one ran.
-	Review     *reviewJSON                `json:"review,omitempty"`
-	BaseCommit string                     `json:"baseCommit"`
-	Summary    service.Summary            `json:"summary"`
-	Findings   []service.Finding          `json:"findings"`
-	Incomplete []service.IncompletePolicy `json:"incomplete"`
+	Review *reviewJSON `json:"review,omitempty"`
+	// ReviewSkipped is why the local review did not run. It is set only
+	// when it did not.
+	ReviewSkipped string                     `json:"reviewSkipped,omitempty"`
+	BaseCommit    string                     `json:"baseCommit"`
+	Summary       service.Summary            `json:"summary"`
+	Findings      []service.Finding          `json:"findings"`
+	Incomplete    []service.IncompletePolicy `json:"incomplete"`
 	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
 	// counts but incomplete does not name, because the service names at most
 	// 50. It is set only when the list was cut.
@@ -853,6 +871,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Approved:             options.Approved,
 		StaticStatus:         options.StaticStatus,
 		Review:               reviewValue(options.Review),
+		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
 		Summary:              response.Summary,
 		Findings:             listed(response, options),
@@ -882,15 +901,16 @@ func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck)
 // pendingReport is the document `--format json` prints for a check that was
 // still running when --timeout ran out.
 type pendingReport struct {
-	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
-	Status       string        `json:"status"`
-	Approved     bool          `json:"approved"`
-	StaticStatus string        `json:"staticStatus,omitempty"`
-	Review       *reviewJSON   `json:"review,omitempty"`
-	RetryAfter   int           `json:"retryAfter"`
-	Message      string        `json:"message"`
-	Remedy       string        `json:"remedy"`
-	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	Status        string        `json:"status"`
+	Approved      bool          `json:"approved"`
+	StaticStatus  string        `json:"staticStatus,omitempty"`
+	Review        *reviewJSON   `json:"review,omitempty"`
+	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
+	RetryAfter    int           `json:"retryAfter"`
+	Message       string        `json:"message"`
+	Remedy        string        `json:"remedy"`
+	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // writePendingBase renders a check that is still running. The human format
@@ -901,15 +921,16 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 		return nil
 	case FormatJSON:
 		return encode(w, pendingReport{
-			OmittedFiles: options.OmittedFiles,
-			Status:       status(service.StatusPending, options),
-			StaticStatus: options.StaticStatus,
-			Approved:     options.Approved,
-			Review:       reviewValue(options.Review),
-			RetryAfter:   pending.RetryAfter,
-			Message:      pending.Message,
-			Remedy:       pending.Remedy,
-			SkillUpdated: options.SkillUpdated,
+			OmittedFiles:  options.OmittedFiles,
+			Status:        status(service.StatusPending, options),
+			StaticStatus:  options.StaticStatus,
+			Approved:      options.Approved,
+			Review:        reviewValue(options.Review),
+			ReviewSkipped: options.ReviewSkipped,
+			RetryAfter:    pending.RetryAfter,
+			Message:       pending.Message,
+			Remedy:        pending.Remedy,
+			SkillUpdated:  options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{
@@ -942,16 +963,17 @@ type Skipped struct {
 
 // skippedReport is the document `--format json` prints for a skipped check.
 type skippedReport struct {
-	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
-	Status       string        `json:"status"`
-	Approved     bool          `json:"approved"`
-	StaticStatus string        `json:"staticStatus,omitempty"`
-	Review       *reviewJSON   `json:"review,omitempty"`
-	Code         string        `json:"code"`
-	State        string        `json:"state"`
-	Repository   string        `json:"repository"`
-	Message      string        `json:"message"`
-	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	Status        string        `json:"status"`
+	Approved      bool          `json:"approved"`
+	StaticStatus  string        `json:"staticStatus,omitempty"`
+	Review        *reviewJSON   `json:"review,omitempty"`
+	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
+	Code          string        `json:"code"`
+	State         string        `json:"state"`
+	Repository    string        `json:"repository"`
+	Message       string        `json:"message"`
+	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // writeSkippedBase renders a check that was not sent because the repository is not
@@ -964,16 +986,17 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 		return nil
 	case FormatJSON:
 		return encode(w, skippedReport{
-			OmittedFiles: options.OmittedFiles,
-			Status:       status("skipped", options),
-			StaticStatus: options.StaticStatus,
-			Approved:     options.Approved,
-			Review:       reviewValue(options.Review),
-			Code:         skipped.Code,
-			State:        skipped.State,
-			Repository:   skipped.Repository,
-			Message:      skipped.Message,
-			SkillUpdated: options.SkillUpdated,
+			OmittedFiles:  options.OmittedFiles,
+			Status:        status("skipped", options),
+			StaticStatus:  options.StaticStatus,
+			Approved:      options.Approved,
+			Review:        reviewValue(options.Review),
+			ReviewSkipped: options.ReviewSkipped,
+			Code:          skipped.Code,
+			State:         skipped.State,
+			Repository:    skipped.Repository,
+			Message:       skipped.Message,
+			SkillUpdated:  options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{
@@ -999,18 +1022,19 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 // service refused: its closed error code, verbatim message and remedy, and
 // whether the same request may succeed later.
 type failureReport struct {
-	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
-	Status       string        `json:"status"`
-	Approved     bool          `json:"approved"`
-	StaticStatus string        `json:"staticStatus,omitempty"`
-	Review       *reviewJSON   `json:"review,omitempty"`
-	Code         string        `json:"code"`
-	Message      string        `json:"message"`
-	Remedy       string        `json:"remedy"`
-	Retryable    bool          `json:"retryable"`
-	InstallURL   string        `json:"installUrl,omitempty"`
-	TopUpURL     string        `json:"topUpUrl,omitempty"`
-	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	Status        string        `json:"status"`
+	Approved      bool          `json:"approved"`
+	StaticStatus  string        `json:"staticStatus,omitempty"`
+	Review        *reviewJSON   `json:"review,omitempty"`
+	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
+	Code          string        `json:"code"`
+	Message       string        `json:"message"`
+	Remedy        string        `json:"remedy"`
+	Retryable     bool          `json:"retryable"`
+	InstallURL    string        `json:"installUrl,omitempty"`
+	TopUpURL      string        `json:"topUpUrl,omitempty"`
+	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // writeFailureBase renders a check the service refused. The human format prints
@@ -1022,18 +1046,19 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 		return nil
 	case FormatJSON:
 		return encode(w, failureReport{
-			OmittedFiles: options.OmittedFiles,
-			Status:       status(service.StatusFailed, options),
-			StaticStatus: options.StaticStatus,
-			Approved:     options.Approved,
-			Review:       reviewValue(options.Review),
-			Code:         failure.Body.Code,
-			Message:      failure.Error(),
-			Remedy:       failure.Body.Remedy,
-			Retryable:    failure.Body.Retryable,
-			InstallURL:   failure.Body.InstallURL,
-			TopUpURL:     failure.Body.TopUpURL,
-			SkillUpdated: options.SkillUpdated,
+			OmittedFiles:  options.OmittedFiles,
+			Status:        status(service.StatusFailed, options),
+			StaticStatus:  options.StaticStatus,
+			Approved:      options.Approved,
+			Review:        reviewValue(options.Review),
+			ReviewSkipped: options.ReviewSkipped,
+			Code:          failure.Body.Code,
+			Message:       failure.Error(),
+			Remedy:        failure.Body.Remedy,
+			Retryable:     failure.Body.Retryable,
+			InstallURL:    failure.Body.InstallURL,
+			TopUpURL:      failure.Body.TopUpURL,
+			SkillUpdated:  options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		id := failure.Body.Code
@@ -1062,6 +1087,9 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
 	properties["slopcop.approved"] = options.Approved
+	if options.ReviewSkipped != "" {
+		properties["slopcop.reviewSkipped"] = options.ReviewSkipped
+	}
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
@@ -1522,6 +1550,12 @@ func encode(w io.Writer, value any, what string) error {
 func Write(w io.Writer, response service.Response, format string, options Options) error {
 	if format == "" || format == FormatHuman {
 		if _, err := io.WriteString(w, human(response, options)); err != nil {
+			return err
+		}
+		// Only the fallback a person did not choose gets a line: one who
+		// asked for static mode knows, and a CI job keeps its output.
+		if options.Review == nil && options.ReviewSkipped == ReviewSkippedNoReviewers {
+			_, err := io.WriteString(w, "\nReview: skipped (no reviewers are configured; run `slopcop init` to add them)\n")
 			return err
 		}
 		return writeReview(w, options.Review)
