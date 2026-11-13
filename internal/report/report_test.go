@@ -1762,3 +1762,53 @@ func TestPartialSimilarityNoticeRendersInAllFormats(t *testing.T) {
 		t.Fatalf("SARIF notice = %v", notice)
 	}
 }
+
+func TestStaticOnlyReportSaysTheReviewWasSkipped(t *testing.T) {
+	response := service.Response{Status: service.StatusClean, BaseCommit: "base"}
+	options := Options{ReviewSkipped: ReviewSkippedNoReviewers}
+	var out bytes.Buffer
+	if err := Write(&out, response, FormatJSON, options); err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc["reviewSkipped"] != ReviewSkippedNoReviewers {
+		t.Fatalf("json reviewSkipped = %v: %s", doc["reviewSkipped"], out.String())
+	}
+	out.Reset()
+	if err := WriteFailure(&out, &service.Error{Body: service.ErrorBody{Message: "no"}}, FormatJSON, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"reviewSkipped": "noReviewers"`) {
+		t.Fatalf("failure json: %s", out.String())
+	}
+	out.Reset()
+	if err := Write(&out, response, FormatSARIF, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"slopcop.reviewSkipped": "noReviewers"`) {
+		t.Fatalf("sarif: %s", out.String())
+	}
+	out.Reset()
+	if err := Write(&out, response, FormatHuman, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Review: skipped (no reviewers are configured") {
+		t.Fatalf("human: %q", out.String())
+	}
+}
+
+func TestChosenStaticModeHasNoHumanReviewLine(t *testing.T) {
+	response := service.Response{Status: service.StatusClean, BaseCommit: "base"}
+	for _, reason := range []string{ReviewSkippedCI, ReviewSkippedStaticMode} {
+		var out bytes.Buffer
+		if err := Write(&out, response, FormatHuman, Options{ReviewSkipped: reason}); err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(out.String(), "Review:") {
+			t.Fatalf("%s: human: %q", reason, out.String())
+		}
+	}
+}
