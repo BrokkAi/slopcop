@@ -68,6 +68,17 @@ func TestDoctorStates(t *testing.T) {
 	if data, _ := os.ReadFile(settings); string(data) != "{}\n" {
 		t.Fatalf("doctor changed the settings: %s", data)
 	}
+
+	// A Stop hook under another event, and a gate whose matcher misses the
+	// shell, would not run, so they do not count.
+	misplaced := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"slopcop hook codex || true"}]}],` +
+		`"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"slopcop gate --hook codex"}]}]}}`
+	if err := os.WriteFile(settings, []byte(misplaced), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if report := doctorJSON(t, dir); strings.Join(report.Missing, "|") != "Codex's Stop hook|Codex's push gate" {
+		t.Fatalf("misplaced hooks counted: %+v", report)
+	}
 }
 
 // A harness installed after init ran has nothing until init runs again.
@@ -118,6 +129,12 @@ func TestDoctorListsLegacyRepositoryFiles(t *testing.T) {
 	report := doctorJSON(t, repo)
 	if strings.Join(report.Legacy, "|") != hook+"|"+skill || !strings.Contains(strings.Join(report.Notes, "\n"), "removes the per-repository leftovers") {
 		t.Fatalf("%+v", report)
+	}
+	// A tracked settings file is the repository's own; init leaves it, so
+	// doctor does not list it.
+	gitAt(t, repo, "add", "-f", hook)
+	if report := doctorJSON(t, repo); strings.Join(report.Legacy, "|") != skill {
+		t.Fatalf("tracked hook listed: %+v", report.Legacy)
 	}
 	// Outside the checkout there is nothing to clean.
 	if report := doctorJSON(t, t.TempDir()); len(report.Legacy) != 0 {

@@ -133,7 +133,8 @@ func diagnoseSetup(dir string) setupReport {
 		report.Notes = append(report.Notes, "Codex runs SlopCop's hooks only after you trust them with /hooks")
 	}
 	if repo, err := gitx.Toplevel(dir); err == nil {
-		report.Legacy = append(report.Legacy, agenthooks.LegacyRepositoryHooks(repo)...)
+		tracked := func(path string) bool { return gitTracked(repo, path) }
+		report.Legacy = append(report.Legacy, agenthooks.LegacyRepositoryHooks(repo, tracked)...)
 		report.Legacy = append(report.Legacy, legacyRepositorySkills(repo)...)
 		if len(report.Legacy) > 0 {
 			report.Notes = append(report.Notes, "`slopcop init` in "+repo+" removes the per-repository leftovers")

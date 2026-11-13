@@ -479,7 +479,7 @@ func Find() map[string]Presence {
 		p := found[h.name]
 		p.Configured, _ = harnessDirExists(h.dir)
 		p.NeedsTrust = p.NeedsTrust || h.needsTrust
-		if fileHolds(filepath.Join(h.dir, h.file), h.ours) {
+		if fileHolds(filepath.Join(h.dir, h.file), h, true) {
 			if h.gate {
 				p.Gate = true
 			} else {
@@ -492,22 +492,30 @@ func Find() map[string]Presence {
 }
 
 // LegacyRepositoryHooks lists the clone-local settings files under root that
-// still hold a hook written by the releases that installed per repository.
-func LegacyRepositoryHooks(root string) []string {
+// still hold a hook written by the releases that installed per repository,
+// leaving out those skip accepts, as the cleanup does for tracked files. A
+// handler counts under any event or matcher, since the cleanup removes it
+// wherever it is.
+func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 	var paths []string
 	for _, h := range repositoryHarnesses(root) {
 		path := filepath.Join(h.dir, h.file)
-		if fileHolds(path, h.ours) {
+		if skip != nil && skip(path) {
+			continue
+		}
+		if fileHolds(path, h, false) {
 			paths = appendUnique(paths, path)
 		}
 	}
 	return paths
 }
 
-// fileHolds reports whether the settings file at path has a hook handler
-// whose command ours accepts, under any event. An unreadable or malformed
-// file holds none.
-func fileHolds(path string, ours func(any) bool) bool {
+// fileHolds reports whether the settings file at path has h's handler. With
+// strict set, the handler counts only where the harness would run it for h:
+// under h's event and, for the push gate, in a group with h's matcher, as
+// install writes it. Otherwise it counts under any event. An unreadable or
+// malformed file holds none.
+func fileHolds(path string, h harness, strict bool) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
@@ -520,12 +528,19 @@ func fileHolds(path string, ours func(any) bool) bool {
 	if err != nil || hooks == nil {
 		return false
 	}
+	event := h.event
+	if event == "" {
+		event = "Stop"
+	}
 	for _, key := range hooks.keys {
+		if strict && key != event {
+			continue
+		}
 		groups, _ := hooks.get(key)
 		list, _ := groups.([]any)
 		for _, groupValue := range list {
 			group, ok := groupValue.(*object)
-			if !ok {
+			if !ok || strict && h.gate && groupMatcher(group) != h.matcher {
 				continue
 			}
 			handlersValue, _ := group.get("hooks")
@@ -535,7 +550,7 @@ func fileHolds(path string, ours func(any) bool) bool {
 				if !ok {
 					continue
 				}
-				if command, _ := handler.get("command"); ours(command) {
+				if command, _ := handler.get("command"); h.ours(command) {
 					return true
 				}
 			}
