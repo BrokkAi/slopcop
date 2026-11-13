@@ -28,7 +28,8 @@ the exit code, except that new findings below `--fail-on` (or with
 `--fail-on never`) still read `findings`; `staticStatus` keeps the static
 half's status when it differs.
 Review details are in `review`, including each configured reviewer, its error
-if it could not run, and its log path. Exit `0` can include a static skip or empty review;
+if it could not run, and its log path. When the review did not run, `review`
+is absent and `reviewSkipped` says why (`noReviewers`, `ci`, or `staticMode`). Exit `0` can include a static skip or empty review;
 inspect those statuses before calling the change checked.
 
 ## New and existing findings

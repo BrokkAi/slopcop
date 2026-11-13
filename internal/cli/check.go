@@ -269,6 +269,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	if mode != modeStatic {
 		reportOptions.Review = &verdict
+	} else {
+		reportOptions.ReviewSkipped = reviewSkippedReason(fallback)
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
 	if prepared.bytes == 0 && len(prepared.omittedFiles) == 0 {
