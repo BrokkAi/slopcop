@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 
 	"github.com/spf13/cobra"
 
@@ -90,7 +91,9 @@ func diagnoseSetup(dir string) setupReport {
 		if !p.Configured {
 			continue
 		}
-		h := setupHarness{Name: name, Skill: userSkillAvailable(name), StopHook: p.Stop, PushGate: p.Gate}
+		skill, broken := userSkillAvailable(name)
+		report.brokenSkill(broken)
+		h := setupHarness{Name: name, Skill: skill, StopHook: p.Stop, PushGate: p.Gate}
 		report.Harnesses = append(report.Harnesses, h)
 		anyPresent = anyPresent || h.Skill || h.StopHook || h.PushGate
 		needsTrust = needsTrust || p.NeedsTrust && (h.StopHook || h.PushGate)
@@ -108,7 +111,9 @@ func diagnoseSetup(dir string) setupReport {
 	if len(report.Harnesses) == 0 {
 		// No harness is configured here; only the vendor-neutral skill that
 		// other agents read can be installed.
-		if userSkillAvailable("") {
+		skill, broken := userSkillAvailable("")
+		report.brokenSkill(broken)
+		if skill {
 			anyPresent = true
 		} else {
 			report.Missing = append(report.Missing, "the slopcop skill")
@@ -143,6 +148,17 @@ func diagnoseSetup(dir string) setupReport {
 	return report
 }
 
+// brokenSkill notes each unloadable skill file once, with the step init
+// cannot take for it.
+func (r *setupReport) brokenSkill(paths []string) {
+	for _, path := range paths {
+		note := path + " is not a valid slopcop skill, and init keeps an existing file; move its folder aside, then run `slopcop init`"
+		if !slices.Contains(r.Notes, note) {
+			r.Notes = append(r.Notes, note)
+		}
+	}
+}
+
 // reviewerProbeNote warns that init will probe reviewers, which sends each a
 // short prompt, when none are configured yet. It is empty when init would not.
 func reviewerProbeNote() string {
@@ -156,24 +172,32 @@ func reviewerProbeNote() string {
 // userSkillAvailable reports whether the named harness would find a
 // user-level slopcop skill. Claude Code reads its own directory; Codex, Grok
 // and the agents an empty name stands for read ~/.agents/skills, and Codex
-// also its own home.
-func userSkillAvailable(name string) bool {
+// also its own home. It also returns the skill files the harness reads that
+// lack the skill's frontmatter, which the harness does not load and init,
+// keeping an existing file, does not replace.
+func userSkillAvailable(name string) (bool, []string) {
 	roots, err := skillRoots()
 	if err != nil {
-		return false
+		return false, nil
 	}
+	var broken []string
 	for _, root := range roots {
 		claudeRoot := !root.neutral && !root.codex
 		reads := root.neutral && name != "claude" || claudeRoot && name == "claude" || root.codex && name == "codex"
 		if !reads {
 			continue
 		}
-		// A file without the skill's frontmatter is not loaded as the skill.
-		if data, err := os.ReadFile(filepath.Join(root.dir, skillName, skillFileName)); err == nil && skillNamed(data, skillName) {
-			return true
+		path := filepath.Join(root.dir, skillName, skillFileName)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
 		}
+		if skillNamed(data, skillName) {
+			return true, nil
+		}
+		broken = append(broken, path)
 	}
-	return false
+	return false, broken
 }
 
 // legacyRepositorySkills lists untracked SlopCop skills in the checkout that

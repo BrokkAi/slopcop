@@ -62,8 +62,13 @@ func TestDoctorStates(t *testing.T) {
 	if err := os.WriteFile(claudeSkill, nil, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if report := doctorJSON(t, dir); strings.Join(report.Missing, "|") != "Claude Code's slopcop skill" {
+	report := doctorJSON(t, dir)
+	if strings.Join(report.Missing, "|") != "Claude Code's slopcop skill" {
 		t.Fatalf("empty skill counted: %+v", report)
+	}
+	// Init keeps an existing file, so doctor says to move it aside first.
+	if !strings.Contains(strings.Join(report.Notes, "\n"), claudeSkill+" is not a valid slopcop skill") {
+		t.Fatalf("no remedy for the broken skill: %+v", report.Notes)
 	}
 	if err := os.WriteFile(claudeSkill, original, 0o644); err != nil {
 		t.Fatal(err)
