@@ -1,0 +1,114 @@
+/* SlopCop design system, version 2: tokens.
+   Black, white and one red. Type, rules and outlines are solid, one pixel and sharp. Every value is a
+   custom property with the prefix --sc-. This is the design system's token sheet as slopcop.com and the
+   blog use it, less the values for pictures, which the documentation does not have. slopcop.css maps
+   these onto Starlight; do not add colours, faces or sizes there that are not here.
+   The faces are in public/fonts/, each under the SIL Open Font License (see the file beside each). */
+
+@font-face { font-family: "Redaction 20"; src: url(/fonts/Redaction_20-Regular.woff2) format("woff2"); font-display: swap; }
+/* The wordmark is small, so it takes the bold cut; the file holds only the letters of "SlopCop" (4 KB). */
+@font-face { font-family: "Redaction 20 Wordmark"; src: url(/fonts/Redaction_20-Bold-wordmark.woff2) format("woff2"); font-display: swap; }
+@font-face { font-family: "Overused Grotesk"; src: url(/fonts/OverusedGrotesk-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Overused Grotesk"; src: url(/fonts/OverusedGrotesk-500.woff2) format("woff2"); font-weight: 500; font-display: swap; }
+@font-face { font-family: "Overused Grotesk"; src: url(/fonts/OverusedGrotesk-600.woff2) format("woff2"); font-weight: 600 700; font-display: swap; }
+@font-face { font-family: "Commit Mono"; src: url(/fonts/CommitMono-400.woff2) format("woff2"); font-weight: 400; font-display: swap; }
+@font-face { font-family: "Commit Mono"; src: url(/fonts/CommitMono-700.woff2) format("woff2"); font-weight: 700; font-display: swap; }
+/* A stand-in for the text face while it loads: the reader's own Arial (Liberation Sans on Linux, Helvetica on a
+   Mac), drawn at Overused Grotesk's width, so lines break where they will break and nothing moves when the face
+   arrives. Commit Mono needs none: its advance is 0.6em, as the usual monospace faces' is. */
+@font-face { font-family: "Overused Grotesk Fallback"; src: local("Arial"), local("Liberation Sans"), local("Helvetica"); font-weight: 400 500; size-adjust: 94.65%; }
+@font-face { font-family: "Overused Grotesk Fallback"; src: local("Arial Bold"), local("Liberation Sans Bold"), local("Helvetica Bold"); font-weight: 600 700; size-adjust: 91.75%; }
+
+:root {
+  /* ---- Palette: three colours, and no others. ---- */
+  --sc-night: #15171c;      /* the field, and ink on paper */
+  --sc-white: #ffffff;      /* paper, and text on the field */
+  --sc-red: #ee3c42;        /* the highlight: a finding, the marked code, a destructive act. Never a link, never a button's fill. */
+  --sc-red-ink: #d42a31;    /* red as text on paper, where --sc-red is 3.9:1 (this is 5.0:1) */
+
+  /* ---- Faces ---- */
+  --sc-display: "Redaction 20", Georgia, serif;                  /* a page's one headline, and the wordmark. Nothing else. */
+  --sc-wordmark: "Redaction 20 Wordmark", var(--sc-display);
+  --sc-sans: "Overused Grotesk", "Overused Grotesk Fallback", system-ui, sans-serif;   /* headings, text, controls */
+  --sc-mono: "Commit Mono", ui-monospace, monospace;             /* what a machine printed: code, findings, commands, ids */
+
+  /* ---- Type: marketing and reading ---- */
+  --sc-t-display: clamp(46px, 6.1vw, 90px);    /* line .96, -.022em, display face */
+  --sc-t-heading: clamp(34px, 4vw, 56px);      /* line 1.02, 600, -.032em. Every section heading on a page is this one size. */
+  --sc-t-title: clamp(26px, 2.4vw, 34px);      /* line 1.1, 600, -.022em */
+  --sc-t-lead: 20px;                           /* line 1.4. The sentence under a headline. */
+  --sc-t-item: 20px;                           /* line 1.25, 600, -.01em. A row's title. */
+  --sc-t-body: 17px;                           /* line 1.5 */
+  --sc-t-small: 16px;                          /* line 1.45. Secondary lines, quiet. */
+  --sc-t-note: 15px;                           /* line 20px. Captions, labels. */
+  --sc-t-mono: 13px;                           /* line 21px */
+  --sc-t-read: 19px;                           /* line 1.6. Long reading: a guide. */
+  --sc-measure: 32em;                          /* the widest a column of reading gets (about 70 characters at the reading size) */
+
+  /* ---- Type: screens. Smaller, same faces and weights. ---- */
+  --sc-ui-page: 28px;        /* line 32px, 600, -.022em */
+  --sc-ui-section: 20px;     /* line 26px, 600, -.012em */
+  --sc-ui-body: 15px;        /* line 22px */
+  --sc-ui-small: 13px;       /* line 18px */
+
+  /* ---- Space: a 4 px step. Use these, not new numbers. ---- */
+  --sc-1: 4px; --sc-2: 8px; --sc-3: 12px; --sc-4: 16px; --sc-5: 20px; --sc-6: 24px; --sc-7: 28px;
+  --sc-8: 40px; --sc-9: 56px; --sc-10: 72px; --sc-11: 88px;
+
+  /* ---- Layout ---- */
+  --sc-gutter: clamp(16px, 4.2vw, 60px);   /* the window's edge to the content */
+  --sc-stage: 1440px;                      /* the widest content gets; a wider window gets more ground either side */
+  --sc-band-top: var(--sc-10);             /* from the top of a section to its heading, the same in every section */
+
+  /* ---- Shape: square corners, one corner cut, one-pixel lines. No radius, no shadow, no gradient. ---- */
+  --sc-cut: 14px;        /* a tag */
+  --sc-cut-s: 8px;       /* a chip, a small control */
+  --sc-cut-l: 28px;      /* a tag that leads, a dialog */
+
+  /* ---- Motion: answers to an action only, short. ---- */
+  --sc-press: 120ms;
+  --sc-ease-out: cubic-bezier(.23, 1, .32, 1);
+}
+/* The gutter is whole pixels, so every hairline in the content lands on a pixel. */
+@supports (width: round(1px, 1px)) { :root { --sc-gutter: clamp(16px, round(4.2vw, 1px), 60px); } }
+
+/* ---- Grounds. There are two: paper (white, ink on it) and the field (night, white on it). Starlight's
+   light theme is paper and its dark theme is the field; everything reads these, never the palette. ----
+   --sc-bg      the ground itself
+   --sc-fg      text, solid outlines, a solid button
+   --sc-quiet   secondary text (6.2:1 on paper, 7.4:1 on the field)
+   --sc-faint   placeholders, disabled text (decorative or large only: 3.3:1)
+   --sc-hair    a rule between items: one pixel, solid, quiet
+   --sc-line    the outline of a control
+   --sc-tag-line   the outline of a tag: the text colour at 46%, so a card is marked off without shouting
+   --sc-tag-found  the outline of the tag that warns: the highlight at 72%
+   --sc-tint    a row under the pointer, the current item: the only fill besides the ground and the well
+   --sc-well    where a machine's text sits: a code block, an input
+   --sc-mark    the highlight as a line or a dot
+   --sc-mark-text  the highlight as text */
+:root, [data-theme="light"] {
+  color-scheme: light;
+  --sc-bg: var(--sc-white); --sc-fg: var(--sc-night);
+  --sc-quiet: color-mix(in srgb, var(--sc-night) 68%, var(--sc-white));
+  --sc-faint: color-mix(in srgb, var(--sc-night) 48%, var(--sc-white));
+  --sc-hair: color-mix(in srgb, var(--sc-night) 22%, transparent);
+  --sc-line: var(--sc-night);
+  --sc-tag-line: color-mix(in srgb, var(--sc-night) 46%, var(--sc-white)); --sc-tag-found: color-mix(in srgb, var(--sc-red) 72%, var(--sc-white));
+  --sc-tint: color-mix(in srgb, var(--sc-night) 5%, var(--sc-white));
+  --sc-well: color-mix(in srgb, var(--sc-night) 3.5%, var(--sc-white));
+  --sc-mark: var(--sc-red); --sc-mark-text: var(--sc-red-ink);
+  --sc-code-key: #2a4b9b; --sc-code-str: #1d6a43; --sc-code-num: #8a5600;       /* code's inks: pen blue, ledger green, manila */
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --sc-bg: var(--sc-night); --sc-fg: var(--sc-white);
+  --sc-quiet: color-mix(in srgb, var(--sc-white) 62%, var(--sc-night));
+  --sc-faint: color-mix(in srgb, var(--sc-white) 40%, var(--sc-night));
+  --sc-hair: color-mix(in srgb, var(--sc-white) 22%, transparent);
+  --sc-line: var(--sc-white);
+  --sc-tag-line: color-mix(in srgb, var(--sc-white) 46%, var(--sc-night)); --sc-tag-found: color-mix(in srgb, var(--sc-red) 72%, var(--sc-night));
+  --sc-tint: color-mix(in srgb, var(--sc-white) 7%, var(--sc-night));
+  --sc-well: color-mix(in srgb, #000000 28%, var(--sc-night));
+  --sc-mark: var(--sc-red); --sc-mark-text: var(--sc-red);
+  --sc-code-key: #a9c0ff; --sc-code-str: #9fd8b6; --sc-code-num: #e8c684;
+}

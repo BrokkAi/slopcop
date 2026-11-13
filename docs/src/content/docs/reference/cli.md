@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every slopcop command and flag. Check, enable, status, login, logout, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
+description: "Every slopcop command and flag. Check, enable, status, login, logout, service, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
 sidebar:
   order: 1
 ---
@@ -18,7 +18,7 @@ completion <shell>` generates shell completion.
 
 | Flag | Meaning |
 | --- | --- |
-| `--service URL` | the SlopCop check service URL (also `SLOPCOP_SERVICE`); default `https://slopcop.com` |
+| `--service URL` | the SlopCop check service URL for this command (also `SLOPCOP_SERVICE`); default `https://slopcop.com`. A command that uses another says so on stderr |
 | `-v`, `--version` | print the version and exit |
 | `-h`, `--help` | help for the command |
 
@@ -53,7 +53,7 @@ slopcop --root ../repo --base origin/main
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
 | `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
 | `--if-enabled` | check only if the repository is active in the workspace; otherwise exit `0` without sending a check |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
+| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 Exit codes: `0` clean, `1` new findings, `2` incomplete or failed, `3` still
@@ -105,20 +105,40 @@ waits for approval. Login does not install the agent skill. See
 | Flag | Meaning |
 | --- | --- |
 | `--token TOKEN` | store an existing token instead of starting the browser flow |
+| `--default` | also make this service the default for every command. It asks at a terminal and refuses when stdin is not one |
+
+Each service keeps its own login. With `--service`, login signs in to that
+service, leaves the other logins as they are, and does not change the default
+unless `--default` is passed.
 
 ## `slopcop logout`
 
-Forget the stored credential.
+Forget the credential stored for one service: the one `--service` or
+`SLOPCOP_SERVICE` names, else the default. Other logins stay.
+
+| Flag | Meaning |
+| --- | --- |
+| `--all` | forget the credential for every service |
+
+## `slopcop service`
+
+List the services this machine is signed in to, or change the default.
+
+| Command | Meaning |
+| --- | --- |
+| `slopcop service list` | the default service and every service with a stored login; `--format json` has `services`, each with `service`, `default`, `signedIn` |
+| `slopcop service use URL` | make a service the default for every command without `--service`. It asks at a terminal and refuses when stdin is not one |
 
 ## `slopcop whoami`
 
 Show the account behind this login, the workspace it is bound to (the one its
 checks and ignores run in, and bill), that workspace's plan, and the service
-URL. Run it before a check when it matters which workspace pays.
+URL. With logins stored for more than one service, it also lists them and
+marks the default. Run it before a check when it matters which workspace pays.
 
 | Flag | Meaning |
 | --- | --- |
-| `--format human\|json` | output format (default `human`); `json` has `service`, `account`, `workspace`, `plan` |
+| `--format human\|json` | output format (default `human`); `json` has `service`, `account`, `workspace`, `plan`, `services` |
 
 ## `slopcop workspace`
 

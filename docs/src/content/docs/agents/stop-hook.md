@@ -91,6 +91,11 @@ true`, or `|| exit /b 0` under Windows' `cmd`), so even a `slopcop` that cannot
 run it, such as an older one first on `PATH`, lets the agent stop. Init warns
 when that is the case, because no check would run.
 
+When the hook's check goes to a service other than `https://slopcop.com`,
+because the [default was changed](/account/sign-in/#the-service-url) or
+`SLOPCOP_SERVICE` is set, it says so once in the session: `slopcop: the
+automatic check uses service <url>, not https://slopcop.com.`
+
 Hook runs never print the [upgrade notice](/get-started/install/#upgrade-notices).
 
 ## Turn it off

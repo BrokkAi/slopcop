@@ -240,7 +240,7 @@ func TestRepoDisableAndEnableSendTheRepositoryID(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if stderr != "Type Acme/gadgets to disable it: " {
+	if stderr != "slopcop: using service "+server.URL+"\n"+"Type Acme/gadgets to disable it: " {
 		t.Errorf("stderr = %q", stderr)
 	}
 	if stdout != "slopcop: disabled Acme/gadgets\n" {
@@ -272,7 +272,7 @@ func TestRepoEnablePrintsTheServiceRemedy(t *testing.T) {
 	if code != 2 || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := "Type Acme/widgets to enable it: " + "Only the workspace's owner can enable or disable its repositories.\n" +
+	want := "slopcop: using service " + server.URL + "\n" + "Type Acme/widgets to enable it: " + "Only the workspace's owner can enable or disable its repositories.\n" +
 		"Ask the workspace's owner, or switch to a workspace you own.\n" +
 		"Name a workspace you own with `--workspace <name>`.\n"
 	if stderr != want {
@@ -435,6 +435,38 @@ func TestRepoCommandsRunInTheWorkspaceNamed(t *testing.T) {
 	for _, call := range (*calls)[before:] {
 		if call.path == "/v1/repositories" {
 			t.Errorf("an unknown workspace still listed: %+v", call)
+		}
+	}
+}
+
+func TestALoginIsNotSentToAnotherService(t *testing.T) {
+	isolateUserConfig(t)
+	server, calls := accountService(t, nil)
+	if code, _, stderr := runCLI(t, "login", "--token", "prod-token"); code != 0 {
+		t.Fatalf("login: exit = %d, stderr = %s", code, stderr)
+	}
+
+	code, _, stderr := runCLI(t, "whoami", "--service", server.URL)
+	if code != 0 || !strings.Contains(stderr, "slopcop: using service "+server.URL) {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if len(*calls) != 1 || (*calls)[0].authorization != "" {
+		t.Fatalf("the hosted service's login went to another service: %+v", *calls)
+	}
+
+	if code, _, stderr = runCLI(t, "login", "--service", server.URL, "--token", "local-token"); code != 0 {
+		t.Fatalf("login: exit = %d, stderr = %s", code, stderr)
+	}
+	code, stdout, _ := runCLI(t, "whoami", "--service", server.URL)
+	if code != 0 || (*calls)[1].authorization != "Bearer local-token" {
+		t.Fatalf("exit = %d, calls = %+v", code, *calls)
+	}
+	for _, want := range []string{
+		"Stored:    https://slopcop.com (signed in, default)\n",
+		"Stored:    " + server.URL + " (signed in)\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want %q", stdout, want)
 		}
 	}
 }

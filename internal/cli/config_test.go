@@ -15,7 +15,7 @@ func TestConfigCommandGetSetUnset(t *testing.T) {
 			t.Fatalf("get %s: code=%d out=%q err=%q", tc.key, code, out, errOut)
 		}
 	}
-	cfg := config.Config{Token: "token"}
+	cfg := config.Config{LegacyToken: "token"}
 	if _, err := config.Save(cfg); err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestConfigCommandGetSetUnset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Token != "token" || got.Review != nil || got.Mode != "ai" {
+	if got.TokenFor(config.DefaultServiceURL) != "token" || got.Review != nil || got.Mode != "ai" {
 		t.Fatalf("config after unset = %+v", got)
 	}
 }

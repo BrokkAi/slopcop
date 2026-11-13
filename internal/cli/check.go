@@ -250,6 +250,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	case service.ExitPending:
 		status = "pending"
 	}
+	// Status says what the check found and --fail-on only what exits
+	// nonzero, so findings below the threshold, or with --fail-on never,
+	// still read as findings.
+	if static.status == service.StatusFindings || verdict.Status == review.StatusFindings {
+		status = service.StatusFindings
+	}
 	reportOptions.Status = status
 	if mode != modeAI && status != static.status {
 		reportOptions.StaticStatus = static.status
@@ -345,6 +351,7 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		return failed(prepared.staticErr)
 	}
 	client, request := prepared.client, prepared.request
+	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
 		return failed(err)
@@ -426,7 +433,28 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	} else {
 		rememberCheck(prepared, response)
 	}
-	return staticOutcome{response: &response, exit: response.ExitCode(), status: response.Status}
+	exit := response.ExitCode()
+	// The service's status follows failOn, so with --fail-on never, or new
+	// findings below the threshold, it answers clean or incomplete. The
+	// report's status names the result instead; the exit keeps the threshold.
+	if response.KnownStatus() && hasNewFindings(response) {
+		response.Status = service.StatusFindings
+	}
+	return staticOutcome{response: &response, exit: exit, status: response.Status}
+}
+
+// hasNewFindings says the change introduced or touched a finding, listed or
+// omitted past the service's bound.
+func hasNewFindings(response service.Response) bool {
+	if response.Summary.NewFindings > 0 || response.Summary.OmittedFindings > 0 {
+		return true
+	}
+	for _, finding := range response.Findings {
+		if finding.New {
+			return true
+		}
+	}
+	return false
 }
 
 // checkFailure prints a service failure's code, message, and remedy on
@@ -667,7 +695,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		return prepared, nil
 	}
 	target := resolveServiceURL(cfg, serviceFlag)
-	token := resolveToken(cfg)
+	token := resolveToken(cfg, target)
 	client, err := service.New(target, token, "slopcop/"+version, opts.timeout)
 	if err != nil {
 		if opts.mode == "" {
@@ -996,21 +1024,22 @@ func resolveServiceURL(cfg config.Config, flagValue string) string {
 	for _, candidate := range []string{
 		flagValue,
 		os.Getenv("SLOPCOP_SERVICE"),
-		cfg.ServiceURL,
-		config.DefaultServiceURL,
 	} {
 		if value := strings.TrimSpace(candidate); value != "" {
 			return value
 		}
 	}
-	return config.DefaultServiceURL
+	return cfg.DefaultService()
 }
 
-func resolveToken(cfg config.Config) string {
+// resolveToken is the credential for the service a command talks to:
+// $SLOPCOP_TOKEN, which CI sets for the one service it uses, else the login
+// stored for that service. A login stored for another service is never sent.
+func resolveToken(cfg config.Config, serviceURL string) string {
 	if token := strings.TrimSpace(os.Getenv("SLOPCOP_TOKEN")); token != "" {
 		return token
 	}
-	return strings.TrimSpace(cfg.Token)
+	return cfg.TokenFor(serviceURL)
 }
 
 func valueOr(value, fallback string) string {

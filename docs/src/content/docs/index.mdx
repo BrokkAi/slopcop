@@ -3,26 +3,23 @@ title: SlopCop documentation
 description: "Static analysis deep enough for CI, fast enough for your coding agent to run on every edit. How to install slopcop, wire it into Claude Code and Codex, read a report, and gate a change."
 template: splash
 hero:
-  title: SlopCop <span>Documentation</span>
+  title: SlopCop <span>documentation</span>
   tagline: Install the <code>slopcop</code> CLI, wire it into your coding agent, read what a check reports, and gate a change in CI.
   actions:
     - text: Quickstart
       link: get-started/quickstart/
-      icon: right-arrow
       variant: primary
     - text: How a check works
       link: '#how-a-check-works'
-      icon: down-arrow
       variant: minimal
 ---
 
 import SlopCopNavCard from '../../components/SlopCopNavCard.astro';
 
-<section class="sc-section sc-section--center not-content" id="how-a-check-works">
-  <p class="sc-eyebrow">How a check works</p>
+<section class="sc-section not-content" id="how-a-check-works">
   <h2>Your agent makes the edit. SlopCop checks it.</h2>
   <p>The CLI sends one git patch to the hosted service. The service applies it to your base commit, runs <a href="https://github.com/BrokkAi/bifrost">Bifrost</a> over the files the change writes, and returns findings your agent can act on.</p>
-  <ol class="sc-timeline">
+  <ol class="sc-steps">
     <li>
       <small>01 / your machine</small>
       <h3>Your coding agent runs <code>slopcop</code></h3>
@@ -44,35 +41,34 @@ import SlopCopNavCard from '../../components/SlopCopNavCard.astro';
       <p>The agent fixes them and checks again until none are left. Findings already in the code never fail it.</p>
     </li>
   </ol>
-  <p class="sc-loop"><span aria-hidden="true"><svg viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.46-3.54" /><path d="M12 1.75v3h-3" /></svg></span> Check again after the next edit</p>
+  <p class="sc-loop">Check again after the next edit</p>
 </section>
 
 <section class="sc-section not-content">
   <h2>Find your next step</h2>
   <div class="sc-grid">
-    <SlopCopNavCard icon="rocket" title="Get started" description="Install the CLI, add the skill to your agent, sign in, and run your first check." href="get-started/quickstart/" />
-    <SlopCopNavCard icon="puzzle" title="Connect an agent" description="Claude Code, Codex, opencode, Copilot CLI and more: the skill, the Stop hook, and what to add to each." href="agents/overview/" />
-    <SlopCopNavCard icon="magnifier" title="Read a report" description="Status, certainty, new versus existing findings, and what incomplete and inconclusive mean." href="checks/read-a-report/" />
-    <SlopCopNavCard icon="seti:shell" title="CLI reference" description="Every command and flag, the configuration file, and the error codes." href="reference/cli/" />
-    <SlopCopNavCard icon="code-branch" title="Gate a change in CI" description="Run slopcop in GitHub Actions with a token, pick the base, and upload SARIF to code scanning." href="checks/ci/" />
-    <SlopCopNavCard icon="star" title="Credits and what it costs" description="Checks are free, and so is your first repository. What an active repository costs after that." href="account/credits/" />
+    <SlopCopNavCard title="Get started" description="Install the CLI, add the skill to your agent, sign in, and run your first check." href="get-started/quickstart/" />
+    <SlopCopNavCard title="Connect an agent" description="Claude Code, Codex, opencode, Copilot CLI and more: the skill, the Stop hook, and what to add to each." href="agents/overview/" />
+    <SlopCopNavCard title="Read a report" description="Status, certainty, new versus existing findings, and what incomplete and inconclusive mean." href="checks/read-a-report/" />
+    <SlopCopNavCard title="CLI reference" description="Every command and flag, the configuration file, and the error codes." href="reference/cli/" />
+    <SlopCopNavCard title="Gate a change in CI" description="Run slopcop in GitHub Actions with a token, pick the base, and upload SARIF to code scanning." href="checks/ci/" />
+    <SlopCopNavCard title="Credits and what it costs" description="A workspace gets 1,000 free checks each calendar month. What a check costs after those, and how credits work." href="account/credits/" />
   </div>
 </section>
 
 <section class="sc-section not-content">
   <h2>Explore SlopCop</h2>
   <div class="sc-grid">
-    <SlopCopNavCard icon="approve-check" title="What a check finds" description="The rules behind a finding, how data flow is traced across files, and the languages covered." href="get-started/what-a-check-finds/" />
-    <SlopCopNavCard icon="list-format" title="Exit codes" description="The contract an agent reads: clean, findings, incomplete, timed out, or refused." href="checks/exit-codes/" />
-    <SlopCopNavCard icon="padlock" title="What leaves your machine" description="What a check reads, what the CLI sends, and how your source is handled." href="account/privacy/" />
+    <SlopCopNavCard title="What a check finds" description="The rules behind a finding, how data flow is traced across files, and the languages covered." href="get-started/what-a-check-finds/" />
+    <SlopCopNavCard title="Exit codes" description="The contract an agent reads: clean, findings, incomplete, timed out, or refused." href="checks/exit-codes/" />
+    <SlopCopNavCard title="What leaves your machine" description="What a check reads, what the CLI sends, and how your source is handled." href="account/privacy/" />
   </div>
 </section>
 
 <aside class="sc-cta not-content">
-  <svg class="sc-cta__mark" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v18M3 12h18M5.6 5.6l12.8 12.8M18.4 5.6 5.6 18.4" /></svg>
   <div>
-    <p class="sc-cta__title">Checks are free.</p>
-    <p class="sc-cta__body">Sign in, enable a repository, and see what your agent's last change left behind.</p>
+    <p class="sc-cta__title">1,000 free checks each calendar month.</p>
+    <p class="sc-cta__body">Sign in, enable a repository, and see what your agent's last change left behind. After the free checks, a check costs $0.001 from prepaid credits, and repositories are free. <a href="https://slopcop.com/pricing">See pricing</a>.</p>
   </div>
-  <a class="sc-cta__button" href="https://slopcop.com">Open SlopCop <span aria-hidden="true">↗</span></a>
+  <a class="sc-button is-line" href="https://slopcop.com">Open SlopCop</a>
 </aside>

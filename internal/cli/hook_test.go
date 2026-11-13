@@ -223,7 +223,64 @@ func runHookAs(t *testing.T, harness, serviceURL, payload string) hookOutput {
 	command := &cobra.Command{}
 	command.SetContext(context.Background())
 	command.SetIn(strings.NewReader(payload))
-	return runHook(command, harness, serviceURL, "test")
+	return withoutServiceNotice(runHook(command, harness, serviceURL, "test"))
+}
+
+// withoutServiceNotice drops the line naming the test server, which every
+// first check of a session against one carries, so each test reads what its
+// hook had to say. TestHookNamesAServiceOtherThanTheHostedOne reads the line.
+func withoutServiceNotice(output hookOutput) hookOutput {
+	strip := func(text string) string {
+		if !strings.HasPrefix(text, "slopcop: the automatic check uses service ") {
+			return text
+		}
+		_, rest, _ := strings.Cut(text, "\n")
+		return rest
+	}
+	output.Reason, output.SystemMessage = strip(output.Reason), strip(output.SystemMessage)
+	return output
+}
+
+func TestHookNamesAServiceOtherThanTheHostedOne(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}}
+	server := fake.start(t, repo)
+	run := func() hookOutput {
+		t.Helper()
+		command := &cobra.Command{}
+		command.SetContext(context.Background())
+		command.SetIn(strings.NewReader(stopPayload(repo, false)))
+		return runHook(command, attribution.ClaudeHarness, server.URL, "test")
+	}
+
+	// A clean check has nothing else to say, and still names the service.
+	want := "slopcop: the automatic check uses service " + server.URL + ", not https://slopcop.com."
+	if output := run(); output != (hookOutput{SystemMessage: want}) {
+		t.Fatalf("output = %+v, want the notice alone", output)
+	}
+	// Said once: neither the same tree nor a changed one repeats it.
+	if output := run(); output != (hookOutput{}) {
+		t.Fatalf("unchanged output = %+v", output)
+	}
+	writeFile(t, repo, "demo.go", "package demo // changed\n")
+	if output := run(); output != (hookOutput{}) || fake.checks != 2 {
+		t.Fatalf("changed output = %+v, checks = %d", output, fake.checks)
+	}
+
+	// A held agent is told too, for the harnesses that pass on only the reason.
+	var state hookState
+	held := state.namingService("https://staging.example.test/", hookOutput{Decision: "block", Reason: "Fix it."})
+	if !strings.HasPrefix(held.Reason, "slopcop: the automatic check uses service https://staging.example.test, not") ||
+		!strings.HasSuffix(held.Reason, "\nFix it.") || held.SystemMessage == "" {
+		t.Fatalf("held = %+v", held)
+	}
+	// The hosted service is never named.
+	if output := state.namingService("https://slopcop.com/", hookOutput{}); output != (hookOutput{}) {
+		t.Fatalf("hosted output = %+v", output)
+	}
 }
 
 func TestHookHoldsTheAgentOnceForFindingsInItsFiles(t *testing.T) {

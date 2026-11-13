@@ -493,6 +493,81 @@ func TestSimilarityFindingIsShownRegardlessOfCertaintyAndNeverGates(t *testing.T
 	}
 }
 
+// TestCheckStatusNamesFindingsWhateverFailOn covers BrokkAi/slopcop#120: the
+// service's status follows failOn, but the report's status names the result,
+// and only the exit follows --fail-on.
+func TestCheckStatusNamesFindingsWhateverFailOn(t *testing.T) {
+	cases := []struct {
+		failOn, service string
+		incomplete      bool
+		wantStatus      string
+		wantExit        int
+	}{
+		{"finding", "findings", false, "findings", 1},
+		{"note", "findings", false, "findings", 1},
+		{"warning", "findings", false, "findings", 1},
+		{"error", "clean", false, "findings", 0},
+		{"never", "clean", false, "findings", 0},
+		{"never", "incomplete", true, "findings", 2},
+	}
+	for _, tc := range cases {
+		name := tc.failOn
+		if tc.incomplete {
+			name += " incomplete"
+		}
+		t.Run(name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "demo.go", "package demo\n")
+			incomplete, incompleteCount := `[]`, 0
+			if tc.incomplete {
+				incomplete, incompleteCount = `[{"policyId": "slow", "reason": "timed_out"}]`, 1
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{
+					"status": %q,
+					"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+					"applied": true,
+					"summary": {"files": 1, "findings": 1, "newFindings": 1, "incompletePolicies": %d, "failOn": %q},
+					"findings": [{"id": "f1", "policyId": "local", "severity": "warning", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "example", "new": true}],
+					"incomplete": %s
+				}`, tc.service, incompleteCount, tc.failOn, incomplete)
+			}))
+			defer server.Close()
+			for _, format := range []string{"json", "sarif"} {
+				code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", format, "--fail-on", tc.failOn)
+				if code != tc.wantExit {
+					t.Fatalf("%s exit = %d want %d, stderr = %s", format, code, tc.wantExit, stderr)
+				}
+				var got string
+				if format == "json" {
+					var doc struct {
+						Status string `json:"status"`
+					}
+					if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+						t.Fatalf("stdout is not json: %v", err)
+					}
+					got = doc.Status
+				} else {
+					var doc struct {
+						Runs []struct {
+							Properties map[string]any `json:"properties"`
+						} `json:"runs"`
+					}
+					if err := json.Unmarshal([]byte(stdout), &doc); err != nil || len(doc.Runs) == 0 {
+						t.Fatalf("stdout is not sarif: %v\n%s", err, stdout)
+					}
+					got, _ = doc.Runs[0].Properties["slopcop.status"].(string)
+				}
+				if got != tc.wantStatus {
+					t.Fatalf("%s status = %q want %q:\n%s", format, got, tc.wantStatus, stdout)
+				}
+			}
+		})
+	}
+}
+
 func TestCheckPrintsTheServiceRemedy(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
@@ -551,7 +626,7 @@ func TestCheckOfADisabledRepositoryPointsAtWhoami(t *testing.T) {
 	if code != service.ExitNeedsPerson || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := "slopcop: repository_disabled: This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
+	want := "slopcop: using service " + server.URL + "\n" + "slopcop: repository_disabled: This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
 		"Enable it on the Repositories page in SlopCop, then retry.\n" +
 		"`slopcop whoami` shows which workspace this login checks in.\n"
 	if stderr != want {
@@ -766,23 +841,120 @@ func TestTokenLoginAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Token != "secret" || cfg.ServiceURL != "http://127.0.0.1:9999" {
+	if cfg.TokenFor("http://127.0.0.1:9999") != "secret" {
 		t.Fatalf("config = %+v", cfg)
 	}
+	// Signing in to another service does not move the default, and says so.
+	if cfg.ServiceURL != "" || !strings.Contains(stderr, "the default service is still https://slopcop.com") {
+		t.Fatalf("default = %q, stderr = %q", cfg.ServiceURL, stderr)
+	}
 
+	// Without --service, logout is about the default service.
 	code, stdout, stderr = runCLI(t, "logout")
+	if code != 0 || !strings.Contains(stdout, "no stored credential for https://slopcop.com") {
+		t.Fatalf("logout exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI(t, "logout", "--service", "http://127.0.0.1:9999/")
 	if code != 0 {
 		t.Fatalf("logout exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "logged out") {
+	if !strings.Contains(stdout, "logged out of http://127.0.0.1:9999") {
 		t.Fatalf("logout stdout = %q", stdout)
 	}
 	cfg, err = config.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Token != "" {
+	if len(cfg.Logins) != 0 {
 		t.Fatalf("token was not cleared: %+v", cfg)
+	}
+}
+
+func TestLoginsAreKeptPerService(t *testing.T) {
+	isolateUserConfig(t)
+	const staging = "https://staging.example.test"
+	for _, args := range [][]string{
+		{"login", "--token", "prod-token"},
+		{"login", "--service", staging, "--token", "staging-token"},
+	} {
+		if code, _, stderr := runCLI(t, args...); code != 0 {
+			t.Fatalf("%v: exit = %d, stderr = %s", args, code, stderr)
+		}
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TokenFor(config.DefaultServiceURL) != "prod-token" || cfg.TokenFor(staging) != "staging-token" {
+		t.Fatalf("logins = %+v", cfg.Logins)
+	}
+	// A credential goes only to the service that issued it.
+	if got := resolveToken(cfg, staging+"/"); got != "staging-token" {
+		t.Errorf("staging token = %q", got)
+	}
+	if got := resolveToken(cfg, "https://other.example.test"); got != "" {
+		t.Errorf("a service with no login was handed %q", got)
+	}
+	if got := resolveServiceURL(cfg, ""); got != config.DefaultServiceURL {
+		t.Errorf("default = %q", got)
+	}
+
+	code, stdout, _ := runCLI(t, "service", "list")
+	want := "SERVICE                       LOGIN      DEFAULT\n" +
+		"https://slopcop.com           signed in  *\n" +
+		"https://staging.example.test  signed in  \n"
+	if code != 0 || stdout != want {
+		t.Fatalf("service list: exit = %d, stdout = %q", code, stdout)
+	}
+
+	// login --default moves the default, which only a person at a terminal
+	// may do; logout --all forgets every login and keeps it.
+	if code, _, stderr := runCLI(t, "login", "--service", staging, "--token", "staging-2", "--default"); code != 2 || !strings.Contains(stderr, "login --default moves every agent") {
+		t.Fatalf("login --default off a terminal: exit = %d, stderr = %q", code, stderr)
+	}
+	if cfg, err = config.Load(); err != nil || cfg.TokenFor(staging) != "staging-token" || cfg.DefaultService() != config.DefaultServiceURL {
+		t.Fatalf("a refused login --default changed the config: %+v, err = %v", cfg, err)
+	}
+	typed(t, "y\n")
+	if code, _, stderr := runCLI(t, "login", "--service", staging, "--token", "staging-2", "--default"); code != 0 || strings.Contains(stderr, "still") {
+		t.Fatalf("login --default: exit = %d, stderr = %q", code, stderr)
+	}
+	code, stdout, _ = runCLI(t, "logout", "--all")
+	if code != 0 || !strings.Contains(stdout, "logged out of https://slopcop.com, "+staging) {
+		t.Fatalf("logout --all: exit = %d, stdout = %q", code, stdout)
+	}
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Logins) != 0 || cfg.DefaultService() != staging {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+func TestServiceUseAsksAtATerminal(t *testing.T) {
+	isolateUserConfig(t)
+	const staging = "https://staging.example.test"
+	code, _, stderr := runCLI(t, "service", "use", staging)
+	if code != 2 || !strings.Contains(stderr, "must be confirmed at a terminal") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if code, _, stderr = runCLI(t, "service", "use", "http://staging.example.test"); code != 2 || !strings.Contains(stderr, "https") {
+		t.Fatalf("plain http: exit = %d, stderr = %q", code, stderr)
+	}
+
+	typed(t, "n\n")
+	if code, _, stderr = runCLI(t, "service", "use", staging); code != 2 || !strings.Contains(stderr, "still https://slopcop.com") {
+		t.Fatalf("declined: exit = %d, stderr = %q", code, stderr)
+	}
+	typed(t, "y\n")
+	code, stdout, stderr := runCLI(t, "service", "use", staging+"/")
+	if code != 0 || !strings.Contains(stdout, "the default service is now "+staging) || !strings.Contains(stderr, "not signed in to "+staging) {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg.DefaultService() != staging {
+		t.Fatalf("config = %+v, err = %v", cfg, err)
 	}
 }
 
@@ -829,7 +1001,7 @@ func TestBrowserLoginStoresTheToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Token != "browser-token" || cfg.ServiceURL != server.URL {
+	if cfg.TokenFor(server.URL) != "browser-token" || !strings.Contains(stderr, "slopcop: signing in to "+server.URL) {
 		t.Fatalf("config = %+v", cfg)
 	}
 }
@@ -894,7 +1066,7 @@ func TestCertaintyIsTheServicesToApply(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		if certainty == "all" {
 			_, _ = w.Write([]byte(`{"status": "findings", "baseCommit": "0123456789abcdef0123456789abcdef01234567", "applied": true,
-				"summary": {"files": 1, "findings": 1, "newFindings": 1, "incompletePolicies": 0, "failOn": "finding"},
+				"summary": {"files": 1, "findings": 1, "newFindings": 1, "lessCertainFindings": 0, "incompletePolicies": 0, "failOn": "finding"},
 				"findings": [{"policyId": "p", "severity": "error", "certainty": "possible", "path": "demo.go", "startLine": 1, "endLine": 1, "title": "maybe", "new": true}],
 				"incomplete": []}`))
 			return
@@ -913,7 +1085,13 @@ func TestCertaintyIsTheServicesToApply(t *testing.T) {
 	if code != 1 || !strings.Contains(stdout, "[error] p: maybe") {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := []string{"post <none>", "get failOn=finding", "post all", "get certainty=all&failOn=finding"}
+	// Under --certainty all the count is 0, and the JSON still carries it.
+	code, stdout, _ = runCLI(t, "check", "--root", repo, "--service", server.URL, "--certainty", "all", "--format", "json")
+	if code != 1 || !strings.Contains(stdout, `"lessCertainFindings": 0`) {
+		t.Fatalf("exit = %d, stdout = %s", code, stdout)
+	}
+	want := []string{"post <none>", "get failOn=finding", "post all", "get certainty=all&failOn=finding",
+		"post all", "get certainty=all&failOn=finding"}
 	if fmt.Sprint(sent) != fmt.Sprint(want) {
 		t.Fatalf("sent %q, want %q", sent, want)
 	}
@@ -1760,7 +1938,7 @@ func TestCombinedExitAndStatus(t *testing.T) {
 		{"static clean review failed", "clean", "empty", "finding", "incomplete", "clean", 2},
 		{"static pending review clean", "pending", "clean", "finding", "pending", "", 3},
 		{"static pending review failed", "pending", "empty", "finding", "pending", "", 3},
-		{"fail never review findings", "clean", "findings", "never", "clean", "", 0},
+		{"fail never review findings", "clean", "findings", "never", "findings", "clean", 0},
 		{"static incomplete review clean", "incomplete", "clean", "finding", "incomplete", "", 2},
 	}
 	for _, tc := range cases {

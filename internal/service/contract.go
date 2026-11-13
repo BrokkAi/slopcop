@@ -218,8 +218,9 @@ type Summary struct {
 	// LessCertainFindings counts the new findings the service left out
 	// because their certainty is not definite and the request did not ask
 	// for all. Findings and NewFindings do not count them and they never
-	// change the status. A service from before it omits it.
-	LessCertainFindings int `json:"lessCertainFindings,omitempty"`
+	// change the status. It is 0 under --certainty all. A service from
+	// before it omits it, so nil means not sent, never none left out.
+	LessCertainFindings *int `json:"lessCertainFindings,omitempty"`
 	// ExcludedFiles and ExcludedPairs count what .slopcop/config.toml [check]
 	// kept from the check (Exclusions lists it). OnlyExcluded says the change
 	// wrote files and [check] left nothing to check: the status is then

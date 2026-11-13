@@ -77,13 +77,13 @@ slopcop check --format json
 
 | Field | Meaning |
 | --- | --- |
-| `staticStatus` | service status when it differs from merged `status` |
+| `staticStatus` | the static half's status when it differs from merged `status` |
 | `review` | `status`, `reviewers`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
 | `approved` | whether the checked tree got push approval; always present |
-| `status` | merged result matching the exit code: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped` |
+| `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
-| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores` |
+| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it |
 | `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, and `previouslyIgnored` with the id of an ignored finding it matches; a finding with `previouslyIgnored` is listed even when it is not new |
 | `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
@@ -134,6 +134,10 @@ an empty change sets `properties["slopcop.emptyChange"]`; a skill update sits in
 `properties["slopcop.skillUpdated"]`. The first run's
 `properties["slopcop.approved"]` says whether the checked tree got push
 approval.
+
+The static run's `slopcop.status` names the result the same way: `findings`
+whenever the change has new findings, even when `--fail-on` lets the check exit
+`0`.
 
 A failed check prints a run with `slopcop.status` `failed`, whose invocation is
 unsuccessful and carries an `error` notification whose descriptor id is the

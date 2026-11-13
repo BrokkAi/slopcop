@@ -109,7 +109,7 @@ work passed.
 | `--timeout DURATION` | how long to wait for the result (default `10m`); a check still running then exits `3` |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's; see [Workspaces](/account/workspaces/) |
 | `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` and send nothing. For automatic checks; see [Repositories](/account/repositories/) |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
+| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
 | `--service URL` | the check service (also `SLOPCOP_SERVICE`) |
 | `--verbose` | print the resolved request to stderr, and in `human` name each inconclusive check and the files and rules each [`.slopcop/config.toml` exclusion](/checks/false-positives/#exclude-paths-from-checks) resolved to |
 
@@ -121,6 +121,11 @@ included, is worth fixing before the change lands. The service's own default
 for a request without a level is Bifrost's `warning`; pass `--fail-on warning`
 to match it. New findings that cross the threshold exit `1` even when some
 rule did not complete.
+
+The threshold decides only the exit code. The report's `status` is `findings`
+whenever the change has new findings, so `--fail-on never` reports
+`"status": "findings"` and exits `0`, and `--fail-on error` does the same for
+a change whose new findings are all warnings or notes.
 
 The threshold applies to `definite` findings only. By default the service
 leaves out every `possible` and `heuristic` finding before it decides the

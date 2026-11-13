@@ -4,12 +4,14 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/BrokkAi/slopcop/internal/attribution"
+	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -46,6 +48,30 @@ type hookState struct {
 	// Others is how many new findings outside the session's files the user
 	// was last told of, so the same count is not repeated every turn.
 	Others int `json:"others,omitempty"`
+	// ServiceNamed is the service, other than the hosted one, the user was
+	// last told the hook's checks go to, so it is said once and not every
+	// turn.
+	ServiceNamed string `json:"serviceNamed,omitempty"`
+}
+
+// namingService adds to output, once in a session for a given service, that
+// the hook's check went to a service other than the hosted one. The hook
+// sends the change with no one watching, so this is where a default that was
+// moved would otherwise go unseen. The user reads the system message; a
+// held agent is told too, in the reason, which is all some harnesses pass
+// on.
+func (s *hookState) namingService(serviceURL string, output hookOutput) hookOutput {
+	origin := config.Origin(serviceURL)
+	if origin == config.DefaultServiceURL || origin == s.ServiceNamed {
+		return output
+	}
+	s.ServiceNamed = origin
+	notice := fmt.Sprintf("slopcop: the automatic check uses service %s, not %s.", origin, config.DefaultServiceURL)
+	if output.Decision == "block" {
+		output.Reason = boundedHookText(notice + "\n" + output.Reason)
+	}
+	output.SystemMessage = boundedHookText(notice + "\n" + output.SystemMessage)
+	return output
 }
 
 // inWorkspace points the state at the workspace the next check runs in.

@@ -306,18 +306,26 @@ already approved in your browser, so it needs neither.
 The browser flow prints a link that opens the approval page with the code
 filled in, plus the page and code to type in instead, and stores the token once
 the login is approved. Approve only if the page shows the code your terminal
-printed. The service URL defaults to `https://slopcop.com`; `--service`,
-`$SLOPCOP_SERVICE`, or a stored value override it.
+printed.
 
-The credential lives in `slopcop/config.json` under the user config directory
-and is written owner-only. `slopcop logout` clears it.
+The service URL defaults to `https://slopcop.com`; `--service` or
+`$SLOPCOP_SERVICE` names another for one command. Each service keeps its own
+login: `slopcop --service <url> login` leaves the others signed in and the
+default as it is, and a login is only sent to the service that issued it.
+`slopcop login --default` or `slopcop service use <url>` changes the default,
+after asking at a terminal, and `slopcop service list` shows the stored logins. A command that talks to
+another service than `https://slopcop.com` says so on stderr.
+
+The credentials live in `slopcop/config.json` under the user config directory,
+which is written owner-only. `slopcop logout` forgets the login for one
+service, and `slopcop logout --all` every one.
 
 Precedence:
 
 | Value | Order |
 | --- | --- |
-| Service URL | `--service`, `$SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
-| Token | `$SLOPCOP_TOKEN`, stored value |
+| Service URL | `--service`, `$SLOPCOP_SERVICE`, the default stored by `slopcop login --default` or `slopcop service use`, `https://slopcop.com` |
+| Token | `$SLOPCOP_TOKEN`, the login stored for that service |
 | Workspace (`check`, `enable`, `status`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
 
 ## Workspace and repositories
@@ -597,8 +605,11 @@ whichever is used.
 | `4` | The service refused the check, and only a person can clear it |
 | `130`, `143` | Interrupted before the check answered: `130` for Ctrl-C, `143` for SIGTERM |
 
-Only `clean` exits `0`: a status this CLI does not know exits `2`, so a newer
-service can never pass a check by accident, and stderr names the status. An
+`--fail-on` decides only the exit code: `status` is `findings` whenever the
+change has new findings, so `--fail-on never` reports them and still exits `0`.
+Otherwise only `clean` exits `0`: a status this CLI does not know exits `2`, so
+a newer service can never pass a check by accident, and stderr names the
+status. An
 interrupted check prints no report. Interrupted before it was sent, nothing
 reached the service; after, a service that received it keeps running it, and
 running the same check again picks up its result.

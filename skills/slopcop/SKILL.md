@@ -43,15 +43,33 @@ named.
 - `slopcop login` runs the browser device flow.
 - `slopcop login --token "$SLOPCOP_TOKEN"` stores an existing credential, which
   is how CI and agents sign in. `$SLOPCOP_TOKEN` alone also works, with no login.
-- `--service` or `$SLOPCOP_SERVICE` names another deployment; the default is
-  `https://slopcop.com`. `slopcop logout` forgets the stored credential.
+- `--service` or `$SLOPCOP_SERVICE` names another deployment for one command;
+  the default is `https://slopcop.com`. Each service keeps its own login, so
+  `slopcop --service <url> login` leaves the others signed in and does not
+  change the default, and a login is only ever sent to the service that issued
+  it. `slopcop service list` shows the stored logins and marks the default.
+- A command that talks to a service other than `https://slopcop.com` says
+  `slopcop: using service <url>` on stderr, and the Stop hook says once a
+  session that `the automatic check uses service <url>`. If the user did not
+  ask for that service, tell them before you go on.
+- `slopcop login --default` and `slopcop service use <url>` change the default
+  service for every command and agent on the machine. Both ask the person at
+  a terminal and refuse when stdin is not one; do not try to answer, and
+  leave either to the user.
+- A service that redirects a request to another host is refused, not
+  followed. Report the address it named to the user; do not retry with
+  `--service` set to it yourself.
+- `slopcop logout` forgets the login for one service (the default, or the one
+  `--service` names); `--all` forgets every one.
 
 ## Know which workspace pays
 
 A login runs its checks and ignores in, and bills, one workspace. When it
 matters which one, run `slopcop whoami` before a check: it prints the account,
 the workspace (name, kind, role), its plan (Pro or Free) and the service URL
-(`--format json` for `service`, `account`, `workspace` and `plan`).
+(`--format json` for `service`, `account`, `workspace`, `plan` and
+`services`). Each service has its own login, bound to its own workspace: with
+more than one stored, `whoami` also lists them and marks the default.
 `slopcop status` shows the same for this checkout: the repository `origin`
 names, whether the workspace has it and whether it is active.
 
@@ -199,7 +217,7 @@ Each finding also carries its
 
 | Exit | Meaning |
 | --- | --- |
-| `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, or skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
+| `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, has only findings below `--fail-on` (`status` then says `findings`), or was skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
 | `1` | A new static finding crossed `--fail-on`, or a reviewer reported findings (unless `--fail-on never`). Fix the real ones and run the check again. |
 | `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed (a reviewer failed, timed out or replied empty, or too few reviewers were available), or the CLI or service failed. Read the errors and log paths. |
 | `3` | The static check was still running when `--timeout` ran out. Run the same check again; a complete review of the same content is reused. |
@@ -208,7 +226,9 @@ Each finding also carries its
 
 The CLI prioritizes interrupt, findings, a static refusal needing a person,
 failure or incompleteness, static pending, then clean. JSON `status` matches
-the exit code; `staticStatus` keeps a different service status. Read
+the exit code, except that it is `findings` whenever there are new static or
+review findings, even when `--fail-on` lets them exit `0`; `staticStatus` keeps
+a different static status. Read
 `review.status`, `review.reviewers`, `review.error`,
 and `review.logDir`. Prompt and reviewer logs are under `<git-dir>/slopcop/`.
 
@@ -260,9 +280,9 @@ Status:
 
 | Term | Meaning |
 | --- | --- |
-| `clean` | Every selected check completed for the files the change writes (an inconclusive one counts as completed), and no new finding crossed `--fail-on`. The only status that supports "nothing found", and only for those checks, files, and lines. |
-| `findings` | A new finding crossed `--fail-on`. Other checks may still be incomplete. |
-| `incomplete` | No new finding crossed `--fail-on`, but some check could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. |
+| `clean` | Every selected check completed for the files the change writes (an inconclusive one counts as completed), and the change has no new finding. The only status that supports "nothing found", and only for those checks, files, and lines. |
+| `findings` | The change has new findings, whatever `--fail-on` is; `--fail-on` decides only whether they exit `1`. Other checks may still be incomplete. |
+| `incomplete` | The change has no new finding, but some check could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. |
 | `pending` | Not a result yet. Run the same check again. |
 
 Finding `certainty`:
