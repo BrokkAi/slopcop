@@ -8,7 +8,7 @@ sidebar:
 ```console
 slopcop login                           # browser device flow
 slopcop login --token "$SLOPCOP_TOKEN"  # existing credential, for CI and agents
-slopcop logout                          # forget the stored credential
+slopcop logout                          # forget the stored credential for one service
 ```
 
 The [one-command install](/get-started/install/#one-command) from Agent setup
@@ -35,7 +35,8 @@ directory whose harness is installed here.
 `--token` stores an existing credential instead of starting the browser flow,
 which is what CI and agent harnesses use. `SLOPCOP_TOKEN` in the environment
 supplies a token for one run with no stored login at all, and wins over a
-stored one.
+stored one whichever service the run talks to, so set it only alongside the
+service that issued it.
 
 A token is tied to the account and workspace it was approved in. Treat it as a
 password: a check sends your working tree with it.
@@ -45,30 +46,58 @@ password: a check sends your working tree with it.
 The credential lives in `slopcop/config.json` under the user config directory
 (`~/.config/slopcop/config.json` on Linux, `~/Library/Application
 Support/slopcop/config.json` on macOS, `%AppData%\slopcop\config.json` on
-Windows) and is written owner-only. `slopcop logout` clears it. Next to it the
+Windows) and is written owner-only. It holds one login per service.
+`slopcop logout` forgets the login for the default service, or the one
+`--service` names, and `slopcop logout --all` forgets every one. Next to it the
 CLI keeps the time of the last [upgrade notice](/get-started/install/#upgrade-notices)
 and any [skill backups](/agents/skill/#local-edits-are-kept).
 
 ## The service URL
 
-The service defaults to `https://slopcop.com`. `--service`, `SLOPCOP_SERVICE`,
-or a value stored by `slopcop login` override it, for another deployment such as
-staging:
+The service defaults to `https://slopcop.com`. `--service` or
+`SLOPCOP_SERVICE` names another deployment, such as staging, for one command:
 
 ```console
 slopcop --service https://staging.slopcop.com login
 slopcop --service https://staging.slopcop.com
 ```
 
-A login against one service is stored with that service's URL. A deployment
-without a browser login answers `device_flow_disabled`; use `--token` there.
+Each service keeps its own login, stored under its origin (scheme, host and
+port). Signing in to one leaves the others signed in, and a login is only ever
+sent to the service that issued it: a command against a service with no stored
+login runs signed out and answers `auth_required`.
+
+Signing in to another service does not change the default. To change it:
+
+```console
+slopcop --service https://staging.slopcop.com login --default
+slopcop service use https://staging.slopcop.com
+slopcop service list
+```
+
+Either one moves every command and agent on the machine, so both ask at a
+terminal and refuse when stdin is not one. `service list` shows the default
+and every stored login. Whenever a command talks to a service other than
+`https://slopcop.com` it says `slopcop: using service <url>` on stderr, and
+`login` names the service before the approval link. The
+[Stop hook](/agents/stop-hook/#how-it-stays-quiet) says it once a session.
+
+The CLI does not follow a redirect to another host or port, or from https to
+http: the request carries your change, so it stops and names the address
+instead. Pass that address to `--service` if it is the one you mean.
+
+A config file from an older release, with one service URL and one token, is
+read as a login for that service, which stays the default.
+
+A deployment without a browser login answers `device_flow_disabled`; use
+`--token` there.
 
 ## Precedence
 
 | Value | Order |
 | --- | --- |
-| Service URL | `--service`, `SLOPCOP_SERVICE`, stored by `slopcop login`, `https://slopcop.com` |
-| Token | `SLOPCOP_TOKEN`, stored value |
+| Service URL | `--service`, `SLOPCOP_SERVICE`, the default stored by `slopcop login --default` or `slopcop service use`, `https://slopcop.com` |
+| Token | `SLOPCOP_TOKEN`, the login stored for that service |
 | Workspace (`check`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `SLOPCOP_WORKSPACE`, the one the login is bound to |
 
 ## Accounts

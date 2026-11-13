@@ -81,8 +81,28 @@ func New(baseURL, token, userAgent string, timeout time.Duration) (*Client, erro
 		BaseURL:   trimmed,
 		Token:     strings.TrimSpace(token),
 		UserAgent: userAgent,
-		HTTP:      &http.Client{Timeout: timeout},
+		HTTP:      &http.Client{Timeout: timeout, CheckRedirect: sameOrigin},
 	}, nil
+}
+
+// errRedirectedAway is why a request stopped at a redirect.
+var errRedirectedAway = errors.New("the service redirected the request to another origin")
+
+// sameOrigin refuses a redirect that leaves the origin the request was sent
+// to: another host or port, or https to http. A redirect replays the request
+// to the new address, and the request carries the change being checked and,
+// to a subdomain, the credential, so only the service the user named gets
+// either. To use a service that has moved, name its new address.
+func sameOrigin(request *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	first := via[0].URL
+	if request.URL.Scheme != first.Scheme || !strings.EqualFold(request.URL.Host, first.Host) {
+		return fmt.Errorf("%w (%s://%s); pass --service with that address if it is the one you mean",
+			errRedirectedAway, request.URL.Scheme, request.URL.Host)
+	}
+	return nil
 }
 
 // Timeout is the longest a check waits for its result.
@@ -292,7 +312,7 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 
 	client := c.HTTP
 	if client == nil {
-		client = &http.Client{Timeout: defaultTimeout}
+		client = &http.Client{Timeout: defaultTimeout, CheckRedirect: sameOrigin}
 	}
 	response, err := client.Do(httpRequest)
 	if err != nil {

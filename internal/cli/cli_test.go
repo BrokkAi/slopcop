@@ -585,7 +585,7 @@ func TestCheckOfADisabledRepositoryPointsAtWhoami(t *testing.T) {
 	if code != service.ExitNeedsPerson || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := "slopcop: repository_disabled: This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
+	want := "slopcop: using service " + server.URL + "\n" + "slopcop: repository_disabled: This repository is disabled in your SlopCop workspace, so it isn't scanned.\n" +
 		"Enable it on the Repositories page in SlopCop, then retry.\n" +
 		"`slopcop whoami` shows which workspace this login checks in.\n"
 	if stderr != want {
@@ -800,23 +800,120 @@ func TestTokenLoginAndLogout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Token != "secret" || cfg.ServiceURL != "http://127.0.0.1:9999" {
+	if cfg.TokenFor("http://127.0.0.1:9999") != "secret" {
 		t.Fatalf("config = %+v", cfg)
 	}
+	// Signing in to another service does not move the default, and says so.
+	if cfg.ServiceURL != "" || !strings.Contains(stderr, "the default service is still https://slopcop.com") {
+		t.Fatalf("default = %q, stderr = %q", cfg.ServiceURL, stderr)
+	}
 
+	// Without --service, logout is about the default service.
 	code, stdout, stderr = runCLI(t, "logout")
+	if code != 0 || !strings.Contains(stdout, "no stored credential for https://slopcop.com") {
+		t.Fatalf("logout exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCLI(t, "logout", "--service", "http://127.0.0.1:9999/")
 	if code != 0 {
 		t.Fatalf("logout exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "logged out") {
+	if !strings.Contains(stdout, "logged out of http://127.0.0.1:9999") {
 		t.Fatalf("logout stdout = %q", stdout)
 	}
 	cfg, err = config.Load()
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Token != "" {
+	if len(cfg.Logins) != 0 {
 		t.Fatalf("token was not cleared: %+v", cfg)
+	}
+}
+
+func TestLoginsAreKeptPerService(t *testing.T) {
+	isolateUserConfig(t)
+	const staging = "https://staging.example.test"
+	for _, args := range [][]string{
+		{"login", "--token", "prod-token"},
+		{"login", "--service", staging, "--token", "staging-token"},
+	} {
+		if code, _, stderr := runCLI(t, args...); code != 0 {
+			t.Fatalf("%v: exit = %d, stderr = %s", args, code, stderr)
+		}
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TokenFor(config.DefaultServiceURL) != "prod-token" || cfg.TokenFor(staging) != "staging-token" {
+		t.Fatalf("logins = %+v", cfg.Logins)
+	}
+	// A credential goes only to the service that issued it.
+	if got := resolveToken(cfg, staging+"/"); got != "staging-token" {
+		t.Errorf("staging token = %q", got)
+	}
+	if got := resolveToken(cfg, "https://other.example.test"); got != "" {
+		t.Errorf("a service with no login was handed %q", got)
+	}
+	if got := resolveServiceURL(cfg, ""); got != config.DefaultServiceURL {
+		t.Errorf("default = %q", got)
+	}
+
+	code, stdout, _ := runCLI(t, "service", "list")
+	want := "SERVICE                       LOGIN      DEFAULT\n" +
+		"https://slopcop.com           signed in  *\n" +
+		"https://staging.example.test  signed in  \n"
+	if code != 0 || stdout != want {
+		t.Fatalf("service list: exit = %d, stdout = %q", code, stdout)
+	}
+
+	// login --default moves the default, which only a person at a terminal
+	// may do; logout --all forgets every login and keeps it.
+	if code, _, stderr := runCLI(t, "login", "--service", staging, "--token", "staging-2", "--default"); code != 2 || !strings.Contains(stderr, "login --default moves every agent") {
+		t.Fatalf("login --default off a terminal: exit = %d, stderr = %q", code, stderr)
+	}
+	if cfg, err = config.Load(); err != nil || cfg.TokenFor(staging) != "staging-token" || cfg.DefaultService() != config.DefaultServiceURL {
+		t.Fatalf("a refused login --default changed the config: %+v, err = %v", cfg, err)
+	}
+	typed(t, "y\n")
+	if code, _, stderr := runCLI(t, "login", "--service", staging, "--token", "staging-2", "--default"); code != 0 || strings.Contains(stderr, "still") {
+		t.Fatalf("login --default: exit = %d, stderr = %q", code, stderr)
+	}
+	code, stdout, _ = runCLI(t, "logout", "--all")
+	if code != 0 || !strings.Contains(stdout, "logged out of https://slopcop.com, "+staging) {
+		t.Fatalf("logout --all: exit = %d, stdout = %q", code, stdout)
+	}
+	cfg, err = config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Logins) != 0 || cfg.DefaultService() != staging {
+		t.Fatalf("config = %+v", cfg)
+	}
+}
+
+func TestServiceUseAsksAtATerminal(t *testing.T) {
+	isolateUserConfig(t)
+	const staging = "https://staging.example.test"
+	code, _, stderr := runCLI(t, "service", "use", staging)
+	if code != 2 || !strings.Contains(stderr, "must be confirmed at a terminal") {
+		t.Fatalf("exit = %d, stderr = %q", code, stderr)
+	}
+	if code, _, stderr = runCLI(t, "service", "use", "http://staging.example.test"); code != 2 || !strings.Contains(stderr, "https") {
+		t.Fatalf("plain http: exit = %d, stderr = %q", code, stderr)
+	}
+
+	typed(t, "n\n")
+	if code, _, stderr = runCLI(t, "service", "use", staging); code != 2 || !strings.Contains(stderr, "still https://slopcop.com") {
+		t.Fatalf("declined: exit = %d, stderr = %q", code, stderr)
+	}
+	typed(t, "y\n")
+	code, stdout, stderr := runCLI(t, "service", "use", staging+"/")
+	if code != 0 || !strings.Contains(stdout, "the default service is now "+staging) || !strings.Contains(stderr, "not signed in to "+staging) {
+		t.Fatalf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+	cfg, err := config.Load()
+	if err != nil || cfg.DefaultService() != staging {
+		t.Fatalf("config = %+v, err = %v", cfg, err)
 	}
 }
 
@@ -863,7 +960,7 @@ func TestBrowserLoginStoresTheToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Token != "browser-token" || cfg.ServiceURL != server.URL {
+	if cfg.TokenFor(server.URL) != "browser-token" || !strings.Contains(stderr, "slopcop: signing in to "+server.URL) {
 		t.Fatalf("config = %+v", cfg)
 	}
 }

@@ -591,3 +591,42 @@ func TestEveryResponseReportsTheLatestVersion(t *testing.T) {
 		t.Errorf("error = %+v", serviceError)
 	}
 }
+
+func TestARedirectToAnotherOriginIsRefused(t *testing.T) {
+	var elsewhereHits int
+	elsewhere := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		elsewhereHits++
+	}))
+	defer elsewhere.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/whoami":
+			// Kept: the same origin under another path.
+			http.Redirect(w, r, "/moved", http.StatusTemporaryRedirect)
+		case "/moved":
+			if r.Header.Get("Authorization") != "Bearer secret" {
+				t.Errorf("authorization = %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"plan": "free"}`))
+		default:
+			http.Redirect(w, r, elsewhere.URL+r.URL.Path, http.StatusTemporaryRedirect)
+		}
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "slopcop/test", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if whoami, err := client.Whoami(context.Background()); err != nil || whoami.Plan != "free" {
+		t.Fatalf("same-origin redirect: plan = %q, err = %v", whoami.Plan, err)
+	}
+	_, err = client.Repositories(context.Background())
+	if !errors.Is(err, errRedirectedAway) || !strings.Contains(err.Error(), elsewhere.URL) {
+		t.Fatalf("err = %v", err)
+	}
+	if elsewhereHits != 0 {
+		t.Fatalf("the request followed the redirect %d times", elsewhereHits)
+	}
+}

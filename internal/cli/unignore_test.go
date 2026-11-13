@@ -62,7 +62,7 @@ func TestUnignorePrintsTheServiceRemedy(t *testing.T) {
 	if stdout != "" {
 		t.Fatalf("stdout = %q", stdout)
 	}
-	want := "SlopCop has no such finding for this login.\nUse a finding id from a check you ran with this login.\n"
+	want := "slopcop: using service " + server.URL + "\n" + "SlopCop has no such finding for this login.\nUse a finding id from a check you ran with this login.\n"
 	if stderr != want {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
