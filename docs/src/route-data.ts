@@ -7,6 +7,9 @@ const displayFace = `${import.meta.env.BASE_URL.replace(/\/+$/, '')}/fonts/Redac
 
 export const onRequest = defineRouteMiddleware((context) => {
   const route = context.locals.starlightRoute;
+  // Starlight always links `favicon` as a "shortcut icon". The tab icons in astro.config.mjs pick their ink by
+  // colour scheme, and a third icon with no media query would compete with them.
+  route.head = route.head.filter((entry) => !(entry.tag === 'link' && entry.attrs?.rel === 'shortcut icon'));
   // Every page names its Markdown version and the llms.txt that covers it, the two link relations
   // llmstxt.org asks for, so an agent that lands on a page finds both without guessing.
   if (route.entry.id !== '404') {
