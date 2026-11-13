@@ -203,7 +203,22 @@ Grok's Stop hook stays at user level, in `hooks/slopcop.json` under
 | `--root PATH` | repository path (default `.`) |
 | `--no-skill` | do not install or update the agent skill |
 | `--no-hooks` | do not install or update the automatic check hook |
-| `--remove-hooks` | remove SlopCop's automatic check hook and nothing else |
+| `--remove-hooks` | remove SlopCop's automatic check hook and session check, and nothing else |
+| `--session-check` | also install the user-level SessionStart reminder for Claude Code and Codex |
+| `--no-reviewers` | skip reviewer probing |
+
+Init records its choices as `slopcop.init`, `slopcop.skill` and
+`slopcop.hooks` in the repository's Git configuration, for `slopcop doctor`.
+See [Checking a checkout's setup](/agents/setup-check/).
+
+## `slopcop doctor`
+
+Report whether this checkout has SlopCop's skill, Stop hook and push gate for
+each agent installed here, and the init command that adds what is missing.
+Local only: it sends nothing, probes no reviewer and changes nothing. Flags:
+`--root <path>`, `--format human|json`. Exits `0`. `slopcop doctor --hook
+claude|codex` answers the SessionStart hook `init --session-check` installs.
+See [Checking a checkout's setup](/agents/setup-check/).
 
 ## `slopcop hook <claude|codex|grok|kimi>`
 

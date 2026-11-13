@@ -43,6 +43,9 @@ type skillRoot struct {
 	// neutral marks the vendor-neutral directory, which init uses when no
 	// harness directory is present.
 	neutral bool
+	// harness names the harness that reads this directory, empty for the
+	// vendor-neutral one.
+	harness string
 }
 
 // skillRoots are the well-known places the agent harnesses read skills from:
@@ -66,8 +69,8 @@ func skillRoots() ([]skillRoot, error) {
 	}
 	return []skillRoot{
 		{marker: agents, dir: filepath.Join(agents, "skills"), neutral: true},
-		{marker: claude, dir: filepath.Join(claude, "skills")},
-		{marker: codexHome, dir: filepath.Join(codexHome, "skills")},
+		{marker: claude, dir: filepath.Join(claude, "skills"), harness: "claude"},
+		{marker: codexHome, dir: filepath.Join(codexHome, "skills"), harness: "codex"},
 	}, nil
 }
 
@@ -461,7 +464,7 @@ func slopcopSkill(data []byte) bool {
 }
 
 func newInitCommand(version string) *cobra.Command {
-	var noSkill, noHooks, removeHooks, noReviewers bool
+	var noSkill, noHooks, removeHooks, noReviewers, sessionCheck bool
 	var root string
 	command := &cobra.Command{Use: "init", Short: "Install repository-local skills and hooks", Long: `Install SlopCop's skill and hooks in the current Git repository. The skill
 is written to .agents/skills/slopcop and, when Claude Code is installed,
@@ -475,7 +478,17 @@ has no repository hook location SlopCop has verified, gets a user-level Stop
 hook in hooks/slopcop.json under GROK_HOME or ~/.grok. Existing user-level
 Claude Code and Codex hooks and SlopCop skills are removed, except that
 --no-hooks keeps the user-level hooks and --no-skill the user-level skills.
---remove-hooks removes both repository and user-level hooks, Grok's included. Init probes available reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+--remove-hooks removes both repository and user-level hooks, Grok's included,
+and the session check. Init probes available reviewers unless --no-reviewers
+is set.
+
+Init records what it installed, and what --no-skill, --no-hooks or
+--remove-hooks turned down, in the repository's Git configuration
+(slopcop.init, slopcop.skill, slopcop.hooks), which its worktrees share.
+'slopcop doctor' reads it to tell a declined piece from a missing one.
+--session-check also installs a user-level SessionStart hook for Claude Code
+and Codex that tells the agent, once, when a session opens in a checkout or
+worktree that lacks SlopCop's skill or hooks; see 'slopcop doctor --help'.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		repo, err := gitx.Toplevel(root)
 		if err != nil {
 			return fmt.Errorf("slopcop init requires a Git repository: %w", err)
@@ -510,7 +523,18 @@ Claude Code and Codex hooks and SlopCop skills are removed, except that
 			for _, p := range dedupe(r.ChangedPaths) {
 				fmt.Fprintf(out, "slopcop: removed SlopCop's hooks from %s\n", p)
 			}
-			return err
+			if err != nil {
+				return err
+			}
+			session, err := agenthooks.RemoveSessionCheck()
+			for _, p := range session.ChangedPaths {
+				fmt.Fprintf(out, "slopcop: removed the session check from %s\n", p)
+			}
+			if err != nil {
+				return err
+			}
+			recordChoices(cmd.ErrOrStderr(), repo, version, skillRecorded(repo), false)
+			return nil
 		}
 		if !noSkill {
 			if err := removeUserSkills(out); err != nil {
@@ -598,6 +622,22 @@ Claude Code and Codex hooks and SlopCop skills are removed, except that
 		if err := excludeInitPaths(repo, excluded); err != nil {
 			return err
 		}
+		if sessionCheck {
+			session, err := agenthooks.InstallSessionCheck()
+			for _, p := range session.ChangedPaths {
+				fmt.Fprintf(out, "slopcop: installed the session check in %s\n", p)
+			}
+			if err != nil {
+				return err
+			}
+			if len(session.Installed) == 0 {
+				fmt.Fprintln(out, "slopcop: no Claude Code or Codex configuration directory here, so no session check was installed")
+			}
+			if session.NeedsTrust {
+				fmt.Fprintln(out, "slopcop: Codex runs the session check only after you trust it with /hooks")
+			}
+		}
+		recordChoices(cmd.ErrOrStderr(), repo, version, !noSkill, !noHooks)
 		if !noReviewers {
 			return initReviewers(cmd.Context(), out, repo)
 		}
@@ -608,8 +648,25 @@ Claude Code and Codex hooks and SlopCop skills are removed, except that
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install the agent skill")
 	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install repository hooks")
 	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove repository and user-level SlopCop hooks")
+	command.Flags().BoolVar(&sessionCheck, "session-check", false, "also install a user-level SessionStart hook that reports checkouts lacking SlopCop's skill or hooks")
 	command.MarkFlagsMutuallyExclusive("no-hooks", "remove-hooks")
+	command.MarkFlagsMutuallyExclusive("session-check", "remove-hooks")
 	return command
+}
+
+// recordChoices stores init's choices for doctor. Failing to record them is
+// reported and leaves init's work in place.
+func recordChoices(errOut io.Writer, repo, version string, skill, hooks bool) {
+	if err := recordInitChoices(repo, version, skill, hooks); err != nil {
+		fmt.Fprintf(errOut, "slopcop: warning: could not record init's choices in the Git configuration: %v\n", err)
+	}
+}
+
+// skillRecorded reports whether the repository's last recorded init kept
+// the skill, which --remove-hooks leaves as it was.
+func skillRecorded(repo string) bool {
+	value, err := gitx.Run(repo, "config", "--local", "--get", gitKeySkill)
+	return err != nil || !gitFalse(value)
 }
 
 func initReviewers(ctx context.Context, out io.Writer, repo string) error {

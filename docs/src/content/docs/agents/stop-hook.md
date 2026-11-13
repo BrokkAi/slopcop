@@ -2,7 +2,7 @@
 title: The Stop hook
 description: "The automatic check hook slopcop init installs for Claude Code, Codex and Grok. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
 sidebar:
-  order: 7
+  order: 8
 ---
 
 `slopcop init` adds a static-only `Stop` hook for Claude Code and Codex inside
@@ -106,7 +106,8 @@ slopcop init --remove-hooks   # remove SlopCop's hooks and nothing else
 ```
 
 Ordinary checks do not reinstall a removed hook. The skill remains the way to
-check from other harnesses.
+check from other harnesses. `slopcop doctor` reports which hooks a checkout
+has; see [Checking a checkout's setup](/agents/setup-check/).
 
 ## Deploy it for a fleet
 
