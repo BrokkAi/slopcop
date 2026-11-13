@@ -9,12 +9,13 @@ import (
 
 func TestInitPicksReviewers(t *testing.T) {
 	for _, tc := range []struct {
-		name          string
-		codex, claude []string
-		want          string
+		name            string
+		codex, claude   []string
+		want, fallbacks string
 	}{
-		{"codex", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{"/missing/claude"}, "terra,sol"},
-		{"claude", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, "haiku"},
+		{"codex", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{"/missing/claude"}, "terra,sol", ""},
+		{"claude", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, "haiku", ""},
+		{"both", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, "terra,sol", "haiku"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			isolateUserConfig(t)
@@ -32,7 +33,7 @@ func TestInitPicksReviewers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if strings.Join(got.Review.Reviewers, ",") != tc.want {
+			if strings.Join(got.Review.Reviewers, ",") != tc.want || strings.Join(got.Review.Fallbacks, ",") != tc.fallbacks {
 				t.Fatalf("%+v, %s", got.Review, out)
 			}
 		})

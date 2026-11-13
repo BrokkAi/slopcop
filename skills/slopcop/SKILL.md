@@ -131,19 +131,29 @@ Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
 through Claude ACP. Each uses the newest model of its family at high effort.
 A clean reply is exactly `No findings.`. `slopcop
 init` probes each family once when reviewers are not configured and the mode is
-not static, then saves the first two that work (or one). Probe prompts use your
-logins. Already configured reviewers are left alone; unset `review.reviewers`
-and run init to pick again. `slopcop init --no-reviewers` skips probing.
-A check runs exactly the configured reviewers. It never reorders or replaces
-them. A reviewer that ends without a verdict (its turn was cut short, it
-replied empty, or its adapter failed) runs once more in a fresh session, told
-why; a timeout, an interrupt or a missing login is not retried. If it still
-fails, the error says so and where its logs are. The review is clean when at
-least `review.minCompleted` reviewers (default 1) replied `No findings.` and
-the rest failed; any reviewer's findings make it `findings`; otherwise it
-fails with exit `2`. With no reviewers configured, run `slopcop init` or set
-`review.reviewers`. Do not change reviewers or adapters to get past a failure;
-report it to the user. The prompt carries the captured diff. Reviewers read repository content,
+not static, then saves the first two that work (or one) as reviewers and the
+rest that work as `review.fallbacks`. Probe prompts use your logins. Already
+configured reviewers are left alone; unset `review.reviewers` and run init to
+pick again. `slopcop init --no-reviewers` skips probing.
+A check starts the configured reviewers; one that cannot start does not stop
+the others. A reviewer that ends without a verdict (it could not start, its
+turn was cut short, it replied empty) runs once more in a fresh session, told
+why; a timeout, an interrupt, a missing login or exhausted credits is not
+retried. If it still fails, the next unused fallback stands in for it,
+preferring another provider, while fewer than `review.minCompleted` reviewers
+(default 2, at most the number of reviewers) have finished. The report names
+which fallback stood in for which reviewer, and a failed reviewer's error
+says the cause when the adapter makes it clear (not signed in, out of
+credits, rate limited, network). Findings from any reviewer, primary or
+fallback, make the review `findings`. Otherwise it is clean when at least
+`review.minCompleted` reviewers replied `No findings.`, and fails with exit
+`2` when fewer did. The minimum only tolerates a failure when more reviewers
+can run than it requires: with `terra,sol`, no fallbacks and the default of 2,
+one failure still fails the review. Configure fallbacks on another provider
+than the reviewers (Codex for `terra`/`sol`, Claude for `haiku`, dsh for
+`flash`), so one outage or empty account cannot take out every reviewer. With
+no reviewers configured, run `slopcop init` or set `review.reviewers`. Do not
+change reviewers or adapters to get past a failure; report it to the user. The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox.
@@ -239,7 +249,7 @@ Each finding also carries its
 | --- | --- |
 | `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, has only findings below `--fail-on` (`status` then says `findings`), or was skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
 | `1` | A new static finding crossed `--fail-on`, or a reviewer reported findings (unless `--fail-on never`). Fix the real ones and run the check again. |
-| `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed (fewer than `review.minCompleted` reviewers finished, even after a retry, and none reported findings), or the CLI or service failed. Read the errors and log paths. |
+| `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed or was incomplete (fewer than `review.minCompleted` reviewers finished after retries and fallbacks; with findings this exits `2` only under `--fail-on never`), or the CLI or service failed. Read the errors and log paths. |
 | `3` | The static check was still running when `--timeout` ran out. Run the same check again; a complete review of the same content is reused. |
 | `4` | The service refused the static check, and only a person can clear it. Do not retry; tell the user the `code` and remedy. |
 | `130`, `143` | The check was interrupted (Ctrl-C or SIGTERM) before it answered, and the reviewers were stopped. It printed no report; run the same check again. |

@@ -125,6 +125,8 @@ func (c *Config) migrate() {
 // Review contains local reviewer settings.
 type Review struct {
 	Reviewers []string `json:"reviewers,omitempty"`
+	// Fallbacks stand in, in order, for reviewers that fail.
+	Fallbacks []string `json:"fallbacks,omitempty"`
 	Timeout   string   `json:"timeout,omitempty"`
 	// MinCompleted is how many reviewers must finish for a clean review;
 	// zero means review.DefaultMinCompleted.
@@ -204,7 +206,7 @@ func Save(cfg Config) (string, error) {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	cfg.migrate()
-	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && len(cfg.Review.Fallbacks) == 0 && cfg.Review.Timeout == "" && cfg.Review.MinCompleted == 0 && len(cfg.Review.Adapters) == 0 {
 		cfg.Review = nil
 	}
 	if cfg.Gate != nil && cfg.Gate.BlockOn == "" {

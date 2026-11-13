@@ -32,8 +32,9 @@ const (
 	// DefaultTimeout bounds each reviewer, from adapter launch to its reply.
 	DefaultTimeout = 20 * time.Minute
 	// DefaultMinCompleted is how many reviewers must finish for a review
-	// to be clean when review.minCompleted is unset.
-	DefaultMinCompleted = 1
+	// to be clean when review.minCompleted is unset, or the number of
+	// reviewers when fewer are configured.
+	DefaultMinCompleted = 2
 	// CleanReply is the exact reply that approves the change.
 	CleanReply = "No findings."
 )
@@ -43,7 +44,7 @@ type Status string
 
 const (
 	// StatusClean: at least Settings.MinCompleted reviewers replied exactly
-	// CleanReply, and every other reviewer failed (after its retry).
+	// CleanReply, and every other reviewer failed after its retry.
 	StatusClean Status = "clean"
 	// StatusFindings: at least one reviewer reported findings. Other
 	// reviewers may have failed.
@@ -61,13 +62,24 @@ type Settings struct {
 	Reviewers []Family
 	// Timeout bounds each reviewer.
 	Timeout time.Duration
-	// MinCompleted is how many reviewers must finish for a clean review; a
-	// reviewer that still fails after its retry is reported but does not
-	// block one. Zero means DefaultMinCompleted.
+	// Fallbacks stand in, in order, for reviewers that still fail after
+	// their retry, while fewer than MinCompleted reviewers have finished.
+	Fallbacks []Family
+	// MinCompleted is how many reviewers, primaries or fallbacks, must
+	// finish for a clean review; a reviewer that still fails is reported but
+	// does not block one. Zero means DefaultMinCompleted, capped at the
+	// number of reviewers.
 	MinCompleted int
 	// Adapters overrides argv by adapter name. An adapter without an entry
 	// uses its pinned npx package.
 	Adapters map[string][]string
+}
+
+func (s Settings) minCompleted() int {
+	if s.MinCompleted > 0 {
+		return s.MinCompleted
+	}
+	return min(DefaultMinCompleted, max(len(s.Reviewers), 1))
 }
 
 // Capture names exactly what was reviewed.
@@ -113,6 +125,8 @@ type Reviewer struct {
 	// reviewer that was retried; the fields above describe the retry.
 	FirstError string `json:"firstError,omitempty"`
 	FirstLog   string `json:"firstLog,omitempty"`
+	// StandsInFor names the reviewer a fallback replaced.
+	StandsInFor string `json:"standsInFor,omitempty"`
 }
 
 // Verdict is the outcome of one review.
@@ -125,6 +139,9 @@ type Verdict struct {
 	// Error says why a failed review failed when no single reviewer is
 	// responsible, such as missing configuration or unwritable state.
 	Error string `json:"error,omitempty"`
+	// Incomplete is set when fewer than Settings.MinCompleted reviewers
+	// finished; with findings, the check still cannot pass.
+	Incomplete bool `json:"incomplete,omitempty"`
 	// Reused is set when the verdict is an earlier complete review of the
 	// same capture by the same reviewers, returned without running again.
 	Reused bool      `json:"reused,omitempty"`

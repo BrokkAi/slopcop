@@ -1289,6 +1289,7 @@ func TestStaticJSONFieldOrderIsUnchanged(t *testing.T) {
 		t.Fatalf("field order changed: %s", out.String())
 	}
 }
+
 // TestReviewHumanNamesFailedReviewers checks that a clean review a reviewer
 // did not finish says so, and shows the retried reviewer's first failure.
 func TestReviewHumanNamesFailedReviewers(t *testing.T) {

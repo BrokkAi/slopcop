@@ -1597,6 +1597,8 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
+	// Incomplete is set when fewer reviewers finished than review.minCompleted.
+	Incomplete bool `json:"incomplete,omitempty"`
 	// Error is the local review's Error field.
 	Error string `json:"error"`
 	// Reused is the local review's Reused field.
@@ -1616,7 +1618,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -1679,6 +1681,9 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
 	for _, r := range v.Reviewers {
 		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)
+		if r.StandsInFor != "" {
+			fmt.Fprintf(w, "    Stands in for %s, which failed\n", printable(r.StandsInFor))
+		}
 		if r.Text != "" {
 			for _, line := range strings.Split(r.Text, "\n") {
 				fmt.Fprintf(w, "    %s\n", printable(line))

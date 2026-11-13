@@ -54,11 +54,13 @@ func TestConfiguredReviewersNoFallback(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Flash}, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6-terra", trace), "dsh": fakeAdapter("new-error", "deepseek-flash", trace)}}}
 	v := Run(context.Background(), store, c, o)
-	if v.Status != StatusFailed || len(v.Reviewers) != 2 || v.Reviewers[1].Status != StatusFailed {
+	// Without fallbacks, two reviewers and a minimum of two, one failure
+	// fails the review; it still does not stop the reviewer that started.
+	if v.Status != StatusFailed || !v.Incomplete || len(v.Reviewers) != 2 || v.Reviewers[0].Status != StatusClean || v.Reviewers[1].Status != StatusFailed || v.Reviewers[1].FirstError == "" {
 		t.Fatalf("%+v", v)
 	}
 	data, _ := os.ReadFile(trace)
-	if strings.Contains(string(data), "prompt") {
+	if strings.Count(string(data), "prompt") != 1 {
 		t.Fatal(string(data))
 	}
 }
@@ -130,19 +132,15 @@ func TestMinCompletedReviewers(t *testing.T) {
 		reviewers []Family
 		want      Status
 	}{
-		{"default one of two", 0, []Family{Terra, Sol}, StatusClean},
-		{"both required", 2, []Family{Terra, Sol}, StatusFailed},
-		{"none finished", 0, []Family{Sol}, StatusFailed},
+		{"default of two, two reviewers", 0, []Family{Terra, Flash}, StatusFailed},
+		{"minimum of one", 1, []Family{Terra, Flash}, StatusClean},
+		{"default of two, three reviewers", 0, []Family{Terra, Terra, Flash}, StatusClean},
+		{"none finished", 0, []Family{Flash}, StatusFailed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root, c, s := reviewRepo(t)
+			// Flash stands in for a reviewer that keeps failing.
 			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: tc.reviewers, MinCompleted: tc.min, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6.10-terra", ""), "dsh": fakeAdapter("escalate-always", "deepseek-flash", "")}}}
-			// Sol stands in for a reviewer that keeps failing.
-			for i, f := range o.Settings.Reviewers {
-				if f == Sol {
-					o.Settings.Reviewers[i] = Flash
-				}
-			}
 			v := Run(context.Background(), s, c, o)
 			if v.Status != tc.want {
 				t.Fatalf("%+v", v)
@@ -162,21 +160,82 @@ func TestMinCompletedReviewers(t *testing.T) {
 func TestReviewStatus(t *testing.T) {
 	clean, findings, failed := Reviewer{Text: CleanReply}, Reviewer{Text: "bug"}, Reviewer{Error: "x"}
 	for _, tc := range []struct {
-		rs   []Reviewer
-		min  int
-		want Status
+		rs         []Reviewer
+		min        int
+		want       Status
+		incomplete bool
 	}{
-		{nil, 0, StatusFailed},
-		{[]Reviewer{failed}, 0, StatusFailed},
-		{[]Reviewer{clean, failed}, 0, StatusClean},
-		{[]Reviewer{clean, failed}, 2, StatusFailed},
-		{[]Reviewer{findings, failed}, 2, StatusFindings},
-		{[]Reviewer{clean, findings}, 0, StatusFindings},
-		{[]Reviewer{clean, clean}, 2, StatusClean},
+		{nil, 1, StatusFailed, true},
+		{[]Reviewer{failed}, 1, StatusFailed, true},
+		{[]Reviewer{clean, failed}, 1, StatusClean, false},
+		{[]Reviewer{clean, failed}, 2, StatusFailed, true},
+		{[]Reviewer{findings, failed}, 2, StatusFindings, true},
+		{[]Reviewer{clean, findings}, 2, StatusFindings, false},
+		{[]Reviewer{clean, clean, failed}, 2, StatusClean, false},
 	} {
-		if got := reviewStatus(tc.rs, tc.min); got != tc.want {
-			t.Errorf("%+v min %d: %s, want %s", tc.rs, tc.min, got, tc.want)
+		if got, incomplete := reviewStatus(tc.rs, tc.min); got != tc.want || incomplete != tc.incomplete {
+			t.Errorf("%+v min %d: %s %v, want %s %v", tc.rs, tc.min, got, incomplete, tc.want, tc.incomplete)
 		}
+	}
+}
+
+// TestTakeFallback checks that fallbacks go in order, prefer another adapter
+// than the reviewer they replace, and stop once enough reviewers finished.
+func TestTakeFallback(t *testing.T) {
+	p := &panel{min: 2, fallbacks: []Family{Sol, Flash, Haiku}}
+	for _, want := range []Family{Flash, Haiku, Sol} {
+		if f, _, ok := p.takeFallback(Terra); !ok || f != want {
+			t.Fatalf("got %s %v, want %s", f, ok, want)
+		}
+	}
+	if _, _, ok := p.takeFallback(Terra); ok {
+		t.Fatal("fallbacks ran out")
+	}
+	p = &panel{min: 2, completed: 2, fallbacks: []Family{Haiku}}
+	if _, _, ok := p.takeFallback(Terra); ok {
+		t.Fatal("fallback after the minimum finished")
+	}
+}
+
+func TestFailureCause(t *testing.T) {
+	for _, tc := range []struct {
+		err  string
+		want string
+	}{
+		{`{"code":-32000,"message":"Authentication required"}`, "not signed in"},
+		{"You exceeded your current quota, please check your plan and billing details", "out of credits"},
+		{"429 Too Many Requests", "rate limiting"},
+		{"connect ECONNREFUSED 127.0.0.1:443", "could not be reached"},
+		{"incomplete turn: cancelled", "Run the check again to retry"},
+	} {
+		got := explainFailure(Reviewer{Family: Sol, Error: tc.err})
+		if !strings.Contains(got, tc.want) || !strings.Contains(got, tc.err) {
+			t.Errorf("%q: %q", tc.err, got)
+		}
+	}
+}
+
+// TestFallbackStandsIn checks that a reviewer that still fails after its
+// retry hands its place to a fallback on another adapter, and that the
+// fallback's verdict counts toward the minimum.
+func TestFallbackStandsIn(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra, Flash}, Fallbacks: []Family{Flash, Haiku}, Adapters: map[string][]string{
+		"codex":  fakeAdapter("clean", "gpt-6.10-terra", ""),
+		"dsh":    fakeAdapter("escalate-always", "deepseek-flash", ""),
+		"claude": fakeAdapter("clean", "haiku", trace),
+	}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusClean || v.Incomplete || len(v.Reviewers) != 3 {
+		t.Fatalf("%+v", v)
+	}
+	fb := v.Reviewers[2]
+	if fb.Name != "fallback1-haiku" || fb.StandsInFor != "2-flash" || fb.Status != StatusClean || v.Reviewers[1].Status != StatusFailed {
+		t.Fatalf("%+v", v.Reviewers)
+	}
+	if err := s.Override("reason", c.Tree); err == nil {
+		t.Fatal("override allowed while a reviewer failed")
 	}
 }
 func TestEmptyReviewers(t *testing.T) {
@@ -274,7 +333,7 @@ func TestReuseAndInvalidation(t *testing.T) {
 	o.Settings.Adapters["dsh"] = []string{"/missing/slopcop-fake"}
 	o.Settings.Adapters["claude"] = []string{"/missing/slopcop-fake"}
 	v = Run(context.Background(), s, c, o)
-	if v.Status != StatusFailed || v.Reused {
+	if v.Status != StatusFindings || !v.Incomplete || v.Reused {
 		t.Fatal(v)
 	}
 	if err := s.Override("false positive", c.Tree); err == nil {

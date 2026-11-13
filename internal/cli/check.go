@@ -234,7 +234,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if mode != modeStatic {
 		if verdict.Status == review.StatusFindings && failOn != "never" {
 			exit = service.ExitFindings
-		} else if static.exit != service.ExitFindings && static.exit != service.ExitNeedsPerson && static.exit != service.ExitPending && verdict.Status == review.StatusFailed {
+		} else if static.exit != service.ExitFindings && static.exit != service.ExitNeedsPerson && static.exit != service.ExitPending && (verdict.Status == review.StatusFailed || verdict.Incomplete) {
 			// A pending static result keeps its exit: it tells the caller to
 			// run the same check again, which also runs the review again, and
 			// the failed review stays visible in the report. Incomplete would

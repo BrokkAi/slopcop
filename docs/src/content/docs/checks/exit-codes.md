@@ -34,9 +34,12 @@ In JSON, top-level `status` matches the exit code, except that it is
 `--fail-on` lets them exit `0` (below the threshold, or `--fail-on never`).
 `staticStatus` keeps the static half's status when it differs. `review.status` is `clean`, `findings`,
 `failed`, or `empty`; `review.reviewers` explain the outcome, with an error on
-each reviewer that could not run, and `firstError` and `firstLog` on one that
-was retried. A review is clean when at least `review.minCompleted` reviewers
-(default 1) finished clean and the others failed after their retry. Review findings count toward exit `1` unless `--fail-on never` is
+each reviewer that could not run, `firstError` and `firstLog` on one that
+was retried, and `standsInFor` on a fallback. A review is clean when at least
+`review.minCompleted` reviewers (default 2, at most the number configured)
+finished clean and the others failed after their retry. `review.incomplete`
+is true when fewer finished; with findings, that still exits `2` under
+`--fail-on never`. Review findings count toward exit `1` unless `--fail-on never` is
 set. A complete review is reused when its inputs have not changed.
 
 ## Exit 1: findings
