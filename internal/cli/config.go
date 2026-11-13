@@ -163,6 +163,9 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 				return fmt.Errorf("invalid review.reviewers %q: %w", value, err)
 			}
 		}
+		if cfg.Review != nil && cfg.Review.MinCompleted > len(names) {
+			return fmt.Errorf("invalid review.reviewers %q: review.minCompleted is %d; lower or unset it first", value, cfg.Review.MinCompleted)
+		}
 		ensureReview(cfg).Reviewers = names
 	case "review.fallbacks":
 		names := strings.Split(value, ",")
@@ -183,8 +186,12 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 		ensureReview(cfg).Timeout = value
 	case "review.minCompleted":
 		n, err := strconv.Atoi(value)
-		if err != nil || n < 1 || n > review.MaxReviewers {
-			return fmt.Errorf("invalid review.minCompleted %q (want 1-%d)", value, review.MaxReviewers)
+		limit := review.MaxReviewers
+		if cfg.Review != nil && len(cfg.Review.Reviewers) > 0 {
+			limit = len(cfg.Review.Reviewers)
+		}
+		if err != nil || n < 1 || n > limit {
+			return fmt.Errorf("invalid review.minCompleted %q (want 1-%d, at most the number of reviewers)", value, limit)
 		}
 		ensureReview(cfg).MinCompleted = n
 	default:

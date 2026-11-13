@@ -35,12 +35,20 @@ func TestConfigCommandGetSetUnset(t *testing.T) {
 	if code == 0 || !strings.Contains(errOut, "invalid review.minCompleted") {
 		t.Fatalf("invalid minCompleted: code=%d err=%q", code, errOut)
 	}
+	code, _, errOut = runCLI(t, "config", "set", "review.minCompleted", "3")
+	if code == 0 || !strings.Contains(errOut, "at most the number of reviewers") {
+		t.Fatalf("minCompleted above reviewers: code=%d err=%q", code, errOut)
+	}
 	code, _, errOut = runCLI(t, "config", "set", "review.minCompleted", "2")
 	if code != 0 {
 		t.Fatalf("set minCompleted: code=%d err=%q", code, errOut)
 	}
 	if code, out, _ := runCLI(t, "config", "get", "review.minCompleted"); code != 0 || strings.TrimSpace(out) != "2" {
 		t.Fatalf("get minCompleted: %q", out)
+	}
+	code, _, errOut = runCLI(t, "config", "set", "review.reviewers", "terra")
+	if code == 0 || !strings.Contains(errOut, "review.minCompleted is 2") {
+		t.Fatalf("reviewers below minCompleted: code=%d err=%q", code, errOut)
 	}
 	code, _, errOut = runCLI(t, "config", "unset", "review.minCompleted")
 	if code != 0 {
