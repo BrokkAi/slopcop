@@ -1633,6 +1633,9 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	}
 	v := options.Review
 	properties := map[string]any{"slopcop.status": v.Status}
+	if v.Incomplete {
+		properties["slopcop.incomplete"] = true
+	}
 	if v.Capture.DiffTree != "" {
 		properties["slopcop.tree"] = v.Capture.Tree
 		properties["slopcop.diffTree"] = v.Capture.DiffTree
@@ -1640,7 +1643,7 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
-	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed}}, Properties: properties}
+	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed && !v.Incomplete}}, Properties: properties}
 	for _, r := range v.Reviewers {
 		if r.Status == review.StatusFindings {
 			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})

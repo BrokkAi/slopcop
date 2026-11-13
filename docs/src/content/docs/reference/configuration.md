@@ -88,7 +88,11 @@ prints each result as it arrives. It skips flash without a dsh command override
 when `DEEPSEEK_API_KEY` is not set.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
-`overrides.jsonl`, and `review-*/` prompt and reviewer logs. Checks that
+`overrides.jsonl`, and `review-*/` prompt and reviewer logs. When a reviewer
+or probe is done, the CLI asks its adapter to delete the session, so reviews
+do not pile up in your agent's history: Codex archives the thread (`codex
+unarchive <id>` restores it) and Claude deletes it. Cleanup is skipped when an
+adapter does not support it, and a failed cleanup never affects the review. Checks that
 approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
 and valid overrides write `refs/slopcop/reviewed/<tree>`.
 

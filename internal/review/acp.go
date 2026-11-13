@@ -166,8 +166,43 @@ type runner struct {
 	updates, stderr *os.File
 	exited          chan struct{}
 	stopWatch       func() bool
-	session         acp.SessionId
+	watchDone       chan struct{}
 	result          Reviewer
+	// canDelete records that the adapter advertised session/delete.
+	canDelete bool
+	// sessionMu guards session, which the timeout's kill reads.
+	sessionMu sync.Mutex
+	session   acp.SessionId
+	cleanOnce sync.Once
+}
+
+// cleanupTimeout bounds deleting a reviewer's session, so cleanup never
+// holds up a review.
+const cleanupTimeout = 2 * time.Second
+
+// cleanup deletes the reviewer's session from the adapter's history, once.
+// Each reviewer run, retry and probe is otherwise a saved thread in the
+// user's agent app. Codex archives the thread (`codex unarchive <id>` brings
+// it back) and Claude deletes it. Failure is ignored and noted in stderr.
+func (s *runner) cleanup() {
+	s.cleanOnce.Do(func() {
+		s.sessionMu.Lock()
+		session := s.session
+		s.sessionMu.Unlock()
+		if session == "" || !s.canDelete {
+			return
+		}
+		select {
+		case <-s.conn.Done():
+			return
+		default:
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+		defer cancel()
+		if _, err := s.conn.UnstableDeleteSession(ctx, acp.UnstableDeleteSessionRequest{SessionId: session}); err != nil {
+			fmt.Fprintf(s.stderr, "delete session %s: %v\n", session, err)
+		}
+	})
 }
 
 // startRunner initializes adapters serially so first-run npx installs never overlap.
@@ -222,15 +257,23 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 		return nil, err
 	}
 	go func() { _ = s.cmd.Wait(); close(s.exited) }()
-	s.stopWatch = context.AfterFunc(s.ctx, func() { killProcessTree(s.cmd) })
 	s.client = &reviewClient{stderr: s.stderr}
 	s.conn = acp.NewClientSideConnection(s.client, s.stdin, io.TeeReader(stdout, s.updates))
 	s.conn.SetLogger(slog.New(slog.NewTextHandler(s.stderr, nil)))
-	_, err = s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
+	// On a timeout or interrupt, delete the session while the adapter still
+	// runs, then kill it.
+	s.watchDone = make(chan struct{})
+	s.stopWatch = context.AfterFunc(s.ctx, func() {
+		defer close(s.watchDone)
+		s.cleanup()
+		killProcessTree(s.cmd)
+	})
+	initialized, err := s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
 	if err != nil {
 		s.stop()
 		return nil, fmt.Errorf("initialize: %w", err)
 	}
+	s.canDelete = initialized.AgentCapabilities.SessionCapabilities.Delete != nil
 	return s, nil
 }
 func (s *runner) closeFiles() {
@@ -242,7 +285,12 @@ func (s *runner) closeFiles() {
 	}
 }
 func (s *runner) stop() {
-	s.stopWatch()
+	if s.stopWatch() {
+		s.cleanup()
+	} else {
+		// The timeout fired: let it delete the session before the kill.
+		<-s.watchDone
+	}
 	s.cancel()
 	killProcessTree(s.cmd)
 	s.stdin.Close()
@@ -255,13 +303,15 @@ func (s *runner) prepare(root string) error {
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
 	}
+	s.sessionMu.Lock()
 	s.session = session.SessionId
+	s.sessionMu.Unlock()
 	modelOpt := configOption(session.ConfigOptions, "model")
 	model, ok := bestModel(s.result.Family, choices(modelOpt))
 	if !ok {
 		return fmt.Errorf("no model of family %s", s.result.Family)
 	}
-	response, err := s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: modelOpt.Id, Value: acp.SessionConfigValueId(model)}})
+	response, err := s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: modelOpt.Id, Value: acp.SessionConfigValueId(model)}})
 	if err != nil {
 		return fmt.Errorf("select model: %w", err)
 	}
@@ -283,7 +333,7 @@ func (s *runner) prepare(root string) error {
 	if !found {
 		return fmt.Errorf("high effort unavailable")
 	}
-	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
+	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
 	if err != nil {
 		return fmt.Errorf("select high effort: %w", err)
 	}
@@ -303,7 +353,7 @@ func (s *runner) prepare(root string) error {
 	if !hasChoice(option, value) {
 		return fmt.Errorf("adapter offers no %s=%s option, so the reviewer cannot be restricted; update the adapter", key, value)
 	}
-	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: option.Id, Value: acp.SessionConfigValueId(value)}})
+	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: option.Id, Value: acp.SessionConfigValueId(value)}})
 	if err != nil {
 		return fmt.Errorf("select %s=%s: %w", key, value, err)
 	}

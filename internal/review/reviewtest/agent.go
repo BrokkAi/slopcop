@@ -24,7 +24,23 @@ type agent struct {
 func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
 	a.record(fmt.Sprintf("pid=%d", os.Getpid()))
 	a.record("initialize")
-	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber}, nil
+	// Codex and Claude adapters advertise session/delete; mode no-delete
+	// stands for an adapter that does not.
+	caps := acp.AgentCapabilities{}
+	if a.mode != "no-delete" {
+		caps.SessionCapabilities.Delete = &acp.SessionDeleteCapabilities{}
+	}
+	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber, AgentCapabilities: caps}, nil
+}
+
+// Cancel accepts the client's session/cancel; a hanging prompt ends with its
+// own context.
+func (a *agent) Cancel(context.Context, acp.CancelNotification) error { return nil }
+
+// UnstableDeleteSession records the session slopcop cleans up.
+func (a *agent) UnstableDeleteSession(_ context.Context, p acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+	a.record("delete=" + string(p.SessionId))
+	return acp.UnstableDeleteSessionResponse{}, nil
 }
 func options(model, mode string) []acp.SessionConfigOption {
 	m := acp.SessionConfigSelectOptionsUngrouped{}

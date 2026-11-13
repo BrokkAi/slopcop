@@ -1308,6 +1308,17 @@ func TestReviewHumanNamesFailedReviewers(t *testing.T) {
 		t.Fatalf("failed reviewer repeats its first error: %q", out.String())
 	}
 }
+// TestReviewSARIFMarksIncompleteReview checks that a review with findings,
+// but fewer finished reviewers than required, is not a successful execution.
+func TestReviewSARIFMarksIncompleteReview(t *testing.T) {
+	v := &review.Verdict{Status: review.StatusFindings, Incomplete: true, Reviewers: []review.Reviewer{{Name: "1-terra", Status: review.StatusFindings, Text: "bug"}, {Name: "2-sol", Status: review.StatusFailed, Error: "down"}}}
+	run := sarifLogWithReview(Options{Review: v}, sarifRun{}).Runs
+	got := run[len(run)-1]
+	if got.Invocations[0].ExecutionSuccessful || got.Properties["slopcop.incomplete"] != true || len(got.Results) != 1 {
+		t.Fatalf("%+v", got)
+	}
+}
+
 func TestReviewHumanKeepsLines(t *testing.T) {
 	verdict := review.Verdict{Status: review.StatusFindings, Reviewers: []review.Reviewer{{Name: "1-terra", Status: review.StatusFindings, Text: "first\nsecond"}}}
 	var out bytes.Buffer

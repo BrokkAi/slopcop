@@ -179,6 +179,34 @@ func TestReviewStatus(t *testing.T) {
 	}
 }
 
+// TestReviewerSessionsAreDeleted checks that slopcop deletes each reviewer's
+// session from the adapter's history when the reviewer is done, whether it
+// finished, failed, or timed out, and only when the adapter supports it.
+func TestReviewerSessionsAreDeleted(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		timeout time.Duration
+		deletes int
+	}{
+		{"clean", 0, 1},
+		{"escalate-always", 0, 2},
+		{"hang", 300 * time.Millisecond, 1},
+		{"no-delete", 0, 0},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			root, c, s := reviewRepo(t)
+			trace := filepath.Join(t.TempDir(), "trace")
+			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: tc.timeout, Adapters: map[string][]string{"codex": fakeAdapter(tc.mode, "gpt-6.10-terra", trace)}}}
+			v := Run(context.Background(), s, c, o)
+			data, _ := os.ReadFile(trace)
+			if got := strings.Count(string(data), "delete=fake"); got != tc.deletes {
+				log, _ := os.ReadFile(filepath.Join(v.LogDir, "1-terra.stderr.log"))
+				t.Fatalf("deletes %d, want %d: %s\n%s", got, tc.deletes, data, log)
+			}
+		})
+	}
+}
+
 // TestTakeFallback checks that fallbacks go in order, prefer another adapter
 // than the reviewer they replace, and stop once enough reviewers finished.
 func TestTakeFallback(t *testing.T) {
