@@ -47,10 +47,18 @@ export default defineConfig({
           tag: 'link',
           attrs: { rel: 'preload', href: textFaceUrl, as: 'font', type: 'font/woff2', crossorigin: true },
         },
-        // Starlight links favicon.svg, the tab icon. Search results and home screens want a bitmap: Google
-        // asks for a multiple of 48 pixels, and iOS takes the apple-touch-icon.
-        { tag: 'link', attrs: { rel: 'icon', href: iconUrl('favicon.ico'), sizes: '16x16 32x32 48x48' } },
-        { tag: 'link', attrs: { rel: 'icon', href: iconUrl('icon-192.png'), sizes: '192x192', type: 'image/png' } },
+        // The tab icon is the mark alone, night ink on a light tab bar and bone on a dark one. Only PNGs are
+        // linked: Safari sets a light plate behind a linked SVG or ICO and takes either over the PNGs, so
+        // src/route-data.ts drops the link Starlight makes from `favicon`. Google asks for a multiple of 48
+        // pixels, which 192 is, and iOS takes the apple-touch-icon.
+        {
+          tag: 'link',
+          attrs: { rel: 'icon', href: iconUrl('favicon-light.png'), sizes: '192x192', type: 'image/png', media: '(prefers-color-scheme: light)' },
+        },
+        {
+          tag: 'link',
+          attrs: { rel: 'icon', href: iconUrl('favicon-dark.png'), sizes: '192x192', type: 'image/png', media: '(prefers-color-scheme: dark)' },
+        },
         { tag: 'link', attrs: { rel: 'apple-touch-icon', href: iconUrl('apple-touch-icon.png') } },
       ],
       customCss: ['./src/styles/tokens.css', './src/styles/slopcop.css'],
@@ -108,7 +116,7 @@ export default defineConfig({
         dark: './src/assets/gumshoe-dark.svg',
         alt: 'SlopCop',
       },
-      favicon: '/favicon.svg',
+      favicon: '/favicon-light.png',
       editLink: {
         baseUrl: 'https://github.com/BrokkAi/slopcop/edit/master/docs/',
       },
