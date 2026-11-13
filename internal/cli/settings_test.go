@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
 )
 
@@ -132,5 +133,17 @@ func TestCheckWithNoModeAndNoReviewersRunsStatic(t *testing.T) {
 				t.Fatalf("a review ran: %s", stderr)
 			}
 		})
+	}
+}
+
+func TestReviewSkippedReasonNamesTheFallback(t *testing.T) {
+	for fallback, want := range map[string]string{
+		staticForCI:          report.ReviewSkippedCI,
+		staticForNoReviewers: report.ReviewSkippedNoReviewers,
+		"":                   report.ReviewSkippedStaticMode,
+	} {
+		if got := reviewSkippedReason(fallback); got != want {
+			t.Errorf("reviewSkippedReason(%q) = %q, want %q", fallback, got, want)
+		}
 	}
 }

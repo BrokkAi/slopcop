@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
 )
 
@@ -40,6 +41,18 @@ func resolveMode(flagMode string, static, ai bool, cfg config.Config, getenv fun
 		return modeStatic, staticForNoReviewers, nil
 	}
 	return modeBoth, "", nil
+}
+
+// reviewSkippedReason names, for the report, why a static-only check did
+// not run the local review, from the fallback resolveMode gave.
+func reviewSkippedReason(fallback string) string {
+	switch fallback {
+	case staticForCI:
+		return report.ReviewSkippedCI
+	case staticForNoReviewers:
+		return report.ReviewSkippedNoReviewers
+	}
+	return report.ReviewSkippedStaticMode
 }
 
 // inCI reports whether the check runs as a CI job. Most CI services set CI;
