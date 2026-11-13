@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
 	"sort"
 	"strings"
 	"unicode"
@@ -373,7 +374,67 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 			}
 			out.WriteString("\n")
 		}
+		if finding.Dependency != nil {
+			writeDependency(out, *finding.Dependency)
+		}
 		out.WriteString("\n")
+	}
+}
+
+// writeDependency says which package a dependency advisory finding is about,
+// how it got into the tree and how to fix it, such as:
+//
+//	Package: npm lodash@4.17.20, direct, from package.json
+//	Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9
+//	Fixed in: 4.17.21
+//	Fix: npm install lodash@4.17.21 --save-exact
+func writeDependency(out *strings.Builder, dependency service.Dependency) {
+	// Direct is false also when the service could not tell, so only a chain
+	// through another package says transitive.
+	how := ""
+	switch {
+	case dependency.Direct:
+		how = ", direct"
+	case len(dependency.DependencyChain) > 1:
+		how = ", transitive"
+	}
+	fmt.Fprintf(
+		out,
+		"    Package: %s %s@%s%s, from %s\n",
+		printable(dependency.Ecosystem),
+		printable(dependency.Package),
+		printable(dependency.Version),
+		how,
+		printable(dependency.ManifestPath),
+	)
+	advisory := printable(dependency.AdvisoryID)
+	if len(dependency.Aliases) > 0 {
+		advisory += " (" + printableList(dependency.Aliases) + ")"
+	}
+	fmt.Fprintf(out, "    Advisory: %s %s\n", advisory, printable(dependency.SourceURL))
+	if !dependency.Direct && len(dependency.DependencyChain) > 1 {
+		shown := make([]string, len(dependency.DependencyChain))
+		for i, step := range dependency.DependencyChain {
+			shown[i] = printable(step)
+		}
+		fmt.Fprintf(out, "    Via: %s\n", strings.Join(shown, " → "))
+	}
+	if len(dependency.FixedVersions) > 0 {
+		fmt.Fprintf(out, "    Fixed in: %s\n", printableList(dependency.FixedVersions))
+	} else {
+		// OSV lists fixes on the installed version's line only, so a later
+		// major version may still fix it.
+		out.WriteString("    Fixed in: no fix listed for this version line\n")
+	}
+	if dependency.UpgradeCommand != "" {
+		// npm changes the manifest of the directory it runs in, and the
+		// manifest path is relative to the repository root, not the
+		// current directory.
+		where := "at the repository root"
+		if dir := path.Dir(dependency.ManifestPath); dir != "." {
+			where = "in " + printable(dir) + "/ under the repository root"
+		}
+		fmt.Fprintf(out, "    Fix: %s (run %s)\n", printable(dependency.UpgradeCommand), where)
 	}
 }
 
@@ -1269,7 +1330,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			}
 			result.RelatedLocations = append(result.RelatedLocations, location)
 		}
-		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "") {
+		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "" || finding.Dependency != nil) {
 			result.Properties = map[string]any{}
 		}
 		if finding.ID != "" {
@@ -1277,6 +1338,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		}
 		if finding.PreviouslyIgnored != "" {
 			result.Properties["slopcop.previouslyIgnored"] = finding.PreviouslyIgnored
+		}
+		if finding.Dependency != nil {
+			result.Properties["slopcop.dependency"] = finding.Dependency
 		}
 		results = append(results, result)
 	}

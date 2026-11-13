@@ -1885,6 +1885,140 @@ func TestPartialSimilarityNoticeRendersInAllFormats(t *testing.T) {
 	}
 }
 
+// advisories is a check with a dependency advisory finding on an added
+// direct dependency and one on a new transitive dependency without a fix.
+func advisories() service.Response {
+	direct := finding("package-lock.json", 12, "error", service.DependencyAdvisoryPolicy)
+	direct.ID = "6b1f0c0e-0000-4000-8000-000000000003"
+	direct.Title = "lodash 4.17.20 has a known vulnerability"
+	direct.Dependency = &service.Dependency{
+		Ecosystem: "npm", Package: "lodash", Version: "4.17.20", Direct: true,
+		ManifestPath: "package.json", DependencyChain: []string{"lodash@4.17.20"},
+		AdvisoryID: "GHSA-29mw-wpgm-hmr9", Aliases: []string{"CVE-2020-28500"},
+		SourceURL:        "https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9",
+		FixedVersions:    []string{"4.17.21"},
+		UpgradeCommand:   "npm install lodash@4.17.21 --save-exact",
+		DatabaseModified: "2025-09-29T21:12:31.102523Z",
+	}
+	transitive := finding("web/package-lock.json", 40, "warning", service.DependencyAdvisoryPolicy)
+	transitive.ID = "6b1f0c0e-0000-4000-8000-000000000004"
+	transitive.Title = "qs 6.5.2 has a known vulnerability"
+	transitive.Dependency = &service.Dependency{
+		Ecosystem: "npm", Package: "qs", Version: "6.5.2",
+		ManifestPath: "web/package.json", DependencyChain: []string{"express@4.16.0", "body-parser@1.18.2", "qs@6.5.2"},
+		AdvisoryID: "GHSA-hrpp-h998-j3pp", Aliases: []string{"CVE-2022-24999"},
+		SourceURL:        "https://osv.dev/vulnerability/GHSA-hrpp-h998-j3pp",
+		FixedVersions:    []string{},
+		DatabaseModified: "2025-01-10T08:00:00Z",
+	}
+	return response(service.StatusFindings, "finding", []service.Finding{direct, transitive})
+}
+
+func TestHumanSaysWhereToRunTheFix(t *testing.T) {
+	nested := advisories().Findings[0]
+	nested.Dependency.ManifestPath = "web/package.json"
+	if got := Findings([]service.Finding{nested}); !strings.Contains(got, "    Fix: npm install lodash@4.17.21 --save-exact (run in web/ under the repository root)\n") {
+		t.Errorf("human = %q", got)
+	}
+}
+
+func TestHumanDoesNotGuessHowAPackageIsInstalled(t *testing.T) {
+	unknown := advisories().Findings[1]
+	unknown.Dependency.DependencyChain = []string{}
+	got := Findings([]service.Finding{unknown})
+	if !strings.Contains(got, "    Package: npm qs@6.5.2, from web/package.json\n") || strings.Contains(got, "Via:") {
+		t.Errorf("human = %q", got)
+	}
+}
+
+func TestHumanSaysThePackageTheAdvisoryAndTheFix(t *testing.T) {
+	want := "New findings\n" +
+		"  [error] slopcop.dependencies.known-vulnerability: lodash 4.17.20 has a known vulnerability\n" +
+		"    Location: package-lock.json:12\n" +
+		"    Certainty: definite\n" +
+		"    ID: 6b1f0c0e-0000-4000-8000-000000000003\n" +
+		"    Package: npm lodash@4.17.20, direct, from package.json\n" +
+		"    Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9\n" +
+		"    Fixed in: 4.17.21\n" +
+		"    Fix: npm install lodash@4.17.21 --save-exact (run at the repository root)\n" +
+		"\n" +
+		"  [warning] slopcop.dependencies.known-vulnerability: qs 6.5.2 has a known vulnerability\n" +
+		"    Location: web/package-lock.json:40\n" +
+		"    Certainty: definite\n" +
+		"    ID: 6b1f0c0e-0000-4000-8000-000000000004\n" +
+		"    Package: npm qs@6.5.2, transitive, from web/package.json\n" +
+		"    Advisory: GHSA-hrpp-h998-j3pp (CVE-2022-24999) https://osv.dev/vulnerability/GHSA-hrpp-h998-j3pp\n" +
+		"    Via: express@4.16.0 → body-parser@1.18.2 → qs@6.5.2\n" +
+		"    Fixed in: no fix listed for this version line\n" +
+		"\n"
+	if got := Findings(advisories().Findings); got != want {
+		t.Errorf("human = %q", got)
+	}
+}
+
+func TestMachineReportsCarryTheDependencyAsSent(t *testing.T) {
+	check := advisories()
+	want := []map[string]any{}
+	for _, finding := range check.Findings {
+		raw, err := json.Marshal(finding.Dependency)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var fields map[string]any
+		if err := json.Unmarshal(raw, &fields); err != nil {
+			t.Fatal(err)
+		}
+		want = append(want, fields)
+	}
+
+	var document struct {
+		Findings []map[string]any `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(render(t, check, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	for i, finding := range document.Findings {
+		if !reflect.DeepEqual(finding["dependency"], want[i]) {
+			t.Errorf("json dependency %d = %v", i, finding["dependency"])
+		}
+	}
+	if _, ok := want[1]["upgradeCommand"]; ok {
+		t.Errorf("an absent upgrade command was sent: %v", want[1])
+	}
+
+	var log struct {
+		Runs []struct {
+			Results []struct {
+				BaselineState string         `json:"baselineState"`
+				Properties    map[string]any `json:"properties"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, check, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	for i, result := range log.Runs[0].Results {
+		if result.BaselineState != "new" || result.Properties["slopcop.findingId"] != check.Findings[i].ID {
+			t.Errorf("sarif result %d = %+v", i, result)
+		}
+		if !reflect.DeepEqual(result.Properties["slopcop.dependency"], want[i]) {
+			t.Errorf("sarif dependency %d = %v", i, result.Properties["slopcop.dependency"])
+		}
+	}
+}
+
+func TestAFindingWithoutADependencyKeepsItsShape(t *testing.T) {
+	check := response(service.StatusFindings, "finding", []service.Finding{finding("cli.py", 2, "warning", "acme.eval")})
+	if got := render(t, check, FormatHuman); strings.Contains(got, "Package:") || strings.Contains(got, "Advisory:") {
+		t.Errorf("human = %q", got)
+	}
+	for _, format := range []string{FormatJSON, FormatSARIF} {
+		if got := render(t, check, format); strings.Contains(got, "dependency") {
+			t.Errorf("%s invented a dependency: %s", format, got)
+		}
+	}
+}
+
 func TestStaticOnlyReportSaysTheReviewWasSkipped(t *testing.T) {
 	response := service.Response{Status: service.StatusClean, BaseCommit: "base"}
 	options := Options{ReviewSkipped: ReviewSkippedNoReviewers}

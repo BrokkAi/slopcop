@@ -459,6 +459,30 @@ similarity, pass `--policy-id slopcop.similarity`.
 For this check, function source from the change is sent to third-party
 embedding and model providers used by the hosted service.
 
+A finding of the hosted `slopcop.dependencies.known-vulnerability` check is a
+known-vulnerable dependency version the change brings in. Its location is the
+lockfile entry, and the report adds the package, how it is installed and the
+fix:
+
+```text
+  [error] slopcop.dependencies.known-vulnerability: lodash 4.17.20 has a known vulnerability
+    Location: package-lock.json:12
+    Certainty: definite
+    ID: 6b1f0c0e-0000-4000-8000-000000000003
+    Package: npm lodash@4.17.20, direct, from package.json
+    Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9
+    Fixed in: 4.17.21
+    Fix: npm install lodash@4.17.21 --save-exact (run at the repository root)
+```
+
+A transitive dependency adds a `Via:` line, from the direct dependency down
+to the package. `json` passes the same fields through as the finding's
+`dependency` object, and `sarif` puts it in the result's
+`slopcop.dependency` property. The client never reads lockfiles or asks an
+advisory database itself, and drops a `dependency` object that is malformed,
+oversized or unsafe to print, keeping the finding. `slopcop ignore` takes the
+finding's id like any other.
+
 ### Modes and local review
 
 `slopcop check` runs hosted static analysis and local LLM review concurrently
