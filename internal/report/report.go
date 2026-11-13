@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -26,6 +27,14 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 // Options shape what a report lists. Rendering never changes the check, so
 // none of them is sent to the service.
 type Options struct {
+	// Approved says this run recorded push approval for the checked tree.
+	Approved bool
+	// Review is the local reviewers' verdict, when one ran.
+	Review *review.Verdict
+	// Status overrides the service status with the combined check status.
+	Status string
+	// StaticStatus preserves the service status when it differs.
+	StaticStatus string
 	// ShowExisting lists the findings that were already in the code, after
 	// the new ones. They are counted either way.
 	ShowExisting bool
@@ -34,7 +43,9 @@ type Options struct {
 	// to the CLI's note on stderr.
 	EmptyChange bool
 	// Verbose lists the inconclusive checks in the human format, which
-	// otherwise only counts them. The machine formats always list them.
+	// otherwise only counts them, and the files and rules each
+	// .slopcop/config.toml exclusion resolved to. The machine formats always
+	// list them.
 	Verbose bool
 	// SkillUpdated lists the skills directories whose slopcop skill this run
 	// installed or replaced, so an agent knows to reread its instructions.
@@ -56,8 +67,8 @@ type SkillUpdate struct {
 	Backup string `json:"backup,omitempty"`
 }
 
-// Write renders the response to w.
-func Write(w io.Writer, response service.Response, format string, options Options) error {
+// writeBase renders the static response to w.
+func writeBase(w io.Writer, response service.Response, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
 		_, err := io.WriteString(w, human(response, options))
@@ -164,7 +175,87 @@ func human(response service.Response, options Options) string {
 		out.WriteString(line)
 		out.WriteString("\n")
 	}
+	writeExclusions(&out, response.Exclusions, options.Verbose)
 	return out.String()
+}
+
+// onlyExcluded says .slopcop/config.toml [check] left the change nothing to
+// check, so its clean status means nothing ran.
+func onlyExcluded(response service.Response) bool {
+	return response.Summary.OnlyExcluded ||
+		(response.Exclusions != nil && response.Exclusions.OnlyExcluded && response.Status == service.StatusClean)
+}
+
+// writeExclusions lists what .slopcop/config.toml [check] excluded, each
+// scope with its reason, and warns about every rule that matched nothing.
+// Verbose adds the changed files and rules each scope resolved to. An
+// exclusion is never silent, so the scopes are listed either way.
+func writeExclusions(out *strings.Builder, exclusions *service.Exclusions, verbose bool) {
+	if exclusions == nil {
+		return
+	}
+	fmt.Fprintf(
+		out,
+		"Excluded by %s: %d changed file(s) for every rule, %d (file, rule) pair(s) for named rules\n",
+		printable(exclusions.Config), exclusions.ExcludedFiles, exclusions.ExcludedPairs,
+	)
+	for _, scope := range exclusions.Scopes {
+		rules := "every rule"
+		if !scope.AllRules {
+			rules = printableList(scope.RulePatterns)
+		}
+		fmt.Fprintf(out, "  %s for %s: %d changed file(s)", printableList(scope.Paths), rules, scope.FileCount)
+		if scope.Reason != "" {
+			fmt.Fprintf(out, " (%s)", printable(scope.Reason))
+		}
+		out.WriteString("\n")
+		if !verbose {
+			continue
+		}
+		if !scope.AllRules {
+			fmt.Fprintf(out, "    Rules: %s%s\n", valueOrNone(printableList(scope.Rules)), more(scope.RuleCount, len(scope.Rules)))
+			if len(scope.NotRun) > 0 {
+				fmt.Fprintf(out, "    Not run (excluded on every changed file): %s\n", printableList(scope.NotRun))
+			}
+		}
+		fmt.Fprintf(out, "    Files: %s%s\n", valueOrNone(printableList(scope.Files)), more(scope.FileCount, len(scope.Files)))
+	}
+	for _, warning := range exclusions.Warnings {
+		fmt.Fprintf(
+			out,
+			"Warning: [check] rule %s matches no selected policy, so it excludes nothing\n",
+			printable(warning.Rule),
+		)
+	}
+	if exclusions.ExcludedFindings > 0 {
+		fmt.Fprintf(out, "  %d finding(s) on excluded files were dropped\n", exclusions.ExcludedFindings)
+	}
+	if !verbose && len(exclusions.Scopes) > 0 {
+		out.WriteString("  --verbose lists the files and rules each one resolved to.\n")
+	}
+}
+
+func printableList(values []string) string {
+	shown := make([]string, len(values))
+	for i, value := range values {
+		shown[i] = printable(value)
+	}
+	return strings.Join(shown, ", ")
+}
+
+func valueOrNone(value string) string {
+	if value == "" {
+		return "none"
+	}
+	return value
+}
+
+// more says how many a list left out, such as ` and 3 more`.
+func more(total, listed int) string {
+	if total > listed {
+		return fmt.Sprintf(" and %d more", total-listed)
+	}
+	return ""
 }
 
 // Findings lists findings the way a human report lists its new ones, for a
@@ -319,6 +410,9 @@ func previouslyIgnoredLine(finding service.Finding) string {
 func summaryLine(response service.Response) string {
 	fresh, existing := split(response.Findings)
 	scope := "No new findings"
+	if onlyExcluded(response) {
+		scope = "Nothing checked: every changed file is excluded by .slopcop/config.toml"
+	}
 	switch len(fresh) {
 	case 0:
 	case 1:
@@ -342,8 +436,8 @@ func summaryLine(response service.Response) string {
 	}
 	// The service leaves out findings Bifrost did not prove unless asked for
 	// all; say how many, so a clean line is not read as none at all.
-	if count := response.Summary.LessCertainFindings; count > 0 {
-		scope = fmt.Sprintf("%s; %d less certain not shown (--certainty all)", scope, count)
+	if count := response.Summary.LessCertainFindings; count != nil && *count > 0 {
+		scope = fmt.Sprintf("%s; %d less certain not shown (--certainty all)", scope, *count)
 	}
 	state := "Analysis complete"
 	switch {
@@ -619,7 +713,12 @@ func printable(value string) string {
 // existing ones a service from before BrokkAi/bifrost-service#760 still
 // sent; summary counts both either way.
 type jsonReport struct {
-	Status     string                     `json:"status"`
+	Status   string `json:"status"`
+	Approved bool   `json:"approved"`
+	// StaticStatus preserves the hosted status when the combined status differs.
+	StaticStatus string `json:"staticStatus,omitempty"`
+	// Review is the local verdict, when one ran.
+	Review     *reviewJSON                `json:"review,omitempty"`
 	BaseCommit string                     `json:"baseCommit"`
 	Summary    service.Summary            `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
@@ -654,6 +753,9 @@ type jsonReport struct {
 	DirectiveWarnings []service.DirectiveWarning `json:"directiveWarnings,omitempty"`
 	// EmptyChange is set only when the patch was empty.
 	EmptyChange bool `json:"emptyChange,omitempty"`
+	// Exclusions is what .slopcop/config.toml [check] excluded, as the
+	// service sent it. It is set only when the checked tree has [check].
+	Exclusions *service.Exclusions `json:"exclusions,omitempty"`
 	// SkillUpdated is set only when this run wrote the skill.
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
@@ -661,7 +763,10 @@ type jsonReport struct {
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
-		Status:               response.Status,
+		Status:               status(response.Status, options),
+		Approved:             options.Approved,
+		StaticStatus:         options.StaticStatus,
+		Review:               reviewValue(options.Review),
 		BaseCommit:           response.BaseCommit,
 		Summary:              response.Summary,
 		Findings:             listed(response, options),
@@ -677,6 +782,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		DirectiveWarnings:    response.DirectiveWarnings,
 		EmptyChange:          options.EmptyChange,
 		SkillUpdated:         options.SkillUpdated,
+		Exclusions:           response.Exclusions,
 	}, "json report")
 }
 
@@ -691,28 +797,34 @@ func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck)
 // still running when --timeout ran out.
 type pendingReport struct {
 	Status       string        `json:"status"`
+	Approved     bool          `json:"approved"`
+	StaticStatus string        `json:"staticStatus,omitempty"`
+	Review       *reviewJSON   `json:"review,omitempty"`
 	RetryAfter   int           `json:"retryAfter"`
 	Message      string        `json:"message"`
 	Remedy       string        `json:"remedy"`
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
-// WritePending renders a check that is still running. The human format
+// writePendingBase renders a check that is still running. The human format
 // prints nothing on stdout: the message is on stderr and the exit code is 3.
-func WritePending(w io.Writer, pending service.Pending, format string, options Options) error {
+func writePendingBase(w io.Writer, pending service.Pending, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
 		return nil
 	case FormatJSON:
 		return encode(w, pendingReport{
-			Status:       service.StatusPending,
+			Status:       status(service.StatusPending, options),
+			StaticStatus: options.StaticStatus,
+			Approved:     options.Approved,
+			Review:       reviewValue(options.Review),
 			RetryAfter:   pending.RetryAfter,
 			Message:      pending.Message,
 			Remedy:       pending.Remedy,
 			SkillUpdated: options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
-		return encode(w, sarifLog(sarifRun{
+		return encode(w, sarifLogWithReview(options, sarifRun{
 			Tool:    sarifTool{Driver: sarifDriver{Name: "SlopCop", InformationURI: "https://slopcop.com", Rules: []sarifRule{}}},
 			Results: []sarifResult{},
 			Invocations: []sarifInvocation{{
@@ -743,6 +855,9 @@ type Skipped struct {
 // skippedReport is the document `--format json` prints for a skipped check.
 type skippedReport struct {
 	Status       string        `json:"status"`
+	Approved     bool          `json:"approved"`
+	StaticStatus string        `json:"staticStatus,omitempty"`
+	Review       *reviewJSON   `json:"review,omitempty"`
 	Code         string        `json:"code"`
 	State        string        `json:"state"`
 	Repository   string        `json:"repository"`
@@ -750,17 +865,20 @@ type skippedReport struct {
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
-// WriteSkipped renders a check that was not sent because the repository is not
+// writeSkippedBase renders a check that was not sent because the repository is not
 // active. The human format prints nothing on stdout: the CLI says why on
 // stderr and exits 0, as an automatic path asked it to. The machine formats
 // carry the skip, so it cannot be mistaken for a clean check.
-func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) error {
+func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
 		return nil
 	case FormatJSON:
 		return encode(w, skippedReport{
-			Status:       "skipped",
+			Status:       status("skipped", options),
+			StaticStatus: options.StaticStatus,
+			Approved:     options.Approved,
+			Review:       reviewValue(options.Review),
 			Code:         skipped.Code,
 			State:        skipped.State,
 			Repository:   skipped.Repository,
@@ -768,7 +886,7 @@ func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) 
 			SkillUpdated: options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
-		return encode(w, sarifLog(sarifRun{
+		return encode(w, sarifLogWithReview(options, sarifRun{
 			Tool:    sarifTool{Driver: sarifDriver{Name: "SlopCop", InformationURI: "https://slopcop.com", Rules: []sarifRule{}}},
 			Results: []sarifResult{},
 			Invocations: []sarifInvocation{{
@@ -792,6 +910,9 @@ func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) 
 // whether the same request may succeed later.
 type failureReport struct {
 	Status       string        `json:"status"`
+	Approved     bool          `json:"approved"`
+	StaticStatus string        `json:"staticStatus,omitempty"`
+	Review       *reviewJSON   `json:"review,omitempty"`
 	Code         string        `json:"code"`
 	Message      string        `json:"message"`
 	Remedy       string        `json:"remedy"`
@@ -801,16 +922,19 @@ type failureReport struct {
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
-// WriteFailure renders a check the service refused. The human format prints
+// writeFailureBase renders a check the service refused. The human format prints
 // nothing on stdout: the code, message, and remedy are on stderr and the exit
 // code is 2.
-func WriteFailure(w io.Writer, failure *service.Error, format string, options Options) error {
+func writeFailureBase(w io.Writer, failure *service.Error, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
 		return nil
 	case FormatJSON:
 		return encode(w, failureReport{
-			Status:       service.StatusFailed,
+			Status:       status(service.StatusFailed, options),
+			StaticStatus: options.StaticStatus,
+			Approved:     options.Approved,
+			Review:       reviewValue(options.Review),
 			Code:         failure.Body.Code,
 			Message:      failure.Error(),
 			Remedy:       failure.Body.Remedy,
@@ -824,7 +948,7 @@ func WriteFailure(w io.Writer, failure *service.Error, format string, options Op
 		if id == "" {
 			id = "slopcop.failed"
 		}
-		return encode(w, sarifLog(sarifRun{
+		return encode(w, sarifLogWithReview(options, sarifRun{
 			Tool:    sarifTool{Driver: sarifDriver{Name: "SlopCop", InformationURI: "https://slopcop.com", Rules: []sarifRule{}}},
 			Results: []sarifResult{},
 			Invocations: []sarifInvocation{{
@@ -845,6 +969,7 @@ func WriteFailure(w io.Writer, failure *service.Error, format string, options Op
 
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
+	properties["slopcop.approved"] = options.Approved
 	if options.EmptyChange {
 		properties["slopcop.emptyChange"] = true
 	}
@@ -1156,13 +1281,17 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		"slopcop.failOn":                response.Summary.FailOn,
 		"slopcop.newFindings":           response.Summary.NewFindings,
 		"slopcop.existingFindings":      response.Summary.ExistingFindings,
-		"slopcop.lessCertainFindings":   response.Summary.LessCertainFindings,
 		"slopcop.remappedIgnores":       remappedCount(response),
 		"slopcop.inconclusive":          response.Summary.Inconclusive,
 		"slopcop.inconclusiveElsewhere": response.Summary.InconclusiveElsewhere,
 		"slopcop.inlineSuppressed":      max(response.Summary.InlineSuppressed, len(response.InlineSuppressed)),
 		"slopcop.directiveWarnings":     max(response.Summary.DirectiveWarnings, len(response.DirectiveWarnings)),
 	}, options)
+	// A service from before lessCertainFindings omits it; say nothing
+	// rather than claim none were left out.
+	if count := response.Summary.LessCertainFindings; count != nil {
+		properties["slopcop.lessCertainFindings"] = *count
+	}
 	if unnamed := incompleteUnlisted(response); unnamed > 0 {
 		properties["slopcop.incompleteUnlisted"] = unnamed
 	}
@@ -1175,8 +1304,29 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	if unnamed := inconclusiveUnlisted(response, inconclusive); unnamed > 0 {
 		properties["slopcop.inconclusiveUnlisted"] = unnamed
 	}
+	// What .slopcop/config.toml [check] excluded is never silent: the run
+	// carries it, and each rule that matched nothing is a warning.
+	if exclusions := response.Exclusions; exclusions != nil {
+		properties["slopcop.exclusions"] = exclusions
+		properties["slopcop.onlyExcluded"] = onlyExcluded(response)
+		for _, warning := range exclusions.Warnings {
+			notifications = append(notifications, sarifNotification{
+				Level: "warning",
+				Message: sarifMessage{Text: fmt.Sprintf(
+					"[check] rule %s matches no selected policy, so it excludes nothing", warning.Rule,
+				)},
+				Properties: map[string]any{"slopcop.exclusionWarning": warning.Kind},
+			})
+		}
+		if onlyExcluded(response) {
+			notifications = append(notifications, sarifNotification{
+				Level:   "note",
+				Message: sarifMessage{Text: "Nothing checked: every changed file is excluded by .slopcop/config.toml"},
+			})
+		}
+	}
 
-	return encode(w, sarifLog(sarifRun{
+	return encode(w, sarifLogWithReview(options, sarifRun{
 		Tool: sarifTool{Driver: sarifDriver{
 			Name:           "SlopCop",
 			InformationURI: "https://slopcop.com",
@@ -1237,4 +1387,169 @@ func encode(w io.Writer, value any, what string) error {
 		return fmt.Errorf("encode %s: %w", what, err)
 	}
 	return nil
+}
+
+// Write renders the static response and optional review.
+func Write(w io.Writer, response service.Response, format string, options Options) error {
+	if format == "" || format == FormatHuman {
+		if _, err := io.WriteString(w, human(response, options)); err != nil {
+			return err
+		}
+		return writeReview(w, options.Review)
+	}
+	return writeBase(w, response, format, options)
+}
+
+// WritePending renders a still-running static check and optional review.
+func WritePending(w io.Writer, pending service.Pending, format string, options Options) error {
+	if format == "" || format == FormatHuman {
+		return writeReview(w, options.Review)
+	}
+	return writePendingBase(w, pending, format, options)
+}
+
+// WriteSkipped renders a skipped static check and optional review.
+func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) error {
+	if format == "" || format == FormatHuman {
+		return writeReview(w, options.Review)
+	}
+	return writeSkippedBase(w, skipped, format, options)
+}
+
+// WriteFailure renders a static failure and optional review.
+func WriteFailure(w io.Writer, failure *service.Error, format string, options Options) error {
+	if format == "" || format == FormatHuman {
+		return writeReview(w, options.Review)
+	}
+	return writeFailureBase(w, failure, format, options)
+}
+
+// WriteAI renders a local-only review.
+func WriteAI(w io.Writer, format string, options Options) error {
+	switch format {
+	case "", FormatHuman:
+		return writeReview(w, options.Review)
+	case FormatJSON:
+		return encode(w, aiReport{Status: status("clean", options), Approved: options.Approved, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
+	case FormatSARIF:
+		return encode(w, sarifLogWithReview(options, sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "SlopCop", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: true}}, Properties: runProperties(map[string]any{"slopcop.status": status("clean", options)}, options)}), "sarif report")
+	default:
+		return fmt.Errorf("unknown format %q", format)
+	}
+}
+
+// aiReport is the JSON document for a check without a static half.
+type aiReport struct {
+	// Status is the AI-only report's Status field.
+	Status   string `json:"status"`
+	Approved bool   `json:"approved"`
+	// EmptyChange is the AI-only report's EmptyChange field.
+	EmptyChange bool `json:"emptyChange,omitempty"`
+	// Review is the AI-only report's Review field.
+	Review *reviewJSON `json:"review,omitempty"`
+	// SkillUpdated is the AI-only report's SkillUpdated field.
+	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+}
+
+// reviewJSON gives the local verdict its public JSON field names.
+type reviewJSON struct {
+	// Status is the local review's Status field.
+	Status review.Status `json:"status"`
+	// BaseTree is the local review's BaseTree field.
+	BaseTree string `json:"baseTree"`
+	// Tree is the local review's Tree field.
+	Tree string `json:"tree"`
+	// IntentSource is the local review's IntentSource field.
+	IntentSource string `json:"intentSource"`
+	// LogDir is the local review's LogDir field.
+	LogDir string `json:"logDir"`
+	// Reviewers is the local review's Reviewers field.
+	Reviewers []review.Reviewer `json:"reviewers"`
+	// Error is the local review's Error field.
+	Error string `json:"error"`
+	// Reused is the local review's Reused field.
+	Reused bool `json:"reused"`
+}
+
+// status applies the combined status only when one was supplied.
+func status(static string, options Options) string {
+	if options.Status != "" {
+		return options.Status
+	}
+	return static
+}
+
+// reviewValue converts a verdict to its report representation.
+func reviewValue(v *review.Verdict) *reviewJSON {
+	if v == nil {
+		return nil
+	}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
+	if result.Reviewers == nil {
+		result.Reviewers = []review.Reviewer{}
+	}
+	return result
+}
+
+// sarifLogWithReview adds a second typed run for the local review.
+func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
+	log := sarifLog(static)
+	if options.Review == nil {
+		return log
+	}
+	v := options.Review
+	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed}}, Properties: map[string]any{"slopcop.status": v.Status}}
+	for _, r := range v.Reviewers {
+		if r.Status == review.StatusFindings {
+			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})
+		}
+		if r.Status == review.StatusFailed {
+			run.Invocations[0].ToolExecutionNotifications = append(run.Invocations[0].ToolExecutionNotifications, sarifNotification{Level: "error", Message: sarifMessage{Text: r.Error}})
+		}
+	}
+	if v.Error != "" {
+		run.Invocations[0].ToolExecutionNotifications = append(run.Invocations[0].ToolExecutionNotifications, sarifNotification{Level: "error", Message: sarifMessage{Text: v.Error}})
+	}
+	log.Runs = append(log.Runs, run)
+	return log
+}
+
+// writeReview renders the review section when a verdict exists.
+func writeReview(w io.Writer, v *review.Verdict) error {
+	if v == nil {
+		return nil
+	}
+	writeReviewHuman(w, *v)
+	return nil
+}
+
+// writeReviewHuman renders one review verdict for a person.
+func writeReviewHuman(w io.Writer, v review.Verdict) {
+	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
+	for _, r := range v.Reviewers {
+		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)
+		if r.Text != "" {
+			for _, line := range strings.Split(r.Text, "\n") {
+				fmt.Fprintf(w, "    %s\n", printable(line))
+			}
+		}
+		if r.Error != "" {
+			fmt.Fprintf(w, "    Error: %s\n", printable(r.Error))
+		}
+		if r.Log != "" {
+			fmt.Fprintf(w, "    Log: %s\n", printable(r.Log))
+		}
+	}
+	if v.Error != "" {
+		fmt.Fprintf(w, "  Error: %s\n", printable(v.Error))
+	}
+	if v.IntentSource != "" {
+		fmt.Fprintf(w, "  Intent: %s\n", printable(v.IntentSource))
+	}
+	if v.LogDir != "" {
+		fmt.Fprintf(w, "  Logs: %s\n", printable(v.LogDir))
+	}
+	if v.Reused {
+		fmt.Fprintln(w, "  Reused previous review")
+	}
 }

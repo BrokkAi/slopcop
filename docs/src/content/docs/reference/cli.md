@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every slopcop command and flag. Check, enable, status, login, logout, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
+description: "Every slopcop command and flag. Check, enable, status, login, logout, service, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
 sidebar:
   order: 1
 ---
@@ -18,13 +18,15 @@ completion <shell>` generates shell completion.
 
 | Flag | Meaning |
 | --- | --- |
-| `--service URL` | the SlopCop check service URL (also `SLOPCOP_SERVICE`); default `https://slopcop.com` |
+| `--service URL` | the SlopCop check service URL for this command (also `SLOPCOP_SERVICE`); default `https://slopcop.com`. A command that uses another says so on stderr |
 | `-v`, `--version` | print the version and exit |
 | `-h`, `--help` | help for the command |
 
 ## `slopcop check`
 
-Check the working tree through the hosted check API. See
+Check the working tree with hosted static analysis and local review by
+default. Use `--mode static` for the hosted half alone or `--mode ai` for
+review without login, repository enablement, or supported origin. See
 [Run a check](/checks/run-a-check/).
 
 ```console
@@ -36,6 +38,10 @@ slopcop --root ../repo --base origin/main
 
 | Flag | Meaning |
 | --- | --- |
+| `--mode both\|static\|ai` | both halves (the default where reviewers are configured, outside CI), static only (the default otherwise), or review only |
+| `--static`, `--ai` | shortcuts for the corresponding mode |
+| `--intent TEXT` | user request if no session transcript is found |
+| `--review-timeout DURATION` | review timeout (default `20m`) |
 | `--root PATH` | repository path to check (default `.`) |
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` (default: merge base with the upstream branch, then with `origin/HEAD`, then `HEAD`) |
 | `--base-exact REV` | exact base commit or revision, used without taking a merge base |
@@ -47,7 +53,7 @@ slopcop --root ../repo --base origin/main
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
 | `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
 | `--if-enabled` | check only if the repository is active in the workspace; otherwise exit `0` without sending a check |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
+| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 Exit codes: `0` clean, `1` new findings, `2` incomplete or failed, `3` still
@@ -93,27 +99,46 @@ the checkout has no `origin`, or the service cannot answer.
 
 Sign in to the SlopCop check service. With no flags, starts the browser device
 flow: prints a link that opens the approval page with the code filled in, then
-waits for approval. Also installs the agent skill into every well-known skills
-directory whose harness is installed here, as every check does. See
+waits for approval. Login does not install the agent skill. See
 [Sign in](/account/sign-in/).
 
 | Flag | Meaning |
 | --- | --- |
 | `--token TOKEN` | store an existing token instead of starting the browser flow |
+| `--default` | also make this service the default for every command. It asks at a terminal and refuses when stdin is not one |
+
+Each service keeps its own login. With `--service`, login signs in to that
+service, leaves the other logins as they are, and does not change the default
+unless `--default` is passed.
 
 ## `slopcop logout`
 
-Forget the stored credential.
+Forget the credential stored for one service: the one `--service` or
+`SLOPCOP_SERVICE` names, else the default. Other logins stay.
+
+| Flag | Meaning |
+| --- | --- |
+| `--all` | forget the credential for every service |
+
+## `slopcop service`
+
+List the services this machine is signed in to, or change the default.
+
+| Command | Meaning |
+| --- | --- |
+| `slopcop service list` | the default service and every service with a stored login; `--format json` has `services`, each with `service`, `default`, `signedIn` |
+| `slopcop service use URL` | make a service the default for every command without `--service`. It asks at a terminal and refuses when stdin is not one |
 
 ## `slopcop whoami`
 
 Show the account behind this login, the workspace it is bound to (the one its
 checks and ignores run in, and bill), that workspace's plan, and the service
-URL. Run it before a check when it matters which workspace pays.
+URL. With logins stored for more than one service, it also lists them and
+marks the default. Run it before a check when it matters which workspace pays.
 
 | Flag | Meaning |
 | --- | --- |
-| `--format human\|json` | output format (default `human`); `json` has `service`, `account`, `workspace`, `plan` |
+| `--format human\|json` | output format (default `human`); `json` has `service`, `account`, `workspace`, `plan`, `services` |
 
 ## `slopcop workspace`
 
@@ -164,12 +189,17 @@ message.
 
 ## `slopcop init`
 
-Install the agent skill that ships inside this binary, and a Claude Code,
-Codex and Grok Stop hook that checks what a session wrote when the agent stops. See
+Run inside a repository to install local skills and static-only Stop hooks
+and push gates for Claude Code and Codex. Tracked files are
+left alone; paths are added to `.git/info/exclude`. Init removes old
+user-level SlopCop hooks for Claude Code and Codex, and SlopCop skill copies.
+Grok's Stop hook stays at user level, in `hooks/slopcop.json` under
+`GROK_HOME` or `~/.grok`. See
 [The agent skill](/agents/skill/) and [The Stop hook](/agents/stop-hook/).
 
 | Flag | Meaning |
 | --- | --- |
+| `--root PATH` | repository path (default `.`) |
 | `--no-skill` | do not install or update the agent skill |
 | `--no-hooks` | do not install or update the automatic check hook |
 | `--remove-hooks` | remove SlopCop's automatic check hook and nothing else |
@@ -182,6 +212,23 @@ the hook's input on stdin and answers in the harness's hook protocol.
 `slopcop hook codex || true` and `slopcop hook grok || true`; Kimi Code's is
 added by hand (see [Grok and Kimi Code](/agents/grok-kimi/)). It is not meant
 to be run by hand.
+
+## `slopcop config` and `slopcop override`
+
+`slopcop config get|set|unset <key> [value]` manages `mode` (`both`,
+`static`, `ai`), `review.reviewers` (1–4 comma-separated entries, in order;
+duplicates allowed), and `review.timeout` (default `20m`). Adapter command
+overrides are under `review.adapters.<codex|dsh|claude>.command`.
+
+`slopcop override --reason "..."` accepts demonstrably incorrect findings
+from the last complete review of the same working-tree snapshot, provided
+the static half passed or did not run. It records the reason and cannot
+accept failed or incomplete reviews or real bugs.
+
+The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
+Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
+open a pull request until HEAD's tree has a passing check or valid override. It also
+blocks any shell command that names `refs/slopcop/`.
 
 ## `slopcop version`
 

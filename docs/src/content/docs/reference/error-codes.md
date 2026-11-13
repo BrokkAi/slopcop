@@ -46,7 +46,7 @@ has not added, so a check never adds one.
 | `insufficient_credits` | 4 | The workspace is out of credits, so no new check runs. Add credits at the printed `topUpUrl`. See [Credits](/account/credits/). |
 | `repository_disabled` | 4 | The workspace's owner disabled the repository. `slopcop whoami` names the workspace. |
 | `repository_not_enabled` | 4 | The workspace has not added the repository, so the CLI sent nothing. Run `slopcop enable` from the checkout at a terminal. `--if-enabled` skips this refusal for automatic checks. See [Repositories](/account/repositories/). |
-| `repository_add_unconfirmed` | 4 | The check tried to add a repository the workspace then pays for. Once a person approves it, run the check again with `--add-repository --workspace <name\|id>`, or run `slopcop enable`. See [Repositories](/account/repositories/). |
+| `repository_add_unconfirmed` | 4 | The check tried to add a repository to a workspace, which then pays for its checks. Once a person approves it, run the check again with `--add-repository --workspace <name\|id>`, or run `slopcop enable`. See [Repositories](/account/repositories/). |
 | `workspace_repository_limit_reached`, `active_repository_limit_reached` | 4 | The workspace is at its limit of repositories or active repositories. The owner chooses which stay active on the Repositories page, or unlocks the workspace. |
 | `workspace_not_found` | 2 | Pick a name from `slopcop workspace list`, or pass the id. |
 | `workspace_repository_not_found` | 2 | The repository is not in that workspace; `slopcop repo list` shows what is. |

@@ -12,14 +12,28 @@ slopcop check --format json      # same, machine-readable
 slopcop --root ../repo --base origin/main
 ```
 
-Running `slopcop` with no subcommand runs the check; `slopcop check` is the
-same command. Every check it sends is one request, and a clean result or a
-failure always comes from the service. `--if-enabled` can skip a repository
-the workspace has not enabled; that is a `skipped` result, never a clean one.
+Running `slopcop` with no subcommand runs the check; `slopcop check` is the same
+command. The static half sends one request and its result comes from the
+service. The local review has a separate result. `--if-enabled` can skip a
+repository the workspace has not enabled; that is a `skipped` result, never a
+clean one.
+
+## Local review
+
+By default, `slopcop check` runs the hosted static check and local review
+concurrently, once reviewers are configured (`slopcop init` picks them). With
+none configured, or in a CI job, it runs only the static check. `--mode static` runs only the hosted check; `--mode ai` runs only
+review without a SlopCop login, enabled repository, or supported origin.
+`--static` and `--ai` are shortcuts. The review uses Node.js with `npx` and
+existing harness logins. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
 
 ## What is sent
 
-One git patch from the base commit to the working tree. The patch carries
+In modes with static analysis, one git patch travels from the base commit to the
+working tree. The local reviewers read the captured tree diff. The patch carries
 committed but unpushed work, unstaged edits, untracked files, deletions,
 renames, mode changes, and binary content. Git-ignored files stay out, except
 selected `.slopcop/policies` rules, which must travel because the service
@@ -95,9 +109,9 @@ work passed.
 | `--timeout DURATION` | how long to wait for the result (default `10m`); a check still running then exits `3` |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's; see [Workspaces](/account/workspaces/) |
 | `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` and send nothing. For automatic checks; see [Repositories](/account/repositories/) |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
+| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
 | `--service URL` | the check service (also `SLOPCOP_SERVICE`) |
-| `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
+| `--verbose` | print the resolved request to stderr, and in `human` name each inconclusive check and the files and rules each [`.slopcop/config.toml` exclusion](/checks/false-positives/#exclude-paths-from-checks) resolved to |
 
 ### The threshold
 
@@ -107,6 +121,11 @@ included, is worth fixing before the change lands. The service's own default
 for a request without a level is Bifrost's `warning`; pass `--fail-on warning`
 to match it. New findings that cross the threshold exit `1` even when some
 rule did not complete.
+
+The threshold decides only the exit code. The report's `status` is `findings`
+whenever the change has new findings, so `--fail-on never` reports
+`"status": "findings"` and exits `0`, and `--fail-on error` does the same for
+a change whose new findings are all warnings or notes.
 
 The threshold applies to `definite` findings only. By default the service
 leaves out every `possible` and `heuristic` finding before it decides the

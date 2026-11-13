@@ -69,10 +69,12 @@ func sendFinding(
 	if err != nil {
 		return service.IgnoreResponse{}, err
 	}
-	client, err := service.New(resolveServiceURL(cfg, serviceFlag), resolveToken(cfg), "slopcop/"+version, ignoreTimeout)
+	target := resolveServiceURL(cfg, serviceFlag)
+	client, err := service.New(target, resolveToken(cfg, target), "slopcop/"+version, ignoreTimeout)
 	if err != nil {
 		return service.IgnoreResponse{}, err
 	}
+	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
 		return service.IgnoreResponse{}, serviceFailure(cmd, err)

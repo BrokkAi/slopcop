@@ -2,6 +2,9 @@ import { unified } from '@astrojs/markdown-remark';
 import starlight from '@astrojs/starlight';
 import { defineConfig } from 'astro/config';
 import rehypeBasePathLinks from './rehype-base-path-links.mjs';
+import rehypeReading from './rehype-reading.mjs';
+import { slopcopField, slopcopPaper } from './src/code-themes.mjs';
+import { sidebar } from './src/sidebar.mjs';
 
 // The deploy workflow sets PUBLIC_DOCS_SITE and PUBLIC_DOCS_BASE. A local
 // `astro dev` always serves from `/`.
@@ -11,15 +14,18 @@ const isDev = process.argv.includes('dev');
 const base = isDev ? '/' : productionBase;
 const socialCardPath = [productionBase.replace(/^\/+|\/+$/g, ''), 'og.png'].filter(Boolean).join('/');
 const socialCardUrl = new URL(`/${socialCardPath}`, site).href;
+// The text face is on every page, so every page preloads its regular weight.
+const textFaceUrl = `/${[base.replace(/^\/+|\/+$/g, ''), 'fonts/OverusedGrotesk-400.woff2'].filter(Boolean).join('/')}`;
+const iconUrl = (file) => `/${[base.replace(/^\/+|\/+$/g, ''), file].filter(Boolean).join('/')}`;
 const socialCardAlt =
-  'SlopCop documentation: static analysis deep enough for CI, fast enough for your coding agent to run on every edit.';
+  'SlopCop documentation. A detective on a ladder takes a box from tall shelves of evidence boxes under a hanging lamp.';
 
 export default defineConfig({
   site,
   base,
   markdown: {
     processor: unified({
-      rehypePlugins: [[rehypeBasePathLinks, { base }]],
+      rehypePlugins: [[rehypeBasePathLinks, { base }], rehypeReading],
     }),
   },
   integrations: [
@@ -37,27 +43,58 @@ export default defineConfig({
         { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
         { tag: 'meta', attrs: { name: 'twitter:image', content: socialCardUrl } },
         { tag: 'meta', attrs: { name: 'twitter:image:alt', content: socialCardAlt } },
+        {
+          tag: 'link',
+          attrs: { rel: 'preload', href: textFaceUrl, as: 'font', type: 'font/woff2', crossorigin: true },
+        },
+        // Starlight links favicon.svg, the tab icon. Search results and home screens want a bitmap: Google
+        // asks for a multiple of 48 pixels, and iOS takes the apple-touch-icon.
+        { tag: 'link', attrs: { rel: 'icon', href: iconUrl('favicon.ico'), sizes: '16x16 32x32 48x48' } },
+        { tag: 'link', attrs: { rel: 'icon', href: iconUrl('icon-192.png'), sizes: '192x192', type: 'image/png' } },
+        { tag: 'link', attrs: { rel: 'apple-touch-icon', href: iconUrl('apple-touch-icon.png') } },
       ],
-      customCss: ['./src/styles/slopcop.css'],
+      customCss: ['./src/styles/tokens.css', './src/styles/slopcop.css'],
+      routeMiddleware: './src/route-data.ts',
+      // Code sits in a well with no frame, in the mono face at 13 on 21, in four inks.
       expressiveCode: {
+        themes: [slopcopField, slopcopPaper],
+        minSyntaxHighlightingColorContrast: 0,
         styleOverrides: {
           borderRadius: '0',
-          borderColor: 'var(--sc-line)',
-          borderWidth: '1px',
-          codeFontFamily: 'var(--sc-font-mono)',
+          borderColor: 'transparent',
+          borderWidth: '0px',
+          codeFontFamily: 'var(--sc-mono)',
+          codeFontSize: 'var(--sc-t-mono)',
+          codeLineHeight: '21px',
+          codePaddingBlock: 'var(--sc-4)',
+          codePaddingInline: 'var(--sc-5)',
           codeBackground: 'var(--sc-well)',
+          codeForeground: 'var(--sc-fg)',
+          uiFontFamily: 'var(--sc-sans)',
+          uiFontSize: 'var(--sc-ui-small)',
+          focusBorder: 'var(--sc-fg)',
           frames: {
             shadowColor: 'transparent',
-            terminalTitlebarBackground: 'var(--sc-surface)',
-            terminalTitlebarBorderBottomColor: 'var(--sc-line-soft)',
-            terminalTitlebarDotsForeground: 'var(--sc-line-strong)',
-            terminalTitlebarDotsOpacity: '1',
-            editorTabBarBackground: 'var(--sc-surface)',
+            frameBoxShadowCssValue: 'none',
+            editorBackground: 'var(--sc-well)',
+            editorTabBarBackground: 'var(--sc-well)',
+            editorTabBarBorderColor: 'transparent',
+            editorTabBarBorderBottomColor: 'var(--sc-hair)',
             editorActiveTabBackground: 'var(--sc-well)',
-            editorActiveTabIndicatorTopColor: 'var(--sc-accent)',
-            editorTabBarBorderBottomColor: 'var(--sc-line-soft)',
-            tooltipSuccessBackground: 'var(--sc-accent-dim)',
-            tooltipSuccessForeground: 'var(--sc-accent-text)',
+            editorActiveTabForeground: 'var(--sc-quiet)',
+            editorActiveTabBorderColor: 'transparent',
+            editorActiveTabIndicatorTopColor: 'transparent',
+            editorActiveTabIndicatorBottomColor: 'transparent',
+            terminalBackground: 'var(--sc-well)',
+            terminalTitlebarBackground: 'var(--sc-well)',
+            terminalTitlebarForeground: 'var(--sc-quiet)',
+            terminalTitlebarBorderBottomColor: 'var(--sc-hair)',
+            terminalTitlebarDotsOpacity: '0',
+            inlineButtonBackground: 'var(--sc-fg)',
+            inlineButtonForeground: 'var(--sc-fg)',
+            inlineButtonBorder: 'var(--sc-fg)',
+            tooltipSuccessBackground: 'var(--sc-fg)',
+            tooltipSuccessForeground: 'var(--sc-bg)',
           },
         },
       },
@@ -67,7 +104,8 @@ export default defineConfig({
         ThemeSelect: './src/components/SlopCopThemeSelect.astro',
       },
       logo: {
-        src: './src/assets/helmet.svg',
+        light: './src/assets/gumshoe-light.svg',
+        dark: './src/assets/gumshoe-dark.svg',
         alt: 'SlopCop',
       },
       favicon: '/favicon.svg',
@@ -79,78 +117,7 @@ export default defineConfig({
         { icon: 'github', label: 'GitHub', href: 'https://github.com/BrokkAi/slopcop' },
         { icon: 'discord', label: 'Discord', href: 'https://discord.gg/KVk8n5sENg' },
       ],
-      sidebar: [
-        {
-          label: 'Get started',
-          items: [
-            { label: 'What is SlopCop?', slug: 'get-started/overview' },
-            { label: 'Quickstart', slug: 'get-started/quickstart' },
-            { label: 'Install the CLI', slug: 'get-started/install' },
-            { label: 'What a check finds', slug: 'get-started/what-a-check-finds' },
-          ],
-        },
-        {
-          label: 'Coding agents',
-          items: [
-            { label: 'SlopCop in your agent', slug: 'agents/overview' },
-            { label: 'Claude Code', slug: 'agents/claude-code' },
-            { label: 'Codex', slug: 'agents/codex' },
-            { label: 'OpenCode and Kilo Code', slug: 'agents/opencode' },
-            { label: 'Pi', slug: 'agents/pi' },
-            { label: 'GitHub Copilot CLI', slug: 'agents/copilot-cli' },
-            { label: 'Grok and Kimi Code', slug: 'agents/grok-kimi' },
-            { label: 'Other agents', slug: 'agents/other-agents' },
-            { label: 'Lovable, Bolt, and MCP', slug: 'agents/app-builders' },
-            { label: 'The agent skill', slug: 'agents/skill' },
-            { label: 'The Stop hook', slug: 'agents/stop-hook' },
-            { label: 'Managed rollout', slug: 'agents/managed-rollout' },
-          ],
-        },
-        {
-          label: 'Checks',
-          items: [
-            { label: 'Run a check', slug: 'checks/run-a-check' },
-            { label: 'Read a report', slug: 'checks/read-a-report' },
-            { label: 'Exit codes', slug: 'checks/exit-codes' },
-            { label: 'Output formats', slug: 'checks/output-formats' },
-            { label: 'False positives', slug: 'checks/false-positives' },
-            { label: 'Repository rules', slug: 'checks/repository-rules' },
-            { label: 'Gate a change in CI', slug: 'checks/ci' },
-            { label: 'Check pull requests', slug: 'checks/pull-requests' },
-          ],
-        },
-        {
-          label: 'Account and billing',
-          items: [
-            { label: 'Sign in', slug: 'account/sign-in' },
-            { label: 'Workspaces', slug: 'account/workspaces' },
-            { label: 'Repositories', slug: 'account/repositories' },
-            { label: 'Private repositories', slug: 'account/private-repositories' },
-            { label: 'Credits and what it costs', slug: 'account/credits' },
-            { label: 'The web app', slug: 'account/web-app' },
-            { label: 'What leaves your machine', slug: 'account/privacy' },
-          ],
-        },
-        {
-          label: 'Reference',
-          items: [
-            { label: 'CLI reference', slug: 'reference/cli' },
-            { label: 'Configuration', slug: 'reference/configuration' },
-            { label: 'Error codes', slug: 'reference/error-codes' },
-            { label: 'HTTP API', slug: 'reference/api' },
-          ],
-        },
-        {
-          label: 'Contribute',
-          items: [
-            { label: 'Development', slug: 'contribute/development' },
-            { label: 'Releasing', slug: 'contribute/releasing' },
-            { label: 'Publishing to npm', slug: 'contribute/npm-publishing' },
-            { label: 'Publishing to PyPI', slug: 'contribute/pypi-publishing' },
-            { label: 'This documentation', slug: 'contribute/docs' },
-          ],
-        },
-      ],
+      sidebar,
     }),
   ],
 });

@@ -13,6 +13,7 @@ import (
 
 func newLoginCommand(serviceURL *string, version string) *cobra.Command {
 	var token string
+	makeDefault := false
 	command := &cobra.Command{
 		Use:   "login",
 		Short: "Sign in to the SlopCop check service",
@@ -22,8 +23,12 @@ With no flags, login starts the browser device flow: it prints a link that
 opens the approval page with the code filled in, then waits for approval. Pass --token to store an existing credential,
 which is what CI and agent harnesses use.
 
-Login also installs the agent skill into every well-known skills directory
-whose harness is installed here, as every check does.`,
+Each service keeps its own login. --service or $SLOPCOP_SERVICE signs in to
+another deployment and leaves the other logins, and the default service, as
+they are; pass --default to also make it the default for every command,
+which asks at a terminal like service use does.
+
+Run slopcop init in a repository to install the agent skill and hooks.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()
@@ -32,10 +37,23 @@ whose harness is installed here, as every check does.`,
 			}
 			target := strings.TrimRight(resolveServiceURL(cfg, *serviceURL), "/")
 			credential := strings.TrimSpace(token)
-			if credential == "" {
-				client, err := service.New(target, "", "slopcop/"+version, 0)
-				if err != nil {
+			// The check a command makes of its service URL, before a
+			// credential is stored for one no command could use.
+			client, err := service.New(target, "", "slopcop/"+version, 0)
+			if err != nil {
+				return err
+			}
+			hosted := config.Origin(target) == config.DefaultServiceURL
+			if makeDefault && config.Origin(target) != config.Origin(cfg.DefaultService()) {
+				// The same step as service use, so the same question, and
+				// before anything is sent or stored.
+				if err := confirmDefaultService(cmd, cfg, target, "login --default"); err != nil {
 					return err
+				}
+			}
+			if credential == "" {
+				if !hosted {
+					fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: signing in to %s\n", config.Origin(target))
 				}
 				noticeUpdates(client, cmd.ErrOrStderr(), version)
 				start, err := client.StartDevice(cmd.Context())
@@ -50,20 +68,25 @@ whose harness is installed here, as every check does.`,
 					return remedyError(err)
 				}
 			}
-			cfg.ServiceURL = target
-			cfg.Token = credential
+			cfg.SetToken(target, credential)
+			if makeDefault {
+				cfg.ServiceURL = target
+			}
 			path, err := config.Save(cfg)
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: logged in to %s (%s)\n", target, path)
-			// Signing in is the one step every user takes, so it also puts
-			// the agent skill in place; every check keeps it current.
-			syncSkillAndReport(cmd.OutOrStdout(), cmd.ErrOrStderr(), version)
+			if current := config.Origin(cfg.DefaultService()); current != config.Origin(target) {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"slopcop: the default service is still %s; pass --service %s to use this login, or make it the default with `slopcop service use %s`\n",
+					current, target, target)
+			}
 			return nil
 		},
 	}
 	command.Flags().StringVar(&token, "token", "", "store an existing token instead of starting the browser flow")
+	command.Flags().BoolVar(&makeDefault, "default", false, "also make this service the default for every command; asks at a terminal")
 	return command
 }
 

@@ -16,21 +16,25 @@ completed.
 
 | Status | Meaning |
 | --- | --- |
-| `clean` | Every selected rule completed for the files the change writes (an inconclusive one counts as completed), and no new finding crossed `--fail-on`. The only status that supports "nothing found", and only for those rules, files, and lines. Exit `0`. |
-| `findings` | A new finding crossed `--fail-on`. Other rules may still be incomplete. Exit `1`. |
-| `incomplete` | No new finding crossed `--fail-on`, but some rule could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. Exit `2`. |
+| `clean` | Every selected rule completed for the files the change writes (an inconclusive one counts as completed), and the change has no new finding. The only status that supports "nothing found", and only for those rules, files, and lines. Exit `0`. |
+| `findings` | The change has new findings. Other rules may still be incomplete. Exit `1` when one crossed `--fail-on`; below the threshold, or with `--fail-on never`, the exit is what it would be without them: `0`, or `2` when a rule did not complete. |
+| `incomplete` | The change has no new finding, but some rule could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. Exit `2`. |
 | `pending` | Not a result yet: the check was still running when `--timeout` ran out. Run the same check again. Exit `3`. |
 | `failed` | The service refused or could not run the check. Carries a `code`, `message`, and `remedy`. Exit `4` when only a person can clear it, `2` otherwise. |
 | `skipped` | The CLI sent nothing because `--if-enabled` found the repository not active. Carries `code: repository_not_enabled`, the repository, and its state. Exit `0`; this is not a check result. |
 
-The service sets the status and the CLI follows it. Only `clean` exits `0`; a
-status this CLI does not know exits `2` with the status named on stderr, so a
-newer service can never pass a check by accident. `skipped` comes from the CLI
-itself and is the one status that means no check ran on purpose.
+The CLI merges static and review statuses. Top-level JSON `status` matches
+the exit code, except that new findings below `--fail-on` (or with
+`--fail-on never`) still read `findings`; `staticStatus` keeps the static
+half's status when it differs.
+Review details are in `review`, including each configured reviewer, its error
+if it could not run, and its log path. Exit `0` can include a static skip or empty review;
+inspect those statuses before calling the change checked.
 
 ## New and existing findings
 
-A check fails only on findings the change introduced or touched. The service
+The static half fails on findings the change introduced or touched.
+Review findings are model judgments about the captured change. The service
 marks a finding new when it is in a file the change writes and its lines meet a
 line the change added, or the line beside one it removed. Findings that were
 already in the code are counted (`summary.existingFindings`, and `N already in
@@ -53,7 +57,9 @@ A check lists only `definite` findings unless run with `--certainty all`. The
 others are counted, in `human` on the summary line ("2 less certain not
 shown"), in `json` as `summary.lessCertainFindings`, and in `sarif` as
 `properties["slopcop.lessCertainFindings"]`; they do not count in
-`newFindings` and do not change the status.
+`newFindings` and do not change the status. Under `--certainty all` the
+count is `0`, and `json` and `sarif` still carry it, so you can tell the
+filter took effect.
 
 Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 `properties["slopcop.findingId"]` in `sarif`. It is what

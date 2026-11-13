@@ -171,3 +171,34 @@ func TestBaseWarnsWhenMergedInLineDiverged(t *testing.T) {
 		}
 	}
 }
+
+// A commit that has already landed on origin's default branch keeps the
+// --base it names: HEAD merged nothing from that line, so the base must not
+// move to HEAD and empty the patch.
+func TestBaseKeepsNamedBaseOnLandedCommit(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	commitFile(t, repo, "landed.txt", "landed work\n")
+	commitFile(t, repo, "later.txt", "later work on main\n")
+	publishMain(t, repo)
+	runGit(t, repo, "checkout", "-q", "--detach", "HEAD~1")
+	parent := runGit(t, repo, "rev-parse", "HEAD^")
+
+	server, captured := checkCapture(t)
+	code, _, stderr := runCLI(t,
+		"check", "--root", repo, "--service", server.URL, "--format", "json", "--base", parent,
+	)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	request := (*captured)[0]
+	if request["baseCommit"] != parent {
+		t.Errorf("baseCommit = %v, want the named base %s", request["baseCommit"], parent)
+	}
+	if patch := decodedPatch(t, request); !strings.Contains(patch, "b/landed.txt") {
+		t.Errorf("patch should carry the landed commit's file:\n%s", patch)
+	}
+	if strings.Contains(stderr, "patch is empty") || strings.Contains(stderr, "carries their changes") {
+		t.Errorf("stderr should not report an empty or oversized patch: %q", stderr)
+	}
+}

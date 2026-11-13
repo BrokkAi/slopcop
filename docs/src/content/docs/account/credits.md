@@ -1,32 +1,36 @@
 ---
 title: Credits and what it costs
-description: "Checks are free, and so is a workspace's first repository. Each active repository after that costs credits every 30 days. What happens when credits run out, and who pays nothing."
+description: "A workspace gets 1,000 free checks each calendar month, then pays for each check with prepaid credits. Repositories are free. What happens when credits run out, and who pays nothing."
 sidebar:
   order: 5
 ---
 
-**Checks are free.** A check of a change from the CLI, whether an agent or CI
-ran it, never uses credits, in every workspace. There are no paid tiers and no
+**A workspace gets 1,000 free checks each calendar month.** The month is the
+calendar month in UTC. A check uses a free check while the month has one left,
+whether an agent, CI, or a pull request ran it. There are no paid tiers and no
 per-seat price.
 
-**Your first repository is free.** A workspace's oldest active repository costs
-nothing.
+**Each check after those costs 0.1 credits.** One credit is one US cent, so
+that is $0.001 a check, charged when the check finishes. A check that fails is
+not charged, and asking again for a check that already ran is not charged
+again. Checks' fractions add up, and the balance goes down by a whole credit
+each time they reach one.
 
-**Each active repository after that costs 100 credits per 30 days.** One credit
-is one US cent, so that is one dollar a month per repository, charged one UTC
-day at a time (three or four credits a day, adding up to exactly 100 across 30
-days). A disabled repository, or one being deleted, costs nothing. The current
-price is listed on the workspace's Credits page and on
-[slopcop.com](https://slopcop.com).
+**Repositories are free.** Adding or enabling a repository costs nothing.
+
+Credits are prepaid. The workspace's owner buys them in packs on the
+workspace's Credits page, and can have them bought automatically when the
+balance falls below an amount the owner chooses. The current prices are listed
+on the Credits page and on the [pricing page](https://slopcop.com/pricing).
 
 ## When credits run out
 
-A day is paid in full or not at all, and a workspace never goes into debt.
-When the available balance cannot pay the day for its repositories, nothing is
-charged and the workspace is out of credits: every new check of it is refused
-with `insufficient_credits` and a `topUpUrl`, the free repository's checks too,
-until credits are added. The first check after a top-up pays the day and runs.
-A day that went unpaid is never charged later.
+A workspace never goes into debt. Once the month's free checks are used and
+the balance cannot pay for a check, the workspace is out of credits: every new
+check of it is refused with `insufficient_credits` and a `topUpUrl` until
+credits are added. The workspace's pull request checks pause, and the
+workspace's owner is emailed. Checks resume once credits are added or the next
+month's free checks arrive.
 
 An agent that hits `insufficient_credits` stops and tells you; the printed link
 opens the Credits page. Only the workspace's owner buys credits.

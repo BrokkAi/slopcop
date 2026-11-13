@@ -28,7 +28,7 @@ const currentPath = Astro.url.pathname.replace(/\/+$/, '/');
         return <a href={href} aria-current={current ? 'page' : undefined}>{label}</a>;
       })
     }
-    <a href="https://slopcop.com" class="sc-nav__site">slopcop.com <span aria-hidden="true">↗</span></a>
+    <a href="https://slopcop.com">slopcop.com</a>
   </nav>
 
   <div class="sc-search sl-flex print:hidden"><Search /></div>
@@ -41,62 +41,48 @@ const currentPath = Astro.url.pathname.replace(/\/+$/, '/');
 
 <style>
   @layer starlight.user {
+    /* The bar: the wordmark on the left, everything else on the right, in the sans at 16. */
     .sc-header {
-      display: grid;
-      grid-template-columns: auto 1fr auto auto;
+      display: flex;
       align-items: center;
-      gap: clamp(0.75rem, 2vw, 2rem);
+      gap: var(--sc-4);
       height: 100%;
-      max-width: 96rem;
+      max-width: var(--sc-stage);
       margin-inline: auto;
     }
-    .sc-brand { align-items: center; min-width: 0; }
-    .sc-nav { display: none; align-items: center; gap: 0.25rem; }
+    .sc-brand { align-items: center; min-width: 0; margin-inline-end: auto; }
+    .sc-nav { display: none; align-items: center; gap: var(--sc-6); margin-inline-end: var(--sc-2); }
     .sc-nav a {
-      position: relative;
-      padding: 0.45rem 0.7rem;
-      color: var(--sc-text-3);
-      font-family: var(--sc-font-mono);
-      font-size: 0.6875rem;
-      letter-spacing: 0.1em;
+      color: var(--sc-quiet);
+      font-size: 16px;
+      line-height: 24px;
       text-decoration: none;
-      text-transform: uppercase;
       white-space: nowrap;
     }
-    .sc-nav a::after {
-      position: absolute;
-      inset: auto 0.7rem 0.15rem;
-      height: 1px;
-      background: var(--sc-accent);
-      content: '';
-      transform: scaleX(0);
-      transform-origin: left;
-      transition: transform 140ms ease;
-    }
-    .sc-nav a:hover, .sc-nav a:focus-visible, .sc-nav a[aria-current='page'] { color: var(--sc-text); }
-    .sc-nav a[aria-current='page']::after { transform: scaleX(1); }
-    .sc-nav__site { margin-inline-start: 0.5rem; }
-    .sc-search { justify-self: end; width: clamp(12rem, 18vw, 22rem); min-width: 0; }
+    /* The current section is told by lightness, as in the rail. */
+    .sc-nav a:hover, .sc-nav a[aria-current='page'] { color: var(--sc-fg); }
+    .sc-search { min-width: 0; }
     .sc-search :global(button[data-open-modal]) { max-width: none; }
-    .sc-tools, .social-icons { align-items: center; gap: 0.25rem; }
-    /* Every tool is a 2rem square with a centered icon, so the gaps read evenly. */
+    .sc-tools, .social-icons { align-items: center; gap: var(--sc-1); }
+    /* Every tool is a 36 px square with a centred mark, drawn in the text colour. */
     .social-icons :global(a) {
-      width: 2rem;
-      height: 2rem;
+      display: flex;
+      width: 36px;
+      height: 36px;
       padding: 0;
       margin: 0;
       align-items: center;
       justify-content: center;
-      color: var(--sl-color-gray-2);
-      font-size: 1.05rem;
+      color: var(--sc-fg);
+      font-size: 18px;
     }
-    .social-icons :global(a:hover) { color: var(--sc-accent-text); }
-    @media (min-width: 64rem) {
+    .social-icons :global(a:hover) { background: var(--sc-tint); color: var(--sc-fg); }
+    @media (min-width: 50rem) {
+      .sc-search { width: 220px; }
+    }
+    @media (min-width: 72rem) {
+      .sc-header { gap: var(--sc-6); }
       .sc-nav { display: flex; }
-    }
-    @media (max-width: 50rem) {
-      .sc-header { grid-template-columns: 1fr auto; }
-      .sc-search { width: auto; }
     }
   }
 </style>

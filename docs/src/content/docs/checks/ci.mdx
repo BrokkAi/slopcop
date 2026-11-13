@@ -7,9 +7,10 @@ sidebar:
 
 import { Aside } from '@astrojs/starlight/components';
 
-The same command that an agent runs gates a change in CI: no prompts, one
-request, and the [exit code](/checks/exit-codes/) says what happened. A check
-of unpushed or branch work is free and never uses credits.
+The same command that an agent runs gates a change in CI: no prompts in static
+mode, one request, and the [exit code](/checks/exit-codes/) says what happened.
+A check in CI costs what any check costs: it uses one of the workspace's
+1,000 free checks each calendar month, then [credits](/account/credits/).
 
 On GitHub, [pull request checks](/checks/pull-requests/) give each pull request
 the same check with no workflow or token: the SlopCop GitHub App posts it. Run
@@ -34,6 +35,14 @@ A check of a repository the workspace has not added exits `4` with
 from the checkout at a terminal, or once a person has approved it, pass
 `--add-repository --workspace <name>`. See [Repositories](/account/repositories/).
 </Aside>
+
+A CI job, one with `CI` set (or `TF_BUILD` or `JENKINS_URL`), runs only the
+static check unless `--mode`, `--ai`, or `mode` in the config file asks for
+the review, so an existing job keeps its exit code. Ask for it only where the
+runner has Node.js and reviewer harness logins: the review can take minutes. The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox.
 
 ## GitHub Actions
 
@@ -62,7 +71,7 @@ jobs:
         env:
           SLOPCOP_TOKEN: ${{ secrets.SLOPCOP_TOKEN }}
         run: |
-          slopcop check --base "origin/${{ github.base_ref }}" --format sarif > slopcop.sarif
+          slopcop check --mode static --base "origin/${{ github.base_ref }}" --format sarif > slopcop.sarif
           echo "exit=$?" >> "$GITHUB_OUTPUT"
         id: slopcop
         continue-on-error: true
@@ -107,7 +116,7 @@ export `SLOPCOP_TOKEN`, check with `--base` naming the target branch, and act on
 the exit code.
 
 ```console
-slopcop check --base origin/main --format json > slopcop.json
+slopcop check --mode static --base origin/main --format json > slopcop.json
 ```
 
 `--timeout` bounds the whole wait (default ten minutes); a check still running

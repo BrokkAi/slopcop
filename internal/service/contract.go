@@ -130,6 +130,60 @@ type Response struct {
 	// accepted nothing, at most 300; Summary.DirectiveWarnings counts them
 	// all. They are warnings, never findings, and never change the status.
 	DirectiveWarnings []DirectiveWarning `json:"directiveWarnings,omitempty"`
+	// Exclusions is what the [check] section of the checked tree's
+	// .slopcop/config.toml excluded. Nil when the tree has none, or from a
+	// service from before BrokkAi/bifrost-service#1103.
+	Exclusions *Exclusions `json:"exclusions,omitempty"`
+}
+
+// Exclusions mirrors CheckExclusions. Paths, rules and reasons come from the
+// analyzed repository and are hostile.
+type Exclusions struct {
+	// Config is the file the scopes come from, .slopcop/config.toml.
+	Config string `json:"config"`
+	// Scopes lists exclude first, when set, then each exclude_rules entry in
+	// the file's order, including one that matched nothing in this change.
+	Scopes   []ExclusionScope   `json:"scopes"`
+	Warnings []ExclusionWarning `json:"warnings"`
+	// ExcludedFiles counts the changed files exclude kept from every rule.
+	ExcludedFiles int `json:"excludedFiles"`
+	// ExcludedPairs counts the distinct (file, rule) pairs the
+	// exclude_rules entries kept from the check.
+	ExcludedPairs int `json:"excludedPairs"`
+	// ExcludedFindings counts the findings those entries dropped.
+	ExcludedFindings int `json:"excludedFindings"`
+	// OnlyExcluded says the change wrote files and [check] left nothing to
+	// check, so a clean status means nothing ran.
+	OnlyExcluded bool `json:"onlyExcluded"`
+}
+
+// ExclusionScope mirrors ExclusionScope: exclude (AllRules) or one
+// exclude_rules entry.
+type ExclusionScope struct {
+	// Paths are the entry's gitignore patterns.
+	Paths    []string `json:"paths"`
+	AllRules bool     `json:"allRules,omitempty"`
+	// RulePatterns are the entry's rules as written; Rules the selected
+	// policies they name, at most 300, which RuleCount counts.
+	RulePatterns []string `json:"rulePatterns,omitempty"`
+	Rules        []string `json:"rules,omitempty"`
+	RuleCount    int      `json:"ruleCount,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+	// Files are the changed files the paths match, at most 300, which
+	// FileCount counts.
+	Files     []string `json:"files"`
+	FileCount int      `json:"fileCount"`
+	Pairs     int      `json:"pairs,omitempty"`
+	// NotRun names the rules excluded on every changed file, which did not
+	// run at all.
+	NotRun []string `json:"notRun,omitempty"`
+}
+
+// ExclusionWarning mirrors ExclusionWarning. Kind is unmatched_rule for a
+// rule pattern that names no selected policy, or unknown.
+type ExclusionWarning struct {
+	Kind string `json:"kind"`
+	Rule string `json:"rule"`
 }
 
 // InlineSuppressedFinding mirrors InlineSuppressedFinding: a finding an inline
@@ -219,8 +273,16 @@ type Summary struct {
 	// LessCertainFindings counts the new findings the service left out
 	// because their certainty is not definite and the request did not ask
 	// for all. Findings and NewFindings do not count them and they never
-	// change the status. A service from before it omits it.
-	LessCertainFindings int `json:"lessCertainFindings,omitempty"`
+	// change the status. It is 0 under --certainty all. A service from
+	// before it omits it, so nil means not sent, never none left out.
+	LessCertainFindings *int `json:"lessCertainFindings,omitempty"`
+	// ExcludedFiles and ExcludedPairs count what .slopcop/config.toml [check]
+	// kept from the check (Exclusions lists it). OnlyExcluded says the change
+	// wrote files and [check] left nothing to check: the status is then
+	// clean, and nothing ran. A service from before them omits them.
+	ExcludedFiles int  `json:"excludedFiles,omitempty"`
+	ExcludedPairs int  `json:"excludedPairs,omitempty"`
+	OnlyExcluded  bool `json:"onlyExcluded,omitempty"`
 	// InlineSuppressed counts the findings inline `slopcop: ignore` comments
 	// accepted, listed in Response.InlineSuppressed up to its bound. A
 	// service from before it omits it.

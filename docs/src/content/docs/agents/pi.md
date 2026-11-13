@@ -1,14 +1,16 @@
 ---
 title: Pi
-description: "Pi reads the SlopCop skill from ~/.agents/skills, has no Stop hook, and a check run by Pi sends the models its session file records."
+description: "Pi reads the SlopCop skill from the repository's .agents/skills, has no Stop hook, and a check run by Pi sends the models its session file records."
 sidebar:
   order: 4
 ---
 
 ## The skill
 
-Pi reads skills from `~/.agents/skills/`, where `slopcop init` puts the
-SlopCop skill. Ask it to check its change, or force the skill with
+`slopcop init` puts the SlopCop skill in the repository's `.agents/skills/`,
+which Pi reads, along with `.pi/skills`, in the working directory and each
+parent up to the Git root. Pi loads a project's skills only once you trust the
+project. Ask it to check its change, or force the skill with
 `/skill:slopcop`.
 
 To have Pi check every change, add the repository to the workspace from its

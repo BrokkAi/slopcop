@@ -3,6 +3,7 @@
 package hooks
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -35,6 +36,9 @@ type Result struct {
 	// Installed names the harnesses whose settings hold the hook after an
 	// install, whether or not this install changed them.
 	Installed []string
+	// Gates names the harnesses whose settings hold the push gate after an
+	// install.
+	Gates []string
 	// NeedsTrust says the hook is installed in a harness that runs it only
 	// once someone trusts it, as Codex does with /hooks.
 	NeedsTrust bool
@@ -55,7 +59,26 @@ type harness struct {
 	// needsTrust says the harness runs a new or changed hook only once
 	// someone trusts it.
 	needsTrust bool
+	// event selects Stop by default or PreToolUse for the push gate.
+	event string
+	// gate uses an unguarded command so the harness can block a push with
+	// exit 2.
+	gate bool
+	// matcher is the tool-name matcher of the push gate's group.
+	matcher string
 }
+
+// Push gate matchers. Claude Code reads a matcher with characters other than
+// letters, digits, _ and | as an unanchored regex, so the anchors keep it from
+// matching tools such as BashOutput; the MCP tools are GitHub's, under any
+// server name, that open a pull request or push files. Grok reads the same
+// .claude/settings.local.json and also tests a regex against Claude's names
+// for its tools, so ^Bash$ matches its run_terminal_command. Codex sends
+// every shell command as Bash and matches a plain name exactly.
+const (
+	claudeGateMatcher = "^(Bash|mcp__.+__(create_pull_request|push_files))$"
+	codexGateMatcher  = "Bash"
+)
 
 // harnesses are the harnesses the hook installs into, each at the
 // configuration directory it reads: CLAUDE_CONFIG_DIR or ~/.claude for
@@ -98,12 +121,18 @@ func harnesses() []harness {
 // one from before it, exits 2; || true turns any failure into one that lets
 // the agent stop.
 func (h harness) command() string {
+	if h.gate {
+		return "slopcop gate --hook " + h.name
+	}
 	return "slopcop hook " + h.name + " || true"
 }
 
 // ours reports whether a handler's command is SlopCop's hook for this
 // harness, as installed now or as first installed, without the guard.
 func (h harness) ours(command any) bool {
+	if h.gate {
+		return command == h.command()
+	}
 	return command == h.command() || command == "slopcop hook "+h.name
 }
 
@@ -113,6 +142,9 @@ func (h harness) handler() *object {
 	handler := newObject()
 	handler.set("type", "command")
 	handler.set("command", h.command())
+	if h.gate {
+		return handler
+	}
 	if h.windowsCommand != "" {
 		handler.set("commandWindows", h.windowsCommand)
 	}
@@ -121,9 +153,98 @@ func (h harness) handler() *object {
 	return handler
 }
 
+// repositoryHarnesses are the hooks Repository installs in a clone.
+func repositoryHarnesses(root string) []harness {
+	claude, codex := filepath.Join(root, ".claude"), filepath.Join(root, ".codex")
+	return []harness{
+		{name: "claude", dir: claude, file: "settings.local.json"},
+		{name: "claude", dir: claude, file: "settings.local.json", event: "PreToolUse", gate: true, matcher: claudeGateMatcher},
+		{name: "codex", dir: codex, file: "hooks.json", windowsCommand: "slopcop hook codex || exit /b 0", needsTrust: true},
+		{name: "codex", dir: codex, file: "hooks.json", event: "PreToolUse", gate: true, matcher: codexGateMatcher, needsTrust: true},
+	}
+}
+
+// Repository installs or removes hooks in clone-local settings. skip leaves a
+// tracked settings file untouched, preserving the repository's own content.
+// Codex 0.166 reads .codex/hooks.json from a project it trusts, as a
+// "project" hook that still needs /hooks trust (checked with its app-server
+// hooks/list). Codex 0.167 runs a PreToolUse hook before its shell tool with
+// tool_name Bash and tool_input.command, and blocks the command when the hook
+// exits 2 with a reason on stderr (codex-rs/hooks/src/events/pre_tool_use.rs),
+// as Claude Code does, so both get the push gate.
+func Repository(root string, install bool, skip func(string) bool) (Result, error) {
+	var result Result
+	var errs []error
+	for _, h := range repositoryHarnesses(root) {
+		path := filepath.Join(h.dir, h.file)
+		if skip != nil && skip(path) {
+			continue
+		}
+		if install {
+			if err := os.MkdirAll(h.dir, 0755); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+		}
+		changed, present, err := reconcileHarness(h, install)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		if changed != "" {
+			result.ChangedPaths = append(result.ChangedPaths, changed)
+		}
+		if install && present {
+			if h.gate {
+				result.Gates = append(result.Gates, h.name)
+			} else {
+				result.Installed = append(result.Installed, h.name)
+			}
+			result.NeedsTrust = result.NeedsTrust || h.needsTrust
+		}
+	}
+	return result, errors.Join(errs...)
+}
+
+// GateInstalled reports whether the repository's Claude Code or Codex
+// settings hold SlopCop's push gate. A check says whether its tree may be
+// pushed only where the gate will ask; elsewhere, such as in CI, the line
+// would be noise.
+func GateInstalled(root string) bool {
+	for _, h := range repositoryHarnesses(root) {
+		if !h.gate {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(h.dir, h.file))
+		if err == nil && bytes.Contains(data, []byte(h.command())) {
+			return true
+		}
+	}
+	return false
+}
+
 // Install registers SlopCop's Stop hook in each harness installed here.
 func Install() (Result, error) {
 	return reconcile(true)
+}
+
+// inRepository says whether Repository gives this harness a hook of its own
+// in the clone. Grok's project hooks are not verified, so its hook stays at
+// user level.
+func (h harness) inRepository() bool {
+	return h.name == "claude" || h.name == "codex"
+}
+
+// RemoveReplaced unregisters the user-level Stop hook only from the harnesses
+// whose hook Repository installs in the clone, leaving the others in place.
+func RemoveReplaced() (Result, error) {
+	return reconcileWhere(false, harness.inRepository)
+}
+
+// InstallUserOnly registers the user-level Stop hook in each harness
+// installed here that Repository has no hook for.
+func InstallUserOnly() (Result, error) {
+	return reconcileWhere(true, func(h harness) bool { return !h.inRepository() })
 }
 
 // Remove unregisters SlopCop's Stop hook from each harness.
@@ -135,6 +256,12 @@ func Remove() (Result, error) {
 // or write is left as it was and named in the error, and the other harnesses
 // are updated all the same. Result says what changed either way.
 func reconcile(install bool) (Result, error) {
+	return reconcileWhere(install, nil)
+}
+
+// reconcileWhere is reconcile over the harnesses keep accepts, or every
+// harness when keep is nil.
+func reconcileWhere(install bool, keep func(harness) bool) (Result, error) {
 	var result Result
 	found := harnesses()
 	if len(found) == 0 {
@@ -142,6 +269,9 @@ func reconcile(install bool) (Result, error) {
 	}
 	var errs []error
 	for _, h := range found {
+		if keep != nil && !keep(h) {
+			continue
+		}
 		changed, present, err := reconcileHarness(h, install)
 		if err != nil {
 			errs = append(errs, err)

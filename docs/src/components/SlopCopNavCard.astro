@@ -1,0 +1,43 @@
+---
+// A home-page card: a tag that is one link, with a title and one quiet line.
+interface Props {
+  title: string;
+  description: string;
+  href: string;
+}
+
+const { title, description, href } = Astro.props;
+---
+
+<a class="sc-tag is-pressable sc-navcard" href={href}>
+  <span class="sc-navcard__title">{title}</span>
+  <span class="sc-navcard__desc">{description}</span>
+</a>
+
+<style>
+  @layer starlight.user {
+    .sc-navcard {
+      display: flex;
+      flex-direction: column;
+      min-height: 100%;
+      padding: var(--sc-4) var(--sc-5) var(--sc-6);
+      color: var(--sc-fg);
+      text-decoration: none;
+    }
+    .sc-navcard__title {
+      padding-inline-end: var(--sc-4);
+      font-size: var(--sc-t-item);
+      line-height: 1.25;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      text-wrap: balance;
+    }
+    .sc-navcard__desc {
+      margin-top: 6px;
+      max-width: 26em;
+      color: var(--sc-quiet);
+      font-size: var(--sc-t-small);
+      line-height: 1.45;
+    }
+  }
+</style>

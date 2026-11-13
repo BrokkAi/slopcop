@@ -12,21 +12,31 @@ built from each harness's published source,
 (Kimi Code 2.5.1), not from a captured session. If a hook does not fire or a
 check names no model, please open an issue.
 
-Both read skills from `~/.agents/skills`, where `slopcop init` puts the skill,
-so the skill and the `AGENTS.md` line from [Other agents](/agents/other-agents/)
-work as they do elsewhere.
+Both read the skill from the repository's `.agents/skills`, where
+`slopcop init` puts it. Grok reads it, with `.grok/skills` and
+`.claude/skills`, in the working directory and each parent up to the Git
+root, and only in a folder you trust. Kimi Code reads it, with
+`.kimi-code/skills`, at the root of the Git repository. The `AGENTS.md` line
+from [Other agents](/agents/other-agents/) works as it does elsewhere.
 
 ## Grok
 
 `slopcop init` writes a `Stop` hook to `hooks/slopcop.json` under `GROK_HOME`,
-or `~/.grok`. Grok loads every `*.json` file in that directory, so the hook
+or `~/.grok`. It stays at user level while the Claude Code and Codex hooks
+move into the repository, because Grok runs a project's hooks only in a folder
+you trust, and a user-level hook needs no trust. Grok loads every `*.json` file in that directory, so the hook
 lives in a file of its own and your other hook files are left alone. Grok asks
 you to trust hooks that come with a project, not these.
 `slopcop init --remove-hooks` takes it out again.
 
-Grok also runs the hooks in `~/.claude/settings.json`. SlopCop's Claude Code
-hook sees that it is running under Grok and does nothing, so a stop is checked
-once.
+Grok also runs the hooks in `~/.claude/settings.json` and, in a folder you
+trust, the repository's `.claude/settings.json` and
+`.claude/settings.local.json`, unless its Claude Code compatibility is off.
+SlopCop's Claude Code Stop hook sees that it is running under Grok and does
+nothing, so a stop is checked once. The push gate `slopcop init` puts in
+`.claude/settings.local.json` does run under Grok: it blocks Grok's
+`run_terminal_command` when the command pushes or names `refs/slopcop/`, as it
+does Claude Code's `Bash`.
 
 ### What the CLI reads from the session
 
