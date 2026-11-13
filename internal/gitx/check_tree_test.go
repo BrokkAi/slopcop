@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -245,6 +246,13 @@ func TestFilterCheckTreeUnusualPaths(t *testing.T) {
 	root := initRepo(t)
 	jsonPath := "space tab\tnewline\ncolon:glob[abc]*.json"
 	binaryPath := "binary\tname\n:[]*.bin"
+	if runtime.GOOS == "windows" {
+		// Win32 filenames cannot contain tabs, newlines, colons or stars.
+		// Keep the integration case on real supported paths; parser coverage
+		// below exercises every byte on all platforms without filesystem I/O.
+		jsonPath = "space glob[abc].json"
+		binaryPath = "binary name[].bin"
+	}
 	writeFile(t, root, jsonPath, "old-json-"+strings.Repeat("j", 500001))
 	writeFile(t, root, binaryPath, "\x00old-binary-"+strings.Repeat("b", 500001))
 	writeFile(t, root, "kept.txt", "before\n")
@@ -302,6 +310,20 @@ func TestFilterCheckTreeUnusualPaths(t *testing.T) {
 	}
 	if got := readFile(t, clone, "kept.txt"); got != "after\n" {
 		t.Errorf("kept.txt = %q", got)
+	}
+}
+
+func TestCheckTreeParsersPreserveControlCharacters(t *testing.T) {
+	name := "space tab\tnewline\ncolon:glob[abc]*.json"
+	stat, err := parseNumstat([]byte("-\t-\t" + name + "\x00"))
+	if err != nil || len(stat) != 1 || !stat[name] {
+		t.Fatalf("numstat lost unusual path: %v %v", stat, err)
+	}
+	oldObject, newObject := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	raw := []byte(":100644 100644 " + oldObject + " " + newObject + " M\x00" + name + "\x00")
+	changes, objects, err := parseRawChanges(raw, stat)
+	if err != nil || len(changes) != 1 || changes[0].path != name || !changes[0].binaryFile || len(objects) != 2 {
+		t.Fatalf("raw diff lost unusual path: %+v %v %v", changes, objects, err)
 	}
 }
 
