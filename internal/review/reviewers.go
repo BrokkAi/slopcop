@@ -150,6 +150,7 @@ func (p *panel) start(name string, f Family) (*runner, error) {
 		return nil, err
 	}
 	if err = s.prepare(p.root); err != nil {
+		err = startError(s.ctx, err)
 		s.stop()
 		return s, err
 	}

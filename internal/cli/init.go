@@ -675,6 +675,10 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 	}
 	cfg.Review.Reviewers = names
 	cfg.Review.Fallbacks = fallbacks
+	if cfg.Review.MinCompleted > len(names) {
+		fmt.Fprintf(out, "slopcop: review.minCompleted was %d, more than the %d reviewers found; unset it, so the default applies\n", cfg.Review.MinCompleted, len(names))
+		cfg.Review.MinCompleted = 0
+	}
 	path, err = config.Save(cfg)
 	if err != nil {
 		return err

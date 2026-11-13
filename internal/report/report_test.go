@@ -1308,6 +1308,7 @@ func TestReviewHumanNamesFailedReviewers(t *testing.T) {
 		t.Fatalf("failed reviewer repeats its first error: %q", out.String())
 	}
 }
+
 // TestReviewSARIFMarksIncompleteReview checks that a review with findings,
 // but fewer finished reviewers than required, is not a successful execution.
 func TestReviewSARIFMarksIncompleteReview(t *testing.T) {

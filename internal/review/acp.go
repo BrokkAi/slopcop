@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -184,25 +185,49 @@ const cleanupTimeout = 2 * time.Second
 // Each reviewer run, retry and probe is otherwise a saved thread in the
 // user's agent app. Codex archives the thread (`codex unarchive <id>` brings
 // it back) and Claude deletes it. Failure is ignored and noted in stderr.
+// It waits at most cleanupTimeout: a request stuck behind a blocked write to
+// the adapter must not hold up the kill that would unblock it.
 func (s *runner) cleanup() {
 	s.cleanOnce.Do(func() {
-		s.sessionMu.Lock()
-		session := s.session
-		s.sessionMu.Unlock()
-		if session == "" || !s.canDelete {
-			return
-		}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.deleteSession()
+		}()
 		select {
-		case <-s.conn.Done():
-			return
-		default:
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
-		defer cancel()
-		if _, err := s.conn.UnstableDeleteSession(ctx, acp.UnstableDeleteSessionRequest{SessionId: session}); err != nil {
-			fmt.Fprintf(s.stderr, "delete session %s: %v\n", session, err)
+		case <-done:
+		case <-time.After(cleanupTimeout):
 		}
 	})
+}
+
+// deleteSession sends session/delete when the adapter supports it.
+func (s *runner) deleteSession() {
+	s.sessionMu.Lock()
+	session := s.session
+	s.sessionMu.Unlock()
+	if session == "" || !s.canDelete {
+		return
+	}
+	select {
+	case <-s.conn.Done():
+		return
+	default:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+	if _, err := s.conn.UnstableDeleteSession(ctx, acp.UnstableDeleteSessionRequest{SessionId: session}); err != nil {
+		fmt.Fprintf(s.stderr, "delete session %s: %v\n", session, err)
+	}
+}
+
+// startError keeps a setup timeout recognizable as one: the ACP SDK reports
+// a canceled request as its own error, which does not wrap the context's.
+func startError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+		return fmt.Errorf("%w: %v", ctxErr, err)
+	}
+	return err
 }
 
 // startRunner initializes adapters serially so first-run npx installs never overlap.
@@ -271,7 +296,7 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 	initialized, err := s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
 	if err != nil {
 		s.stop()
-		return nil, fmt.Errorf("initialize: %w", err)
+		return nil, fmt.Errorf("initialize: %w", startError(s.ctx, err))
 	}
 	s.canDelete = initialized.AgentCapabilities.SessionCapabilities.Delete != nil
 	return s, nil

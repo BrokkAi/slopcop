@@ -207,6 +207,20 @@ func TestReviewerSessionsAreDeleted(t *testing.T) {
 	}
 }
 
+// TestStartupTimeoutIsNotRetried checks that a reviewer whose session setup
+// times out fails without a second attempt, which would wait out another
+// full timeout.
+func TestStartupTimeoutIsNotRetried(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: 300 * time.Millisecond, Adapters: map[string][]string{"codex": fakeAdapter("hang-session", "gpt-6.10-terra", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	data, _ := os.ReadFile(trace)
+	if v.Status != StatusFailed || v.Reviewers[0].FirstError != "" || !strings.Contains(v.Reviewers[0].Error, "deadline exceeded") || strings.Count(string(data), "new-session") != 1 {
+		t.Fatalf("%+v\n%s", v, data)
+	}
+}
+
 // TestTakeFallback checks that fallbacks go in order, prefer another adapter
 // than the reviewer they replace, and stop once enough reviewers finished.
 func TestTakeFallback(t *testing.T) {
