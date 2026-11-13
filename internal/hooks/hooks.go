@@ -469,6 +469,9 @@ type Presence struct {
 	// NeedsTrust says the harness runs these hooks only once someone
 	// trusts them, which cannot be read from its files.
 	NeedsTrust bool
+	// Invalid is the harness's settings file when it cannot be read as
+	// settings, which init cannot change either until it is fixed.
+	Invalid string
 }
 
 // Find reports, for each harness init installs into, which of SlopCop's
@@ -479,7 +482,12 @@ func Find() map[string]Presence {
 		p := found[h.name]
 		p.Configured, _ = harnessDirExists(h.dir)
 		p.NeedsTrust = p.NeedsTrust || h.needsTrust
-		if fileHolds(filepath.Join(h.dir, h.file), h, true) {
+		path := filepath.Join(h.dir, h.file)
+		holds, err := fileHolds(path, h, true)
+		if err != nil {
+			p.Invalid = path
+		}
+		if holds {
 			if h.gate {
 				p.Gate = true
 			} else {
@@ -503,7 +511,7 @@ func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 		if skip != nil && skip(path) {
 			continue
 		}
-		if fileHolds(path, h, false) {
+		if holds, _ := fileHolds(path, h, false); holds {
 			paths = appendUnique(paths, path)
 		}
 	}
@@ -513,20 +521,24 @@ func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 // fileHolds reports whether the settings file at path has h's handler under
 // h's event, as a handler of type command, which is the only kind that runs
 // it. With matcher set, a push gate counts only in a group with h's
-// matcher, as install writes it, so that it would run for the shell. An
-// unreadable or malformed file holds none.
-func fileHolds(path string, h harness, matcher bool) bool {
+// matcher, as install writes it, so that it would run for the shell. A
+// missing file holds none; one that cannot be read or parsed as settings
+// holds none and returns the reason.
+func fileHolds(path string, h harness, matcher bool) (bool, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
 	if err != nil {
-		return false
+		return false, err
 	}
 	root, err := decodeSettings(data)
 	if err != nil {
-		return false
+		return false, err
 	}
 	hooks, err := childObject(root, "hooks", false)
 	if err != nil || hooks == nil {
-		return false
+		return false, err
 	}
 	event := h.event
 	if event == "" {
@@ -552,10 +564,10 @@ func fileHolds(path string, h harness, matcher bool) bool {
 				}
 				kind, _ := handler.get("type")
 				if command, _ := handler.get("command"); kind == "command" && h.ours(command) {
-					return true
+					return true, nil
 				}
 			}
 		}
 	}
-	return false
+	return false, nil
 }

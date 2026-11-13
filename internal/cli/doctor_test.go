@@ -87,6 +87,14 @@ func TestDoctorStates(t *testing.T) {
 		t.Fatalf("doctor changed the settings: %s", data)
 	}
 
+	// Settings init cannot parse are named, since init cannot fix them.
+	if err := os.WriteFile(settings, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if report := doctorJSON(t, dir); !strings.Contains(strings.Join(report.Notes, "\n"), settings+" is not valid settings JSON") {
+		t.Fatalf("invalid settings not named: %+v", report.Notes)
+	}
+
 	// A Stop hook of another type or under another event, and a gate whose
 	// matcher misses the shell, would not run, so they do not count.
 	misplaced := `{"hooks":{"Stop":[{"hooks":[{"type":"prompt","command":"slopcop hook codex || true"}]}],` +
