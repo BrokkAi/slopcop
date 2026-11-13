@@ -91,8 +91,15 @@ func TestDoctorStates(t *testing.T) {
 	if err := os.WriteFile(settings, []byte("{not json"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if report := doctorJSON(t, dir); !strings.Contains(strings.Join(report.Notes, "\n"), settings+" is not valid settings JSON") {
+	if report := doctorJSON(t, dir); !strings.Contains(strings.Join(report.Notes, "\n"), settings+" cannot be read as hook settings") {
 		t.Fatalf("invalid settings not named: %+v", report.Notes)
+	}
+	// So are settings that parse but that init rejects.
+	if err := os.WriteFile(settings, []byte(`{"hooks":{"Stop":{}}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if report := doctorJSON(t, dir); !strings.Contains(strings.Join(report.Notes, "\n"), settings+" cannot be read as hook settings") {
+		t.Fatalf("misshapen settings not named: %+v", report.Notes)
 	}
 
 	// A Stop hook of another type or under another event, and a gate whose

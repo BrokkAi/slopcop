@@ -94,7 +94,7 @@ func diagnoseSetup(dir string) setupReport {
 		skill, broken := userSkillAvailable(name)
 		report.brokenSkill(broken)
 		if p.Invalid != "" {
-			report.Notes = append(report.Notes, p.Invalid+" is not valid settings JSON, and init cannot change it; fix it, then run `slopcop init`")
+			report.Notes = append(report.Notes, p.Invalid+" cannot be read as hook settings, so init cannot update it; fix it, then run `slopcop init`")
 		}
 		h := setupHarness{Name: name, Skill: skill, StopHook: p.Stop, PushGate: p.Gate}
 		report.Harnesses = append(report.Harnesses, h)

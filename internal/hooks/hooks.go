@@ -522,14 +522,20 @@ func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 // h's event, as a handler of type command, which is the only kind that runs
 // it. With matcher set, a push gate counts only in a group with h's
 // matcher, as install writes it, so that it would run for the shell. A
-// missing file holds none; one that cannot be read or parsed as settings
-// holds none and returns the reason.
+// missing file holds none; one that cannot be read, or that install could not
+// reconcile, holds none and returns the reason.
 func fileHolds(path string, h harness, matcher bool) (bool, error) {
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil
 	}
 	if err != nil {
+		return false, err
+	}
+	// A file install cannot reconcile is invalid however its hooks look,
+	// since init fails on it too; a dry run of install finds that out
+	// exactly as init would.
+	if _, _, err := reconcileJSON(data, true, h); err != nil {
 		return false, err
 	}
 	root, err := decodeSettings(data)
