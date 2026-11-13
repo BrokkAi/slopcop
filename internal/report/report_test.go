@@ -565,6 +565,128 @@ func TestFailureIsAParseableReport(t *testing.T) {
 	}
 }
 
+func TestOmittedFilesReachEveryReportShape(t *testing.T) {
+	omitted := []OmittedFile{
+		{Path: "large.py", Bytes: 7, Reason: "exceeds the upload limit"},
+		{Path: "vendor/huge.json", Bytes: 5, Reason: "exceeds the local review limit"},
+	}
+	wantOmitted := []any{
+		map[string]any{"path": "large.py", "bytes": float64(7), "reason": "exceeds the upload limit"},
+		map[string]any{"path": "vendor/huge.json", "bytes": float64(5), "reason": "exceeds the local review limit"},
+	}
+	options := Options{OmittedFiles: omitted, Review: &review.Verdict{Status: review.StatusClean}}
+	failure := &service.Error{StatusCode: 402, Body: service.ErrorBody{
+		Code: "insufficient_credits", Message: "The workspace is out of credits.", Remedy: "Add credits, then retry.",
+	}}
+	writers := []struct {
+		name   string
+		status string
+		write  func(io.Writer, string, Options) error
+	}{
+		{
+			name:   "normal",
+			status: service.StatusFindings,
+			write: func(w io.Writer, format string, options Options) error {
+				return Write(w, response(service.StatusFindings, "finding", sampleFindings()), format, options)
+			},
+		},
+		{
+			name:   "pending",
+			status: service.StatusPending,
+			write: func(w io.Writer, format string, options Options) error {
+				return WritePending(w, service.Pending{RetryAfter: 5, Message: "Still running."}, format, options)
+			},
+		},
+		{
+			name:   "skipped",
+			status: "skipped",
+			write: func(w io.Writer, format string, options Options) error {
+				return WriteSkipped(w, Skipped{Code: "repository_not_enabled", State: "not_added", Message: "Nothing was checked."}, format, options)
+			},
+		},
+		{
+			name:   "failure",
+			status: service.StatusFailed,
+			write: func(w io.Writer, format string, options Options) error {
+				return WriteFailure(w, failure, format, options)
+			},
+		},
+		{
+			name:   "ai",
+			status: "clean",
+			write: func(w io.Writer, format string, options Options) error {
+				return WriteAI(w, format, options)
+			},
+		},
+	}
+
+	for _, tc := range writers {
+		t.Run(tc.name, func(t *testing.T) {
+			var document map[string]any
+			var out bytes.Buffer
+			if err := tc.write(&out, FormatJSON, options); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+				t.Fatalf("json: %v", err)
+			}
+			if !reflect.DeepEqual(document["omittedFiles"], wantOmitted) {
+				t.Errorf("json omittedFiles = %v", document["omittedFiles"])
+			}
+			if document["status"] != tc.status || document["approved"] != false {
+				t.Errorf("omissions changed result status or approval: %v", document)
+			}
+
+			out.Reset()
+			if err := tc.write(&out, FormatSARIF, options); err != nil {
+				t.Fatalf("sarif: %v", err)
+			}
+			var log map[string]any
+			if err := json.Unmarshal(out.Bytes(), &log); err != nil {
+				t.Fatalf("sarif: %v", err)
+			}
+			runs := log["runs"].([]any)
+			for index, rawRun := range runs {
+				properties := rawRun.(map[string]any)["properties"].(map[string]any)
+				if !reflect.DeepEqual(properties["slopcop.omittedFiles"], wantOmitted) {
+					t.Errorf("sarif run %d omittedFiles = %v", index, properties["slopcop.omittedFiles"])
+				}
+				if index == 0 && properties["slopcop.status"] != tc.status {
+					t.Errorf("omissions changed SARIF status: %v", properties)
+				}
+			}
+
+			out.Reset()
+			if err := tc.write(&out, FormatHuman, options); err != nil {
+				t.Fatalf("human: %v", err)
+			}
+			for _, want := range []string{
+				"Files omitted from both hosted upload and local review due to size: 2 file(s), 12 bytes total.",
+				"Their contents were not analyzed.",
+				"large.py (7 bytes): exceeds the upload limit",
+				"vendor/huge.json (5 bytes): exceeds the local review limit",
+			} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("human report missing %q: %s", want, out.String())
+				}
+			}
+
+			out.Reset()
+			if err := tc.write(&out, FormatHuman, Options{OmittedFiles: omitted, Verbose: true}); err != nil {
+				t.Fatalf("verbose human: %v", err)
+			}
+			for _, want := range []string{
+				"large.py (7 bytes): exceeds the upload limit",
+				"vendor/huge.json (5 bytes): exceeds the local review limit",
+			} {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("verbose human report missing %q: %s", want, out.String())
+				}
+			}
+		})
+	}
+}
+
 func TestSARIFIsAValid210Log(t *testing.T) {
 	findings := sampleFindings()
 	unrated := finding("lib/util.py", 7, "unrated", "acme.custom")

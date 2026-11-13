@@ -229,10 +229,20 @@ func Reviewed(root, tree string) (bool, error) {
 
 // NewCapture resolves the base tree and records the diffstat for a fixed snapshot.
 func NewCapture(root, baseCommit, tree string) (Capture, error) {
+	return NewFilteredCapture(root, baseCommit, tree, tree)
+}
+
+// NewFilteredCapture keeps the complete snapshot's identity while recording
+// the smaller tree whose changes are in review scope.
+func NewFilteredCapture(root, baseCommit, tree, diffTree string) (Capture, error) {
 	base, err := gitx.Run(root, "rev-parse", baseCommit+"^{tree}")
 	if err != nil {
 		return Capture{}, err
 	}
-	stat, err := gitx.Run(root, "diff", "--no-ext-diff", "--no-textconv", "--numstat", base, tree)
-	return Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: stat}, err
+	stat, err := gitx.Run(root, "diff", "--no-ext-diff", "--no-textconv", "--numstat", base, diffTree)
+	capture := Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: stat}
+	if diffTree != tree {
+		capture.DiffTree = diffTree
+	}
+	return capture, err
 }

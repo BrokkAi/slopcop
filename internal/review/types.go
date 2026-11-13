@@ -69,12 +69,23 @@ type Capture struct {
 	// Tree is the snapshot of the working tree: HEAD plus every tracked,
 	// untracked and deleted path, without ignored files.
 	Tree string `json:"tree"`
-	// Numstat is `git diff --numstat BaseTree Tree`.
+	// DiffTree is the subset reviewed after large data artifacts are omitted.
+	// Tree remains the full snapshot identity used for approval and overrides.
+	DiffTree string `json:"diffTree,omitempty"`
+	// Numstat is `git diff --numstat BaseTree CheckedTree()`.
 	Numstat string `json:"numstat"`
 }
 
+// CheckedTree names the contents actually sent to the reviewers.
+func (c Capture) CheckedTree() string {
+	if c.DiffTree != "" {
+		return c.DiffTree
+	}
+	return c.Tree
+}
+
 // Empty reports whether the capture has nothing to review.
-func (c Capture) Empty() bool { return c.BaseTree == c.Tree }
+func (c Capture) Empty() bool { return c.BaseTree == c.CheckedTree() }
 
 // Reviewer is one reviewer's result.
 type Reviewer struct {

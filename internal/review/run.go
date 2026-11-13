@@ -51,7 +51,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		}
 		commands[f] = cmd
 	}
-	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, in.Text, opts.Version, order, commands})
+	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, commands})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
 	previous, err := store.Last()
@@ -83,7 +83,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	}
 	v.LogDir = dir
 	TrimLogs(store.dir)
-	diff, err := gitx.RunBytes(opts.Root, nil, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.Tree)
+	diff, err := gitx.RunBytes(opts.Root, nil, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.CheckedTree())
 	if err != nil {
 		v.Error = "read captured diff: " + err.Error()
 		save()

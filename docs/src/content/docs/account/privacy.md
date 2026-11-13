@@ -13,6 +13,12 @@ sidebar:
   can hold unpublished source and binary files, so review what your working
   tree holds before an agent checks it. Git-ignored files stay out, except
   selected `.slopcop/policies` rules.
+- **Large data is omitted by default**: changed `.json`, `.jsonl`, `.ndjson`
+  and Git-detected binary files over 500,000 bytes on either side of the change
+  are left out of the uploaded patch and captured local-review diff. Reports
+  list the omitted files; their contents were not analyzed. Repeatable
+  `--include` paths or globs opt selected files back in. See
+  [Run a check](/checks/run-a-check/).
 - **The policy selection** and the `--fail-on` level.
 - **The bearer token** of the login.
 

@@ -139,6 +139,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err != nil {
 		return err
 	}
+	reportOptions.OmittedFiles = prepared.omittedFiles
+	if notice := omittedFilesNotice(prepared.omittedFiles); notice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), notice)
+	}
 	// How the base was chosen applies to both halves, so it is said before
 	// either starts.
 	if prepared.base.warning != "" {
@@ -166,7 +170,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 				reviewDone <- v
 				return
 			}
-			capture, err := review.NewCapture(prepared.repoRoot, prepared.request.BaseCommit, prepared.snapshot.Tree)
+			capture, err := review.NewFilteredCapture(prepared.repoRoot, prepared.request.BaseCommit, prepared.snapshot.Tree, prepared.reviewTree)
 			if err != nil {
 				v.Error = err.Error()
 				reviewDone <- v
@@ -185,7 +189,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}()
 	}
 	var static staticOutcome
-	if mode != modeAI {
+	if prepared.onlyOmitted() {
+		static = omittedOnlyOutcome(prepared)
+		fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+static.skipped.Message)
+	} else if mode != modeAI {
 		static = runStaticCheck(cmd, opts, prepared, failOn, version)
 	} else {
 		static = staticOutcome{exit: 0, status: "clean"}
@@ -264,7 +271,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		reportOptions.Review = &verdict
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
-	if prepared.bytes == 0 {
+	if prepared.bytes == 0 && len(prepared.omittedFiles) == 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(prepared.request.BaseCommit))
 		// A base the CLI moved explains an empty patch the user did not
 		// expect from the base they named, so say so even without --verbose.
@@ -282,7 +289,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
 			return err
 		}
-	} else if prepared.bytes > 0 {
+	} else if prepared.bytes > 0 || len(prepared.omittedFiles) > 0 {
 		// A later failed decision also withdraws an override for this tree.
 		if err := review.Unmark(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
 			return err
@@ -325,6 +332,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 
 // runStaticCheck runs only the hosted half and returns its outcome.
 func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedCheck, failOn, version string) staticOutcome {
+	if prepared.onlyOmitted() {
+		return omittedOnlyOutcome(prepared)
+	}
 	failed := func(err error) staticOutcome {
 		var serviceError *service.Error
 		if !errors.As(err, &serviceError) {
@@ -620,11 +630,15 @@ func sendCheck(ctx context.Context, client *service.Client, request *service.Req
 // preparedCheck is a check request ready to send, and the client to send it.
 // The caller adds the attribution.
 type preparedCheck struct {
-	client    *service.Client
-	snapshot  gitx.Snapshot
-	staticErr error
-	request   service.Request
-	repoRoot  string
+	client   *service.Client
+	snapshot gitx.Snapshot
+	// reviewTree is the same size-filtered scope as the uploaded patch, but
+	// without selected ignored policy files. snapshot.Tree stays unfiltered.
+	reviewTree   string
+	omittedFiles []report.OmittedFile
+	staticErr    error
+	request      service.Request
+	repoRoot     string
 	// workspace is the workspace the check is asked to run in, by the name
 	// it was given.
 	workspace string
@@ -666,15 +680,45 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	var change gitx.WorkingChange
 	for _, candidate := range resolution.bases {
 		base = candidate
-		change, err = gitx.TreePatch(repoRoot, base, snapshot.PatchTree)
+		// Resolve the base from the complete change before filtering. An
+		// artifact-only change must not fall back to an unrelated older base.
+		var changed []byte
+		changed, err = gitx.RunBytes(repoRoot, nil, "diff", "--no-ext-diff", "--no-textconv", "--name-only", "--no-renames", "-z", base, snapshot.PatchTree)
 		if err != nil {
 			return prepared, err
 		}
-		if len(change.Patch) > 0 {
+		if len(changed) > 0 {
 			break
 		}
 	}
-	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, files: change.Files, bytes: len(change.Patch), base: resolution, request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
+	patchTree, reviewTree := snapshot.PatchTree, snapshot.Tree
+	var omitted []report.OmittedFile
+	{
+		filtered, err := gitx.FilterCheckTree(repoRoot, base, patchTree, opts.include...)
+		if err != nil {
+			return prepared, err
+		}
+		patchTree = filtered.Tree
+		for _, file := range filtered.OmittedFiles {
+			omitted = append(omitted, report.OmittedFile{Path: file.Path, Bytes: file.Bytes, Reason: file.Reason})
+		}
+		if snapshot.Tree == snapshot.PatchTree {
+			reviewTree = patchTree
+		} else {
+			filteredReview, err := gitx.FilterCheckTree(repoRoot, base, snapshot.Tree, opts.include...)
+			if err != nil {
+				return prepared, err
+			}
+			reviewTree = filteredReview.Tree
+		}
+	}
+	change, err = gitx.TreePatch(repoRoot, base, patchTree)
+	if err != nil {
+		return prepared, err
+	}
+	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree,
+		omittedFiles: omitted, files: change.Files, bytes: len(change.Patch), base: resolution,
+		request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
 	if opts.mode == modeAI || opts.ai {
 		return prepared, nil
 	}
@@ -715,17 +759,33 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		request.Selection = &selection
 	}
 	workspace := resolveWorkspaceName(opts.workspace)
-	return preparedCheck{
-		client:      client,
-		snapshot:    snapshot,
-		request:     request,
-		repoRoot:    repoRoot,
-		workspace:   workspace,
-		fingerprint: fingerprintCheck(target, token, workspace, request),
-		files:       change.Files,
-		bytes:       len(change.Patch),
-		base:        resolution,
-	}, nil
+	prepared.client = client
+	prepared.request = request
+	prepared.workspace = workspace
+	prepared.fingerprint = fingerprintCheck(target, token, workspace, request)
+	return prepared, nil
+}
+
+func omittedFilesNotice(files []report.OmittedFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+	var total int64
+	for _, file := range files {
+		total += file.Bytes
+	}
+	return fmt.Sprintf("slopcop: omitted %d large JSON/binary file(s) (%d bytes) from upload and local review; their contents were not analyzed. The report lists paths, sizes and reasons. Use --include <path-or-glob> to check selected files.", len(files), total)
+}
+
+func (p preparedCheck) onlyOmitted() bool {
+	return p.bytes == 0 && len(p.omittedFiles) > 0
+}
+
+func omittedOnlyOutcome(prepared preparedCheck) staticOutcome {
+	return staticOutcome{status: "skipped", skipped: &report.Skipped{
+		Code: "all_files_omitted", State: "no-analyzable-change", Repository: prepared.request.RepoURL,
+		Message: "Every changed file was omitted by the large-data size filter; nothing was uploaded or analyzed and no push approval was recorded.",
+	}}
 }
 
 func resolveEnums(opts *checkOptions) (string, string, error) {
