@@ -452,6 +452,47 @@ func TestCheckSendsTheChangeAndAppliesFailOn(t *testing.T) {
 	}
 }
 
+func TestCheckPolicySelectors(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	var selection map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		selection, _ = request["selection"].(map[string]any)
+		_, _ = w.Write([]byte(`{"status":"clean","summary":{"failOn":"finding"},"findings":[],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	code, _, stderr := runCLI(t, "check", "--mode", "static", "--root", repo, "--service", server.URL,
+		"--no-policy-discovery", "--policy-id", "slopcop.similarity", "--policy-id", "slopcop.similarity",
+		"--policy-pack", "built-in", "--policy-pack", "built-in",
+		"--policy-category", "duplication", "--policy-category", "duplication")
+	if code != 0 {
+		t.Fatalf("exit=%d stderr=%s", code, stderr)
+	}
+	for key, want := range map[string]string{"policyIds": "slopcop.similarity", "packs": "built-in", "categories": "duplication"} {
+		values, _ := selection[key].([]any)
+		if len(values) != 1 || values[0] != want {
+			t.Errorf("selection[%s]=%v, want [%s]", key, values, want)
+		}
+	}
+}
+
+func TestSimilarityFindingIsShownRegardlessOfCertaintyAndNeverGates(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"clean","summary":{"newFindings":1,"failOn":"finding"},"findings":[{"policyId":"slopcop.similarity","severity":"info","certainty":"heuristic","path":"new.go","startLine":3,"title":"Similar function","new":true,"relatedLocations":[{"path":"old.go","startLine":8,"endLine":10,"message":"P(combine) = 0.87"}]}],"incomplete":[],"checks":[{"policyId":"slopcop.similarity","status":"future_status","message":"Readiness detail."}]}`))
+	}))
+	defer server.Close()
+	code, stdout, stderr := runCLI(t, "check", "--mode", "static", "--root", repo, "--service", server.URL, "--certainty", "definite")
+	if code != 0 || !strings.Contains(stdout, "[info] slopcop.similarity") || !strings.Contains(stdout, "Candidate: old.go:8 — P(combine) = 0.87") || !strings.Contains(stdout, "Note: slopcop.similarity (future_status): Readiness detail.") {
+		t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}
+
 // TestCheckStatusNamesFindingsWhateverFailOn covers BrokkAi/slopcop#120: the
 // service's status follows failOn, but the report's status names the result,
 // and only the exit follows --fail-on.
@@ -2080,6 +2121,12 @@ func TestPushApprovalLevel(t *testing.T) {
 		exit                          int
 	}{
 		{"warning advisory", "warning", "", "finding", true, 1},
+		{"info advisory default error level", "info", "", "finding", true, 1},
+		{"info advisory finding level", "info", "finding", "finding", true, 1},
+		{"info advisory note level", "info", "note", "finding", true, 1},
+		{"info advisory warning level", "info", "warning", "finding", true, 1},
+		{"info advisory error level", "info", "error", "finding", true, 1},
+		{"info advisory never level", "info", "never", "finding", true, 1},
 		{"error blocks", "error", "", "finding", false, 1},
 		{"unknown severity blocks", "mystery", "", "finding", false, 1},
 		{"warning threshold", "warning", "warning", "finding", false, 1},
@@ -2129,7 +2176,7 @@ func TestPushApprovalLevel(t *testing.T) {
 			if (err == nil) != tc.approved {
 				t.Fatalf("approval ref=%v want %v", err == nil, tc.approved)
 			}
-			if tc.name == "warning advisory" || tc.name == "error blocks" {
+			if tc.name == "warning advisory" || tc.name == "error blocks" || strings.Contains(tc.name, "info advisory") {
 				// The push line is printed only where init installed the
 				// gate, so install it the way init does, kept out of the
 				// snapshot by the repository's exclude file.

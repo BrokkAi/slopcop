@@ -143,8 +143,17 @@ func remappedCount(response service.Response) int {
 func human(response service.Response, options Options) string {
 	var out strings.Builder
 	fresh, existing := split(response.Findings)
+	var blocking, notes []service.Finding
+	for _, finding := range fresh {
+		if finding.Severity == "info" {
+			notes = append(notes, finding)
+		} else {
+			blocking = append(blocking, finding)
+		}
+	}
 	remapped, rest := splitRemapped(existing)
-	writeBlock(&out, "New findings", fresh)
+	writeBlock(&out, "New findings", blocking)
+	writeBlock(&out, "Notes", notes)
 	writeBlock(&out, "Previously ignored, code changed (never fail the check)", remapped)
 	if options.ShowExisting {
 		writeBlock(&out, "Already in the code (never fail the check)", rest)
@@ -165,6 +174,9 @@ func human(response service.Response, options Options) string {
 	if line := incompleteLine(response); line != "" {
 		out.WriteString(line)
 		out.WriteString("\n")
+	}
+	for _, check := range response.Checks {
+		fmt.Fprintf(&out, "Note: %s (%s): %s\n", printable(check.PolicyID), printable(check.Status), printable(check.Message))
 	}
 	// One that could not prove there is nothing more to find is the norm for
 	// static analysis, so by default they get one line, for a reader judging
@@ -292,6 +304,17 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 		if line := previouslyIgnoredLine(finding); line != "" {
 			fmt.Fprintf(out, "    %s\n", line)
 		}
+		for _, candidate := range finding.RelatedLocations {
+			candidatePath := printable(candidate.Path)
+			if candidate.StartLine >= 1 {
+				candidatePath = fmt.Sprintf("%s:%d", candidatePath, candidate.StartLine)
+			}
+			fmt.Fprintf(out, "    Candidate: %s", candidatePath)
+			if candidate.Message != "" {
+				fmt.Fprintf(out, " — %s", printable(candidate.Message))
+			}
+			out.WriteString("\n")
+		}
 		out.WriteString("\n")
 	}
 }
@@ -409,19 +432,35 @@ func previouslyIgnoredLine(finding service.Finding) string {
 // the new findings, then how many were already in the code.
 func summaryLine(response service.Response) string {
 	fresh, existing := split(response.Findings)
+	var notes []service.Finding
+	var blocking []service.Finding
+	for _, finding := range fresh {
+		if finding.Severity == "info" {
+			notes = append(notes, finding)
+		} else {
+			blocking = append(blocking, finding)
+		}
+	}
 	scope := "No new findings"
 	if onlyExcluded(response) {
 		scope = "Nothing checked: every changed file is excluded by .slopcop/config.toml"
 	}
-	switch len(fresh) {
+	switch len(blocking) {
 	case 0:
 	case 1:
 		scope = "1 new finding"
 	default:
-		scope = fmt.Sprintf("%d new findings", len(fresh))
+		scope = fmt.Sprintf("%d new findings", len(blocking))
 	}
-	if len(fresh) > 0 {
-		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(fresh))
+	if len(blocking) > 0 {
+		scope = fmt.Sprintf("%s across %d file(s)", scope, filesWithFindings(blocking))
+	}
+	if len(notes) > 0 {
+		noun := "notes"
+		if len(notes) == 1 {
+			noun = "note"
+		}
+		scope = fmt.Sprintf("%s; %d %s: %s", scope, len(notes), noun, printable(notes[0].Title))
 	}
 	// The service lists only the findings the change introduced or touched
 	// and counts the rest; a service from before that also listed them.
@@ -713,8 +752,9 @@ func printable(value string) string {
 // existing ones a service from before BrokkAi/bifrost-service#760 still
 // sent; summary counts both either way.
 type jsonReport struct {
-	Status   string `json:"status"`
-	Approved bool   `json:"approved"`
+	Checks   []service.CheckNotice `json:"checks,omitempty"`
+	Status   string                `json:"status"`
+	Approved bool                  `json:"approved"`
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Review is the local verdict, when one ran.
@@ -764,6 +804,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
 		Status:               status(response.Status, options),
+		Checks:               response.Checks,
 		Approved:             options.Approved,
 		StaticStatus:         options.StaticStatus,
 		Review:               reviewValue(options.Review),
@@ -1018,7 +1059,8 @@ type sarifResult struct {
 	Locations []sarifLocation `json:"locations"`
 	// BaselineState is `new` for a finding the change touched and
 	// `unchanged` for one already in the code.
-	BaselineState string `json:"baselineState"`
+	BaselineState    string          `json:"baselineState"`
+	RelatedLocations []sarifLocation `json:"relatedLocations,omitempty"`
 	// Properties carries the finding id `slopcop ignore` takes, when the
 	// service sent one, and the id of the ignored finding it matches.
 	Properties map[string]any `json:"properties,omitempty"`
@@ -1037,6 +1079,8 @@ type sarifMessage struct {
 }
 
 type sarifLocation struct {
+	ID               *int                  `json:"id,omitempty"`
+	Message          *sarifMessage         `json:"message,omitempty"`
 	PhysicalLocation sarifPhysicalLocation `json:"physicalLocation"`
 }
 
@@ -1122,7 +1166,28 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			Locations:     []sarifLocation{{PhysicalLocation: physical}},
 			BaselineState: baselineState(finding),
 		}
-		if finding.ID != "" || finding.PreviouslyIgnored != "" {
+		if finding.Severity == "info" {
+			result.Properties = map[string]any{"slopcop.severity": finding.Severity}
+		}
+		for i, candidate := range finding.RelatedLocations {
+			id := i + 1
+			candidatePhysical := sarifPhysicalLocation{
+				ArtifactLocation: sarifArtifactLocation{URI: sarifURI(candidate.Path), URIBaseID: "SRCROOT"},
+			}
+			if candidate.StartLine >= 1 {
+				candidatePhysical.Region = &sarifRegion{StartLine: candidate.StartLine}
+				if candidate.EndLine >= candidate.StartLine {
+					end := candidate.EndLine
+					candidatePhysical.Region.EndLine = &end
+				}
+			}
+			location := sarifLocation{ID: &id, PhysicalLocation: candidatePhysical}
+			if candidate.Message != "" {
+				location.Message = &sarifMessage{Text: candidate.Message}
+			}
+			result.RelatedLocations = append(result.RelatedLocations, location)
+		}
+		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "") {
 			result.Properties = map[string]any{}
 		}
 		if finding.ID != "" {
@@ -1177,6 +1242,14 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	// The overall notice, findings left out, then one per named check, so a
 	// SARIF consumer can tell which checks to rerun or exclude.
 	var notifications []sarifNotification
+	for _, check := range response.Checks {
+		notifications = append(notifications, sarifNotification{
+			Level:      "note",
+			Message:    sarifMessage{Text: check.Message},
+			Descriptor: &sarifDescriptor{ID: check.PolicyID},
+			Properties: map[string]any{"slopcop.checkStatus": check.Status},
+		})
+	}
 	switch {
 	case response.Failure != "":
 		notifications = append(notifications, sarifNotification{
@@ -1355,6 +1428,8 @@ func baselineState(finding service.Finding) string {
 // its level for a result without a severity.
 func sarifLevel(severity string) string {
 	switch severity {
+	case "info":
+		return "note"
 	case "error", "warning", "note":
 		return severity
 	default:
