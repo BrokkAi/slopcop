@@ -97,10 +97,15 @@ slopcop check --format json
 | `failure` | present when the analysis as a whole did not complete |
 | `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
+| `omittedFiles` | files omitted from both upload and local review by the size filter, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json` or `large-binary`); their contents were not analyzed |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
 
-Failure, pending, skipped, and AI-only JSON also include `approved`. The first
-SARIF run has `slopcop.approved` in its properties.
+Failure, pending, skipped, and AI-only JSON also include `approved` and any
+`omittedFiles`. If the filter omits every changed file, the result is `skipped`
+with no approval or analysis. The first SARIF run has `slopcop.approved` in its
+properties; `slopcop.omittedFiles` lists omissions on each run. A local review's
+`tree` identifies the complete snapshot, while optional `diffTree` identifies
+the filtered scope actually reviewed.
 
 A failed check prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the service

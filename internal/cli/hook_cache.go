@@ -13,6 +13,7 @@ import (
 	"github.com/BrokkAi/slopcop/internal/attribution"
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -36,9 +37,12 @@ type hookState struct {
 	Off bool `json:"off,omitempty"`
 	// Fingerprint names the last check that completed in this session, by
 	// the hook or by hand; Status and Findings are its result.
-	Fingerprint string            `json:"fingerprint,omitempty"`
-	Status      string            `json:"status,omitempty"`
-	Findings    []service.Finding `json:"findings,omitempty"`
+	Fingerprint string `json:"fingerprint,omitempty"`
+	// OmittedScope tracks disclosure separately from the hosted request:
+	// artifact-only changes must update the notice without resending analysis.
+	OmittedScope string            `json:"omittedScope,omitempty"`
+	Status       string            `json:"status,omitempty"`
+	Findings     []service.Finding `json:"findings,omitempty"`
 	// Handed says the hook already gave the agent or the user those
 	// findings.
 	Handed bool `json:"handed,omitempty"`
@@ -138,7 +142,17 @@ func rememberCheck(prepared preparedCheck, response service.Response) {
 	path := hookStatePath(attributed.Harness, session, prepared.repoRoot)
 	state, _ := loadHookState(path)
 	state.completed(prepared.workspace, prepared.fingerprint, response)
+	state.OmittedScope = omittedScopeDigest(prepared.omittedFiles)
 	saveHookState(path, state)
+}
+
+func omittedScopeDigest(files []report.OmittedFile) string {
+	if len(files) == 0 {
+		return ""
+	}
+	encoded, _ := json.Marshal(files)
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:])
 }
 
 // forgetFinding drops an ignored finding from the state of the session that
