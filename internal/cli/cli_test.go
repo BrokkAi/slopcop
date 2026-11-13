@@ -1842,6 +1842,27 @@ func TestBaseNotFoundHintNamesOriginsDefaultBranch(t *testing.T) {
 	}
 }
 
+// TestIncompleteReviewFailsUnderFailOnNever checks that findings from one
+// reviewer, while fewer than review.minCompleted reviewers finished, still
+// exit 2 when --fail-on never lets the findings themselves exit 0.
+func TestIncompleteReviewFailsUnderFailOnNever(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	fake := func(mode string) config.Adapter {
+		return config.Adapter{Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=" + mode}}
+	}
+	cfg := config.Config{Mode: "ai", Review: &config.Review{Reviewers: []string{"terra", "flash"}, Adapters: map[string]config.Adapter{"codex": fake("findings"), "dsh": fake("empty")}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--fail-on", "never")
+	if code != 2 || !strings.Contains(out, `"incomplete": true`) {
+		t.Fatalf("exit %d, stdout %s stderr %s", code, out, stderr)
+	}
+}
+
 func TestAILocalReviewAndOverride(t *testing.T) {
 	for _, tc := range []struct {
 		mode   string

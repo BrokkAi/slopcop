@@ -5,12 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/BrokkAi/slopcop/internal/gitx"
@@ -41,17 +40,18 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		timeout = DefaultTimeout
 	}
 	order := opts.Settings.Reviewers
+	minCompleted := opts.Settings.minCompleted()
 	in := discoverIntent(opts.Intent)
 	v.IntentSource = in.Source
 	commands := map[Family][]string{}
-	for _, f := range order {
+	for _, f := range slices.Concat(order, opts.Settings.Fallbacks) {
 		cmd := opts.Settings.Adapters[AdapterName(f)]
 		if len(cmd) == 0 {
 			cmd = DefaultCommand(f)
 		}
 		commands[f] = cmd
 	}
-	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, commands})
+	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
 	previous, err := store.Last()
@@ -59,7 +59,9 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		v.Error = "read last review: " + err.Error()
 		return v
 	}
-	if previous != nil && (previous.Status == StatusClean || previous.Status == StatusFindings) && previous.ReuseKey == key {
+	// Only a review every reviewer finished is reused; a reviewer that
+	// failed gets another chance on the next check.
+	if previous != nil && (previous.Status == StatusClean || previous.Status == StatusFindings) && groupVerdict(previous.Reviewers) == previous.Status && previous.ReuseKey == key {
 		v = previous.Verdict
 		v.Reused = true
 		save()
@@ -95,50 +97,10 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	ready := make([]*runner, 0, len(order))
-	v.Reviewers = make([]Reviewer, len(order))
-	failed := false
-	for i, f := range order {
-		name := fmt.Sprintf("%d-%s", i+1, f)
-		s, err := startRunner(ctx, opts.Root, commands[f], f, name, dir, timeout)
-		if err == nil {
-			err = s.prepare(opts.Root)
-		}
-		if err != nil {
-			failed = true
-			v.Reviewers[i] = Reviewer{Name: name, Family: f, Status: StatusFailed, Error: err.Error()}
-			if s != nil {
-				v.Reviewers[i] = s.result
-				v.Reviewers[i].Status = StatusFailed
-				v.Reviewers[i].Error = err.Error()
-				s.stop()
-			}
-			continue
-		}
-		ready = append(ready, s)
-	}
-	if failed {
-		for _, s := range ready {
-			s.stop()
-		}
-		for i, r := range v.Reviewers {
-			if r.Name == "" {
-				v.Reviewers[i] = Reviewer{Name: fmt.Sprintf("%d-%s", i+1, order[i]), Family: order[i], Status: StatusFailed, Error: "review stopped because another reviewer could not start"}
-			}
-		}
-		save()
-		return v
-	}
-	var wg sync.WaitGroup
-	for i, s := range ready {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			v.Reviewers[i], _ = s.prompt(reviewPrompt(opts.Root, capture, in, findings, string(diff), s.result.Family))
-		}()
-	}
-	wg.Wait()
-	v.Status = groupVerdict(v.Reviewers)
+	p := &panel{ctx: ctx, root: opts.Root, dir: dir, timeout: timeout, commands: commands, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
+		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, findings, string(diff), f) }}
+	v.Reviewers = p.run(order)
+	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
 	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}
 	if err = store.Save(r); err != nil {
 		v.Status = StatusFailed

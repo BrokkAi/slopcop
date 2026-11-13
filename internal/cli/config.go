@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.timeout"
+const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted"
 
 // newConfigCommand builds the user config commands.
 func newConfigCommand() *cobra.Command {
@@ -118,11 +119,21 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return strings.Join(cfg.Review.Reviewers, ","), nil
 		}
 		return "(not set)", nil
+	case "review.fallbacks":
+		if cfg.Review != nil && len(cfg.Review.Fallbacks) > 0 {
+			return strings.Join(cfg.Review.Fallbacks, ","), nil
+		}
+		return "(not set)", nil
 	case "review.timeout":
 		if cfg.Review != nil && cfg.Review.Timeout != "" {
 			return cfg.Review.Timeout, nil
 		}
 		return review.DefaultTimeout.String(), nil
+	case "review.minCompleted":
+		if cfg.Review != nil && cfg.Review.MinCompleted > 0 {
+			return strconv.Itoa(cfg.Review.MinCompleted), nil
+		}
+		return strconv.Itoa(review.DefaultMinCompleted) + " (not set; at most the number of reviewers)", nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -152,13 +163,37 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 				return fmt.Errorf("invalid review.reviewers %q: %w", value, err)
 			}
 		}
+		if cfg.Review != nil && cfg.Review.MinCompleted > len(names) {
+			return fmt.Errorf("invalid review.reviewers %q: review.minCompleted is %d; lower or unset it first", value, cfg.Review.MinCompleted)
+		}
 		ensureReview(cfg).Reviewers = names
+	case "review.fallbacks":
+		names := strings.Split(value, ",")
+		if len(names) > review.MaxReviewers {
+			return fmt.Errorf("invalid review.fallbacks %q (want 1-%d known families)", value, review.MaxReviewers)
+		}
+		for _, name := range names {
+			if _, err := review.ParseFamily(name); err != nil {
+				return fmt.Errorf("invalid review.fallbacks %q: %w", value, err)
+			}
+		}
+		ensureReview(cfg).Fallbacks = names
 	case "review.timeout":
 		d, err := time.ParseDuration(value)
 		if err != nil || d <= 0 {
 			return fmt.Errorf("invalid review.timeout %q (want a positive Go duration)", value)
 		}
 		ensureReview(cfg).Timeout = value
+	case "review.minCompleted":
+		n, err := strconv.Atoi(value)
+		limit := review.MaxReviewers
+		if cfg.Review != nil && len(cfg.Review.Reviewers) > 0 {
+			limit = len(cfg.Review.Reviewers)
+		}
+		if err != nil || n < 1 || n > limit {
+			return fmt.Errorf("invalid review.minCompleted %q (want 1-%d, at most the number of reviewers)", value, limit)
+		}
+		ensureReview(cfg).MinCompleted = n
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -180,14 +215,22 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 		if cfg.Review != nil {
 			cfg.Review.Reviewers = nil
 		}
+	case "review.fallbacks":
+		if cfg.Review != nil {
+			cfg.Review.Fallbacks = nil
+		}
 	case "review.timeout":
 		if cfg.Review != nil {
 			cfg.Review.Timeout = ""
 		}
+	case "review.minCompleted":
+		if cfg.Review != nil {
+			cfg.Review.MinCompleted = 0
+		}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
-	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && len(cfg.Review.Fallbacks) == 0 && cfg.Review.Timeout == "" && cfg.Review.MinCompleted == 0 && len(cfg.Review.Adapters) == 0 {
 		cfg.Review = nil
 	}
 	return nil

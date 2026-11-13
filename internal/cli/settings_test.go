@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
 )
 
@@ -79,7 +80,7 @@ func TestReviewSettingsValidation(t *testing.T) {
 	if err != nil || len(got.Reviewers) != 0 || got.Timeout != review.DefaultTimeout {
 		t.Fatalf("defaults = %+v, %v", got, err)
 	}
-	for _, cfg := range []config.Config{{Review: &config.Review{Reviewers: []string{"terra", "sol", "flash", "haiku", "terra"}}}, {Review: &config.Review{Timeout: "0s"}}, {Review: &config.Review{Adapters: map[string]config.Adapter{"bad": {Command: []string{"x"}}}}}} {
+	for _, cfg := range []config.Config{{Review: &config.Review{Reviewers: []string{"terra", "sol", "flash", "haiku", "terra"}}}, {Review: &config.Review{Timeout: "0s"}}, {Review: &config.Review{Adapters: map[string]config.Adapter{"bad": {Command: []string{"x"}}}}}, {Review: &config.Review{Reviewers: []string{"terra", "sol"}, MinCompleted: 3}}, {Review: &config.Review{MinCompleted: -1}}} {
 		if _, err := reviewSettings(cfg, 0); err == nil || !strings.Contains(err.Error(), "config") {
 			t.Errorf("expected config validation error; got %v", err)
 		}
@@ -87,6 +88,10 @@ func TestReviewSettingsValidation(t *testing.T) {
 	got, err = reviewSettings(config.Config{Review: &config.Review{Reviewers: []string{"terra"}, Timeout: "3s", Adapters: map[string]config.Adapter{"codex": {Command: []string{"runner"}}}}}, 5*time.Second)
 	if err != nil || got.Timeout != 5*time.Second || got.Adapters["codex"][0] != "runner" {
 		t.Fatalf("override = %+v, %v", got, err)
+	}
+	got, err = reviewSettings(config.Config{Review: &config.Review{Reviewers: []string{"terra", "sol"}, MinCompleted: 2}}, 0)
+	if err != nil || got.MinCompleted != 2 {
+		t.Fatalf("minCompleted = %+v, %v", got, err)
 	}
 }
 
@@ -132,5 +137,17 @@ func TestCheckWithNoModeAndNoReviewersRunsStatic(t *testing.T) {
 				t.Fatalf("a review ran: %s", stderr)
 			}
 		})
+	}
+}
+
+func TestReviewSkippedReasonNamesTheFallback(t *testing.T) {
+	for fallback, want := range map[string]string{
+		staticForCI:          report.ReviewSkippedCI,
+		staticForNoReviewers: report.ReviewSkippedNoReviewers,
+		"":                   report.ReviewSkippedStaticMode,
+	} {
+		if got := reviewSkippedReason(fallback); got != want {
+			t.Errorf("reviewSkippedReason(%q) = %q, want %q", fallback, got, want)
+		}
 	}
 }

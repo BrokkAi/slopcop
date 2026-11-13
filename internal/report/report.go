@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"path"
 	"sort"
 	"strings"
 	"unicode"
@@ -22,6 +23,17 @@ const (
 	FormatSARIF = "sarif"
 )
 
+// Reasons the local review did not run, as the reports name them.
+const (
+	// ReviewSkippedNoReviewers is a check with no mode set on a machine
+	// whose config names no reviewers.
+	ReviewSkippedNoReviewers = "noReviewers"
+	// ReviewSkippedCI is a check with no mode set that ran as a CI job.
+	ReviewSkippedCI = "ci"
+	// ReviewSkippedStaticMode is static mode chosen by flag or config file.
+	ReviewSkippedStaticMode = "staticMode"
+)
+
 const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
 
 // Options shape what a report lists. Rendering never changes the check, so
@@ -35,6 +47,10 @@ type Options struct {
 	Approved bool
 	// Review is the local reviewers' verdict, when one ran.
 	Review *review.Verdict
+	// ReviewSkipped is why the local review did not run, one of the
+	// ReviewSkipped constants, or "" when it ran. A static-only report must
+	// not read like a clean review.
+	ReviewSkipped string
 	// Status overrides the service status with the combined check status.
 	Status string
 	// StaticStatus preserves the service status when it differs.
@@ -361,7 +377,67 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 			}
 			out.WriteString("\n")
 		}
+		if finding.Dependency != nil {
+			writeDependency(out, *finding.Dependency)
+		}
 		out.WriteString("\n")
+	}
+}
+
+// writeDependency says which package a dependency advisory finding is about,
+// how it got into the tree and how to fix it, such as:
+//
+//	Package: npm lodash@4.17.20, direct, from package.json
+//	Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9
+//	Fixed in: 4.17.21
+//	Fix: npm install lodash@4.17.21 --save-exact
+func writeDependency(out *strings.Builder, dependency service.Dependency) {
+	// Direct is false also when the service could not tell, so only a chain
+	// through another package says transitive.
+	how := ""
+	switch {
+	case dependency.Direct:
+		how = ", direct"
+	case len(dependency.DependencyChain) > 1:
+		how = ", transitive"
+	}
+	fmt.Fprintf(
+		out,
+		"    Package: %s %s@%s%s, from %s\n",
+		printable(dependency.Ecosystem),
+		printable(dependency.Package),
+		printable(dependency.Version),
+		how,
+		printable(dependency.ManifestPath),
+	)
+	advisory := printable(dependency.AdvisoryID)
+	if len(dependency.Aliases) > 0 {
+		advisory += " (" + printableList(dependency.Aliases) + ")"
+	}
+	fmt.Fprintf(out, "    Advisory: %s %s\n", advisory, printable(dependency.SourceURL))
+	if !dependency.Direct && len(dependency.DependencyChain) > 1 {
+		shown := make([]string, len(dependency.DependencyChain))
+		for i, step := range dependency.DependencyChain {
+			shown[i] = printable(step)
+		}
+		fmt.Fprintf(out, "    Via: %s\n", strings.Join(shown, " → "))
+	}
+	if len(dependency.FixedVersions) > 0 {
+		fmt.Fprintf(out, "    Fixed in: %s\n", printableList(dependency.FixedVersions))
+	} else {
+		// OSV lists fixes on the installed version's line only, so a later
+		// major version may still fix it.
+		out.WriteString("    Fixed in: no fix listed for this version line\n")
+	}
+	if dependency.UpgradeCommand != "" {
+		// npm changes the manifest of the directory it runs in, and the
+		// manifest path is relative to the repository root, not the
+		// current directory.
+		where := "at the repository root"
+		if dir := path.Dir(dependency.ManifestPath); dir != "." {
+			where = "in " + printable(dir) + "/ under the repository root"
+		}
+		fmt.Fprintf(out, "    Fix: %s (run %s)\n", printable(dependency.UpgradeCommand), where)
 	}
 }
 
@@ -819,11 +895,14 @@ type jsonReport struct {
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Review is the local verdict, when one ran.
-	Review     *reviewJSON                `json:"review,omitempty"`
-	BaseCommit string                     `json:"baseCommit"`
-	Summary    service.Summary            `json:"summary"`
-	Findings   []service.Finding          `json:"findings"`
-	Incomplete []service.IncompletePolicy `json:"incomplete"`
+	Review *reviewJSON `json:"review,omitempty"`
+	// ReviewSkipped is why the local review did not run. It is set only
+	// when it did not.
+	ReviewSkipped string                     `json:"reviewSkipped,omitempty"`
+	BaseCommit    string                     `json:"baseCommit"`
+	Summary       service.Summary            `json:"summary"`
+	Findings      []service.Finding          `json:"findings"`
+	Incomplete    []service.IncompletePolicy `json:"incomplete"`
 	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
 	// counts but incomplete does not name, because the service names at most
 	// 50. It is set only when the list was cut.
@@ -870,6 +949,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Approved:             options.Approved,
 		StaticStatus:         options.StaticStatus,
 		Review:               reviewValue(options.Review),
+		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
 		Summary:              response.Summary,
 		Findings:             listed(response, options),
@@ -899,15 +979,16 @@ func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck)
 // pendingReport is the document `--format json` prints for a check that was
 // still running when --timeout ran out.
 type pendingReport struct {
-	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
-	Status       string        `json:"status"`
-	Approved     bool          `json:"approved"`
-	StaticStatus string        `json:"staticStatus,omitempty"`
-	Review       *reviewJSON   `json:"review,omitempty"`
-	RetryAfter   int           `json:"retryAfter"`
-	Message      string        `json:"message"`
-	Remedy       string        `json:"remedy"`
-	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	Status        string        `json:"status"`
+	Approved      bool          `json:"approved"`
+	StaticStatus  string        `json:"staticStatus,omitempty"`
+	Review        *reviewJSON   `json:"review,omitempty"`
+	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
+	RetryAfter    int           `json:"retryAfter"`
+	Message       string        `json:"message"`
+	Remedy        string        `json:"remedy"`
+	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // writePendingBase renders a check that is still running. The human format
@@ -918,15 +999,16 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 		return nil
 	case FormatJSON:
 		return encode(w, pendingReport{
-			OmittedFiles: options.OmittedFiles,
-			Status:       status(service.StatusPending, options),
-			StaticStatus: options.StaticStatus,
-			Approved:     options.Approved,
-			Review:       reviewValue(options.Review),
-			RetryAfter:   pending.RetryAfter,
-			Message:      pending.Message,
-			Remedy:       pending.Remedy,
-			SkillUpdated: options.SkillUpdated,
+			OmittedFiles:  options.OmittedFiles,
+			Status:        status(service.StatusPending, options),
+			StaticStatus:  options.StaticStatus,
+			Approved:      options.Approved,
+			Review:        reviewValue(options.Review),
+			ReviewSkipped: options.ReviewSkipped,
+			RetryAfter:    pending.RetryAfter,
+			Message:       pending.Message,
+			Remedy:        pending.Remedy,
+			SkillUpdated:  options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{
@@ -959,16 +1041,17 @@ type Skipped struct {
 
 // skippedReport is the document `--format json` prints for a skipped check.
 type skippedReport struct {
-	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
-	Status       string        `json:"status"`
-	Approved     bool          `json:"approved"`
-	StaticStatus string        `json:"staticStatus,omitempty"`
-	Review       *reviewJSON   `json:"review,omitempty"`
-	Code         string        `json:"code"`
-	State        string        `json:"state"`
-	Repository   string        `json:"repository"`
-	Message      string        `json:"message"`
-	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	Status        string        `json:"status"`
+	Approved      bool          `json:"approved"`
+	StaticStatus  string        `json:"staticStatus,omitempty"`
+	Review        *reviewJSON   `json:"review,omitempty"`
+	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
+	Code          string        `json:"code"`
+	State         string        `json:"state"`
+	Repository    string        `json:"repository"`
+	Message       string        `json:"message"`
+	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // writeSkippedBase renders a check that was not sent because the repository is not
@@ -981,16 +1064,17 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 		return nil
 	case FormatJSON:
 		return encode(w, skippedReport{
-			OmittedFiles: options.OmittedFiles,
-			Status:       status("skipped", options),
-			StaticStatus: options.StaticStatus,
-			Approved:     options.Approved,
-			Review:       reviewValue(options.Review),
-			Code:         skipped.Code,
-			State:        skipped.State,
-			Repository:   skipped.Repository,
-			Message:      skipped.Message,
-			SkillUpdated: options.SkillUpdated,
+			OmittedFiles:  options.OmittedFiles,
+			Status:        status("skipped", options),
+			StaticStatus:  options.StaticStatus,
+			Approved:      options.Approved,
+			Review:        reviewValue(options.Review),
+			ReviewSkipped: options.ReviewSkipped,
+			Code:          skipped.Code,
+			State:         skipped.State,
+			Repository:    skipped.Repository,
+			Message:       skipped.Message,
+			SkillUpdated:  options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{
@@ -1016,18 +1100,19 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 // service refused: its closed error code, verbatim message and remedy, and
 // whether the same request may succeed later.
 type failureReport struct {
-	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
-	Status       string        `json:"status"`
-	Approved     bool          `json:"approved"`
-	StaticStatus string        `json:"staticStatus,omitempty"`
-	Review       *reviewJSON   `json:"review,omitempty"`
-	Code         string        `json:"code"`
-	Message      string        `json:"message"`
-	Remedy       string        `json:"remedy"`
-	Retryable    bool          `json:"retryable"`
-	InstallURL   string        `json:"installUrl,omitempty"`
-	TopUpURL     string        `json:"topUpUrl,omitempty"`
-	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	Status        string        `json:"status"`
+	Approved      bool          `json:"approved"`
+	StaticStatus  string        `json:"staticStatus,omitempty"`
+	Review        *reviewJSON   `json:"review,omitempty"`
+	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
+	Code          string        `json:"code"`
+	Message       string        `json:"message"`
+	Remedy        string        `json:"remedy"`
+	Retryable     bool          `json:"retryable"`
+	InstallURL    string        `json:"installUrl,omitempty"`
+	TopUpURL      string        `json:"topUpUrl,omitempty"`
+	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
 // writeFailureBase renders a check the service refused. The human format prints
@@ -1039,18 +1124,19 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 		return nil
 	case FormatJSON:
 		return encode(w, failureReport{
-			OmittedFiles: options.OmittedFiles,
-			Status:       status(service.StatusFailed, options),
-			StaticStatus: options.StaticStatus,
-			Approved:     options.Approved,
-			Review:       reviewValue(options.Review),
-			Code:         failure.Body.Code,
-			Message:      failure.Error(),
-			Remedy:       failure.Body.Remedy,
-			Retryable:    failure.Body.Retryable,
-			InstallURL:   failure.Body.InstallURL,
-			TopUpURL:     failure.Body.TopUpURL,
-			SkillUpdated: options.SkillUpdated,
+			OmittedFiles:  options.OmittedFiles,
+			Status:        status(service.StatusFailed, options),
+			StaticStatus:  options.StaticStatus,
+			Approved:      options.Approved,
+			Review:        reviewValue(options.Review),
+			ReviewSkipped: options.ReviewSkipped,
+			Code:          failure.Body.Code,
+			Message:       failure.Error(),
+			Remedy:        failure.Body.Remedy,
+			Retryable:     failure.Body.Retryable,
+			InstallURL:    failure.Body.InstallURL,
+			TopUpURL:      failure.Body.TopUpURL,
+			SkillUpdated:  options.SkillUpdated,
 		}, "json report")
 	case FormatSARIF:
 		id := failure.Body.Code
@@ -1079,6 +1165,9 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
 	properties["slopcop.approved"] = options.Approved
+	if options.ReviewSkipped != "" {
+		properties["slopcop.reviewSkipped"] = options.ReviewSkipped
+	}
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
@@ -1258,7 +1347,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			}
 			result.RelatedLocations = append(result.RelatedLocations, location)
 		}
-		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "" || finding.SuggestedWord != "") {
+		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "" || finding.SuggestedWord != "" || finding.Dependency != nil) {
 			result.Properties = map[string]any{}
 		}
 		if finding.ID != "" {
@@ -1269,6 +1358,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		}
 		if finding.SuggestedWord != "" {
 			result.Properties["slopcop.suggestedWord"] = finding.SuggestedWord
+		}
+		if finding.Dependency != nil {
+			result.Properties["slopcop.dependency"] = finding.Dependency
 		}
 		results = append(results, result)
 	}
@@ -1544,6 +1636,12 @@ func Write(w io.Writer, response service.Response, format string, options Option
 		if _, err := io.WriteString(w, human(response, options)); err != nil {
 			return err
 		}
+		// Only the fallback a person did not choose gets a line: one who
+		// asked for static mode knows, and a CI job keeps its output.
+		if options.Review == nil && options.ReviewSkipped == ReviewSkippedNoReviewers {
+			_, err := io.WriteString(w, "\nReview: skipped (no reviewers are configured; run `slopcop init` to add them)\n")
+			return err
+		}
 		return writeReview(w, options.Review)
 	}
 	return writeBase(w, response, format, options)
@@ -1617,6 +1715,8 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
+	// Incomplete is set when fewer reviewers finished than review.minCompleted.
+	Incomplete bool `json:"incomplete,omitempty"`
 	// Error is the local review's Error field.
 	Error string `json:"error"`
 	// Reused is the local review's Reused field.
@@ -1636,7 +1736,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -1651,6 +1751,9 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	}
 	v := options.Review
 	properties := map[string]any{"slopcop.status": v.Status}
+	if v.Incomplete {
+		properties["slopcop.incomplete"] = true
+	}
 	if v.Capture.DiffTree != "" {
 		properties["slopcop.tree"] = v.Capture.Tree
 		properties["slopcop.diffTree"] = v.Capture.DiffTree
@@ -1658,7 +1761,7 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
-	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed}}, Properties: properties}
+	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed && !v.Incomplete}}, Properties: properties}
 	for _, r := range v.Reviewers {
 		if r.Status == review.StatusFindings {
 			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})
@@ -1683,11 +1786,25 @@ func writeReview(w io.Writer, v *review.Verdict) error {
 	return nil
 }
 
+// failedReviewers counts reviewers without a verdict.
+func failedReviewers(v review.Verdict) int {
+	n := 0
+	for _, r := range v.Reviewers {
+		if r.Status == review.StatusFailed {
+			n++
+		}
+	}
+	return n
+}
+
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
 	for _, r := range v.Reviewers {
 		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)
+		if r.StandsInFor != "" {
+			fmt.Fprintf(w, "    Stands in for %s, which failed\n", printable(r.StandsInFor))
+		}
 		if r.Text != "" {
 			for _, line := range strings.Split(r.Text, "\n") {
 				fmt.Fprintf(w, "    %s\n", printable(line))
@@ -1699,6 +1816,15 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		if r.Log != "" {
 			fmt.Fprintf(w, "    Log: %s\n", printable(r.Log))
 		}
+		if r.FirstError != "" && r.Status != review.StatusFailed {
+			fmt.Fprintf(w, "    Retried after: %s\n", printable(r.FirstError))
+		}
+		if r.FirstLog != "" {
+			fmt.Fprintf(w, "    First attempt log: %s\n", printable(r.FirstLog))
+		}
+	}
+	if failed := failedReviewers(v); failed > 0 && v.Status != review.StatusFailed {
+		fmt.Fprintf(w, "  %d of %d reviewers failed; the review stands on the reviewers that finished\n", failed, len(v.Reviewers))
 	}
 	if v.Error != "" {
 		fmt.Fprintf(w, "  Error: %s\n", printable(v.Error))

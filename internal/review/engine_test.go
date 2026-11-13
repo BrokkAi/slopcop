@@ -54,11 +54,13 @@ func TestConfiguredReviewersNoFallback(t *testing.T) {
 	trace := filepath.Join(t.TempDir(), "trace")
 	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Flash}, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6-terra", trace), "dsh": fakeAdapter("new-error", "deepseek-flash", trace)}}}
 	v := Run(context.Background(), store, c, o)
-	if v.Status != StatusFailed || len(v.Reviewers) != 2 || v.Reviewers[1].Status != StatusFailed {
+	// Without fallbacks, two reviewers and a minimum of two, one failure
+	// fails the review; it still does not stop the reviewer that started.
+	if v.Status != StatusFailed || !v.Incomplete || len(v.Reviewers) != 2 || v.Reviewers[0].Status != StatusClean || v.Reviewers[1].Status != StatusFailed || v.Reviewers[1].FirstError == "" {
 		t.Fatalf("%+v", v)
 	}
 	data, _ := os.ReadFile(trace)
-	if strings.Contains(string(data), "prompt") {
+	if strings.Count(string(data), "prompt") != 1 {
 		t.Fatal(string(data))
 	}
 }
@@ -66,8 +68,216 @@ func TestAuthFailureKeepsPartial(t *testing.T) {
 	root, c, store := reviewRepo(t)
 	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Flash}, Adapters: map[string][]string{"codex": fakeAdapter("findings", "gpt-6-terra", ""), "dsh": fakeAdapter("auth-required", "deepseek-flash", "")}}}
 	v := Run(context.Background(), store, c, o)
-	if v.Status != StatusFailed || len(v.Reviewers) != 2 || !strings.Contains(v.Reviewers[0].Text, "fake defect") || v.Reviewers[1].Status != StatusFailed {
+	// Findings stand even though the other reviewer failed; a missing login
+	// is not retried.
+	if v.Status != StatusFindings || len(v.Reviewers) != 2 || !strings.Contains(v.Reviewers[0].Text, "fake defect") || v.Reviewers[1].Status != StatusFailed || v.Reviewers[1].FirstError != "" {
 		t.Fatalf("%+v", v)
+	}
+	if err := store.Override("reason", c.Tree); err == nil {
+		t.Fatal("override allowed while a reviewer failed")
+	}
+}
+
+// TestRefusedEscalationIsRetried checks that a Codex reviewer whose turn ends
+// because slopcop refused a command outside its sandbox runs once more in a
+// fresh session, told why, and that its verdict then counts.
+func TestRefusedEscalationIsRetried(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra, Sol}, Adapters: map[string][]string{"codex": fakeAdapter("escalate", "gpt-6.10-terra,gpt-6.1-sol", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusClean || len(v.Reviewers) != 2 {
+		t.Fatalf("%+v", v)
+	}
+	for _, r := range v.Reviewers {
+		if r.Status != StatusClean || !strings.Contains(r.FirstError, "incomplete turn: cancelled") || !strings.Contains(r.FirstError, `"go test ./..."`) || !strings.HasSuffix(r.Log, "-retry.jsonl") || r.FirstLog == "" {
+			t.Fatalf("%+v", r)
+		}
+	}
+	data, _ := os.ReadFile(trace)
+	if strings.Count(string(data), "permission=cancel") != 2 || strings.Count(string(data), "retry-prompt") != 2 {
+		t.Fatalf("trace: %s", data)
+	}
+	// A review with a retried reviewer that finished is complete, so it is
+	// reused.
+	if v = Run(context.Background(), s, c, o); !v.Reused {
+		t.Fatalf("%+v", v)
+	}
+}
+
+// TestDeclineKeepsTheTurnGoing checks that slopcop picks the refusal that
+// lets the reviewer continue when the adapter offers one, so no retry is
+// needed.
+func TestDeclineKeepsTheTurnGoing(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Sol}, Adapters: map[string][]string{"codex": fakeAdapter("escalate-decline", "gpt-6.1-sol", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusClean || v.Reviewers[0].FirstError != "" {
+		t.Fatalf("%+v", v)
+	}
+	data, _ := os.ReadFile(trace)
+	if !strings.Contains(string(data), "permission=decline") || strings.Contains(string(data), "retry-prompt") {
+		t.Fatalf("trace: %s", data)
+	}
+}
+
+// TestMinCompletedReviewers checks the rule for a reviewer that still fails
+// after its retry: the review stands on the reviewers that finished when at
+// least MinCompleted did, and fails otherwise.
+func TestMinCompletedReviewers(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		min       int
+		reviewers []Family
+		want      Status
+	}{
+		{"default of two, two reviewers", 0, []Family{Terra, Flash}, StatusFailed},
+		{"minimum of one", 1, []Family{Terra, Flash}, StatusClean},
+		{"default of two, three reviewers", 0, []Family{Terra, Terra, Flash}, StatusClean},
+		{"none finished", 0, []Family{Flash}, StatusFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, c, s := reviewRepo(t)
+			// Flash stands in for a reviewer that keeps failing.
+			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: tc.reviewers, MinCompleted: tc.min, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6.10-terra", ""), "dsh": fakeAdapter("escalate-always", "deepseek-flash", "")}}}
+			v := Run(context.Background(), s, c, o)
+			if v.Status != tc.want {
+				t.Fatalf("%+v", v)
+			}
+			failed := v.Reviewers[len(v.Reviewers)-1]
+			if failed.Status != StatusFailed || !strings.Contains(failed.Error, "retried once") || !strings.Contains(failed.Error, "Run the check again") || failed.FirstLog == "" {
+				t.Fatalf("%+v", failed)
+			}
+			// A review a reviewer did not finish is never reused.
+			if v = Run(context.Background(), s, c, o); v.Reused {
+				t.Fatalf("reused: %+v", v)
+			}
+		})
+	}
+}
+
+func TestReviewStatus(t *testing.T) {
+	clean, findings, failed := Reviewer{Text: CleanReply}, Reviewer{Text: "bug"}, Reviewer{Error: "x"}
+	for _, tc := range []struct {
+		rs         []Reviewer
+		min        int
+		want       Status
+		incomplete bool
+	}{
+		{nil, 1, StatusFailed, true},
+		{[]Reviewer{failed}, 1, StatusFailed, true},
+		{[]Reviewer{clean, failed}, 1, StatusClean, false},
+		{[]Reviewer{clean, failed}, 2, StatusFailed, true},
+		{[]Reviewer{findings, failed}, 2, StatusFindings, true},
+		{[]Reviewer{clean, findings}, 2, StatusFindings, false},
+		{[]Reviewer{clean, clean, failed}, 2, StatusClean, false},
+	} {
+		if got, incomplete := reviewStatus(tc.rs, tc.min); got != tc.want || incomplete != tc.incomplete {
+			t.Errorf("%+v min %d: %s %v, want %s %v", tc.rs, tc.min, got, incomplete, tc.want, tc.incomplete)
+		}
+	}
+}
+
+// TestReviewerSessionsAreDeleted checks that slopcop deletes each reviewer's
+// session from the adapter's history when the reviewer is done, whether it
+// finished, failed, or timed out, and only when the adapter supports it.
+func TestReviewerSessionsAreDeleted(t *testing.T) {
+	for _, tc := range []struct {
+		mode    string
+		timeout time.Duration
+		deletes int
+	}{
+		{"clean", 0, 1},
+		{"escalate-always", 0, 2},
+		{"hang", 300 * time.Millisecond, 1},
+		{"no-delete", 0, 0},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			root, c, s := reviewRepo(t)
+			trace := filepath.Join(t.TempDir(), "trace")
+			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: tc.timeout, Adapters: map[string][]string{"codex": fakeAdapter(tc.mode, "gpt-6.10-terra", trace)}}}
+			v := Run(context.Background(), s, c, o)
+			data, _ := os.ReadFile(trace)
+			if got := strings.Count(string(data), "delete=fake"); got != tc.deletes {
+				log, _ := os.ReadFile(filepath.Join(v.LogDir, "1-terra.stderr.log"))
+				t.Fatalf("deletes %d, want %d: %s\n%s", got, tc.deletes, data, log)
+			}
+		})
+	}
+}
+
+// TestStartupTimeoutIsNotRetried checks that a reviewer whose session setup
+// times out fails without a second attempt, which would wait out another
+// full timeout.
+func TestStartupTimeoutIsNotRetried(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: 300 * time.Millisecond, Adapters: map[string][]string{"codex": fakeAdapter("hang-session", "gpt-6.10-terra", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	data, _ := os.ReadFile(trace)
+	if v.Status != StatusFailed || v.Reviewers[0].FirstError != "" || !strings.Contains(v.Reviewers[0].Error, "deadline exceeded") || strings.Count(string(data), "new-session") != 1 {
+		t.Fatalf("%+v\n%s", v, data)
+	}
+}
+
+// TestTakeFallback checks that fallbacks go in order, prefer another adapter
+// than the reviewer they replace, and stop once enough reviewers finished.
+func TestTakeFallback(t *testing.T) {
+	p := &panel{min: 2, fallbacks: []Family{Sol, Flash, Haiku}}
+	for _, want := range []Family{Flash, Haiku, Sol} {
+		if f, _, ok := p.takeFallback(Terra); !ok || f != want {
+			t.Fatalf("got %s %v, want %s", f, ok, want)
+		}
+	}
+	if _, _, ok := p.takeFallback(Terra); ok {
+		t.Fatal("fallbacks ran out")
+	}
+	p = &panel{min: 2, completed: 2, fallbacks: []Family{Haiku}}
+	if _, _, ok := p.takeFallback(Terra); ok {
+		t.Fatal("fallback after the minimum finished")
+	}
+}
+
+func TestFailureCause(t *testing.T) {
+	for _, tc := range []struct {
+		err  string
+		want string
+	}{
+		{`{"code":-32000,"message":"Authentication required"}`, "not signed in"},
+		{"You exceeded your current quota, please check your plan and billing details", "out of credits"},
+		{"429 Too Many Requests", "rate limiting"},
+		{"connect ECONNREFUSED 127.0.0.1:443", "could not be reached"},
+		{"incomplete turn: cancelled", "Run the check again to retry"},
+	} {
+		got := explainFailure(Reviewer{Family: Sol, Error: tc.err})
+		if !strings.Contains(got, tc.want) || !strings.Contains(got, tc.err) {
+			t.Errorf("%q: %q", tc.err, got)
+		}
+	}
+}
+
+// TestFallbackStandsIn checks that a reviewer that still fails after its
+// retry hands its place to a fallback on another adapter, and that the
+// fallback's verdict counts toward the minimum.
+func TestFallbackStandsIn(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra, Flash}, Fallbacks: []Family{Flash, Haiku}, Adapters: map[string][]string{
+		"codex":  fakeAdapter("clean", "gpt-6.10-terra", ""),
+		"dsh":    fakeAdapter("escalate-always", "deepseek-flash", ""),
+		"claude": fakeAdapter("clean", "haiku", trace),
+	}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusClean || v.Incomplete || len(v.Reviewers) != 3 {
+		t.Fatalf("%+v", v)
+	}
+	fb := v.Reviewers[2]
+	if fb.Name != "fallback1-haiku" || fb.StandsInFor != "2-flash" || fb.Status != StatusClean || v.Reviewers[1].Status != StatusFailed {
+		t.Fatalf("%+v", v.Reviewers)
+	}
+	if err := s.Override("reason", c.Tree); err == nil {
+		t.Fatal("override allowed while a reviewer failed")
 	}
 }
 func TestEmptyReviewers(t *testing.T) {
@@ -165,7 +375,7 @@ func TestReuseAndInvalidation(t *testing.T) {
 	o.Settings.Adapters["dsh"] = []string{"/missing/slopcop-fake"}
 	o.Settings.Adapters["claude"] = []string{"/missing/slopcop-fake"}
 	v = Run(context.Background(), s, c, o)
-	if v.Status != StatusFailed || v.Reused {
+	if v.Status != StatusFindings || !v.Incomplete || v.Reused {
 		t.Fatal(v)
 	}
 	if err := s.Override("false positive", c.Tree); err == nil {

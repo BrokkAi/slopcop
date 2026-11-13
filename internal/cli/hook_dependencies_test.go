@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 // hostRecorder is a transport that records the host of every request the
@@ -96,6 +98,49 @@ func TestHookChecksADependencyChangeMadeThroughTheShell(t *testing.T) {
 	}
 	if !reflect.DeepEqual(hosts.hosts, map[string]bool{service.Host: true}) {
 		t.Fatalf("hosts = %v, want only the service at %s", hosts.hosts, service.Host)
+	}
+}
+
+func TestHookHandsBackADependencyAdvisoryUntilItIsIgnored(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{}}`+"\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "manifest")
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{"lodash":"4.17.20"}}`+"\n")
+	writeFile(t, repo, "package-lock.json", "{}\n")
+	fake := &fakeService{
+		active:   []string{"BrokkAi/slopcop"},
+		findings: []string{"package-lock.json"},
+		dependency: &service.Dependency{
+			Ecosystem: "npm", Package: "lodash", Version: "4.17.20", Direct: true,
+			ManifestPath: "package.json", DependencyChain: []string{"lodash@4.17.20"},
+			AdvisoryID: "GHSA-29mw-wpgm-hmr9", Aliases: []string{"CVE-2020-28500"},
+			FixedVersions:    []string{"4.17.21"},
+			UpgradeCommand:   "npm install lodash@4.17.21 --save-exact",
+			DatabaseModified: "2025-09-29T21:12:31.102523Z",
+		},
+	}
+	server := fake.start(t, repo)
+
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	for _, want := range []string{
+		"Package: npm lodash@4.17.20, direct, from package.json",
+		"Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9",
+		"Fixed in: 4.17.21",
+		"Fix: npm install lodash@4.17.21 --save-exact (run at the repository root)",
+	} {
+		if output.Decision != "block" || !strings.Contains(output.Reason, want) {
+			t.Fatalf("output = %+v, want %q", output, want)
+		}
+	}
+	t.Chdir(repo)
+	if code, _, stderr := runCLI(t, "ignore", fakeFindingID(0), "--service", server.URL); code != 0 {
+		t.Fatalf("ignore exit = %d, stderr = %s", code, stderr)
+	}
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
+		t.Fatalf("output after the ignore = %+v", output)
 	}
 }
 

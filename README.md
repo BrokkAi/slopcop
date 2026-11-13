@@ -459,6 +459,30 @@ similarity, pass `--policy-id slopcop.similarity`.
 For this check, function source from the change is sent to third-party
 embedding and model providers used by the hosted service.
 
+A finding of the hosted `slopcop.dependencies.known-vulnerability` check is a
+known-vulnerable dependency version the change brings in. Its location is the
+lockfile entry, and the report adds the package, how it is installed and the
+fix:
+
+```text
+  [error] slopcop.dependencies.known-vulnerability: lodash 4.17.20 has a known vulnerability
+    Location: package-lock.json:12
+    Certainty: definite
+    ID: 6b1f0c0e-0000-4000-8000-000000000003
+    Package: npm lodash@4.17.20, direct, from package.json
+    Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9
+    Fixed in: 4.17.21
+    Fix: npm install lodash@4.17.21 --save-exact (run at the repository root)
+```
+
+A transitive dependency adds a `Via:` line, from the direct dependency down
+to the package. `json` passes the same fields through as the finding's
+`dependency` object, and `sarif` puts it in the result's
+`slopcop.dependency` property. The client never reads lockfiles or asks an
+advisory database itself, and drops a `dependency` object that is malformed,
+oversized or unsafe to print, keeping the finding. `slopcop ignore` takes the
+finding's id like any other.
+
 ### Modes and local review
 
 `slopcop check` runs hosted static analysis and local LLM review concurrently
@@ -472,12 +496,23 @@ Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) throug
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
 through Claude ACP. Each uses the newest model of its family at high effort.
 `slopcop init` probes each family once when reviewers are not configured and
-mode is not static, then saves the first two that work (or one). Configured
-reviewers are left alone; unset `review.reviewers` and run init to pick again.
-`slopcop init --no-reviewers` skips probing. A check runs exactly the configured
-reviewers and fails with exit `2` if one cannot run. Set the ordered list (1–4
+mode is not static, then saves the first two that work (or one) as reviewers
+and the rest that work as `review.fallbacks`. Configured reviewers are left
+alone; unset `review.reviewers` and run init to pick again.
+`slopcop init --no-reviewers` skips probing. A reviewer that cannot start does
+not stop the others. One that ends without a verdict runs once more in a fresh
+session; if it still fails, the next unused fallback stands in for it,
+preferring another provider. The review is clean when at least
+`review.minCompleted` reviewers (default 2, at most the number of reviewers)
+finished clean, and fails with exit `2` when fewer did. Findings from any
+reviewer count. The minimum only tolerates a failure when more reviewers can
+run than it requires, so configure fallbacks on another provider than the
+reviewers: one outage or empty account then cannot fail every check. Set the
+ordered list (1–4
 entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol`.
-Set `review.timeout` (default `20m`) or `mode` with `slopcop config set`;
+Set `review.fallbacks` (ordered, like `review.reviewers`), `review.timeout`
+(default `20m`), `review.minCompleted` (1 up to the number of reviewers) or
+`mode` with `slopcop config set`;
 adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search

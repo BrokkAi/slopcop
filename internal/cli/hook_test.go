@@ -31,6 +31,8 @@ type fakeService struct {
 	severities []string
 	// words are the suggested words of the findings, by index.
 	words []string
+	// dependency, when set, is the dependency evidence every finding carries.
+	dependency *service.Dependency
 	// refusal, when set, is the error body every request is answered with.
 	refusal string
 	// outages is how many requests a gateway answers with a bare 503 first.
@@ -80,6 +82,7 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 				response.Findings = append(response.Findings, service.Finding{
 					ID: fakeFindingID(i), PolicyID: "demo.policy", Severity: severity, Certainty: "definite",
 					Path: path, StartLine: &line, Title: "Fix " + path, New: true,
+					Dependency: f.dependency,
 				})
 				if i < len(f.words) {
 					response.Findings[i].SuggestedWord = f.words[i]

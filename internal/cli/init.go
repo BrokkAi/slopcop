@@ -653,10 +653,17 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 			fmt.Fprintf(out, "slopcop: %s unavailable: %s\n", r.Family, r.Reason)
 		}
 	})
-	var names []string
+	// The first two that work review; the rest that work stand by as
+	// fallbacks for a reviewer that fails.
+	var names, fallbacks []string
 	for _, r := range results {
-		if r.Available && len(names) < review.DefaultReviewerCount {
+		if !r.Available {
+			continue
+		}
+		if len(names) < review.DefaultReviewerCount {
 			names = append(names, string(r.Family))
+		} else {
+			fallbacks = append(fallbacks, string(r.Family))
 		}
 	}
 	if len(names) == 0 {
@@ -667,10 +674,18 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 		cfg.Review = &config.Review{}
 	}
 	cfg.Review.Reviewers = names
+	cfg.Review.Fallbacks = fallbacks
+	if cfg.Review.MinCompleted > len(names) {
+		fmt.Fprintf(out, "slopcop: review.minCompleted was %d, more than the %d reviewers found; unset it, so the default applies\n", cfg.Review.MinCompleted, len(names))
+		cfg.Review.MinCompleted = 0
+	}
 	path, err = config.Save(cfg)
 	if err != nil {
 		return err
 	}
 	fmt.Fprintf(out, "slopcop: reviewers set to %s in %s\n", strings.Join(names, ", "), path)
+	if len(fallbacks) > 0 {
+		fmt.Fprintf(out, "slopcop: fallbacks set to %s\n", strings.Join(fallbacks, ", "))
+	}
 	return nil
 }

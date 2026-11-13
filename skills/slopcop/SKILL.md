@@ -105,6 +105,8 @@ names, whether the workspace has it and whether it is active.
 Where reviewers are configured, a check runs the hosted static half and local
 review concurrently (`both` mode). With none configured, or in CI, a check with
 no mode set runs only the static half and, outside CI, says so on stderr.
+The JSON report then has no `review` and sets `reviewSkipped` (`noReviewers`,
+`ci`, or `staticMode`): a `clean` status there covers only the static half.
 `--mode static` or `--static` runs only the hosted half; `--mode ai` or `--ai`
 runs only review. `--if-enabled` skips only an inactive static half. The Stop
 hook and `slopcop enable` remain static-only. A single captured snapshot
@@ -129,16 +131,31 @@ captured diff; approval and overrides still bind the complete snapshot identity.
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
 through Claude ACP. Each uses the newest model of its family at high effort.
-Every reviewer must reply exactly `No findings.` for a clean review. `slopcop
+A clean reply is exactly `No findings.`. `slopcop
 init` probes each family once when reviewers are not configured and the mode is
-not static, then saves the first two that work (or one). Probe prompts use your
-logins. Already configured reviewers are left alone; unset `review.reviewers`
-and run init to pick again. `slopcop init --no-reviewers` skips probing.
-A check runs exactly the configured reviewers. It never reorders or replaces
-them. If one cannot run, review fails with exit `2` and names the reviewer and
-reason. With no reviewers configured, run `slopcop init` or set
-`review.reviewers`. Do not change reviewers or adapters to get past a failure;
-report it to the user. The prompt carries the captured diff. Reviewers read repository content,
+not static, then saves the first two that work (or one) as reviewers and the
+rest that work as `review.fallbacks`. Probe prompts use your logins. Already
+configured reviewers are left alone; unset `review.reviewers` and run init to
+pick again. `slopcop init --no-reviewers` skips probing.
+A check starts the configured reviewers; one that cannot start does not stop
+the others. A reviewer that ends without a verdict (it could not start, its
+turn was cut short, it replied empty) runs once more in a fresh session, told
+why; a timeout, an interrupt, a missing login or exhausted credits is not
+retried. If it still fails, the next unused fallback stands in for it,
+preferring another provider, while fewer than `review.minCompleted` reviewers
+(default 2, at most the number of reviewers) have finished. The report names
+which fallback stood in for which reviewer, and a failed reviewer's error
+says the cause when the adapter makes it clear (not signed in, out of
+credits, rate limited, network). Findings from any reviewer, primary or
+fallback, make the review `findings`. Otherwise it is clean when at least
+`review.minCompleted` reviewers replied `No findings.`, and fails with exit
+`2` when fewer did. The minimum only tolerates a failure when more reviewers
+can run than it requires: with `terra,sol`, no fallbacks and the default of 2,
+one failure still fails the review. Configure fallbacks on another provider
+than the reviewers (Codex for `terra`/`sol`, Claude for `haiku`, dsh for
+`flash`), so one outage or empty account cannot take out every reviewer. With
+no reviewers configured, run `slopcop init` or set `review.reviewers`. Do not
+change reviewers or adapters to get past a failure; report it to the user. The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox.
@@ -234,7 +251,7 @@ Each finding also carries its
 | --- | --- |
 | `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, has only findings below `--fail-on` (`status` then says `findings`), or was skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
 | `1` | A new static finding crossed `--fail-on`, or a reviewer reported findings (unless `--fail-on never`). Fix the real ones and run the check again. |
-| `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed (a reviewer failed, timed out or replied empty, or too few reviewers were available), or the CLI or service failed. Read the errors and log paths. |
+| `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed or was incomplete (fewer than `review.minCompleted` reviewers finished after retries and fallbacks; with findings this exits `2` only under `--fail-on never`), or the CLI or service failed. Read the errors and log paths. |
 | `3` | The static check was still running when `--timeout` ran out. Run the same check again; a complete review of the same content is reused. |
 | `4` | The service refused the static check, and only a person can clear it. Do not retry; tell the user the `code` and remedy. |
 | `130`, `143` | The check was interrupted (Ctrl-C or SIGTERM) before it answered, and the reviewers were stopped. It printed no report; run the same check again. |
@@ -320,6 +337,19 @@ notes, not incomplete checks. To select only similarity, use
 `--policy-id slopcop.similarity`. Function source from the
 change is sent to third-party embedding and model providers used by the hosted
 service.
+
+A `slopcop.dependencies.known-vulnerability` finding is a known-vulnerable
+dependency version the change brings in, located at its lockfile entry. Its
+`dependency` object (human: the `Package`, `Advisory`, `Via`, `Fixed in` and
+`Fix` lines) names the package, version, advisory and fixed versions. Fix it
+with the package manager, never by editing the lockfile. `upgradeCommand`,
+when there is one, is always `npm install <package>@<version> --save-exact`
+(the client drops any other); check that, then run it in the directory of
+`manifestPath`, relative to the repository root. For a transitive
+dependency, upgrade the direct dependency first in `dependencyChain` to a
+release that pulls in a fixed version. `fixedVersions` lists fixes on the
+installed version's line only; when it is empty, a later major version may
+still fix it, so tell the user rather than ignoring the finding.
 
 Why a check is `incomplete` (`incomplete[].reason`):
 

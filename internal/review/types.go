@@ -31,6 +31,10 @@ const (
 	DefaultReviewerCount = 2
 	// DefaultTimeout bounds each reviewer, from adapter launch to its reply.
 	DefaultTimeout = 20 * time.Minute
+	// DefaultMinCompleted is how many reviewers must finish for a review
+	// to be clean when review.minCompleted is unset, or the number of
+	// reviewers when fewer are configured.
+	DefaultMinCompleted = 2
 	// CleanReply is the exact reply that approves the change.
 	CleanReply = "No findings."
 )
@@ -39,13 +43,14 @@ const (
 type Status string
 
 const (
-	// StatusClean: every reviewer replied exactly CleanReply.
+	// StatusClean: at least Settings.MinCompleted reviewers replied exactly
+	// CleanReply, and every other reviewer failed after its retry.
 	StatusClean Status = "clean"
-	// StatusFindings: at least one reviewer reported findings and none
-	// failed.
+	// StatusFindings: at least one reviewer reported findings. Other
+	// reviewers may have failed.
 	StatusFindings Status = "findings"
-	// StatusFailed: a reviewer failed, timed out, or replied empty.
-	// Partial findings may still be present in Reviewers.
+	// StatusFailed: fewer than Settings.MinCompleted reviewers finished
+	// and none reported findings, or the review could not run.
 	StatusFailed Status = "failed"
 	// StatusEmpty: the base tree and the working-tree snapshot are the same,
 	// so there was nothing to review and no reviewer ran.
@@ -57,9 +62,24 @@ type Settings struct {
 	Reviewers []Family
 	// Timeout bounds each reviewer.
 	Timeout time.Duration
+	// Fallbacks stand in, in order, for reviewers that still fail after
+	// their retry, while fewer than MinCompleted reviewers have finished.
+	Fallbacks []Family
+	// MinCompleted is how many reviewers, primaries or fallbacks, must
+	// finish for a clean review; a reviewer that still fails is reported but
+	// does not block one. Zero means DefaultMinCompleted, capped at the
+	// number of reviewers.
+	MinCompleted int
 	// Adapters overrides argv by adapter name. An adapter without an entry
 	// uses its pinned npx package.
 	Adapters map[string][]string
+}
+
+func (s Settings) minCompleted() int {
+	if s.MinCompleted > 0 {
+		return s.MinCompleted
+	}
+	return min(DefaultMinCompleted, max(len(s.Reviewers), 1))
 }
 
 // Capture names exactly what was reviewed.
@@ -101,6 +121,12 @@ type Reviewer struct {
 	Error string `json:"error,omitempty"`
 	// Log is the reviewer's inbound ACP stream as JSON lines.
 	Log string `json:"log,omitempty"`
+	// FirstError and FirstLog describe the failed first attempt of a
+	// reviewer that was retried; the fields above describe the retry.
+	FirstError string `json:"firstError,omitempty"`
+	FirstLog   string `json:"firstLog,omitempty"`
+	// StandsInFor names the reviewer a fallback replaced.
+	StandsInFor string `json:"standsInFor,omitempty"`
 }
 
 // Verdict is the outcome of one review.
@@ -113,6 +139,9 @@ type Verdict struct {
 	// Error says why a failed review failed when no single reviewer is
 	// responsible, such as missing configuration or unwritable state.
 	Error string `json:"error,omitempty"`
+	// Incomplete is set when fewer than Settings.MinCompleted reviewers
+	// finished; with findings, the check still cannot pass.
+	Incomplete bool `json:"incomplete,omitempty"`
 	// Reused is set when the verdict is an earlier complete review of the
 	// same capture by the same reviewers, returned without running again.
 	Reused bool      `json:"reused,omitempty"`

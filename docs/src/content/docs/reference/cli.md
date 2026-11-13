@@ -233,7 +233,10 @@ to be run by hand.
 
 `slopcop config get|set|unset <key> [value]` manages `mode` (`both`,
 `static`, `ai`), `review.reviewers` (1–4 comma-separated entries, in order;
-duplicates allowed), and `review.timeout` (default `20m`). Adapter command
+duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
+for one that fails), `review.timeout` (default `20m`), and
+`review.minCompleted` (default 2, at most the number of reviewers: how many
+must finish for a clean review). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude>.command`.
 
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
