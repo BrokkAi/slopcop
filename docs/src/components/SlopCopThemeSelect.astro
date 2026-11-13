@@ -104,9 +104,12 @@ const options = [
       document.addEventListener('click', (event) => {
         if (this.#isOpen() && !this.contains(event.target as Node)) this.#close();
       });
+      // Close when Tab moves focus out of the menu. Safari does not focus a button on click, so
+      // pressing an item blurs to nothing; closing then would hide the item before its click.
+      // A click elsewhere is handled by the document listener above.
       this.addEventListener('focusout', (event) => {
         const next = event.relatedTarget as Node | null;
-        if (this.#isOpen() && !(next && this.contains(next))) this.#close();
+        if (this.#isOpen() && next && !this.contains(next)) this.#close();
       });
     }
 
