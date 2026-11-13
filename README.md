@@ -465,7 +465,8 @@ embedding and model providers used by the hosted service.
 by default. Use `--mode static` or `--static` for only the hosted check; use
 `--mode ai` or `--ai` for only local review. A single captured snapshot
 includes committed, uncommitted, and untracked work, except ignored files.
-Reviewers read `git diff <baseTree> <snapshotTree>` themselves.
+Reviewers read the captured diff after the same large-data filter used for
+the hosted patch. The full snapshot still identifies the tree approved for push.
 
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
@@ -503,6 +504,27 @@ out. The patch carries committed but unpushed work, unstaged edits, untracked
 files, deletions, renames, mode changes, and binary content. Git-ignored files
 stay out, except selected `.slopcop/policies` rules, which must travel because
 the service evaluates them from the patched checkout.
+
+By default, changed JSON data (`.json`, `.jsonl`, `.ndjson`, case-insensitive)
+and Git-detected binary files are omitted when either the base or captured
+version exceeds **500,000 bytes (0.5 MB)**. Source files and smaller JSON
+configurations remain in scope. The filter runs before generating the upload
+or local review diff, covers deletions and both sides of renames, and never
+changes your files or index. Every report discloses omitted files: human output
+names each path with its size and reason, JSON carries `omittedFiles`, and SARIF
+carries `slopcop.omittedFiles`. Their contents were not analyzed; a passing
+result covers the retained scope. If every change is omitted, the check is
+`skipped`, sends nothing, and records no push approval.
+
+Use repeatable `--include` paths or globs to opt particular data files back in:
+
+```console
+slopcop check --include config/settings.json --include 'models/**/*.json'
+```
+
+Patterns are relative to the repository root; quote globs so the shell does
+not expand them. They only override the size filter and do not exclude other
+changed source files. Service payload limits still apply to the resulting patch.
 
 A check run by a Claude Code, Codex or OpenCode agent also sends which models wrote the
 change, so the service can tie each finding to the model that wrote its file.

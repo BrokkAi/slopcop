@@ -147,9 +147,15 @@ result covers.
 - **`repositoryAdded`**: `true` only when this check carried an approved add,
   as `slopcop enable` or `--add-repository` does. A check never adds a
   repository by itself. See [Repositories](/account/repositories/).
-- **`emptyChange`**: `true` only when the patch was empty because the working
-  tree matches the base. Nothing was checked; rerun with `--base` if you meant
-  to check committed work.
+- **`omittedFiles`**: JSON data and binary artifacts omitted from upload and
+  local review by the 500,000-byte size filter. Each entry gives the path,
+  larger base/current size in bytes, and reason. Those contents were not
+  analyzed; a passing check covers the retained scope. Repeatable `--include`
+  paths or globs opt particular files back in. See [Run a check](/checks/run-a-check/).
+- **`emptyChange`**: the patch has no in-scope changes. If the size filter
+  omitted every changed file, the result is `skipped` with no analysis or push
+  approval. Otherwise the working tree matches the base; rerun with `--base`
+  if you meant to check committed work.
 - **`skillUpdated`**: present only when this run installed or replaced the
   [agent skill](/agents/skill/). An agent's loaded copy of the instructions is
   then out of date.

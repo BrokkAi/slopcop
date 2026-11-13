@@ -45,14 +45,17 @@ func reviewPrompt(root string, capture Capture, in intent, previous *Record, dif
 		b.WriteString("Diff truncated at 256 KiB. Read the remaining changed files listed\n")
 		b.WriteString("in the numstat with file-reading tools.\n")
 	}
-	fmt.Fprintf(&b, "\nRepository root: %s\nBase tree: %s\nSnapshot tree: %s\n", root, capture.BaseTree, capture.Tree)
+	fmt.Fprintf(&b, "\nRepository root: %s\nBase tree: %s\nSnapshot tree: %s\n", root, capture.BaseTree, capture.CheckedTree())
+	if capture.DiffTree != "" {
+		b.WriteString("Large data artifacts were omitted before this review. Review only the changed paths in this captured diff; their omitted contents have not been analyzed.\n")
+	}
 	if family == Terra || family == Sol {
-		fmt.Fprintf(&b, "Run this exact command yourself to inspect the diff:\ngit -C %s diff --no-ext-diff %s %s\n", shellQuote(root), capture.BaseTree, capture.Tree)
+		fmt.Fprintf(&b, "Run this exact command yourself to inspect the diff:\ngit -C %s diff --no-ext-diff %s %s\n", shellQuote(root), capture.BaseTree, capture.CheckedTree())
 	} else {
 		b.WriteString("Read changed files with file-reading tools; do not run commands.\n")
 	}
 	if previous != nil {
-		fmt.Fprintf(&b, "\nPrevious review (base tree %s, snapshot tree %s); verify fixes and report remaining or newly introduced bugs:\n<previous_findings>\n", previous.Capture.BaseTree, previous.Capture.Tree)
+		fmt.Fprintf(&b, "\nPrevious review (base tree %s, snapshot tree %s); verify fixes and report remaining or newly introduced bugs:\n<previous_findings>\n", previous.Capture.BaseTree, previous.Capture.CheckedTree())
 		for _, reviewer := range previous.Reviewers {
 			if parseVerdict(reviewer) == StatusFindings {
 				fmt.Fprintf(&b, "%s:\n%s\n", reviewer.Name, reviewer.Text)

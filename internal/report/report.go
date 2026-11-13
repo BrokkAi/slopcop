@@ -27,6 +27,10 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 // Options shape what a report lists. Rendering never changes the check, so
 // none of them is sent to the service.
 type Options struct {
+	// OmittedFiles lists files left out of both hosted upload and local review
+	// because of their size. The report only describes this scope; it does not
+	// affect the check's status or approval.
+	OmittedFiles []OmittedFile
 	// Approved says this run recorded push approval for the checked tree.
 	Approved bool
 	// Review is the local reviewers' verdict, when one ran.
@@ -38,9 +42,9 @@ type Options struct {
 	// ShowExisting lists the findings that were already in the code, after
 	// the new ones. They are counted either way.
 	ShowExisting bool
-	// EmptyChange marks a check whose patch was empty: the working tree
-	// matched the base, so no change was checked. The human format leaves it
-	// to the CLI's note on stderr.
+	// EmptyChange marks a check whose patch had no in-scope changes. With
+	// OmittedFiles, the size filter removed them all; otherwise the snapshot
+	// matched the base. The human format leaves it to the CLI's stderr note.
 	EmptyChange bool
 	// Verbose lists the inconclusive checks in the human format, which
 	// otherwise only counts them, and the files and rules each
@@ -51,6 +55,13 @@ type Options struct {
 	// installed or replaced, so an agent knows to reread its instructions.
 	// The human format leaves it to the CLI's note on stderr.
 	SkillUpdated []SkillUpdate
+}
+
+// OmittedFile is a file left out of both hosted upload and local review.
+type OmittedFile struct {
+	Path   string `json:"path"`
+	Bytes  int64  `json:"bytes"`
+	Reason string `json:"reason"`
 }
 
 // SkillUpdate is one skills directory whose slopcop skill a run wrote.
@@ -188,7 +199,39 @@ func human(response service.Response, options Options) string {
 		out.WriteString("\n")
 	}
 	writeExclusions(&out, response.Exclusions, options.Verbose)
+	out.WriteString(omittedFilesHuman(options))
 	return out.String()
+}
+
+// omittedFilesHuman always names files left out of analysis, with their sizes
+// and reasons. Scope changes must be visible without an extra verbosity flag.
+func omittedFilesHuman(options Options) string {
+	if len(options.OmittedFiles) == 0 {
+		return ""
+	}
+	totalBytes := int64(0)
+	for _, file := range options.OmittedFiles {
+		totalBytes += file.Bytes
+	}
+
+	var out strings.Builder
+	fmt.Fprintf(&out,
+		"Files omitted from both hosted upload and local review due to size: %d file(s), %d bytes total. Their contents were not analyzed.\n",
+		len(options.OmittedFiles), totalBytes,
+	)
+	for _, file := range options.OmittedFiles {
+		fmt.Fprintf(&out, "  %s (%d bytes): %s\n", printable(file.Path), file.Bytes, printable(file.Reason))
+	}
+	return out.String()
+}
+
+// writeHumanOmittedAndReview preserves the usual review output while making
+// omitted analysis scope visible for result shapes with no static summary.
+func writeHumanOmittedAndReview(w io.Writer, options Options) error {
+	if _, err := io.WriteString(w, omittedFilesHuman(options)); err != nil {
+		return err
+	}
+	return writeReview(w, options.Review)
 }
 
 // onlyExcluded says .slopcop/config.toml [check] left the change nothing to
@@ -752,9 +795,10 @@ func printable(value string) string {
 // existing ones a service from before BrokkAi/bifrost-service#760 still
 // sent; summary counts both either way.
 type jsonReport struct {
-	Checks   []service.CheckNotice `json:"checks,omitempty"`
-	Status   string                `json:"status"`
-	Approved bool                  `json:"approved"`
+	OmittedFiles []OmittedFile         `json:"omittedFiles,omitempty"`
+	Checks       []service.CheckNotice `json:"checks,omitempty"`
+	Status       string                `json:"status"`
+	Approved     bool                  `json:"approved"`
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Review is the local verdict, when one ran.
@@ -803,6 +847,7 @@ type jsonReport struct {
 func writeJSON(w io.Writer, response service.Response, options Options) error {
 	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
+		OmittedFiles:         options.OmittedFiles,
 		Status:               status(response.Status, options),
 		Checks:               response.Checks,
 		Approved:             options.Approved,
@@ -837,6 +882,7 @@ func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck)
 // pendingReport is the document `--format json` prints for a check that was
 // still running when --timeout ran out.
 type pendingReport struct {
+	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
 	Status       string        `json:"status"`
 	Approved     bool          `json:"approved"`
 	StaticStatus string        `json:"staticStatus,omitempty"`
@@ -855,6 +901,7 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 		return nil
 	case FormatJSON:
 		return encode(w, pendingReport{
+			OmittedFiles: options.OmittedFiles,
 			Status:       status(service.StatusPending, options),
 			StaticStatus: options.StaticStatus,
 			Approved:     options.Approved,
@@ -884,8 +931,8 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 	}
 }
 
-// Skipped is a check the CLI did not send because the repository is not active
-// in the workspace: nothing was checked, and that must not read as a pass.
+// Skipped is a check the CLI did not send because the repository is inactive
+// or no changed files remain in scope. Nothing was checked; it is not a pass.
 type Skipped struct {
 	Code       string
 	State      string
@@ -895,6 +942,7 @@ type Skipped struct {
 
 // skippedReport is the document `--format json` prints for a skipped check.
 type skippedReport struct {
+	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
 	Status       string        `json:"status"`
 	Approved     bool          `json:"approved"`
 	StaticStatus string        `json:"staticStatus,omitempty"`
@@ -916,6 +964,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 		return nil
 	case FormatJSON:
 		return encode(w, skippedReport{
+			OmittedFiles: options.OmittedFiles,
 			Status:       status("skipped", options),
 			StaticStatus: options.StaticStatus,
 			Approved:     options.Approved,
@@ -950,6 +999,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 // service refused: its closed error code, verbatim message and remedy, and
 // whether the same request may succeed later.
 type failureReport struct {
+	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
 	Status       string        `json:"status"`
 	Approved     bool          `json:"approved"`
 	StaticStatus string        `json:"staticStatus,omitempty"`
@@ -972,6 +1022,7 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 		return nil
 	case FormatJSON:
 		return encode(w, failureReport{
+			OmittedFiles: options.OmittedFiles,
 			Status:       status(service.StatusFailed, options),
 			StaticStatus: options.StaticStatus,
 			Approved:     options.Approved,
@@ -1011,6 +1062,9 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
 	properties["slopcop.approved"] = options.Approved
+	if len(options.OmittedFiles) > 0 {
+		properties["slopcop.omittedFiles"] = options.OmittedFiles
+	}
 	if options.EmptyChange {
 		properties["slopcop.emptyChange"] = true
 	}
@@ -1478,7 +1532,7 @@ func Write(w io.Writer, response service.Response, format string, options Option
 // WritePending renders a still-running static check and optional review.
 func WritePending(w io.Writer, pending service.Pending, format string, options Options) error {
 	if format == "" || format == FormatHuman {
-		return writeReview(w, options.Review)
+		return writeHumanOmittedAndReview(w, options)
 	}
 	return writePendingBase(w, pending, format, options)
 }
@@ -1486,7 +1540,7 @@ func WritePending(w io.Writer, pending service.Pending, format string, options O
 // WriteSkipped renders a skipped static check and optional review.
 func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) error {
 	if format == "" || format == FormatHuman {
-		return writeReview(w, options.Review)
+		return writeHumanOmittedAndReview(w, options)
 	}
 	return writeSkippedBase(w, skipped, format, options)
 }
@@ -1494,7 +1548,7 @@ func WriteSkipped(w io.Writer, skipped Skipped, format string, options Options) 
 // WriteFailure renders a static failure and optional review.
 func WriteFailure(w io.Writer, failure *service.Error, format string, options Options) error {
 	if format == "" || format == FormatHuman {
-		return writeReview(w, options.Review)
+		return writeHumanOmittedAndReview(w, options)
 	}
 	return writeFailureBase(w, failure, format, options)
 }
@@ -1503,9 +1557,9 @@ func WriteFailure(w io.Writer, failure *service.Error, format string, options Op
 func WriteAI(w io.Writer, format string, options Options) error {
 	switch format {
 	case "", FormatHuman:
-		return writeReview(w, options.Review)
+		return writeHumanOmittedAndReview(w, options)
 	case FormatJSON:
-		return encode(w, aiReport{Status: status("clean", options), Approved: options.Approved, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
+		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, Status: status("clean", options), Approved: options.Approved, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "SlopCop", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: true}}, Properties: runProperties(map[string]any{"slopcop.status": status("clean", options)}, options)}), "sarif report")
 	default:
@@ -1515,6 +1569,7 @@ func WriteAI(w io.Writer, format string, options Options) error {
 
 // aiReport is the JSON document for a check without a static half.
 type aiReport struct {
+	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
 	// Status is the AI-only report's Status field.
 	Status   string `json:"status"`
 	Approved bool   `json:"approved"`
@@ -1534,6 +1589,8 @@ type reviewJSON struct {
 	BaseTree string `json:"baseTree"`
 	// Tree is the local review's Tree field.
 	Tree string `json:"tree"`
+	// DiffTree records the filtered review scope when different from Tree.
+	DiffTree string `json:"diffTree,omitempty"`
 	// IntentSource is the local review's IntentSource field.
 	IntentSource string `json:"intentSource"`
 	// LogDir is the local review's LogDir field.
@@ -1559,7 +1616,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -1573,7 +1630,15 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 		return log
 	}
 	v := options.Review
-	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed}}, Properties: map[string]any{"slopcop.status": v.Status}}
+	properties := map[string]any{"slopcop.status": v.Status}
+	if v.Capture.DiffTree != "" {
+		properties["slopcop.tree"] = v.Capture.Tree
+		properties["slopcop.diffTree"] = v.Capture.DiffTree
+	}
+	if len(options.OmittedFiles) > 0 {
+		properties["slopcop.omittedFiles"] = options.OmittedFiles
+	}
+	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed}}, Properties: properties}
 	for _, r := range v.Reviewers {
 		if r.Status == review.StatusFindings {
 			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})

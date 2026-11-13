@@ -164,13 +164,29 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 		return hookOutput{}
 	}
 	fresh := prepared.fingerprint != state.Fingerprint
+	omittedScope := omittedScopeDigest(prepared.omittedFiles)
+	scopeChanged := omittedScope != state.OmittedScope
+	if prepared.onlyOmitted() {
+		if !fresh && !scopeChanged {
+			return hookOutput{}
+		}
+		state.Fingerprint, state.Status = prepared.fingerprint, "skipped"
+		state.OmittedScope = omittedScope
+		state.Findings = nil
+		saveHookState(path, state)
+		return hookOutput{SystemMessage: boundedHookText(hookOmittedFilesNotice(prepared.omittedFiles) + "\nslopcop: " + omittedOnlyOutcome(prepared).skipped.Message)}
+	}
 	if fresh {
 		prepared.request.Attribution = attributed
 		if message, ok := sendHookCheck(ctx, prepared, &state); !ok {
+			if notice := hookOmittedFilesNotice(prepared.omittedFiles); notice != "" {
+				message = boundedHookText(notice + "\n" + message)
+			}
 			output := hookOutput{SystemMessage: message}
 			if message != "" {
 				output = state.namingService(prepared.client.BaseURL, output)
 			}
+			output.SystemMessage = boundedHookText(output.SystemMessage)
 			saveHookState(path, state)
 			return output
 		}
@@ -179,8 +195,36 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	if fresh {
 		output = state.namingService(prepared.client.BaseURL, output)
 	}
+	if fresh || scopeChanged {
+		if notice := hookOmittedFilesNotice(prepared.omittedFiles); notice != "" {
+			output.SystemMessage = boundedHookText(notice + "\n" + output.SystemMessage)
+		}
+	}
+	state.OmittedScope = omittedScope
 	saveHookState(path, state)
 	return output
+}
+
+func hookOmittedFilesNotice(files []report.OmittedFile) string {
+	notice := omittedFilesNotice(files)
+	if notice == "" {
+		return ""
+	}
+	var out strings.Builder
+	out.WriteString(notice)
+	runes := utf8.RuneCountInString(notice)
+	for i, file := range files {
+		line := fmt.Sprintf("\n  %q (%d bytes): %s", file.Path, file.Bytes, file.Reason)
+		lineRunes := utf8.RuneCountInString(line)
+		// Leave room for other hook messages and make truncation explicit.
+		if runes+lineRunes > maxHookOutputRunes/2-100 {
+			fmt.Fprintf(&out, "\n  … %d additional omitted file(s); run slopcop check --format json for the complete list.", len(files)-i)
+			break
+		}
+		out.WriteString(line)
+		runes += lineRunes
+	}
+	return out.String()
 }
 
 // writtenFiles is the set of repository-relative files a session's edits

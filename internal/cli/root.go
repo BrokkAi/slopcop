@@ -164,6 +164,8 @@ type checkOptions struct {
 	// ifEnabled makes an automatic check skip, rather than refuse, a
 	// repository the workspace does not have active.
 	ifEnabled bool
+	// include exempts selected paths/globs from the large-data filter.
+	include []string
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
@@ -192,6 +194,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringArrayVar(&opts.policies, "policy", nil, "repository-relative .rqlp policy file to evaluate (repeatable)")
 	flags.BoolVar(&opts.noDiscovery, "no-policy-discovery", false, "do not include .slopcop/policies rules automatically")
 	flags.BoolVar(&opts.verbose, "verbose", false, "print the resolved request to stderr")
+	flags.StringArrayVar(&opts.include, "include", nil, "repository-relative path or glob to include even above the 500,000-byte data-file limit (repeatable)")
 	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "how long to wait for the result; a check still running then exits 3")
 	addWorkspaceFlag(command, false, &opts.workspace)
 	flags.BoolVar(&opts.addRepository, "add-repository", false, "add the repository to the workspace --workspace names, which then pays for it, without asking at a terminal; pass it once the user has approved that")

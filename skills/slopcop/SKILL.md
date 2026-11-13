@@ -109,7 +109,22 @@ no mode set runs only the static half and, outside CI, says so on stderr.
 runs only review. `--if-enabled` skips only an inactive static half. The Stop
 hook and `slopcop enable` remain static-only. A single captured snapshot
 includes committed, uncommitted, and untracked work, excluding ignored
-files. Reviewers read `git diff <baseTree> <snapshotTree>` themselves.
+files. Both halves omit changed JSON data (`.json`, `.jsonl`, `.ndjson`) and
+Git-detected binary files when either version exceeds 500,000 bytes. Source
+files and smaller JSON configs remain included. Reports disclose `omittedFiles`
+(SARIF: `slopcop.omittedFiles`); those contents were not analyzed. Human output
+lists every omitted path with its size and reason, without requiring
+`--verbose`. A passing result covers the retained scope. If every change was omitted, the check is
+`skipped`, sends nothing and records no push approval. This differs from an
+unchanged working tree.
+
+Use repeatable `--include` paths or globs when particular data files need review,
+for example `--include config/settings.json --include 'models/**/*.json'`.
+Patterns are repository-relative and only override the size filter; they do
+not restrict the remaining source scope. Quote globs so the shell does not
+expand them. Including either path of a rename includes the complete rename.
+The service's overall payload limit still applies. Reviewers read the filtered
+captured diff; approval and overrides still bind the complete snapshot identity.
 
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
@@ -347,9 +362,10 @@ Other bounds in the report:
 - `failure`: the analysis as a whole did not complete, and the report makes no
   claim about the code, even if it lists findings. `applied` is `false`
   whenever the analysis did not complete.
-- `emptyChange`: `true` only when the patch was empty because the working tree
-  matches the base. Nothing was checked; rerun with `--base` if you meant to
-  check committed work.
+- `emptyChange`: the patch has no in-scope changes. If `omittedFiles` is present,
+  the size filter left nothing to check; this is `skipped`, never a clean
+  analysis or push approval. Otherwise the working tree matches the base;
+  rerun with `--base` if you meant to check committed work.
 - `skillUpdated`: present only when this run installed or replaced this
   skill. Each entry names the skill `dir`, the version it replaced (`from`),
   the new one (`to`) and the `changed` files. Your loaded copy of these

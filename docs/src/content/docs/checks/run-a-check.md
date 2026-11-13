@@ -39,10 +39,34 @@ renames, mode changes, and binary content. Git-ignored files stay out, except
 selected `.slopcop/policies` rules, which must travel because the service
 evaluates them from the patched checkout.
 
-An empty change is sent as an empty patch, not filtered out. The service owns
-the limits on what a check accepts: when a change is too large or touches too
-many files, its `payload_too_large` response is printed verbatim, and the CLI
-imposes no limits of its own.
+Before generating either the upload or local review diff, the CLI omits changed
+JSON data (`.json`, `.jsonl`, `.ndjson`, case-insensitive) and Git-detected binary
+files when either version exceeds **500,000 bytes (0.5 MB)**. Smaller JSON
+configuration files and other text/source files remain in scope. The check uses
+the captured Git blobs, including the old version for deletions and both sides
+of a rename, and leaves your files and index unchanged.
+
+Omitted files are unreviewed. Human output names each path with its size and
+reason, plus the total count and size. JSON always lists `omittedFiles` and
+SARIF carries `slopcop.omittedFiles`. A passing check covers the retained scope;
+the full snapshot remains the push identity. If every change is omitted, the
+check is `skipped`: nothing is sent or analyzed and no push approval is recorded.
+
+Opt particular data files back in with repeatable paths or globs:
+
+```console
+slopcop check --include config/settings.json --include 'models/**/*.json'
+```
+
+Patterns are repository-relative. `*` matches within a directory and `**`
+matches across directories; quote globs to keep shell expansion out of the
+selection. An inclusion overrides only the size filter, so other changed source
+files still run through the check. Including either path of a rename includes
+the complete rename.
+
+A genuinely unchanged tree is still sent as an empty patch. The service's
+overall payload and file-count limits still apply; its `payload_too_large`
+response is printed verbatim if the remaining patch exceeds them.
 
 With the patch go the repository's URL (canonicalized from the `origin`
 remote), the base commit's full hash, the policy selection, and the `--fail-on`
