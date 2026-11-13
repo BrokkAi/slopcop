@@ -321,6 +321,19 @@ notes, not incomplete checks. To select only similarity, use
 change is sent to third-party embedding and model providers used by the hosted
 service.
 
+A `slopcop.dependencies.known-vulnerability` finding is a known-vulnerable
+dependency version the change brings in, located at its lockfile entry. Its
+`dependency` object (human: the `Package`, `Advisory`, `Via`, `Fixed in` and
+`Fix` lines) names the package, version, advisory and fixed versions. Fix it
+with the package manager, never by editing the lockfile. `upgradeCommand`,
+when there is one, is always `npm install <package>@<version> --save-exact`
+(the client drops any other); check that, then run it in the directory of
+`manifestPath`, relative to the repository root. For a transitive
+dependency, upgrade the direct dependency first in `dependencyChain` to a
+release that pulls in a fixed version. `fixedVersions` lists fixes on the
+installed version's line only; when it is empty, a later major version may
+still fix it, so tell the user rather than ignoring the finding.
+
 Why a check is `incomplete` (`incomplete[].reason`):
 
 | Term | Meaning | What to do |
