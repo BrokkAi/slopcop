@@ -1,111 +1,71 @@
 ---
-title: Checking a checkout's setup
-description: "How to tell whether a checkout or worktree has SlopCop's skill and hooks: slopcop doctor, the opt-in session-start reminder for Claude Code and Codex, what each harness covers, and the setup steps when nothing can remind you."
+title: Checking your setup
+description: "slopcop doctor reports whether each agent on this machine has SlopCop's skill, Stop hook and push gate, what to run when something is missing, and which leftovers from per-repository releases a checkout still holds."
 sidebar:
   order: 7
 ---
 
-`slopcop init` writes the skill and hooks into one checkout, and leaves them
-out of Git. A fresh clone, or a new worktree of a repository you set up, starts
-without them. Nothing inside that checkout can say so: its hooks are the very
-thing that is missing. Two tools cover this.
-
-## `slopcop doctor`
+`slopcop init` installs SlopCop once per user: the skill, the Stop hook and
+the push gate for every agent harness it finds. Most of the time that is
+enough. The setup can still have gaps: an agent installed after init ran, a
+hook removed by hand, Codex hooks not yet trusted, or an old checkout that
+still holds files from the per-repository releases. `slopcop doctor` shows
+which of these apply.
 
 ```console
-slopcop doctor                 # in the checkout
+slopcop doctor                 # anywhere; in a checkout it also looks for leftovers
 slopcop doctor --format json   # for an agent or a script
 ```
 
-Doctor reports whether the agents installed here would load the `slopcop`
-skill and run the Stop hook and push gate in this checkout, and the `slopcop
-init` command that adds what is missing. It reads local files and Git
-configuration only. It sends nothing, probes no reviewer, and changes
-nothing, so an agent can run it at any time.
+Doctor reads local files only. It sends nothing, probes no reviewer, and
+changes nothing, so an agent can run it at the start of a session without
+asking.
+
+## What it reports
+
+For Claude Code, Codex and Grok, when the harness is installed here, doctor
+reports whether the `slopcop` skill, the Stop hook and the push gate are each
+present. It then gives one of three states:
 
 | State | Meaning |
 | --- | --- |
-| `ready` | nothing is missing |
-| `not_set_up` | init has never run in this repository and nothing is installed |
-| `incomplete` | something is missing: a fresh worktree of a set-up repository, a hook removed by hand, or a harness installed since init ran |
-| `not_git` | not a Git repository; init needs one |
+| `ready` | every installed harness has all three |
+| `not_installed` | nothing is installed; init has not run for this user |
+| `incomplete` | something is missing, such as a harness installed after init or a hook removed by hand |
 
-A skill or hook counts wherever its harness reads it: in the checkout, or at
-user level. Doctor cannot see Codex trust. Codex runs a repository's hooks
-only in a project you trust and after you trust the hooks with `/hooks`, so
-doctor reminds you of that whenever Codex hooks are involved.
+When something is missing, doctor names it and suggests `slopcop init`. Init
+only adds SlopCop's own entries and leaves everything else in each file alone.
+`--no-skill` or `--no-hooks` installs just one half, and `--no-reviewers` skips
+the reviewer probe, which sends each reviewer a short prompt. Doctor mentions
+the probe when no reviewers are configured yet.
 
-## What you turned down stays turned down
+With no harness installed, doctor checks only the shared `~/.agents/skills`
+skill that opencode, Cursor and other agents read.
 
-Init records its choices in the repository's Git configuration, which every
-worktree of the repository shares:
+## Codex trust
 
-| Key | Set by |
-| --- | --- |
-| `slopcop.init` | every init, to the version that ran |
-| `slopcop.skill` | `false` after `--no-skill`, otherwise `true` |
-| `slopcop.hooks` | `false` after `--no-hooks` or `--remove-hooks`, otherwise `true` |
+Codex runs a new or changed user-level hook only after you trust it with
+`/hooks`. That trust is not visible in any file doctor can read. So whenever
+the Codex hooks are installed, doctor reminds you to trust them, rather than
+calling them working.
 
-Doctor does not report a declined piece as missing. The command it suggests
-carries the same `--no-skill` or `--no-hooks`, so following the advice never
-brings back what you removed. Neither doctor nor the reminder below installs
-anything.
+## Leftovers from per-repository releases
 
-## The session-start reminder
-
-```console
-slopcop init --session-check
-```
-
-This also installs a user-level `SessionStart` hook that runs `slopcop doctor
---hook claude` in `~/.claude/settings.json` (or under `CLAUDE_CONFIG_DIR`) and
-`slopcop doctor --hook codex` in `~/.codex/hooks.json` (or under
-`CODEX_HOME`). Only a user-level hook can run in a checkout that has none of
-its own, which is why this is a separate opt-in.
-
-When a session opens, the hook prints nothing unless all of these hold:
-
-- the directory is in a Git repository;
-- something is missing for that harness, after declined pieces are left out;
-- the repository has not silenced the reminder;
-- this checkout has not already been told about the same missing pieces.
-
-Otherwise it gives the agent one note naming what is missing and the init
-command to run, and asks it to check with you first, since init edits the
-checkout's agent settings. Hooks added then take effect in the next session.
-The note comes once per checkout. It comes again only if what is missing
-changes. The hook runs as `... || true`, so a missing or older `slopcop`
-never gets in the way of a session.
-
-Silence it for one repository, or everywhere:
-
-```console
-git config slopcop.sessionCheck false
-git config --global slopcop.sessionCheck false
-```
-
-`slopcop init --remove-hooks` removes the session check with the other hooks.
-
-Codex runs the user-level hook only after you trust it with `/hooks`.
+Earlier releases wrote hooks into `.claude/settings.local.json` and
+`.codex/hooks.json`, and skills into `.agents/skills` and `.claude/skills`, in
+each checkout. Run inside a checkout, doctor lists any that remain under
+`legacy`. `slopcop init` in that checkout removes them, as does the checkout's
+old hook the next time it runs the upgraded binary. Tracked files are never
+listed or removed.
 
 ## Coverage
 
-| Harness | Doctor | Session-start reminder |
-| --- | --- | --- |
-| Claude Code | yes | yes, with `--session-check` |
-| Codex 0.166 and later | yes; trust not visible | yes, with `--session-check`, once trusted |
-| Grok | no | no: its session-start output is not verified, and the reminder stays quiet when Grok runs Claude Code's hooks |
-| Kimi Code, opencode, Cursor, Copilot CLI, others | skill only | no |
+| Harness | What doctor checks |
+| --- | --- |
+| Claude Code | skill in `~/.claude/skills`, Stop hook and push gate in `settings.json` |
+| Codex | skill in `~/.agents/skills` or `CODEX_HOME/skills`, Stop hook and push gate in `hooks.json`; trust is not visible |
+| Grok | skill in `~/.agents/skills`, Stop hook and push gate in `hooks/slopcop.json` |
+| Kimi Code, opencode, Cursor, Copilot CLI, others | the shared skill only; hooks for these are set up by hand |
 
-## Without a reminder
-
-Where no reminder can run, make setup part of starting work in a new checkout
-or worktree:
-
-```console
-slopcop doctor
-slopcop init            # or the exact command doctor printed
-```
-
-A worktree created by a tool, such as an agent's own worktree feature, needs
-this too: its untracked `.claude` and `.codex` files do not come along.
+Hooks deployed through managed settings (see [Managed rollout](/agents/managed-rollout/))
+live outside these files, so doctor reports them as missing.

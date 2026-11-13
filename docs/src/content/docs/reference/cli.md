@@ -190,35 +190,28 @@ message.
 
 ## `slopcop init`
 
-Run inside a repository to install local skills and static-only Stop hooks
-and push gates for Claude Code and Codex. Tracked files are
-left alone; paths are added to `.git/info/exclude`. Init removes old
-user-level SlopCop hooks for Claude Code and Codex, and SlopCop skill copies.
-Grok's Stop hook stays at user level, in `hooks/slopcop.json` under
-`GROK_HOME` or `~/.grok`. See
+Run once to install user-level skills and static-only Stop hooks and push gates
+for Claude Code, Codex and Grok. The gate enforces only repositories where
+SlopCop has review state, so it does not block unrelated projects. When run in
+a checkout, init also removes the hooks, skills and exclude entries written by
+the earlier per-repository releases; other checkouts migrate themselves the
+first time their old hook runs the upgraded binary. See
 [The agent skill](/agents/skill/) and [The Stop hook](/agents/stop-hook/).
 
 | Flag | Meaning |
 | --- | --- |
-| `--root PATH` | repository path (default `.`) |
 | `--no-skill` | do not install or update the agent skill |
 | `--no-hooks` | do not install or update the automatic check hook |
-| `--remove-hooks` | remove SlopCop's automatic check hook and session check, and nothing else |
-| `--session-check` | also install the user-level SessionStart reminder for Claude Code and Codex |
-| `--no-reviewers` | skip reviewer probing |
-
-Init records its choices as `slopcop.init`, `slopcop.skill` and
-`slopcop.hooks` in the repository's Git configuration, for `slopcop doctor`.
-See [Checking a checkout's setup](/agents/setup-check/).
+| `--remove-hooks` | remove user-level and legacy repository SlopCop hooks and nothing else |
 
 ## `slopcop doctor`
 
-Report whether this checkout has SlopCop's skill, Stop hook and push gate for
-each agent installed here, and the init command that adds what is missing.
-Local only: it sends nothing, probes no reviewer and changes nothing. Flags:
-`--root <path>`, `--format human|json`. Exits `0`. `slopcop doctor --hook
-claude|codex` answers the SessionStart hook `init --session-check` installs.
-See [Checking a checkout's setup](/agents/setup-check/).
+Report whether SlopCop's skill, Stop hook and push gate are installed for each
+agent harness here (Claude Code, Codex, Grok), and the init command that adds
+what is missing. Run in a checkout, it also lists hooks and skills left by the
+earlier per-repository releases. Local only: it sends nothing, probes no
+reviewer and changes nothing. Flags: `--root <path>`, `--format human|json`.
+Exits `0`. See [Checking your setup](/agents/setup-check/).
 
 ## `slopcop hook <claude|codex|grok|kimi>`
 
@@ -247,7 +240,7 @@ accept failed or incomplete reviews or real bugs.
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override. It also
-blocks any shell command that names `refs/slopcop/`.
+blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
 
 ## `slopcop version`
 

@@ -68,6 +68,21 @@ func writeFile(t *testing.T, root, name, content string) {
 	}
 }
 
+func installUserGate(t *testing.T) {
+	t.Helper()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, ".claude", "settings.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(`{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newRepo(t *testing.T, origin string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -2199,10 +2214,8 @@ func TestPushApprovalLevel(t *testing.T) {
 			}
 			if tc.name == "warning advisory" || tc.name == "error blocks" || strings.Contains(tc.name, "info advisory") {
 				// The push line is printed only where init installed the
-				// gate, so install it the way init does, kept out of the
-				// snapshot by the repository's exclude file.
-				writeFile(t, repo, ".claude/settings.local.json", `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`)
-				writeFile(t, repo, ".git/info/exclude", "/.claude/settings.local.json\n")
+				// user-level gate.
+				installUserGate(t)
 				_, _, humanErr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "human", "--timeout", "50ms")
 				want := "may not be pushed yet: 1 static finding(s) at or above error."
 				if tc.approved {
@@ -2395,8 +2408,7 @@ func TestPushApprovalWithIncompleteRules(t *testing.T) {
 			if doc.Approved != tc.approved {
 				t.Fatalf("approved=%v want %v: %s", doc.Approved, tc.approved, out)
 			}
-			writeFile(t, repo, ".claude/settings.local.json", `{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`)
-			writeFile(t, repo, ".git/info/exclude", "/.claude/settings.local.json\n")
+			installUserGate(t)
 			_, _, humanErr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "human", "--timeout", "50ms")
 			want := "may be pushed: it passed the check."
 			if !tc.approved {

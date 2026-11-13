@@ -37,14 +37,15 @@ version that wrote the skill and what each file held.
 
 ## Files the CLI edits
 
-`slopcop init` runs in the repository. It edits `.claude/settings.local.json`
-(static Stop hook and push gate), `.codex/hooks.json` (static Stop hook and
-push gate), and `.git/info/exclude`. It installs the skills in `.claude/skills/`
-and `.agents/skills/`, leaving tracked targets alone. It removes old
-user-level Claude Code and Codex hooks and SlopCop skills, and keeps Grok's
-user-level Stop hook.
-`slopcop init --remove-hooks` removes SlopCop's hook and nothing else. See
-[The Stop hook](/agents/stop-hook/).
+`slopcop init` edits the user-level settings file for each installed harness:
+Claude Code's `settings.json`, Codex's `hooks.json`, and Grok's
+`hooks/slopcop.json`. Each gets SlopCop's static Stop hook and push gate without
+disturbing other entries. Init also installs both skills in the user-level
+locations described above. An existing per-repository install is removed when
+init runs in that checkout, and migrates itself the first time its old hook
+runs the upgraded CLI elsewhere.
+`slopcop init --remove-hooks` removes SlopCop's user-level and legacy
+repository hooks and nothing else. See [The Stop hook](/agents/stop-hook/).
 
 ## Files in the repository
 
@@ -88,8 +89,10 @@ prints each result as it arrives. It skips flash without a dsh command override
 when `DEEPSEEK_API_KEY` is not set.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
-`overrides.jsonl`, and `review-*/` prompt and reviewer logs. When a reviewer
-or probe is done, the CLI asks its adapter to delete the session, so reviews
+`overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe
+logs are kept under `probes/` beside the user config because init is no longer
+repository-specific. When a reviewer or probe is done, the CLI asks its adapter
+to delete the session, so reviews
 do not pile up in your agent's history: Codex archives the thread (`codex
 unarchive <id>` restores it) and Claude deletes it. Cleanup is skipped when an
 adapter does not support it, and a failed cleanup never affects the review. Checks that

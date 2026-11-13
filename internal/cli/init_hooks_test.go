@@ -1,167 +1,132 @@
 package cli
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-func TestInitMigratesUserHooksAndSkill(t *testing.T) {
-	home := isolateAgentHome(t)
-	makeHarness(t, filepath.Join(home, ".claude"))
-	repo := testInitRepo(t)
-	userHook := filepath.Join(home, ".claude/settings.json")
-	if err := os.WriteFile(userHook, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook claude"}]}]}}`), 0600); err != nil {
+func seedLegacyRepositoryInstall(t *testing.T, repo string) (claudeSettings, codexSettings, skill string) {
+	t.Helper()
+	claudeSettings = filepath.Join(repo, ".claude/settings.local.json")
+	codexSettings = filepath.Join(repo, ".codex/hooks.json")
+	skill = filepath.Join(repo, ".agents/skills/slopcop")
+	makeHarness(t, filepath.Dir(claudeSettings))
+	makeHarness(t, filepath.Dir(codexSettings))
+	if err := os.WriteFile(claudeSettings, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook claude || true"}]}],"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook claude"}]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	skill := filepath.Join(home, ".agents/skills/slopcop/SKILL.md")
-	makeHarness(t, filepath.Dir(skill))
-	if err := os.WriteFile(skill, []byte("---\nname: slopcop\n---\nlocal edit\n"), 0644); err != nil {
+	if err := os.WriteFile(codexSettings, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook codex || true"}]}],"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"slopcop gate --hook codex"}]}]}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	code, out, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
-	if code != 0 {
-		t.Fatal(stderr)
+	files, err := bundledSkillFiles(skillName)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !strings.Contains(out, "removed the user-level hook") || !strings.Contains(out, "backed up") || !strings.Contains(out, "removed the user-level skill") {
-		t.Fatal(out)
+	if err := writeSkill(skill, files, "v0.0.17"); err != nil {
+		t.Fatal(err)
 	}
-	if _, err := os.Stat(skill); !os.IsNotExist(err) {
-		t.Fatalf("user skill remains: %v", err)
+	return claudeSettings, codexSettings, skill
+}
+
+func assertNoSlopCop(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
 	}
-	data, _ := os.ReadFile(userHook)
-	if strings.Contains(string(data), "slopcop hook") {
-		t.Fatal(string(data))
-	}
-	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo, "--remove-hooks")
-	if code != 0 {
-		t.Fatal(stderr)
-	}
-	data, _ = os.ReadFile(filepath.Join(repo, ".claude/settings.local.json"))
 	if strings.Contains(string(data), "slopcop") {
-		t.Fatal(string(data))
+		t.Fatalf("SlopCop remains in %s: %s", path, data)
 	}
 }
 
-// TestInitInstallsAndRemovesHooksWithoutRemovingTheSkill covers both harness
-// settings files and confirms a later skill sync does not restore hooks.
-func TestInitInstallsAndRemovesHooksWithoutRemovingTheSkill(t *testing.T) {
+func TestInitRemoveHooksLeavesSkillsAndMigratesCurrentRepository(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
 	repo := testInitRepo(t)
+	claude, codex, legacySkill := seedLegacyRepositoryInstall(t, repo)
+
 	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	claude := filepath.Join(repo, ".claude/settings.local.json")
-	codex := filepath.Join(repo, ".codex/hooks.json")
-	for path, want := range map[string]string{claude: "slopcop gate --hook claude", codex: "slopcop hook codex"} {
-		data, err := os.ReadFile(path)
-		if err != nil || !strings.Contains(string(data), want) {
-			t.Errorf("%s: %s %v", path, data, err)
-		}
+	assertNoSlopCop(t, claude)
+	assertNoSlopCop(t, codex)
+	if _, err := os.Stat(legacySkill); !os.IsNotExist(err) {
+		t.Fatalf("legacy repository skill remains: %v", err)
 	}
-	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo, "--remove-hooks")
+	userSkill := filepath.Join(home, ".claude/skills/slopcop/SKILL.md")
+	if _, err := os.Stat(userSkill); err != nil {
+		t.Fatal(err)
+	}
+
+	code, _, stderr = runCLI(t, "init", "--remove-hooks", "--root", repo)
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	for _, path := range []string{claude, codex} {
-		data, err := os.ReadFile(path)
-		if err != nil || strings.Contains(string(data), "slopcop") {
-			t.Errorf("hook remains at %s: %s %v", path, data, err)
-		}
-	}
-	for _, p := range []string{".agents/skills/slopcop/SKILL.md", ".claude/skills/slopcop/SKILL.md"} {
-		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
-			t.Errorf("removed skill %s: %v", p, err)
-		}
-	}
-	if _, err := syncBundledSkill(repo, "test"); err != nil {
-		t.Fatal(err)
-	}
-	for _, path := range []string{claude, codex} {
-		data, _ := os.ReadFile(path)
-		if strings.Contains(string(data), "slopcop") {
-			t.Errorf("sync restored hook at %s", path)
-		}
+	assertNoSlopCop(t, filepath.Join(home, ".claude/settings.json"))
+	if _, err := os.Stat(userSkill); err != nil {
+		t.Fatalf("--remove-hooks removed the user skill: %v", err)
 	}
 }
 
-// TestInitHookAndSkillOptOutsAreIndependent applies each flag to a repo.
 func TestInitHookAndSkillOptOutsAreIndependent(t *testing.T) {
 	t.Run("no hooks", func(t *testing.T) {
 		home := isolateAgentHome(t)
 		makeHarness(t, filepath.Join(home, ".claude"))
-		repo := testInitRepo(t)
-		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-hooks")
+		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir(), "--no-hooks")
 		if code != 0 {
 			t.Fatal(stderr)
 		}
-		if _, err := os.Stat(filepath.Join(repo, ".agents/skills/slopcop/SKILL.md")); err != nil {
+		if _, err := os.Stat(filepath.Join(home, ".claude/skills/slopcop/SKILL.md")); err != nil {
 			t.Fatal(err)
 		}
-		for _, p := range []string{".claude/settings.local.json", ".codex/hooks.json"} {
-			if _, err := os.Stat(filepath.Join(repo, p)); !os.IsNotExist(err) {
-				t.Errorf("hook installed at %s: %v", p, err)
-			}
+		if _, err := os.Stat(filepath.Join(home, ".claude/settings.json")); !os.IsNotExist(err) {
+			t.Errorf("hook settings created: %v", err)
 		}
 	})
 	t.Run("no skill", func(t *testing.T) {
 		home := isolateAgentHome(t)
 		makeHarness(t, filepath.Join(home, ".claude"))
-		repo := testInitRepo(t)
-		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-skill")
+		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir(), "--no-skill")
 		if code != 0 {
 			t.Fatal(stderr)
 		}
-		for _, p := range []string{".agents/skills/slopcop/SKILL.md", ".claude/skills/slopcop/SKILL.md"} {
-			if _, err := os.Stat(filepath.Join(repo, p)); !os.IsNotExist(err) {
-				t.Errorf("skill installed at %s: %v", p, err)
-			}
+		if _, err := os.Stat(filepath.Join(home, ".claude/skills/slopcop")); !os.IsNotExist(err) {
+			t.Errorf("skill installed: %v", err)
 		}
-		for _, p := range []string{".claude/settings.local.json", ".codex/hooks.json"} {
-			if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
-				t.Errorf("hook missing at %s: %v", p, err)
-			}
+		data, err := os.ReadFile(filepath.Join(home, ".claude/settings.json"))
+		if err != nil || !strings.Contains(string(data), "slopcop hook claude") {
+			t.Fatalf("hooks missing: %s %v", data, err)
 		}
 	})
 }
 
-// TestInitKeepsGrokHookAtUserLevel covers Grok, which has no repository hook
-// location: init installs and keeps its user-level hook while it moves Claude
-// Code's into the clone, and only --remove-hooks takes it out.
-func TestInitKeepsGrokHookAtUserLevel(t *testing.T) {
+// A checkout whose old hook runs after the upgrade is migrated by that hook's
+// first command, so users do not have to revisit every existing repository.
+func TestAnExistingRepositoryHookMigratesItself(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
-	makeHarness(t, filepath.Join(home, ".grok"))
-	repo := testInitRepo(t)
-	userClaude := filepath.Join(home, ".claude/settings.json")
-	if err := os.WriteFile(userClaude, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook claude"}]}]}}`), 0600); err != nil {
-		t.Fatal(err)
-	}
-	grok := filepath.Join(home, ".grok/hooks/slopcop.json")
-	for run := 0; run < 2; run++ {
-		code, out, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
-		if code != 0 {
-			t.Fatal(stderr)
-		}
-		if run == 0 && !strings.Contains(out, "installed the user-level Stop hook in "+grok) {
-			t.Fatal(out)
-		}
-		data, err := os.ReadFile(grok)
-		if err != nil || !strings.Contains(string(data), "slopcop hook grok") {
-			t.Fatalf("run %d: grok hook: %s %v", run, data, err)
-		}
-	}
-	if data, _ := os.ReadFile(userClaude); strings.Contains(string(data), "slopcop hook") {
-		t.Fatalf("user-level Claude Code hook remains: %s", data)
-	}
-	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--remove-hooks")
-	if code != 0 {
+	if code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir()); code != 0 {
 		t.Fatal(stderr)
 	}
-	if data, err := os.ReadFile(grok); err == nil && strings.Contains(string(data), "slopcop") {
-		t.Fatalf("grok hook remains after --remove-hooks: %s", data)
+	repo := testInitRepo(t)
+	claude, codex, legacySkill := seedLegacyRepositoryInstall(t, repo)
+	payload, _ := json.Marshal(map[string]any{
+		"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": "git status"},
+	})
+	cmd := newGateCommand()
+	cmd.SetIn(bytes.NewReader(payload))
+	cmd.SetArgs([]string{"--hook", "claude"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	assertNoSlopCop(t, claude)
+	assertNoSlopCop(t, codex)
+	if _, err := os.Stat(legacySkill); !os.IsNotExist(err) {
+		t.Fatalf("legacy repository skill remains: %v", err)
 	}
 }

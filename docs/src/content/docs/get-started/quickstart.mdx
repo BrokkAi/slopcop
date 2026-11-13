@@ -7,8 +7,8 @@ sidebar:
 
 import { Steps, Tabs, TabItem, Aside } from '@astrojs/starlight/components';
 
-Install the CLI once. Run init inside each repository, then sign in and
-enable repositories you want checked by the hosted static service. You need a
+Install the CLI and run init once for the machine, then sign in and enable
+repositories you want checked by the hosted static service. You need a
 [slopcop.com](https://slopcop.com) account only to approve the sign-in. A
 workspace gets 1,000 free checks each calendar month, and repositories are
 free; [pricing](https://slopcop.com/pricing) has what a check costs after
@@ -57,18 +57,17 @@ those.
    [Install the CLI](/get-started/install/) covers the release archive,
    checksums, and upgrades.
 
-2. **Teach your agent.** `slopcop init` installs the SlopCop skill into
-   repository-local directories for Claude Code, Codex, and other agents, and a
-   Stop hook for Claude Code and Codex that checks what a session wrote when the
-   agent stops.
+2. **Teach your agent.** `slopcop init` installs the SlopCop skills into each
+   installed harness's user-level directory, plus Stop hooks and push gates for
+   Claude Code, Codex and Grok.
 
    ```console
-   cd /path/to/repository
    slopcop init
    ```
 
-   It names what it did. A skill that is already there is left alone, so running
-   it again is safe.
+   It names what it did and is safe to rerun. You do not need to run it again
+   for each checkout. Existing per-repository installs are removed in the
+   current checkout and migrate themselves when first used elsewhere.
 
 3. **Sign in.** The browser device flow prints a link that opens the approval
    page with the code filled in. Approve it while signed in to SlopCop, and only

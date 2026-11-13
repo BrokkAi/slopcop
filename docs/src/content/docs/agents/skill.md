@@ -58,23 +58,24 @@ is not enabled.
 
 ## Where it goes
 
-Run `slopcop init` inside each repository. It installs both skills in these
-repository-local directories and names what it did:
+Run `slopcop init` once for the machine. It installs both skills in the
+user-level directories each installed harness reads and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `.agents/skills/slopcop/`, `.agents/skills/slopcop-audit/` | Codex and other agents |
-| `.claude/skills/slopcop/`, `.claude/skills/slopcop-audit/` | Claude Code and other agents |
+| `~/.agents/skills/slopcop/`, `~/.agents/skills/slopcop-audit/` | Codex, Grok and other agents |
+| `~/.claude/skills/slopcop/`, `~/.claude/skills/slopcop-audit/` | Claude Code and other agents |
 
-Init adds these paths to `.git/info/exclude`, leaves tracked targets alone,
-and removes old user-level SlopCop skill copies. An existing skill is left
-alone when init runs again.
+Init leaves tracked targets alone. When run inside a checkout, it removes the
+skills, hooks and `.git/info/exclude` entries from the earlier per-repository
+releases. Other checkouts migrate themselves the first time their existing hook
+runs the upgraded binary. An existing skill is left alone when init runs again.
 `slopcop init --no-skill` skips the install and any update of it.
 
 ## How it stays current
 
-A check updates skill copies already present in the repository, rewriting
-one that differs from the skill bundled into the binary. It creates no new
+A check updates skill copies already present, rewriting one that differs from
+the skill bundled into the binary. It creates no new
 copy, and `slopcop login` does not install the skill. This keeps existing
 copies aligned with the version of slopcop that runs. Each install records
 the version that wrote it, and what each file held, in `.slopcop-skill.json` in

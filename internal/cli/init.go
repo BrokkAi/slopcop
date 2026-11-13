@@ -43,9 +43,9 @@ type skillRoot struct {
 	// neutral marks the vendor-neutral directory, which init uses when no
 	// harness directory is present.
 	neutral bool
-	// harness names the harness that reads this directory, empty for the
-	// vendor-neutral one.
-	harness string
+	// codex marks the Codex-specific directory. init uses the shared neutral
+	// directory for Codex so the same skill is not listed twice.
+	codex bool
 }
 
 // skillRoots are the well-known places the agent harnesses read skills from:
@@ -69,35 +69,32 @@ func skillRoots() ([]skillRoot, error) {
 	}
 	return []skillRoot{
 		{marker: agents, dir: filepath.Join(agents, "skills"), neutral: true},
-		{marker: claude, dir: filepath.Join(claude, "skills"), harness: "claude"},
-		{marker: codexHome, dir: filepath.Join(codexHome, "skills"), harness: "codex"},
+		{marker: claude, dir: filepath.Join(claude, "skills")},
+		{marker: codexHome, dir: filepath.Join(codexHome, "skills"), codex: true},
 	}, nil
 }
 
-// skillTargets are the skills directories init writes: one for every harness
-// installed here, or the vendor-neutral ~/.agents/skills when none is. That
-// directory is read by Codex, opencode, Cursor and other agents, so init has
-// somewhere to put the skill on a machine whose harness has not created its
-// configuration directory yet.
+// skillTargets are the user-level skills directories init writes. Claude Code
+// uses its own directory. Codex, opencode, Cursor, Grok and other agents share
+// ~/.agents/skills; init never writes a second Codex copy because Codex lists
+// duplicate skills rather than choosing one.
 func skillTargets() ([]skillRoot, error) {
 	roots, err := skillRoots()
 	if err != nil {
 		return nil, err
 	}
-	var found []skillRoot
+	var targets []skillRoot
 	for _, root := range roots {
-		if isDirectory(root.marker) {
-			found = append(found, root)
+		switch {
+		case root.neutral:
+			targets = append(targets, root)
+		case root.codex:
+			// Codex uses the shared agent directory below.
+		case isDirectory(root.marker):
+			targets = append(targets, root)
 		}
 	}
-	if len(found) == 0 {
-		for _, root := range roots {
-			if root.neutral {
-				return []skillRoot{root}, nil
-			}
-		}
-	}
-	return found, nil
+	return targets, nil
 }
 
 // skillInstall is what one install pass did, as skill directories.
@@ -179,15 +176,13 @@ func skillRepoRoot(path string) string {
 	return root
 }
 
-// syncBundledSkill updates only copies that already exist in the checked
-// repository or the legacy user locations. Missing copies are left for init
-// to install, and tracked repository copies stay under the user's control.
-// Local edits are backed up before replacement.
+// syncBundledSkill updates only copies that already exist in user-level
+// locations or, while migrating an older checkout, its repository-local
+// directories. Missing copies are left for init to install, and tracked
+// repository copies stay under the user's control. Local edits are backed up
+// before replacement.
 func syncBundledSkill(repoRoot, version string) ([]report.SkillUpdate, error) {
 	var updates []report.SkillUpdate
-	if repoRoot == "" {
-		return updates, nil
-	}
 	roots, err := skillRoots()
 	if err != nil {
 		return updates, err
@@ -197,7 +192,10 @@ func syncBundledSkill(repoRoot, version string) ([]report.SkillUpdate, error) {
 		if err != nil {
 			return updates, err
 		}
-		dirs := []string{filepath.Join(repoRoot, ".claude", "skills", name), filepath.Join(repoRoot, ".agents", "skills", name)}
+		var dirs []string
+		if repoRoot != "" {
+			dirs = append(dirs, filepath.Join(repoRoot, ".claude", "skills", name), filepath.Join(repoRoot, ".agents", "skills", name))
+		}
 		for _, root := range roots {
 			dirs = append(dirs, filepath.Join(root.dir, name))
 		}
@@ -218,7 +216,7 @@ func syncSkillDirs(updates []report.SkillUpdate, repoRoot string, dirs []string,
 		} else if err != nil {
 			return updates, err
 		}
-		if strings.HasPrefix(dir, repoRoot+string(filepath.Separator)) && gitTracked(repoRoot, dir) {
+		if repoRoot != "" && strings.HasPrefix(dir, repoRoot+string(filepath.Separator)) && gitTracked(repoRoot, dir) {
 			continue
 		}
 		update, wrote, err := syncSkillAt(dir, files, version)
@@ -351,102 +349,129 @@ func gitTracked(root, path string) bool {
 	return err == nil && len(out) > 0
 }
 
-func excludeInitPaths(root string, paths []string) error {
-	out, err := exec.Command("git", "-C", root, "rev-parse", "--git-path", "info/exclude").Output()
+var legacyExcludeEntries = map[string]bool{
+	"# slopcop init":                 true,
+	"/.agents/skills/slopcop/":       true,
+	"/.agents/skills/slopcop-audit/": true,
+	"/.claude/skills/slopcop/":       true,
+	"/.claude/skills/slopcop-audit/": true,
+	"/.claude/settings.local.json":   true,
+	"/.codex/hooks.json":             true,
+}
+
+// cleanupLegacyRepository removes the clone-local hooks and skills written by
+// releases where init ran once per repository. It only touches SlopCop's own
+// handlers and recognized, untracked skill directories; everything else in the
+// checkout is left as it was.
+func cleanupLegacyRepository(repo string, hooks, skills bool, out io.Writer) error {
+	var errs []error
+	if hooks {
+		result, err := agenthooks.Repository(repo, false, func(path string) bool {
+			return gitTracked(repo, path)
+		})
+		for _, path := range dedupe(result.ChangedPaths) {
+			if out != nil {
+				fmt.Fprintf(out, "slopcop: removed the legacy repository hook from %s\n", path)
+			}
+		}
+		if err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if skills {
+		if err := removeRepositorySkills(repo, out); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	if hooks || skills {
+		if err := removeLegacyExcludes(repo); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func removeRepositorySkills(repo string, out io.Writer) error {
+	var errs []error
+	for _, name := range bundledSkillNames {
+		for _, target := range []string{".agents", ".claude"} {
+			dir := filepath.Join(repo, target, "skills", name)
+			data, err := os.ReadFile(filepath.Join(dir, skillFileName))
+			if errors.Is(err, fs.ErrNotExist) {
+				continue
+			}
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if !skillNamed(data, name) || gitTracked(repo, dir) {
+				continue
+			}
+			present, err := readSkillDir(dir)
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			stamp, stamped := readSkillStamp(dir)
+			if _, edited := skillOrigin(present, stamp, stamped); edited {
+				backup, err := backupSkill(dir, present)
+				if err != nil {
+					errs = append(errs, err)
+					continue
+				}
+				if out != nil {
+					fmt.Fprintf(out, "slopcop: backed up the edited legacy skill at %s\n", backup)
+				}
+			}
+			if err := os.RemoveAll(dir); err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			if out != nil {
+				fmt.Fprintf(out, "slopcop: removed the legacy repository skill from %s\n", dir)
+			}
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func removeLegacyExcludes(repo string) error {
+	output, err := exec.Command("git", "-C", repo, "rev-parse", "--git-path", "info/exclude").Output()
 	if err != nil {
 		return err
 	}
-	path := strings.TrimSpace(string(out))
+	path := strings.TrimSpace(string(output))
 	if !filepath.IsAbs(path) {
-		path = filepath.Join(root, path)
+		path = filepath.Join(repo, path)
 	}
 	data, err := os.ReadFile(path)
-	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return err
-	}
-	lines := map[string]bool{}
-	for _, line := range strings.Split(string(data), "\n") {
-		lines[line] = true
-	}
-	var add []string
-	for _, p := range paths {
-		if !lines[p] {
-			add = append(add, p)
-			lines[p] = true
-		}
-	}
-	if len(add) == 0 {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if len(data) > 0 && data[len(data)-1] != '\n' {
-		if _, err = f.WriteString("\n"); err != nil {
-			return err
+	lines := strings.Split(string(data), "\n")
+	kept := make([]string, 0, len(lines))
+	changed := false
+	for _, line := range lines {
+		if legacyExcludeEntries[line] {
+			changed = true
+			continue
 		}
+		kept = append(kept, line)
 	}
-	if !lines["# slopcop init"] {
-		if _, err = f.WriteString("# slopcop init\n"); err != nil {
-			return err
-		}
+	if !changed {
+		return nil
 	}
-	for _, p := range add {
-		if _, err = f.WriteString(p + "\n"); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func removeUserSkills(out io.Writer) error {
-	roots, err := skillRoots()
+	info, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	seen := map[string]bool{}
-	for _, root := range roots {
-		dir := filepath.Join(root.dir, skillName)
-		if seen[dir] {
-			continue
-		}
-		seen[dir] = true
-		data, err := os.ReadFile(filepath.Join(dir, skillFileName))
-		if errors.Is(err, fs.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		if !slopcopSkill(data) {
-			continue
-		}
-		present, err := readSkillDir(dir)
-		if err != nil {
-			return err
-		}
-		stamp, stamped := readSkillStamp(dir)
-		if _, edited := skillOrigin(present, stamp, stamped); edited {
-			backup, err := backupSkill(dir, present)
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(out, "slopcop: backed up the edited skill at %s\n", backup)
-		}
-		if err := os.RemoveAll(dir); err != nil {
-			return err
-		}
-		fmt.Fprintf(out, "slopcop: removed the user-level skill at %s\n", dir)
-	}
-	return nil
+	return os.WriteFile(path, []byte(strings.Join(kept, "\n")), info.Mode().Perm())
 }
 
-func slopcopSkill(data []byte) bool {
+func skillNamed(data []byte, name string) bool {
 	lines := strings.Split(string(data), "\n")
 	if len(lines) < 3 || strings.TrimSpace(lines[0]) != "---" {
 		return false
@@ -456,7 +481,7 @@ func slopcopSkill(data []byte) bool {
 		if strings.TrimSpace(line) == "---" {
 			return found
 		}
-		if strings.TrimSpace(line) == "name: slopcop" || strings.TrimSpace(line) == `name: "slopcop"` || strings.TrimSpace(line) == "name: 'slopcop'" {
+		if strings.TrimSpace(line) == "name: "+name || strings.TrimSpace(line) == `name: "`+name+`"` || strings.TrimSpace(line) == "name: '"+name+"'" {
 			found = true
 		}
 	}
@@ -464,212 +489,119 @@ func slopcopSkill(data []byte) bool {
 }
 
 func newInitCommand(version string) *cobra.Command {
-	var noSkill, noHooks, removeHooks, noReviewers, sessionCheck bool
+	var noSkill, noHooks, removeHooks, noReviewers bool
 	var root string
-	command := &cobra.Command{Use: "init", Short: "Install repository-local skills and hooks", Long: `Install SlopCop's skill and hooks in the current Git repository. The skill
-is written to .agents/skills/slopcop and, when Claude Code is installed,
-.claude/skills/slopcop. Claude Code gets a Stop hook and a push gate in
-.claude/settings.local.json, which Grok also runs in a folder it trusts. Codex
-gets a Stop hook and a push gate in .codex/hooks.json, and requires /hooks
-trust for both. The push gate blocks git push, gh pr create, and GitHub MCP
-tools that push or open a pull request until HEAD's tree passed a check. Written paths are added to the
-repository's info/exclude. Tracked targets are left untouched. Grok, which
-has no repository hook location SlopCop has verified, gets a user-level Stop
-hook in hooks/slopcop.json under GROK_HOME or ~/.grok. Existing user-level
-Claude Code and Codex hooks and SlopCop skills are removed, except that
---no-hooks keeps the user-level hooks and --no-skill the user-level skills.
---remove-hooks removes both repository and user-level hooks, Grok's included,
-and the session check. Init probes available reviewers unless --no-reviewers
-is set.
-
-Init records what it installed, and what --no-skill, --no-hooks or
---remove-hooks turned down, in the repository's Git configuration
-(slopcop.init, slopcop.skill, slopcop.hooks), which its worktrees share.
-'slopcop doctor' reads it to tell a declined piece from a missing one.
---session-check also installs a user-level SessionStart hook for Claude Code
-and Codex that tells the agent, once, when a session opens in a checkout or
-worktree that lacks SlopCop's skill or hooks; see 'slopcop doctor --help'.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
-		repo, err := gitx.Toplevel(root)
-		if err != nil {
-			return fmt.Errorf("slopcop init requires a Git repository: %w", err)
-		}
+	command := &cobra.Command{Use: "init", Short: "Install user-level skills and hooks", Long: `Install SlopCop's agent skills, Stop hooks and push gates once for the
+machine. The skills go into the user-level directories each installed harness
+reads. Claude Code gets its Stop hook and push gate in settings.json under
+CLAUDE_CONFIG_DIR or ~/.claude. Codex gets both in hooks.json under CODEX_HOME
+or ~/.codex, and requires /hooks trust. Grok gets both in
+hooks/slopcop.json under GROK_HOME or ~/.grok. The push gate blocks git push,
+gh pr create, and GitHub MCP tools that push or open a pull request until
+HEAD's tree passed a check. Repositories that have never run SlopCop are left
+alone. Init also removes clone-local hooks and skills written by the earlier
+per-repository releases when run inside that checkout; other checkouts clean
+themselves the next time their old hook runs SlopCop. Init probes available
+reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		out := cmd.OutOrStdout()
-		skip := func(path string) bool {
-			if gitTracked(repo, path) {
-				fmt.Fprintf(out, "slopcop: left tracked target %s alone\n", path)
-				return true
-			}
-			return false
-		}
-		// --no-hooks and --no-skill leave the user-level hooks and skills
-		// alone as well; init removes only what it would replace. Grok's
-		// hook has no repository location yet, so only --remove-hooks takes
-		// it out.
-		if !noHooks {
-			removeUser := agenthooks.RemoveReplaced
-			if removeHooks {
-				removeUser = agenthooks.Remove
-			}
-			user, err := removeUser()
-			for _, p := range user.ChangedPaths {
-				fmt.Fprintf(out, "slopcop: removed the user-level hook from %s\n", p)
-			}
-			if err != nil {
-				return err
-			}
-		}
 		if removeHooks {
-			r, err := agenthooks.Repository(repo, false, skip)
-			for _, p := range dedupe(r.ChangedPaths) {
-				fmt.Fprintf(out, "slopcop: removed SlopCop's hooks from %s\n", p)
+			result, err := agenthooks.Remove()
+			for _, path := range result.ChangedPaths {
+				fmt.Fprintf(out, "slopcop: removed the user-level hook from %s\n", path)
 			}
 			if err != nil {
 				return err
 			}
-			session, err := agenthooks.RemoveSessionCheck()
-			for _, p := range session.ChangedPaths {
-				fmt.Fprintf(out, "slopcop: removed the session check from %s\n", p)
-			}
-			if err != nil {
-				return err
-			}
-			recordChoices(cmd.ErrOrStderr(), repo, version, skillRecorded(repo), false)
-			return nil
-		}
-		if !noSkill {
-			if err := removeUserSkills(out); err != nil {
-				return err
-			}
-		}
-		var excluded []string
-		if !noSkill {
-			targets := []string{filepath.Join(repo, ".agents", "skills")}
-			home, _ := os.UserHomeDir()
-			claude := os.Getenv("CLAUDE_CONFIG_DIR")
-			if claude == "" {
-				claude = filepath.Join(home, ".claude")
-			}
-			if isDirectory(claude) {
-				targets = append(targets, filepath.Join(repo, ".claude", "skills"))
-			}
-			for _, name := range bundledSkillNames {
-				files, err := bundledSkillFiles(name)
-				if err != nil {
+			if repo := legacyRepoRoot(root); repo != "" {
+				if err := cleanupLegacyRepository(repo, true, false, out); err != nil {
 					return err
 				}
-				for _, target := range targets {
-					dir := filepath.Join(target, name)
-					if skip(dir) {
-						continue
-					}
-					written, err := installSkillAt(target, name, files, version)
-					if err != nil {
-						return err
-					}
-					if written {
-						fmt.Fprintf(out, "slopcop: installed the %s skill at %s\n", name, dir)
-					}
-					rel, _ := filepath.Rel(repo, dir)
-					excluded = append(excluded, "/"+filepath.ToSlash(rel)+"/")
-				}
+			}
+			return nil
+		}
+
+		if noSkill {
+			fmt.Fprintln(out, "slopcop: left the agent skills alone (--no-skill)")
+		} else {
+			result, err := installBundledSkill(version)
+			if err != nil {
+				return err
+			}
+			for _, dir := range result.installed {
+				fmt.Fprintf(out, "slopcop: installed the skill at %s\n", dir)
+			}
+			for _, dir := range result.present {
+				fmt.Fprintf(out, "slopcop: the skill is already at %s\n", dir)
 			}
 		}
-		if !noHooks {
-			r, err := agenthooks.Repository(repo, true, skip)
-			if err != nil {
-				return err
-			}
-			// The Stop hook and the push gate share Claude Code's settings
-			// file, so each file is named once.
-			for _, p := range dedupe(r.ChangedPaths) {
-				fmt.Fprintf(out, "slopcop: installed SlopCop's hooks in %s\n", p)
-			}
-			for _, p := range []string{filepath.Join(repo, ".claude", "settings.local.json"), filepath.Join(repo, ".codex", "hooks.json")} {
-				if !gitTracked(repo, p) {
-					rel, _ := filepath.Rel(repo, p)
-					excluded = append(excluded, "/"+filepath.ToSlash(rel))
-				}
-			}
-			user, err := agenthooks.InstallUserOnly()
-			for _, p := range user.ChangedPaths {
-				fmt.Fprintf(out, "slopcop: installed the user-level Stop hook in %s\n", p)
+
+		if noHooks {
+			fmt.Fprintln(out, "slopcop: left the automatic hooks alone (--no-hooks)")
+		} else {
+			result, err := agenthooks.Install()
+			for _, path := range result.ChangedPaths {
+				fmt.Fprintf(out, "slopcop: installed the user-level hooks in %s\n", path)
 			}
 			if err != nil {
 				return err
 			}
-			r.Installed = append(r.Installed, user.Installed...)
-			if r.NeedsTrust {
-				fmt.Fprintln(out, "slopcop: Codex reads .codex/hooks.json only in a project you trust, and runs the Stop hook and push gate only after you trust them with /hooks")
+			if result.NeedsTrust {
+				fmt.Fprintln(out, "slopcop: Codex runs the user-level Stop hook and push gate only after you trust them with /hooks")
 			}
-			if problem := agenthooks.CommandProblem(r.Installed); problem != "" {
+			if problem := agenthooks.CommandProblem(result.Installed); problem != "" {
 				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: warning: %s\n", problem)
 			}
-			// Name the harnesses whose settings now hold the gate, not one
-			// whose tracked settings file was left alone.
-			if len(r.Gates) > 0 {
-				names := map[string]string{"claude": "Claude Code", "codex": "Codex"}
+			if len(result.Gates) > 0 {
+				names := map[string]string{"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 				var gated []string
-				for _, name := range r.Gates {
+				for _, name := range result.Gates {
 					gated = append(gated, names[name])
 				}
-				verb := "blocks"
-				if len(gated) > 1 {
-					verb = "block"
+				fmt.Fprintf(out, "slopcop: %s now install a user-level push gate for git push, gh pr create, and GitHub MCP pushes\n", strings.Join(gated, ", "))
+			}
+			if repo := legacyRepoRoot(root); repo != "" {
+				if err := cleanupLegacyRepository(repo, true, !noSkill, out); err != nil {
+					return err
 				}
-				fmt.Fprintf(out, "slopcop: %s now %s git push, gh pr create, and GitHub MCP pushes until HEAD's tree passed a check\n", strings.Join(gated, " and "), verb)
 			}
 		}
-		if err := excludeInitPaths(repo, excluded); err != nil {
-			return err
-		}
-		if sessionCheck {
-			session, err := agenthooks.InstallSessionCheck()
-			for _, p := range session.ChangedPaths {
-				fmt.Fprintf(out, "slopcop: installed the session check in %s\n", p)
-			}
-			if err != nil {
-				return err
-			}
-			if len(session.Installed) == 0 {
-				fmt.Fprintln(out, "slopcop: no Claude Code or Codex configuration directory here, so no session check was installed")
-			}
-			if session.NeedsTrust {
-				fmt.Fprintln(out, "slopcop: Codex runs the session check only after you trust it with /hooks")
-			}
-		}
-		recordChoices(cmd.ErrOrStderr(), repo, version, !noSkill, !noHooks)
 		if !noReviewers {
-			return initReviewers(cmd.Context(), out, repo)
+			return initReviewers(cmd.Context(), out, root)
 		}
 		return nil
 	}}
-	command.Flags().StringVar(&root, "root", ".", "Git repository directory")
+	command.Flags().StringVar(&root, "root", "", "deprecated repository path to clean up")
+	_ = command.Flags().MarkHidden("root")
 	command.Flags().BoolVar(&noReviewers, "no-reviewers", false, "skip reviewer probing")
-	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install the agent skill")
-	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install repository hooks")
-	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove repository and user-level SlopCop hooks")
-	command.Flags().BoolVar(&sessionCheck, "session-check", false, "also install a user-level SessionStart hook that reports checkouts lacking SlopCop's skill or hooks")
+	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install the agent skills")
+	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install the user-level hooks")
+	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove user-level and legacy repository SlopCop hooks")
 	command.MarkFlagsMutuallyExclusive("no-hooks", "remove-hooks")
-	command.MarkFlagsMutuallyExclusive("session-check", "remove-hooks")
 	return command
 }
 
-// recordChoices stores init's choices for doctor. Failing to record them is
-// reported and leaves init's work in place.
-func recordChoices(errOut io.Writer, repo, version string, skill, hooks bool) {
-	if err := recordInitChoices(repo, version, skill, hooks); err != nil {
-		fmt.Fprintf(errOut, "slopcop: warning: could not record init's choices in the Git configuration: %v\n", err)
+func legacyRepoRoot(path string) string {
+	if strings.TrimSpace(path) == "" {
+		path = "."
 	}
+	repo, err := gitx.Toplevel(path)
+	if err != nil {
+		return ""
+	}
+	return repo
 }
 
-// skillRecorded reports whether the repository's last recorded init kept
-// the skill, which --remove-hooks leaves as it was.
-func skillRecorded(repo string) bool {
-	value, err := gitx.Run(repo, "config", "--local", "--get", gitKeySkill)
-	return err != nil || !gitFalse(value)
+// cleanupInstalledLegacyRepository removes clone-local installs only after the
+// user-level hooks that replace them are present. An upgraded binary by itself
+// must not strip a checkout's working setup.
+func cleanupInstalledLegacyRepository(repo string) error {
+	if repo == "" || !agenthooks.GateInstalled(repo) {
+		return nil
+	}
+	return cleanupLegacyRepository(repo, true, true, nil)
 }
 
-func initReviewers(ctx context.Context, out io.Writer, repo string) error {
+func initReviewers(ctx context.Context, out io.Writer, workDir string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -689,11 +621,20 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 	if err != nil {
 		return err
 	}
-	gitDir, err := exec.Command("git", "-C", repo, "rev-parse", "--absolute-git-dir").Output()
+	if strings.TrimSpace(workDir) == "" {
+		workDir = "."
+	}
+	probeRoot, err := filepath.Abs(workDir)
 	if err != nil {
 		return err
 	}
-	probeParent := filepath.Join(strings.TrimSpace(string(gitDir)), "slopcop")
+	if info, statErr := os.Stat(probeRoot); statErr != nil || !info.IsDir() {
+		probeRoot, err = os.Getwd()
+		if err != nil {
+			return err
+		}
+	}
+	probeParent := filepath.Join(filepath.Dir(path), "probes")
 	if err := os.MkdirAll(probeParent, 0700); err != nil {
 		return err
 	}
@@ -703,7 +644,7 @@ func initReviewers(ctx context.Context, out io.Writer, repo string) error {
 	}
 	review.TrimLogs(probeParent)
 	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt and can take a few minutes the first time, while npx downloads each adapter")
-	results := review.Probe(ctx, repo, logDir, review.Families, settings, func(r review.ProbeResult) {
+	results := review.Probe(ctx, probeRoot, logDir, review.Families, settings, func(r review.ProbeResult) {
 		if r.Available {
 			fmt.Fprintf(out, "slopcop: %s available (%s)\n", r.Family, r.Model)
 		} else {

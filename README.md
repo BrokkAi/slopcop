@@ -164,20 +164,23 @@ The binary carries two agent skills. `slopcop` teaches a coding agent how
 to check a change. `slopcop-audit` audits code that has already landed: it
 splits a commit range into module slices and checks them in parallel with
 hosted checks, then triages the findings into a fix plan. The binary also
-carries an automatic check hook for Claude Code and Codex. Run `slopcop init`
-inside the repository. It installs both skills into the repository-local
-directories below and names what it did:
+carries automatic check and push-gate hooks for Claude Code, Codex and Grok.
+Run `slopcop init` once for the machine. It installs both skills into the
+user-level directories below and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `.agents/skills/slopcop/`, `.agents/skills/slopcop-audit/` | Codex and other agents |
-| `.claude/skills/slopcop/`, `.claude/skills/slopcop-audit/` | Claude Code and other agents |
+| `~/.agents/skills/slopcop/`, `~/.agents/skills/slopcop-audit/` | Codex, Grok and other agents |
+| `~/.claude/skills/slopcop/`, `~/.claude/skills/slopcop-audit/` | Claude Code and other agents |
 
-Init adds these paths to `.git/info/exclude`, leaves tracked files alone, and
-removes SlopCop's old user-level skill copies and hooks.
+It leaves tracked files alone. A command run inside a checkout also removes
+the hooks, skills and `.git/info/exclude` entries written by the earlier
+per-repository releases. Other existing checkouts migrate themselves the first
+time their old hook runs the upgraded binary, so setup does not have to be
+repeated repository by repository.
 
 A skill that is already there is left alone by init, so running it again is
-safe. A check updates copies already in the repository, but creates none; login
+safe. A check updates copies already installed, but creates none; login
 does not install the skill. An existing copy is rewritten when it differs from
 the skill bundled into the binary, so an agent follows the instructions of the
 slopcop version it runs. Each install records the version that wrote it, and
@@ -197,25 +200,25 @@ notice says where. A check's `json` and `sarif` reports carry the same update
 (see below). `slopcop init --no-skill` skips the install and any update of
 it.
 
-Init also adds a static-only `Stop` hook for Claude Code and Codex, and
-leaves everything else in the file as it was:
+Init also adds a static-only `Stop` hook and a `PreToolUse` push gate for
+Claude Code, Codex and Grok, and leaves everything else in each file as it was:
 
 | File | Harness |
 | --- | --- |
-| `.claude/settings.local.json` in the repository | Claude Code |
-| `.codex/hooks.json` in the repository | Codex |
+| `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
+| `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
+| `hooks/slopcop.json` under `GROK_HOME`, or `~/.grok` | Grok |
 
-The Claude Code and Codex settings also get a PreToolUse push gate. It
-blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
-open a pull request until HEAD's tree has a passing check or valid override.
-Grok runs the Claude Code gate too, in a folder it trusts. Codex runs its gate
-only once you trust it with `/hooks`.
+The push gate blocks `git push`, `gh pr create`, and the GitHub MCP tools that
+push files or open a pull request until HEAD's tree has a passing check or
+valid override. It is installed machine-wide but only enforces a repository
+after SlopCop has created review state there. A repository that has never been
+checked is left alone.
 
-Codex reads the repository's `.codex/hooks.json` only once you trust the
-project in Codex, and runs a new or changed hook only once you trust it too:
-open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each
-time it runs, since Codex says nothing of a hook it skips. The hook stays the
-same from one release to the next, so an update does not ask for it again.
+Codex runs a new or changed user-level hook only once you trust it: open Codex
+and review it with `/hooks`. Init never writes that trust itself. The hook
+stays the same from one release to the next, so an update does not ask for it
+again.
 
 When the agent stops, the hook checks the working tree through the same
 hosted API, but only when all of these hold:
@@ -276,9 +279,9 @@ put `slopcop` on `PATH`, and each user still signs in.
   `managed-settings.d/`): a `Stop` group with `"type": "command"`,
   `"command": "slopcop hook claude || true"`, `"timeout": 720` and
   `"statusMessage": "Checking the change with SlopCop"`. Under
-  `allowManagedHooksOnly` the hooks init writes to the repository's
-  `.claude/settings.local.json`, the push gate included, are blocked, so the
-  managed hook is the only one that runs. Claude Code runs
+  `allowManagedHooksOnly` the user-level hooks init writes to
+  `settings.json`, the push gate included, are blocked, so the managed hook is
+  the only one that runs. Claude Code runs
   an identical handler from several settings files once.
 - **Codex:** define the `Stop` hook under `[hooks]` in the managed
   `requirements.toml` (`command = "slopcop hook codex || true"`,

@@ -12,31 +12,28 @@ built from each harness's published source,
 (Kimi Code 2.5.1), not from a captured session. If a hook does not fire or a
 check names no model, please open an issue.
 
-Both read the skill from the repository's `.agents/skills`, where
-`slopcop init` puts it. Grok reads it, with `.grok/skills` and
-`.claude/skills`, in the working directory and each parent up to the Git
-root, and only in a folder you trust. Kimi Code reads it, with
-`.kimi-code/skills`, at the root of the Git repository. The `AGENTS.md` line
-from [Other agents](/agents/other-agents/) works as it does elsewhere.
+`slopcop init` installs the shared skill under `~/.agents/skills`, with a
+Claude Code copy under `~/.claude/skills` when Claude Code is installed. Grok
+also reads repository-local `.grok/skills` and `.claude/skills` in a folder you
+trust. Kimi Code's project skill discovery is repository-local; the
+`AGENTS.md` line from [Other agents](/agents/other-agents/) works as it does
+elsewhere.
 
 ## Grok
 
-`slopcop init` writes a `Stop` hook to `hooks/slopcop.json` under `GROK_HOME`,
-or `~/.grok`. It stays at user level while the Claude Code and Codex hooks
-move into the repository, because Grok runs a project's hooks only in a folder
-you trust, and a user-level hook needs no trust. Grok loads every `*.json` file in that directory, so the hook
-lives in a file of its own and your other hook files are left alone. Grok asks
-you to trust hooks that come with a project, not these.
+`slopcop init` writes the `Stop` hook and push gate to
+`hooks/slopcop.json` under `GROK_HOME`, or `~/.grok`. Grok loads every `*.json`
+file in that directory, so the hooks live in a file of their own and your other
+hook files are left alone. User-level hooks need no project trust.
 `slopcop init --remove-hooks` takes it out again.
 
 Grok also runs the hooks in `~/.claude/settings.json` and, in a folder you
-trust, the repository's `.claude/settings.json` and
-`.claude/settings.local.json`, unless its Claude Code compatibility is off.
-SlopCop's Claude Code Stop hook sees that it is running under Grok and does
-nothing, so a stop is checked once. The push gate `slopcop init` puts in
-`.claude/settings.local.json` does run under Grok: it blocks Grok's
-`run_terminal_command` when the command pushes or names `refs/slopcop/`, as it
-does Claude Code's `Bash`.
+trust, project Claude settings, unless its Claude Code compatibility is off.
+SlopCop's Claude Code Stop hook and gate see that they are running under Grok
+and do nothing, so the Grok hook handles each event once. The user-level Grok
+gate blocks `run_terminal_command` when the command pushes or names
+`refs/slopcop/` or `.git/slopcop`, the same cases the Claude gate blocks for
+`Bash`.
 
 ### What the CLI reads from the session
 
