@@ -84,7 +84,7 @@ slopcop check --format json
 | `baseCommit` | the commit the patch was applied to |
 | `applied` | whether the analysis completed; `false` whenever it did not |
 | `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it; and, when the check met a `slopcop: ignore` comment, `inlineSuppressed` and `directiveWarnings` |
-| `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, and `previouslyIgnored` with the id of an ignored finding it matches; a finding with `previouslyIgnored` is listed even when it is not new |
+| `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, `previouslyIgnored` with the id of an ignored finding it matches, and, for a [dependency advisory](/checks/read-a-report/#dependency-advisories), `dependency`; a finding with `previouslyIgnored` is listed even when it is not new |
 | `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
 | `incompleteUnlisted` | present when the service cut `incomplete`: how many of `summary.incompletePolicies` it does not name |
@@ -127,7 +127,8 @@ reviewer findings as location-free results and failures as notifications.
 The static results carry `baselineState` `new` and the finding id
 in `properties["slopcop.findingId"]`, and the id of an ignored finding it
 matches in `properties["slopcop.previouslyIgnored"]`, counted in the run's
-`slopcop.remappedIgnores`. Each incomplete rule is a `warning` notification
+`slopcop.remappedIgnores`. A dependency advisory carries its `dependency`
+object in `properties["slopcop.dependency"]`. Each incomplete rule is a `warning` notification
 with `slopcop.reason` and, when sent, `slopcop.detail`; when the service cut
 the list, one more `warning` notification counts the rest in
 `slopcop.unlisted`, and the run carries `slopcop.incompleteUnlisted` and

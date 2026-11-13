@@ -29,6 +29,8 @@ type fakeService struct {
 	// findings are the paths the check reports a new finding in.
 	findings   []string
 	severities []string
+	// dependency, when set, is the advisory evidence every finding carries.
+	dependency *service.Dependency
 	// refusal, when set, is the error body every request is answered with.
 	refusal string
 	// outages is how many requests a gateway answers with a bare 503 first.
@@ -77,7 +79,7 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 				response.Status = service.StatusFindings
 				response.Findings = append(response.Findings, service.Finding{
 					ID: fakeFindingID(i), PolicyID: "demo.policy", Severity: severity, Certainty: "definite",
-					Path: path, StartLine: &line, Title: "Fix " + path, New: true,
+					Path: path, StartLine: &line, Title: "Fix " + path, New: true, Dependency: f.dependency,
 				})
 			}
 			response.Summary.Findings = len(response.Findings)

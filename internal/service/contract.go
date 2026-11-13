@@ -345,6 +345,10 @@ type Finding struct {
 	// ignore` with ID does. A service from before
 	// BrokkAi/bifrost-service#953 omits it.
 	PreviouslyIgnored string `json:"previouslyIgnored,omitempty"`
+	// Dependency is the structured evidence of a dependency-advisory
+	// finding. A service from before dependency advisories omits it, and so
+	// does every other finding.
+	Dependency *Dependency `json:"dependency,omitempty"`
 }
 
 // RelatedLocation identifies a candidate location reported alongside a finding.

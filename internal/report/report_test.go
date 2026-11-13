@@ -1884,3 +1884,99 @@ func TestPartialSimilarityNoticeRendersInAllFormats(t *testing.T) {
 		t.Fatalf("SARIF notice = %v", notice)
 	}
 }
+
+// dependencyFindings is a check with a new advisory in an added direct
+// dependency and one in a new transitive dependency.
+func dependencyFindings() service.Response {
+	direct, transitive := true, false
+	added := finding("package-lock.json", 12, "error", "slopcop.dependencies.known-vulnerability")
+	added.ID = "7d2a1c3e-0000-4000-8000-000000000001"
+	added.Title = "lodash 4.17.20 has a known vulnerability"
+	added.Dependency = &service.Dependency{
+		Ecosystem: "npm", Package: "lodash", Version: "4.17.20", Direct: &direct, ManifestPath: "package.json",
+		DependencyChain: []string{"lodash@4.17.20"}, AdvisoryID: "GHSA-29mw-wpgm-hmr9", Aliases: []string{"CVE-2020-28500"},
+		SourceURL: "https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9", FixedVersions: []string{"4.17.21"},
+		UpgradeCommand: "npm install lodash@4.17.21 --save-exact",
+	}
+	pulled := finding("package-lock.json", 40, "warning", "slopcop.dependencies.known-vulnerability")
+	pulled.ID = "7d2a1c3e-0000-4000-8000-000000000002"
+	pulled.Title = "qs 6.7.0 has a known vulnerability"
+	pulled.Dependency = &service.Dependency{
+		Ecosystem: "npm", Package: "qs", Version: "6.7.0", Direct: &transitive, ManifestPath: "package.json",
+		DependencyChain: []string{"express@4.17.1", "body-parser@1.19.0", "qs@6.7.0"}, DependencyChainOmitted: 2,
+		AdvisoryID: "GHSA-hrpp-h998-j3pp", Summary: "qs vulnerable to\x1b[31m prototype pollution",
+	}
+	return response(service.StatusFindings, "finding", []service.Finding{added, pulled})
+}
+
+func TestHumanShowsDependencyEvidence(t *testing.T) {
+	got := render(t, dependencyFindings(), FormatHuman)
+	for _, want := range []string{
+		"    ID: 7d2a1c3e-0000-4000-8000-000000000001\n" +
+			"    Package: npm lodash@4.17.20 (direct, in package.json)\n" +
+			"    Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9\n" +
+			"    Fixed in: 4.17.21\n" +
+			"    Upgrade: npm install lodash@4.17.21 --save-exact\n\n",
+		"    Package: npm qs@6.7.0 (transitive, in package.json)\n" +
+			"    Advisory: GHSA-hrpp-h998-j3pp\n" +
+			"    Summary: qs vulnerable to�[31m prototype pollution\n" +
+			"    Chain: express@4.17.1 → body-parser@1.19.0 → … 2 more → qs@6.7.0\n\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("human lacks %q in:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "\x1b") {
+		t.Errorf("human printed an escape: %q", got)
+	}
+}
+
+func TestMachineReportsCarryDependencyEvidence(t *testing.T) {
+	check := dependencyFindings()
+	var document struct {
+		Findings []struct {
+			ID         string              `json:"id"`
+			Dependency *service.Dependency `json:"dependency"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal([]byte(render(t, check, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	for i, got := range document.Findings {
+		if got.ID != check.Findings[i].ID || !reflect.DeepEqual(got.Dependency, check.Findings[i].Dependency) {
+			t.Errorf("json finding %d = %+v, want %+v", i, got.Dependency, check.Findings[i].Dependency)
+		}
+	}
+
+	var log struct {
+		Runs []struct {
+			Results []struct {
+				BaselineState string `json:"baselineState"`
+				Properties    struct {
+					FindingID  string              `json:"slopcop.findingId"`
+					Dependency *service.Dependency `json:"slopcop.dependency"`
+				} `json:"properties"`
+			} `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal([]byte(render(t, check, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	for i, got := range log.Runs[0].Results {
+		want := check.Findings[i]
+		if got.BaselineState != "new" || got.Properties.FindingID != want.ID ||
+			!reflect.DeepEqual(got.Properties.Dependency, want.Dependency) {
+			t.Errorf("sarif result %d = %+v", i, got)
+		}
+	}
+}
+
+func TestFindingsWithoutDependencyEvidenceSayNothingOfIt(t *testing.T) {
+	check := response(service.StatusFindings, "finding", sampleFindings())
+	for _, format := range []string{FormatHuman, FormatJSON, FormatSARIF} {
+		got := render(t, check, format)
+		if strings.Contains(got, "dependency") || strings.Contains(got, "Package:") {
+			t.Errorf("%s mentions dependency evidence:\n%s", format, got)
+		}
+	}
+}

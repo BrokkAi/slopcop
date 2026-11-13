@@ -347,6 +347,7 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 		if line := previouslyIgnoredLine(finding); line != "" {
 			fmt.Fprintf(out, "    %s\n", line)
 		}
+		writeDependency(out, finding.Dependency)
 		for _, candidate := range finding.RelatedLocations {
 			candidatePath := printable(candidate.Path)
 			if candidate.StartLine >= 1 {
@@ -469,6 +470,80 @@ func previouslyIgnoredLine(finding service.Finding) string {
 		return line
 	}
 	return fmt.Sprintf("%s; `slopcop ignore %s` to keep ignoring it", line, printable(finding.ID))
+}
+
+// writeDependency lists a dependency-advisory finding's evidence as a compact
+// block under the finding: the package, the advisory, the remediation and,
+// for a transitive dependency, the chain that pulls it in. A finding without
+// evidence writes nothing.
+func writeDependency(out *strings.Builder, dependency *service.Dependency) {
+	if !dependency.Usable() {
+		return
+	}
+	pkg := printable(dependency.Package)
+	if dependency.Version != "" {
+		pkg += "@" + printable(dependency.Version)
+	}
+	if dependency.Ecosystem != "" {
+		pkg = printable(dependency.Ecosystem) + " " + pkg
+	}
+	var how []string
+	if dependency.Direct != nil {
+		if *dependency.Direct {
+			how = append(how, "direct")
+		} else {
+			how = append(how, "transitive")
+		}
+	}
+	if dependency.ManifestPath != "" {
+		how = append(how, "in "+printable(dependency.ManifestPath))
+	}
+	if len(how) > 0 {
+		pkg += " (" + strings.Join(how, ", ") + ")"
+	}
+	fmt.Fprintf(out, "    Package: %s\n", pkg)
+
+	if dependency.AdvisoryID != "" {
+		advisory := printable(dependency.AdvisoryID)
+		if len(dependency.Aliases) > 0 {
+			advisory += " (" + printableList(dependency.Aliases) + ")"
+		}
+		if dependency.SourceURL != "" {
+			advisory += " " + printable(dependency.SourceURL)
+		}
+		fmt.Fprintf(out, "    Advisory: %s\n", advisory)
+	}
+	if dependency.Summary != "" {
+		fmt.Fprintf(out, "    Summary: %s\n", printable(dependency.Summary))
+	}
+	if len(dependency.DependencyChain) > 1 || (dependency.Direct != nil && !*dependency.Direct && len(dependency.DependencyChain) > 0) {
+		fmt.Fprintf(out, "    Chain: %s\n", dependencyChain(dependency))
+	}
+	// An empty list may only mean the service did not say, so it is not
+	// presented as there being no fix.
+	if len(dependency.FixedVersions) > 0 {
+		fmt.Fprintf(out, "    Fixed in: %s\n", printableList(dependency.FixedVersions))
+	}
+	if dependency.UpgradeCommand != "" {
+		fmt.Fprintf(out, "    Upgrade: %s\n", printable(dependency.UpgradeCommand))
+	}
+	if dependency.Truncated {
+		out.WriteString("    (Some advisory details were too long and were cut.)\n")
+	}
+}
+
+// dependencyChain joins a chain with arrows, marking where the client cut
+// links from its middle, such as `express@4.17.1 → … 3 more → qs@6.7.0`.
+func dependencyChain(dependency *service.Dependency) string {
+	links := make([]string, len(dependency.DependencyChain))
+	for i, link := range dependency.DependencyChain {
+		links[i] = printable(link)
+	}
+	if omitted := dependency.DependencyChainOmitted; omitted > 0 && len(links) > 1 {
+		last := len(links) - 1
+		links = append(links[:last:last], fmt.Sprintf("… %d more", omitted), links[last])
+	}
+	return strings.Join(links, " → ")
 }
 
 // summaryLine is one line, like the first line of Bifrost's human report:
@@ -1241,7 +1316,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			}
 			result.RelatedLocations = append(result.RelatedLocations, location)
 		}
-		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "") {
+		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "" || finding.Dependency.Usable()) {
 			result.Properties = map[string]any{}
 		}
 		if finding.ID != "" {
@@ -1249,6 +1324,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		}
 		if finding.PreviouslyIgnored != "" {
 			result.Properties["slopcop.previouslyIgnored"] = finding.PreviouslyIgnored
+		}
+		if finding.Dependency.Usable() {
+			result.Properties["slopcop.dependency"] = finding.Dependency
 		}
 		results = append(results, result)
 	}

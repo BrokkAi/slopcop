@@ -65,6 +65,37 @@ Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 `properties["slopcop.findingId"]` in `sarif`. It is what
 [`slopcop ignore`](/checks/false-positives/) takes.
 
+## Dependency advisories
+
+When a change adds or upgrades a dependency to a version with a known
+advisory, the service reports it as a finding on the changed manifest or
+lockfile with a `dependency` object. The service reads the manifests and
+lockfiles and looks the advisory up; the CLI never parses them, runs a package
+manager, or contacts an advisory database. `human` shows a compact block
+under the finding:
+
+```text
+  [error] slopcop.dependencies.known-vulnerability: lodash 4.17.20 has a known vulnerability
+    Location: package-lock.json:12
+    Certainty: definite
+    ID: 7d2a1c3e-…
+    Package: npm lodash@4.17.20 (direct, in package.json)
+    Advisory: GHSA-29mw-wpgm-hmr9 (CVE-2020-28500) https://osv.dev/vulnerability/GHSA-29mw-wpgm-hmr9
+    Fixed in: 4.17.21
+    Upgrade: npm install lodash@4.17.21 --save-exact
+```
+
+A transitive dependency adds a `Chain:` line from the direct dependency to the
+vulnerable package. `json` carries the object as `dependency` on the finding,
+and `sarif` as `properties["slopcop.dependency"]`, with `ecosystem`, `package`,
+`version`, `direct`, `manifestPath`, `dependencyChain`, `advisoryId`,
+`aliases`, `sourceUrl`, `summary`, `fixedVersions`, `upgradeCommand` and
+`databaseModified`, each present when the service sent it. The CLI keeps only
+an `https` `sourceUrl`, cuts each string and list to a bound, and then sets
+`truncated`; a chain cut in the middle keeps its last link and counts the
+rest in `dependencyChainOmitted`. Upgrade to a fixed version, or
+[`slopcop ignore`](/checks/false-positives/) the finding's id like any other.
+
 ## Incomplete checks
 
 `incomplete` lists the rules that could not answer for the changed files, each

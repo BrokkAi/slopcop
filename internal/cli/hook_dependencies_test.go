@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 // hostRecorder is a transport that records the host of every request the
@@ -144,5 +146,76 @@ func TestChangedDependencyFilesInAnyDirectory(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("changed = %v, want %v", got, want)
+	}
+}
+
+func TestHookHandsBackDependencyAdvisoryEvidence(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{}}`+"\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "manifest")
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{"lodash":"4.17.20"}}`+"\n")
+	direct := true
+	fake := &fakeService{
+		active:   []string{"BrokkAi/slopcop"},
+		findings: []string{"package.json"},
+		dependency: &service.Dependency{
+			Ecosystem: "npm", Package: "lodash", Version: "4.17.20", Direct: &direct, ManifestPath: "package.json",
+			AdvisoryID: "GHSA-29mw-wpgm-hmr9", FixedVersions: []string{"4.17.21"},
+			UpgradeCommand: "npm install lodash@4.17.21 --save-exact",
+		},
+	}
+	server := fake.start(t, repo)
+
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	for _, want := range []string{
+		"Package: npm lodash@4.17.20 (direct, in package.json)",
+		"Advisory: GHSA-29mw-wpgm-hmr9",
+		"Fixed in: 4.17.21",
+		"Upgrade: npm install lodash@4.17.21 --save-exact",
+	} {
+		if output.Decision != "block" || !strings.Contains(output.Reason, want) {
+			t.Fatalf("output lacks %q: %+v", want, output)
+		}
+	}
+
+	// The upgrade to the fixed version is a new tree, and the service no
+	// longer reports the advisory: the hook lets the agent go.
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{"lodash":"4.17.21"}}`+"\n")
+	fake.findings = nil
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
+		t.Fatalf("output after the upgrade = %+v", output)
+	}
+	if fake.checks != 2 {
+		t.Fatalf("checks = %d, want 2", fake.checks)
+	}
+}
+
+func TestAnIgnoredDependencyFindingIsNotHandedBack(t *testing.T) {
+	isolateHook(t)
+	// `slopcop ignore` runs inside the agent's session, which names it.
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{}}`+"\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "manifest")
+	writeFile(t, repo, "package.json", `{"name":"demo","dependencies":{"lodash":"4.17.20"}}`+"\n")
+	fake := &fakeService{
+		active:     []string{"BrokkAi/slopcop"},
+		findings:   []string{"package.json"},
+		dependency: &service.Dependency{Ecosystem: "npm", Package: "lodash", Version: "4.17.20", AdvisoryID: "GHSA-29mw-wpgm-hmr9"},
+	}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("first output = %+v", output)
+	}
+	t.Chdir(repo)
+	if code, _, stderr := runCLI(t, "ignore", fakeFindingID(0), "--service", server.URL); code != 0 {
+		t.Fatalf("ignore exit = %d, stderr = %s", code, stderr)
+	}
+	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
+		t.Fatalf("output after the ignore = %+v", output)
 	}
 }

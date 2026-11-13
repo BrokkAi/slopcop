@@ -38,7 +38,8 @@ the files it wrote. The service rejects any other field.
 The response carries `status`, `baseCommit`, `applied`, `summary`, `findings`
 (each with an `id` and `new`, and `previouslyIgnored` naming the ignored
 finding's id when the finding plausibly is one whose code changed, counted in
-`summary.remappedIgnores`), `incomplete`, `inconclusive`, `inlineSuppressed`
+`summary.remappedIgnores`, and an optional `dependency` object for a
+dependency advisory), `incomplete`, `inconclusive`, `inlineSuppressed`
 and `directiveWarnings` when the check met a `slopcop: ignore` comment
 (counted in `summary.inlineSuppressed` and `summary.directiveWarnings`), `failure` when
 the analysis did not complete, and `repositoryAdded: true` when the check added
