@@ -42,6 +42,15 @@ the probe when no reviewers are configured yet.
 With no harness installed, doctor checks only the shared `~/.agents/skills`
 skill that opencode, Cursor and other agents read.
 
+Some problems are ones init cannot fix by itself. Doctor names each one so you
+can fix it before running init:
+
+- a `SKILL.md` that cannot be read, or that lacks the skill's frontmatter
+  (init keeps any existing file, so move its folder aside);
+- a settings file init could not update: not valid JSON, a hooks entry of the
+  wrong shape, a symbolic link to nowhere, or a configuration directory that
+  cannot be read.
+
 ## Codex trust
 
 Codex runs a new or changed user-level hook only after you trust it with
