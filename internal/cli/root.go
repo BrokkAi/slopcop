@@ -138,23 +138,26 @@ func newCheckCommand(opts *checkOptions, serviceURL *string, version string) *co
 }
 
 type checkOptions struct {
-	root          string
-	mode          string
-	static        bool
-	ai            bool
-	intent        string
-	reviewTimeout time.Duration
-	base          string
-	baseExact     string
-	format        string
-	failOn        string
-	certainty     string
-	policies      []string
-	noDiscovery   bool
-	verbose       bool
-	showExisting  bool
-	timeout       time.Duration
-	workspace     string
+	root             string
+	mode             string
+	static           bool
+	ai               bool
+	intent           string
+	reviewTimeout    time.Duration
+	base             string
+	baseExact        string
+	policyIDs        []string
+	policyPacks      []string
+	policyCategories []string
+	format           string
+	failOn           string
+	certainty        string
+	policies         []string
+	noDiscovery      bool
+	verbose          bool
+	showExisting     bool
+	timeout          time.Duration
+	workspace        string
 	// addRepository carries the user's approval of adding the repository to
 	// the workspace --workspace names, which then pays for it.
 	addRepository bool
@@ -173,6 +176,9 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.DurationVar(&opts.reviewTimeout, "review-timeout", 0, "reviewer timeout (0 uses config or default)")
 	flags.StringVar(&opts.base, "base", "", "branch or revision the change started from; the base is its merge base with HEAD (default: merge base with the upstream branch)")
 	flags.StringVar(&opts.baseExact, "base-exact", "", "exact base commit or revision, used without taking a merge base")
+	flags.StringArrayVar(&opts.policyIDs, "policy-id", nil, "built-in policy ID (repeatable)")
+	flags.StringArrayVar(&opts.policyPacks, "policy-pack", nil, "policy pack (repeatable)")
+	flags.StringArrayVar(&opts.policyCategories, "policy-category", nil, "policy category (repeatable)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
 	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
 	flags.StringVar(&opts.certainty, "certainty", certaintyDefinite, "which findings to report and fail on: definite (proven at their location) or all (also possible and heuristic ones)")

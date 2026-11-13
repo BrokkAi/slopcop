@@ -925,6 +925,9 @@ func resolveSelection(root string, opts *checkOptions) (service.Selection, error
 		files = append(files, relative)
 	}
 	selection.Files = dedupe(files)
+	selection.PolicyIDs = dedupe(opts.policyIDs)
+	selection.Packs = dedupe(opts.policyPacks)
+	selection.Categories = dedupe(opts.policyCategories)
 	return selection, nil
 }
 
@@ -1063,7 +1066,7 @@ func staticBlockingCount(response service.Response, level string) int {
 	threshold := rank[level]
 	count := 0
 	for _, finding := range response.Findings {
-		if !finding.New {
+		if !finding.New || finding.Severity == "info" {
 			continue
 		}
 		severity := rank[finding.Severity]

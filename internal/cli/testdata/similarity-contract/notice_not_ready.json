@@ -1,0 +1,29 @@
+{
+  "status": "clean",
+  "baseCommit": "0123456789abcdef0123456789abcdef01234567",
+  "applied": true,
+  "summary": {
+    "files": 1,
+    "findings": 0,
+    "newFindings": 0,
+    "existingFindings": 0,
+    "incompletePolicies": 0,
+    "incompletePolicyIds": [],
+    "inconclusive": 0,
+    "inconclusiveElsewhere": 0,
+    "omittedFindings": 0,
+    "lessCertainFindings": 0,
+    "failOn": "warning"
+  },
+  "findings": [],
+  "incomplete": [],
+  "checks": [
+    {
+      "policyId": "slopcop.similarity",
+      "status": "not_ready",
+      "message": "Run the check again later."
+    }
+  ],
+  "inconclusive": [],
+  "inconclusiveElsewhere": []
+}

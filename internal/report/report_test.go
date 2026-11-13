@@ -37,10 +37,11 @@ func existing(path string, at int, severity, policy string) service.Finding {
 }
 
 func sampleFindings() []service.Finding {
+	note := finding("new file.py", 1, "info", "bifrost.maintainability.complexity")
 	return []service.Finding{
 		finding("cli.py", 2, "warning", "bifrost.correctness.dynamic-evaluation"),
 		finding("cli.py", 5, "warning", "bifrost.correctness.dynamic-evaluation"),
-		finding("new file.py", 1, "note", "bifrost.maintainability.complexity"),
+		note,
 	}
 }
 
@@ -123,11 +124,12 @@ func TestHumanListsEachFindingThenTheSummary(t *testing.T) {
 		"    Location: cli.py:5\n" +
 		"    Certainty: definite\n" +
 		"\n" +
-		"  [note] bifrost.maintainability.complexity: bifrost.maintainability.complexity title\n" +
+		"Notes\n" +
+		"  [info] bifrost.maintainability.complexity: bifrost.maintainability.complexity title\n" +
 		"    Location: new file.py:1\n" +
 		"    Certainty: definite\n" +
 		"\n" +
-		"3 new findings across 2 file(s) | Analysis complete\n"
+		"2 new findings across 1 file(s); 1 note: bifrost.maintainability.complexity title | Analysis complete\n"
 	if got != want {
 		t.Errorf("the file count is files with findings, not changed files:\n%s", got)
 	}
@@ -244,7 +246,7 @@ func TestOmittedFindingsAreSaidInEveryFormat(t *testing.T) {
 		"a check may report; the most severe are listed"
 
 	got := render(t, cut, FormatHuman)
-	want := "\n3 new findings across 2 file(s); +45 not reported | Analysis complete\n" +
+	want := "\n2 new findings across 1 file(s); 1 note: bifrost.maintainability.complexity title; +45 not reported | Analysis complete\n" +
 		"Omitted: " + notice + ".\n"
 	if !strings.HasSuffix(got, want) {
 		t.Errorf("human = %q", got)
@@ -367,7 +369,7 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 	}
 	wantFinding := map[string]any{
 		"policyId":  "bifrost.maintainability.complexity",
-		"severity":  "note",
+		"severity":  "info",
 		"certainty": "definite",
 		"path":      "new file.py",
 		"startLine": float64(1),
@@ -1519,5 +1521,99 @@ func TestJSONAndSARIFCarryTheExclusions(t *testing.T) {
 	}
 	if _, ok := plain["exclusions"]; ok {
 		t.Errorf("a tree without [check] carries no exclusions: %v", plain)
+	}
+}
+
+func TestSimilarityCandidatesAndReadinessNotices(t *testing.T) {
+	match := finding("new.go", 3, "info", "slopcop.similarity")
+	match.Certainty = "heuristic"
+	match.RelatedLocations = []service.RelatedLocation{{
+		Path: "old file.go", StartLine: 8, EndLine: 10, Message: "P(combine) = 0.87",
+	}}
+	r := response(service.StatusClean, "finding", []service.Finding{match})
+	r.Checks = []service.CheckNotice{{PolicyID: "slopcop.similarity", Status: "future_status", Message: "Readiness detail."}}
+
+	humanReport := render(t, r, FormatHuman)
+	for _, want := range []string{"Candidate: old file.go:8 — P(combine) = 0.87", "Note: slopcop.similarity (future_status): Readiness detail."} {
+		if !strings.Contains(humanReport, want) {
+			t.Errorf("human report missing %q: %s", want, humanReport)
+		}
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, r, FormatJSON)), &document); err != nil {
+		t.Fatal(err)
+	}
+	findings := document["findings"].([]any)
+	if len(findings) != 1 || findings[0].(map[string]any)["relatedLocations"].([]any)[0].(map[string]any)["message"] != "P(combine) = 0.87" {
+		t.Fatalf("JSON omitted similarity candidate: %v", document)
+	}
+	checks := document["checks"].([]any)
+	if len(checks) != 1 || checks[0].(map[string]any)["status"] != "future_status" {
+		t.Fatalf("JSON omitted notice: %v", document)
+	}
+
+	if err := json.Unmarshal([]byte(render(t, r, FormatSARIF)), &document); err != nil {
+		t.Fatal(err)
+	}
+	run := document["runs"].([]any)[0].(map[string]any)
+	result := run["results"].([]any)[0].(map[string]any)
+	if result["level"] != "note" || result["properties"].(map[string]any)["slopcop.severity"] != "info" {
+		t.Fatalf("SARIF did not preserve info severity: %v", result)
+	}
+	related := result["relatedLocations"].([]any)[0].(map[string]any)
+	physical := related["physicalLocation"].(map[string]any)
+	if physical["artifactLocation"].(map[string]any)["uri"] != "old%20file.go" || related["message"].(map[string]any)["text"] != "P(combine) = 0.87" {
+		t.Fatalf("SARIF candidate was malformed: %v", related)
+	}
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	foundNotice := false
+	for _, value := range notifications {
+		notice := value.(map[string]any)
+		if notice["properties"].(map[string]any)["slopcop.checkStatus"] == "future_status" && notice["level"] == "note" {
+			foundNotice = true
+		}
+	}
+	if !foundNotice {
+		t.Fatalf("SARIF notice missing: %v", notifications)
+	}
+}
+
+func TestInfoOnlySummaryIsAdvisory(t *testing.T) {
+	r := response(service.StatusClean, "finding", []service.Finding{finding("new.go", 3, "info", "slopcop.similarity")})
+	r.Findings[0].Title = "Similar existing function"
+	r.Findings[0].RelatedLocations = []service.RelatedLocation{{Path: "old.go", StartLine: 8, Message: "matching function"}}
+	got := summaryLine(r)
+	if strings.Contains(got, "1 new finding") || !strings.Contains(got, "No new findings; 1 note: Similar existing function") {
+		t.Fatalf("summary = %q", got)
+	}
+	got = render(t, r, FormatHuman)
+	if !strings.Contains(got, "Notes\n  [info] slopcop.similarity: Similar existing function\n") ||
+		!strings.Contains(got, "Candidate: old.go:8 — matching function\n") || strings.Contains(got, "New findings\n") {
+		t.Fatalf("human = %q", got)
+	}
+}
+
+func TestPartialSimilarityNoticeRendersInAllFormats(t *testing.T) {
+	r := response(service.StatusClean, "finding", nil)
+	r.Checks = []service.CheckNotice{{PolicyID: "slopcop.similarity", Status: "partial", Message: "Compared 8 of 10 changed functions."}}
+	if got := render(t, r, FormatHuman); !strings.Contains(got, "Note: slopcop.similarity (partial): Compared 8 of 10 changed functions.") || strings.Contains(got, "incomplete") {
+		t.Fatalf("human = %q", got)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, r, FormatJSON)), &document); err != nil {
+		t.Fatal(err)
+	}
+	checks := document["checks"].([]any)
+	if checks[0].(map[string]any)["status"] != "partial" || document["status"] != service.StatusClean {
+		t.Fatalf("JSON = %v", document)
+	}
+	if err := json.Unmarshal([]byte(render(t, r, FormatSARIF)), &document); err != nil {
+		t.Fatal(err)
+	}
+	runs := document["runs"].([]any)
+	notifications := runs[0].(map[string]any)["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	notice := notifications[0].(map[string]any)
+	if notice["level"] != "note" || notice["message"].(map[string]any)["text"] != "Compared 8 of 10 changed functions." || notice["properties"].(map[string]any)["slopcop.checkStatus"] != "partial" {
+		t.Fatalf("SARIF notice = %v", notice)
 	}
 }
