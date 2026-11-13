@@ -6,7 +6,8 @@ sidebar:
 ---
 
 The CLI stores settings in the user config. `slopcop config get|set|unset`
-manages `mode`, `review.reviewers`, and `review.timeout`. Adapter commands are
+manages `mode`, `review.reviewers`, `review.fallbacks`, `review.timeout`, and
+`review.minCompleted`. Adapter commands are
 edited in the config file.
 
 ## Precedence
@@ -59,7 +60,19 @@ The review needs no supported origin.
 The config's `mode` is `both`, `static`, or `ai`. `review.reviewers` is an
 ordered list of 1–4 family names; duplicates are allowed. Set it with
 `slopcop config set review.reviewers terra,sol`, or inspect and remove it with
-`get` and `unset`. `review.timeout` defaults to `20m`. Adapter command overrides
+`get` and `unset`. `review.timeout` defaults to `20m`.
+
+A reviewer that cannot start does not stop the others, and one that ends
+without a verdict is retried once in a fresh session (not after a timeout, a
+missing login or exhausted credits). `review.fallbacks` is an ordered list of
+up to 4 families that stand in for a reviewer that still fails, preferring one
+on another provider. `review.minCompleted` (default 2, at most the number of
+reviewers) is how many reviewers, primaries or fallbacks, must finish for a
+clean review. It tolerates a failure only when more reviewers can run than it
+requires: with `terra,sol`, no fallbacks and the default, one failure fails the
+review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
+`flash`) between reviewers and fallbacks, so one outage or empty account does
+not fail every check. Adapter command overrides
 are keyed by adapter at `review.adapters.<codex|dsh|claude>.command`. For
 example, keep a DeepSeek key in a file with:
 
@@ -75,7 +88,11 @@ prints each result as it arrives. It skips flash without a dsh command override
 when `DEEPSEEK_API_KEY` is not set.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
-`overrides.jsonl`, and `review-*/` prompt and reviewer logs. Checks that
+`overrides.jsonl`, and `review-*/` prompt and reviewer logs. When a reviewer
+or probe is done, the CLI asks its adapter to delete the session, so reviews
+do not pile up in your agent's history: Codex archives the thread (`codex
+unarchive <id>` restores it) and Claude deletes it. Cleanup is skipped when an
+adapter does not support it, and a failed cleanup never affects the review. Checks that
 approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
 and valid overrides write `refs/slopcop/reviewed/<tree>`.
 

@@ -133,6 +133,24 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			}
 			settings.Reviewers = append(settings.Reviewers, family)
 		}
+		if len(cfg.Review.Fallbacks) > review.MaxReviewers {
+			path, err = configPath()
+			if err != nil {
+				return review.Settings{}, err
+			}
+			return review.Settings{}, fmt.Errorf("invalid review.fallbacks in %s: want at most %d families", path, review.MaxReviewers)
+		}
+		for _, name := range cfg.Review.Fallbacks {
+			family, parseErr := review.ParseFamily(name)
+			if parseErr != nil {
+				path, err = configPath()
+				if err != nil {
+					return review.Settings{}, err
+				}
+				return review.Settings{}, fmt.Errorf("invalid review.fallbacks in %s: %w", path, parseErr)
+			}
+			settings.Fallbacks = append(settings.Fallbacks, family)
+		}
 		if cfg.Review.Timeout != "" {
 			settings.Timeout, err = time.ParseDuration(cfg.Review.Timeout)
 			if err != nil || settings.Timeout <= 0 {
@@ -142,6 +160,16 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 				}
 				return review.Settings{}, fmt.Errorf("invalid review.timeout in %s: want a positive Go duration", path)
 			}
+		}
+		if n := cfg.Review.MinCompleted; n != 0 {
+			if n < 1 || len(settings.Reviewers) > 0 && n > len(settings.Reviewers) {
+				path, err = configPath()
+				if err != nil {
+					return review.Settings{}, err
+				}
+				return review.Settings{}, fmt.Errorf("invalid review.minCompleted in %s: want 1 to the number of reviewers (%d)", path, len(settings.Reviewers))
+			}
+			settings.MinCompleted = n
 		}
 		if len(cfg.Review.Adapters) > 0 {
 			settings.Adapters = make(map[string][]string, len(cfg.Review.Adapters))

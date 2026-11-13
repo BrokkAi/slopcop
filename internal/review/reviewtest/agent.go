@@ -24,7 +24,23 @@ type agent struct {
 func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
 	a.record(fmt.Sprintf("pid=%d", os.Getpid()))
 	a.record("initialize")
-	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber}, nil
+	// Codex and Claude adapters advertise session/delete; mode no-delete
+	// stands for an adapter that does not.
+	caps := acp.AgentCapabilities{}
+	if a.mode != "no-delete" {
+		caps.SessionCapabilities.Delete = &acp.SessionDeleteCapabilities{}
+	}
+	return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber, AgentCapabilities: caps}, nil
+}
+
+// Cancel accepts the client's session/cancel; a hanging prompt ends with its
+// own context.
+func (a *agent) Cancel(context.Context, acp.CancelNotification) error { return nil }
+
+// UnstableDeleteSession records the session slopcop cleans up.
+func (a *agent) UnstableDeleteSession(_ context.Context, p acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
+	a.record("delete=" + string(p.SessionId))
+	return acp.UnstableDeleteSessionResponse{}, nil
 }
 func options(model, mode string) []acp.SessionConfigOption {
 	m := acp.SessionConfigSelectOptionsUngrouped{}
@@ -45,11 +61,16 @@ func options(model, mode string) []acp.SessionConfigOption {
 	permission := acp.SessionConfigSelectOptionsUngrouped{{Value: "ask", Name: "Ask"}, {Value: "auto", Name: "Auto"}}
 	return append(out, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "mode", Name: "Mode", CurrentValue: "full-access", Options: acp.SessionConfigSelectOptions{Ungrouped: &modes}}}, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "permission_mode", Name: "Permission mode", CurrentValue: "auto", Options: acp.SessionConfigSelectOptions{Ungrouped: &permission}}})
 }
-func (a *agent) NewSession(_ context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	if a.mode == "cwd" {
 		dir, _ := os.Getwd()
 		a.record("process-cwd=" + dir)
 		a.record("session-cwd=" + p.Cwd)
+	}
+	if a.mode == "hang-session" {
+		a.record("new-session")
+		<-ctx.Done()
+		return acp.NewSessionResponse{}, ctx.Err()
 	}
 	if a.mode == "new-error" {
 		return acp.NewSessionResponse{}, fmt.Errorf("fake session failure")
@@ -124,6 +145,35 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		_, _ = a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind, Title: &title}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow"}, {Kind: acp.PermissionOptionKindRejectOnce, OptionId: "reject"}}})
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "Prompt failed"}
 	}
+	if strings.HasPrefix(a.mode, "escalate") {
+		// Codex in read-only mode asks before running a command outside its
+		// sandbox and ends the turn as cancelled when the answer is "cancel".
+		retry := strings.Contains(promptText(p), "## Retry")
+		if retry {
+			a.record("retry-prompt")
+		}
+		if !retry || a.mode == "escalate-always" {
+			kind := acp.ToolKindExecute
+			title := "Run command"
+			options := []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow_once"}, {Kind: acp.PermissionOptionKindAllowAlways, OptionId: "accept_execpolicy_amendment"}}
+			if a.mode == "escalate-decline" {
+				options = append(options, acp.PermissionOption{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "decline"})
+			}
+			options = append(options, acp.PermissionOption{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "cancel"})
+			got, err := a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind, Title: &title, RawInput: map[string]any{"command": "go test ./..."}}, Options: options})
+			if err != nil {
+				return acp.PromptResponse{}, err
+			}
+			chosen := "none"
+			if got.Outcome.Selected != nil {
+				chosen = string(got.Outcome.Selected.OptionId)
+			}
+			a.record("permission=" + chosen)
+			if chosen != "decline" {
+				return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			}
+		}
+	}
 	if a.mode == "findings" {
 		text = "- [P1] fake defect"
 	}
@@ -136,6 +186,16 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		}
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func promptText(p acp.PromptRequest) string {
+	var b strings.Builder
+	for _, block := range p.Prompt {
+		if block.Text != nil {
+			b.WriteString(block.Text.Text)
+		}
+	}
+	return b.String()
 }
 
 // Main runs the fake agent and exits the process when SLOPCOP_FAKE_ACP=1.

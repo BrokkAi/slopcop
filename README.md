@@ -496,12 +496,23 @@ Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) throug
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
 through Claude ACP. Each uses the newest model of its family at high effort.
 `slopcop init` probes each family once when reviewers are not configured and
-mode is not static, then saves the first two that work (or one). Configured
-reviewers are left alone; unset `review.reviewers` and run init to pick again.
-`slopcop init --no-reviewers` skips probing. A check runs exactly the configured
-reviewers and fails with exit `2` if one cannot run. Set the ordered list (1–4
+mode is not static, then saves the first two that work (or one) as reviewers
+and the rest that work as `review.fallbacks`. Configured reviewers are left
+alone; unset `review.reviewers` and run init to pick again.
+`slopcop init --no-reviewers` skips probing. A reviewer that cannot start does
+not stop the others. One that ends without a verdict runs once more in a fresh
+session; if it still fails, the next unused fallback stands in for it,
+preferring another provider. The review is clean when at least
+`review.minCompleted` reviewers (default 2, at most the number of reviewers)
+finished clean, and fails with exit `2` when fewer did. Findings from any
+reviewer count. The minimum only tolerates a failure when more reviewers can
+run than it requires, so configure fallbacks on another provider than the
+reviewers: one outage or empty account then cannot fail every check. Set the
+ordered list (1–4
 entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol`.
-Set `review.timeout` (default `20m`) or `mode` with `slopcop config set`;
+Set `review.fallbacks` (ordered, like `review.reviewers`), `review.timeout`
+(default `20m`), `review.minCompleted` (1 up to the number of reviewers) or
+`mode` with `slopcop config set`;
 adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search

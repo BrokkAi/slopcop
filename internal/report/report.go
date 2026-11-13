@@ -1695,6 +1695,8 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
+	// Incomplete is set when fewer reviewers finished than review.minCompleted.
+	Incomplete bool `json:"incomplete,omitempty"`
 	// Error is the local review's Error field.
 	Error string `json:"error"`
 	// Reused is the local review's Reused field.
@@ -1714,7 +1716,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -1729,6 +1731,9 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	}
 	v := options.Review
 	properties := map[string]any{"slopcop.status": v.Status}
+	if v.Incomplete {
+		properties["slopcop.incomplete"] = true
+	}
 	if v.Capture.DiffTree != "" {
 		properties["slopcop.tree"] = v.Capture.Tree
 		properties["slopcop.diffTree"] = v.Capture.DiffTree
@@ -1736,7 +1741,7 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
-	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed}}, Properties: properties}
+	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed && !v.Incomplete}}, Properties: properties}
 	for _, r := range v.Reviewers {
 		if r.Status == review.StatusFindings {
 			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})
@@ -1761,11 +1766,25 @@ func writeReview(w io.Writer, v *review.Verdict) error {
 	return nil
 }
 
+// failedReviewers counts reviewers without a verdict.
+func failedReviewers(v review.Verdict) int {
+	n := 0
+	for _, r := range v.Reviewers {
+		if r.Status == review.StatusFailed {
+			n++
+		}
+	}
+	return n
+}
+
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
 	for _, r := range v.Reviewers {
 		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)
+		if r.StandsInFor != "" {
+			fmt.Fprintf(w, "    Stands in for %s, which failed\n", printable(r.StandsInFor))
+		}
 		if r.Text != "" {
 			for _, line := range strings.Split(r.Text, "\n") {
 				fmt.Fprintf(w, "    %s\n", printable(line))
@@ -1777,6 +1796,15 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		if r.Log != "" {
 			fmt.Fprintf(w, "    Log: %s\n", printable(r.Log))
 		}
+		if r.FirstError != "" && r.Status != review.StatusFailed {
+			fmt.Fprintf(w, "    Retried after: %s\n", printable(r.FirstError))
+		}
+		if r.FirstLog != "" {
+			fmt.Fprintf(w, "    First attempt log: %s\n", printable(r.FirstLog))
+		}
+	}
+	if failed := failedReviewers(v); failed > 0 && v.Status != review.StatusFailed {
+		fmt.Fprintf(w, "  %d of %d reviewers failed; the review stands on the reviewers that finished\n", failed, len(v.Reviewers))
 	}
 	if v.Error != "" {
 		fmt.Fprintf(w, "  Error: %s\n", printable(v.Error))

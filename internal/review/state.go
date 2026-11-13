@@ -106,7 +106,33 @@ func parseVerdict(r Reviewer) Status {
 	return StatusFindings
 }
 
-// groupVerdict fails on any reviewer failure and retains any finding.
+// reviewStatus keeps any finding, and is otherwise clean when at least min
+// reviewers finished, so one reviewer that keeps failing cannot block a
+// change the others reviewed. The failure stays in the reviewer's result.
+// incomplete reports fewer than min finished reviewers, findings or not.
+func reviewStatus(rs []Reviewer, min int) (status Status, incomplete bool) {
+	completed, findings := 0, false
+	for _, r := range rs {
+		switch parseVerdict(r) {
+		case StatusFindings:
+			completed++
+			findings = true
+		case StatusClean:
+			completed++
+		}
+	}
+	incomplete = completed < max(min, 1)
+	switch {
+	case findings:
+		return StatusFindings, incomplete
+	case incomplete:
+		return StatusFailed, true
+	}
+	return StatusClean, false
+}
+
+// groupVerdict fails on any reviewer failure and retains any finding. An
+// override and the reuse of an earlier review need every reviewer complete.
 func groupVerdict(rs []Reviewer) Status {
 	if len(rs) == 0 {
 		return StatusFailed

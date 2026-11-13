@@ -2,12 +2,14 @@ package review
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,42 +42,82 @@ func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotificatio
 	return nil
 }
 
-// RequestPermission allows only file reading, searching, and thinking.
+// declineOptionID is the Codex adapter's refusal that lets the turn go on
+// ("No, continue without running it"). Its other refusal, "cancel", ends the
+// turn, so a reviewer that asks to leave its sandbox would fail its review.
+const declineOptionID = "decline"
+
+// RequestPermission allows only file reading, searching, and thinking. Every
+// other request is refused, preferring a refusal that keeps the turn going.
 func (c *reviewClient) RequestPermission(_ context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	kinds := []acp.PermissionOptionKind{acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways}
 	if p.ToolCall.Kind != nil && (*p.ToolCall.Kind == acp.ToolKindRead || *p.ToolCall.Kind == acp.ToolKindSearch || *p.ToolCall.Kind == acp.ToolKindThink) {
-		kinds = []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways}
-	} else {
-		kind := "missing"
-		if p.ToolCall.Kind != nil {
-			kind = string(*p.ToolCall.Kind)
+		if id, ok := permissionOption(p.Options, "", acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways); ok {
+			return selectedPermission(id), nil
 		}
-		title := ""
-		if p.ToolCall.Title != nil {
-			title = *p.ToolCall.Title
-		}
+		err := fmt.Errorf("reviewer offered no allow permission option")
 		c.mu.Lock()
-		c.deniedEdit = fmt.Sprintf("reviewer requested %s permission: %s", kind, title)
-		if c.stderr != nil {
-			fmt.Fprintln(c.stderr, c.deniedEdit)
-		}
+		c.permissionError = err
 		c.mu.Unlock()
+		return acp.RequestPermissionResponse{}, err
 	}
-	for _, kind := range kinds {
-		for _, o := range p.Options {
-			if o.Kind == kind {
-				return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: o.OptionId}}}, nil
+	c.mu.Lock()
+	c.deniedEdit = deniedRequest(p.ToolCall)
+	if c.stderr != nil {
+		fmt.Fprintln(c.stderr, c.deniedEdit)
+	}
+	c.mu.Unlock()
+	if id, ok := permissionOption(p.Options, declineOptionID, acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways); ok {
+		return selectedPermission(id), nil
+	}
+	return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}}}, nil
+}
+
+// permissionOption returns the option with the preferred id among the given
+// kinds, else the first option of the earliest kind.
+func permissionOption(options []acp.PermissionOption, preferred acp.PermissionOptionId, kinds ...acp.PermissionOptionKind) (acp.PermissionOptionId, bool) {
+	if preferred != "" {
+		for _, o := range options {
+			if o.OptionId == preferred && slices.Contains(kinds, o.Kind) {
+				return o.OptionId, true
 			}
 		}
 	}
-	if len(kinds) > 0 && kinds[0] == acp.PermissionOptionKindRejectOnce {
-		return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}}}, nil
+	for _, kind := range kinds {
+		for _, o := range options {
+			if o.Kind == kind {
+				return o.OptionId, true
+			}
+		}
 	}
-	err := fmt.Errorf("reviewer offered no allow permission option")
-	c.mu.Lock()
-	c.permissionError = err
-	c.mu.Unlock()
-	return acp.RequestPermissionResponse{}, err
+	return "", false
+}
+
+func selectedPermission(id acp.PermissionOptionId) acp.RequestPermissionResponse {
+	return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: id}}}
+}
+
+// deniedRequest names a refused tool call, with its command when the adapter
+// sent one, so the reviewer's error says what it tried to run.
+func deniedRequest(call acp.ToolCallUpdate) string {
+	kind := "missing"
+	if call.Kind != nil {
+		kind = string(*call.Kind)
+	}
+	title := ""
+	if call.Title != nil {
+		title = *call.Title
+	}
+	out := fmt.Sprintf("reviewer requested %s permission: %s", kind, title)
+	if input, ok := call.RawInput.(map[string]any); ok {
+		if command, ok := input["command"].(string); ok && command != "" && command != title {
+			const limit = 200
+			if len(command) > limit {
+				command = command[:limit] + "..."
+			}
+			out += fmt.Sprintf(" (%q)", command)
+		}
+	}
+	return out
 }
 
 // scrubEnvironment prevents nested session identity and service token leakage to reviewers.
@@ -125,8 +167,67 @@ type runner struct {
 	updates, stderr *os.File
 	exited          chan struct{}
 	stopWatch       func() bool
-	session         acp.SessionId
+	watchDone       chan struct{}
 	result          Reviewer
+	// canDelete records that the adapter advertised session/delete.
+	canDelete bool
+	// sessionMu guards session, which the timeout's kill reads.
+	sessionMu sync.Mutex
+	session   acp.SessionId
+	cleanOnce sync.Once
+}
+
+// cleanupTimeout bounds deleting a reviewer's session, so cleanup never
+// holds up a review.
+const cleanupTimeout = 2 * time.Second
+
+// cleanup deletes the reviewer's session from the adapter's history, once.
+// Each reviewer run, retry and probe is otherwise a saved thread in the
+// user's agent app. Codex archives the thread (`codex unarchive <id>` brings
+// it back) and Claude deletes it. Failure is ignored and noted in stderr.
+// It waits at most cleanupTimeout: a request stuck behind a blocked write to
+// the adapter must not hold up the kill that would unblock it.
+func (s *runner) cleanup() {
+	s.cleanOnce.Do(func() {
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			s.deleteSession()
+		}()
+		select {
+		case <-done:
+		case <-time.After(cleanupTimeout):
+		}
+	})
+}
+
+// deleteSession sends session/delete when the adapter supports it.
+func (s *runner) deleteSession() {
+	s.sessionMu.Lock()
+	session := s.session
+	s.sessionMu.Unlock()
+	if session == "" || !s.canDelete {
+		return
+	}
+	select {
+	case <-s.conn.Done():
+		return
+	default:
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
+	defer cancel()
+	if _, err := s.conn.UnstableDeleteSession(ctx, acp.UnstableDeleteSessionRequest{SessionId: session}); err != nil {
+		fmt.Fprintf(s.stderr, "delete session %s: %v\n", session, err)
+	}
+}
+
+// startError keeps a setup timeout recognizable as one: the ACP SDK reports
+// a canceled request as its own error, which does not wrap the context's.
+func startError(ctx context.Context, err error) error {
+	if ctxErr := ctx.Err(); ctxErr != nil && !errors.Is(err, ctxErr) {
+		return fmt.Errorf("%w: %v", ctxErr, err)
+	}
+	return err
 }
 
 // startRunner initializes adapters serially so first-run npx installs never overlap.
@@ -181,15 +282,23 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 		return nil, err
 	}
 	go func() { _ = s.cmd.Wait(); close(s.exited) }()
-	s.stopWatch = context.AfterFunc(s.ctx, func() { killProcessTree(s.cmd) })
 	s.client = &reviewClient{stderr: s.stderr}
 	s.conn = acp.NewClientSideConnection(s.client, s.stdin, io.TeeReader(stdout, s.updates))
 	s.conn.SetLogger(slog.New(slog.NewTextHandler(s.stderr, nil)))
-	_, err = s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
+	// On a timeout or interrupt, delete the session while the adapter still
+	// runs, then kill it.
+	s.watchDone = make(chan struct{})
+	s.stopWatch = context.AfterFunc(s.ctx, func() {
+		defer close(s.watchDone)
+		s.cleanup()
+		killProcessTree(s.cmd)
+	})
+	initialized, err := s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
 	if err != nil {
 		s.stop()
-		return nil, fmt.Errorf("initialize: %w", err)
+		return nil, fmt.Errorf("initialize: %w", startError(s.ctx, err))
 	}
+	s.canDelete = initialized.AgentCapabilities.SessionCapabilities.Delete != nil
 	return s, nil
 }
 func (s *runner) closeFiles() {
@@ -201,7 +310,12 @@ func (s *runner) closeFiles() {
 	}
 }
 func (s *runner) stop() {
-	s.stopWatch()
+	if s.stopWatch() {
+		s.cleanup()
+	} else {
+		// The timeout fired: let it delete the session before the kill.
+		<-s.watchDone
+	}
 	s.cancel()
 	killProcessTree(s.cmd)
 	s.stdin.Close()
@@ -214,13 +328,15 @@ func (s *runner) prepare(root string) error {
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
 	}
+	s.sessionMu.Lock()
 	s.session = session.SessionId
+	s.sessionMu.Unlock()
 	modelOpt := configOption(session.ConfigOptions, "model")
 	model, ok := bestModel(s.result.Family, choices(modelOpt))
 	if !ok {
 		return fmt.Errorf("no model of family %s", s.result.Family)
 	}
-	response, err := s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: modelOpt.Id, Value: acp.SessionConfigValueId(model)}})
+	response, err := s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: modelOpt.Id, Value: acp.SessionConfigValueId(model)}})
 	if err != nil {
 		return fmt.Errorf("select model: %w", err)
 	}
@@ -242,7 +358,7 @@ func (s *runner) prepare(root string) error {
 	if !found {
 		return fmt.Errorf("high effort unavailable")
 	}
-	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
+	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
 	if err != nil {
 		return fmt.Errorf("select high effort: %w", err)
 	}
@@ -262,7 +378,7 @@ func (s *runner) prepare(root string) error {
 	if !hasChoice(option, value) {
 		return fmt.Errorf("adapter offers no %s=%s option, so the reviewer cannot be restricted; update the adapter", key, value)
 	}
-	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: s.session, ConfigId: option.Id, Value: acp.SessionConfigValueId(value)}})
+	_, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: option.Id, Value: acp.SessionConfigValueId(value)}})
 	if err != nil {
 		return fmt.Errorf("select %s=%s: %w", key, value, err)
 	}

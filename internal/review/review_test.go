@@ -34,7 +34,7 @@ func TestPrompt(t *testing.T) {
 	}
 	for _, family := range []Family{Sol, Flash} {
 		p = reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, nil, "diff", family)
-		if strings.Contains(p, "git -C") != (family == Sol) {
+		if strings.Contains(p, "git -C") != (family == Sol) || strings.Contains(p, sandboxRules) != (family == Sol) {
 			t.Fatal(family)
 		}
 	}
