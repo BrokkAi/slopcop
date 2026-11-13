@@ -103,6 +103,28 @@ Lost the id? `slopcop ignored` lists the findings your workspace ignored in
 this repository, newest first, with each one's id, location, rule, and when and
 by whom it was ignored. It shows 25 at a time; pass `--page 2` for the next.
 
+## Add a word to the dictionary
+
+A misspelled-identifier finding flags one part of an identifier as a typo. When
+that part is a real word in your project, such as a domain term, a product name
+or an abbreviation, add it to your workspace dictionary instead of ignoring the
+finding. The report names the word and the command:
+
+```console
+Word: parsr; add it to the workspace dictionary with `slopcop dictionary add 98a2d745-fa33-467b-8289-2a9f3d05a0c8`
+```
+
+```console
+slopcop dictionary add 98a2d745-fa33-467b-8289-2a9f3d05a0c8
+slopcop dictionary add --word Kubectl
+slopcop dictionary list
+slopcop dictionary remove parsr
+```
+
+A word in the dictionary is accepted in every repository of the workspace, in
+any case, so later checks stop reporting it anywhere. Any member can add a
+word; only owners and managers can remove one.
+
 ## Exclude paths from checks
 
 Some files are wrong on purpose, such as test inputs whose findings are their

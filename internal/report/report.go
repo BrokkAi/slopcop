@@ -347,6 +347,9 @@ func writeBlock(out *strings.Builder, heading string, findings []service.Finding
 		if line := previouslyIgnoredLine(finding); line != "" {
 			fmt.Fprintf(out, "    %s\n", line)
 		}
+		if line := suggestedWordLine(finding); line != "" {
+			fmt.Fprintf(out, "    %s\n", line)
+		}
 		for _, candidate := range finding.RelatedLocations {
 			candidatePath := printable(candidate.Path)
 			if candidate.StartLine >= 1 {
@@ -469,6 +472,20 @@ func previouslyIgnoredLine(finding service.Finding) string {
 		return line
 	}
 	return fmt.Sprintf("%s; `slopcop ignore %s` to keep ignoring it", line, printable(finding.ID))
+}
+
+// suggestedWordLine names a misspelled-identifier finding's word and how to
+// accept it, such as "Word: parsr; add it to the workspace dictionary with
+// `slopcop dictionary add 98a2d745-…`".
+func suggestedWordLine(finding service.Finding) string {
+	if finding.SuggestedWord == "" {
+		return ""
+	}
+	line := "Word: " + printable(finding.SuggestedWord)
+	if finding.ID == "" {
+		return line
+	}
+	return fmt.Sprintf("%s; add it to the workspace dictionary with `slopcop dictionary add %s`", line, printable(finding.ID))
 }
 
 // summaryLine is one line, like the first line of Bifrost's human report:
@@ -1241,7 +1258,7 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 			}
 			result.RelatedLocations = append(result.RelatedLocations, location)
 		}
-		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "") {
+		if result.Properties == nil && (finding.ID != "" || finding.PreviouslyIgnored != "" || finding.SuggestedWord != "") {
 			result.Properties = map[string]any{}
 		}
 		if finding.ID != "" {
@@ -1249,6 +1266,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		}
 		if finding.PreviouslyIgnored != "" {
 			result.Properties["slopcop.previouslyIgnored"] = finding.PreviouslyIgnored
+		}
+		if finding.SuggestedWord != "" {
+			result.Properties["slopcop.suggestedWord"] = finding.SuggestedWord
 		}
 		results = append(results, result)
 	}

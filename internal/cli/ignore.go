@@ -2,7 +2,6 @@ package cli
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -65,28 +64,34 @@ func sendFinding(
 	if !uuidPattern.MatchString(findingID) {
 		return service.IgnoreResponse{}, fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
 	}
-	cfg, err := config.Load()
+	client, err := workspaceClient(cmd, serviceFlag, version, workspace)
 	if err != nil {
 		return service.IgnoreResponse{}, err
+	}
+	response, err := send(client, cmd.Context(), findingID)
+	if err != nil {
+		return service.IgnoreResponse{}, serviceFailure(cmd, err)
+	}
+	return response, nil
+}
+
+// workspaceClient is a client for the service a command names, in the
+// workspace it names, after the notices every service command prints. A
+// service failure prints its message and remedy and exits incomplete.
+func workspaceClient(cmd *cobra.Command, serviceFlag, version, workspace string) (*service.Client, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, err
 	}
 	target := resolveServiceURL(cfg, serviceFlag)
 	client, err := service.New(target, resolveToken(cfg, target), "slopcop/"+version, ignoreTimeout)
 	if err != nil {
-		return service.IgnoreResponse{}, err
+		return nil, err
 	}
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
-		return service.IgnoreResponse{}, serviceFailure(cmd, err)
+		return nil, serviceFailure(cmd, err)
 	}
-	response, err := send(client, cmd.Context(), findingID)
-	if err != nil {
-		var serviceError *service.Error
-		if errors.As(err, &serviceError) {
-			fmt.Fprintln(cmd.ErrOrStderr(), remedyText(serviceError))
-			return service.IgnoreResponse{}, silentExit{service.ExitIncomplete}
-		}
-		return service.IgnoreResponse{}, err
-	}
-	return response, nil
+	return client, nil
 }

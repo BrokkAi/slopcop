@@ -1,6 +1,6 @@
 ---
 title: CLI reference
-description: "Every slopcop command and flag. Check, enable, status, login, logout, service, whoami, workspace, repo, ignore, unignore, ignored, init, hook, and version."
+description: "Every slopcop command and flag. Check, enable, status, login, logout, service, whoami, workspace, repo, ignore, unignore, ignored, dictionary, init, hook, and version."
 sidebar:
   order: 1
 ---
@@ -188,6 +188,21 @@ longer records has no id. Flags: `--page <n>` (from 1), `--format human|json`,
 `--root <path>`, `-w`/`--workspace`. Exits `0`, or `2` with the service's
 message.
 
+## `slopcop dictionary`
+
+Manage your workspace dictionary: the identifier words that checks in the
+workspace accept, so misspelled-identifier findings stop reporting them.
+
+| Subcommand | What it does |
+| --- | --- |
+| `dictionary add <finding-id>` | add a misspelled-identifier finding's suggested word |
+| `dictionary add --word <word>` | add a word: one identifier part of ASCII letters, such as `parsr`, `HTTP` or `Kubectl` |
+| `dictionary list [--format human\|json]` | the words, with when, by whom, and from which finding each was added |
+| `dictionary remove <word>` | remove a word (owners and managers only) |
+
+All take `-w`/`--workspace`. Each exits `0`, or `2` with the service's message.
+See [False positives](/checks/false-positives/#add-a-word-to-the-dictionary).
+
 ## `slopcop init`
 
 Run inside a repository to install local skills and static-only Stop hooks
@@ -242,7 +257,7 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | --- | --- |
 | `SLOPCOP_TOKEN` | a token for this run; wins over the stored credential |
 | `SLOPCOP_SERVICE` | the service URL; `--service` wins over it |
-| `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, and `repo`; `-w` wins over it |
+| `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, `dictionary`, and `repo`; `-w` wins over it |
 | `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
 | `CODEX_THREAD_ID`, `CODEX_HOME` | set by Codex; the same |
