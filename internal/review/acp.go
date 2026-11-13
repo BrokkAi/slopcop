@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -40,42 +41,82 @@ func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotificatio
 	return nil
 }
 
-// RequestPermission allows only file reading, searching, and thinking.
+// declineOptionID is the Codex adapter's refusal that lets the turn go on
+// ("No, continue without running it"). Its other refusal, "cancel", ends the
+// turn, so a reviewer that asks to leave its sandbox would fail its review.
+const declineOptionID = "decline"
+
+// RequestPermission allows only file reading, searching, and thinking. Every
+// other request is refused, preferring a refusal that keeps the turn going.
 func (c *reviewClient) RequestPermission(_ context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	kinds := []acp.PermissionOptionKind{acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways}
 	if p.ToolCall.Kind != nil && (*p.ToolCall.Kind == acp.ToolKindRead || *p.ToolCall.Kind == acp.ToolKindSearch || *p.ToolCall.Kind == acp.ToolKindThink) {
-		kinds = []acp.PermissionOptionKind{acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways}
-	} else {
-		kind := "missing"
-		if p.ToolCall.Kind != nil {
-			kind = string(*p.ToolCall.Kind)
+		if id, ok := permissionOption(p.Options, "", acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways); ok {
+			return selectedPermission(id), nil
 		}
-		title := ""
-		if p.ToolCall.Title != nil {
-			title = *p.ToolCall.Title
-		}
+		err := fmt.Errorf("reviewer offered no allow permission option")
 		c.mu.Lock()
-		c.deniedEdit = fmt.Sprintf("reviewer requested %s permission: %s", kind, title)
-		if c.stderr != nil {
-			fmt.Fprintln(c.stderr, c.deniedEdit)
-		}
+		c.permissionError = err
 		c.mu.Unlock()
+		return acp.RequestPermissionResponse{}, err
 	}
-	for _, kind := range kinds {
-		for _, o := range p.Options {
-			if o.Kind == kind {
-				return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: o.OptionId}}}, nil
+	c.mu.Lock()
+	c.deniedEdit = deniedRequest(p.ToolCall)
+	if c.stderr != nil {
+		fmt.Fprintln(c.stderr, c.deniedEdit)
+	}
+	c.mu.Unlock()
+	if id, ok := permissionOption(p.Options, declineOptionID, acp.PermissionOptionKindRejectOnce, acp.PermissionOptionKindRejectAlways); ok {
+		return selectedPermission(id), nil
+	}
+	return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}}}, nil
+}
+
+// permissionOption returns the option with the preferred id among the given
+// kinds, else the first option of the earliest kind.
+func permissionOption(options []acp.PermissionOption, preferred acp.PermissionOptionId, kinds ...acp.PermissionOptionKind) (acp.PermissionOptionId, bool) {
+	if preferred != "" {
+		for _, o := range options {
+			if o.OptionId == preferred && slices.Contains(kinds, o.Kind) {
+				return o.OptionId, true
 			}
 		}
 	}
-	if len(kinds) > 0 && kinds[0] == acp.PermissionOptionKindRejectOnce {
-		return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Cancelled: &acp.RequestPermissionOutcomeCancelled{}}}, nil
+	for _, kind := range kinds {
+		for _, o := range options {
+			if o.Kind == kind {
+				return o.OptionId, true
+			}
+		}
 	}
-	err := fmt.Errorf("reviewer offered no allow permission option")
-	c.mu.Lock()
-	c.permissionError = err
-	c.mu.Unlock()
-	return acp.RequestPermissionResponse{}, err
+	return "", false
+}
+
+func selectedPermission(id acp.PermissionOptionId) acp.RequestPermissionResponse {
+	return acp.RequestPermissionResponse{Outcome: acp.RequestPermissionOutcome{Selected: &acp.RequestPermissionOutcomeSelected{OptionId: id}}}
+}
+
+// deniedRequest names a refused tool call, with its command when the adapter
+// sent one, so the reviewer's error says what it tried to run.
+func deniedRequest(call acp.ToolCallUpdate) string {
+	kind := "missing"
+	if call.Kind != nil {
+		kind = string(*call.Kind)
+	}
+	title := ""
+	if call.Title != nil {
+		title = *call.Title
+	}
+	out := fmt.Sprintf("reviewer requested %s permission: %s", kind, title)
+	if input, ok := call.RawInput.(map[string]any); ok {
+		if command, ok := input["command"].(string); ok && command != "" && command != title {
+			const limit = 200
+			if len(command) > limit {
+				command = command[:limit] + "..."
+			}
+			out += fmt.Sprintf(" (%q)", command)
+		}
+	}
+	return out
 }
 
 // scrubEnvironment prevents nested session identity and service token leakage to reviewers.

@@ -1663,6 +1663,17 @@ func writeReview(w io.Writer, v *review.Verdict) error {
 	return nil
 }
 
+// failedReviewers counts reviewers without a verdict.
+func failedReviewers(v review.Verdict) int {
+	n := 0
+	for _, r := range v.Reviewers {
+		if r.Status == review.StatusFailed {
+			n++
+		}
+	}
+	return n
+}
+
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
@@ -1679,6 +1690,15 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		if r.Log != "" {
 			fmt.Fprintf(w, "    Log: %s\n", printable(r.Log))
 		}
+		if r.FirstError != "" && r.Status != review.StatusFailed {
+			fmt.Fprintf(w, "    Retried after: %s\n", printable(r.FirstError))
+		}
+		if r.FirstLog != "" {
+			fmt.Fprintf(w, "    First attempt log: %s\n", printable(r.FirstLog))
+		}
+	}
+	if failed := failedReviewers(v); failed > 0 && v.Status != review.StatusFailed {
+		fmt.Fprintf(w, "  %d of %d reviewers failed; the review stands on the reviewers that finished\n", failed, len(v.Reviewers))
 	}
 	if v.Error != "" {
 		fmt.Fprintf(w, "  Error: %s\n", printable(v.Error))

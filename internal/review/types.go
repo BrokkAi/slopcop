@@ -31,6 +31,9 @@ const (
 	DefaultReviewerCount = 2
 	// DefaultTimeout bounds each reviewer, from adapter launch to its reply.
 	DefaultTimeout = 20 * time.Minute
+	// DefaultMinCompleted is how many reviewers must finish for a review
+	// to be clean when review.minCompleted is unset.
+	DefaultMinCompleted = 1
 	// CleanReply is the exact reply that approves the change.
 	CleanReply = "No findings."
 )
@@ -39,13 +42,14 @@ const (
 type Status string
 
 const (
-	// StatusClean: every reviewer replied exactly CleanReply.
+	// StatusClean: at least Settings.MinCompleted reviewers replied exactly
+	// CleanReply, and every other reviewer failed (after its retry).
 	StatusClean Status = "clean"
-	// StatusFindings: at least one reviewer reported findings and none
-	// failed.
+	// StatusFindings: at least one reviewer reported findings. Other
+	// reviewers may have failed.
 	StatusFindings Status = "findings"
-	// StatusFailed: a reviewer failed, timed out, or replied empty.
-	// Partial findings may still be present in Reviewers.
+	// StatusFailed: fewer than Settings.MinCompleted reviewers finished
+	// and none reported findings, or the review could not run.
 	StatusFailed Status = "failed"
 	// StatusEmpty: the base tree and the working-tree snapshot are the same,
 	// so there was nothing to review and no reviewer ran.
@@ -57,6 +61,10 @@ type Settings struct {
 	Reviewers []Family
 	// Timeout bounds each reviewer.
 	Timeout time.Duration
+	// MinCompleted is how many reviewers must finish for a clean review; a
+	// reviewer that still fails after its retry is reported but does not
+	// block one. Zero means DefaultMinCompleted.
+	MinCompleted int
 	// Adapters overrides argv by adapter name. An adapter without an entry
 	// uses its pinned npx package.
 	Adapters map[string][]string
@@ -101,6 +109,10 @@ type Reviewer struct {
 	Error string `json:"error,omitempty"`
 	// Log is the reviewer's inbound ACP stream as JSON lines.
 	Log string `json:"log,omitempty"`
+	// FirstError and FirstLog describe the failed first attempt of a
+	// reviewer that was retried; the fields above describe the retry.
+	FirstError string `json:"firstError,omitempty"`
+	FirstLog   string `json:"firstLog,omitempty"`
 }
 
 // Verdict is the outcome of one review.

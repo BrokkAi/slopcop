@@ -14,6 +14,24 @@ var rubric string
 // shellQuote protects a repository path in the exact diff command sent to agents.
 func shellQuote(path string) string { return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'" }
 
+// sandboxRules keeps a Codex reviewer inside its read-only sandbox. Codex
+// asks before running a command outside it, slopcop refuses, and the refusal
+// ends the reviewer's turn without a verdict.
+const sandboxRules = "Commands run in a read-only sandbox without network access. Run only read-only commands such as git diff, git show, rg and sed. Do not build, run tests, or install anything. Never ask for approval or escalated permissions: every such request is refused and ends your review. If a command fails in the sandbox, read the files instead.\n"
+
+// retryNote tells a retried reviewer why its first attempt ended without a
+// verdict, so it can finish from the diff and file reads.
+func retryNote(firstError string) string {
+	const limit = 500
+	if len(firstError) > limit {
+		firstError = firstError[:limit] + "..."
+	}
+	return "\n## Retry\nYour first attempt at this review ended without a verdict: " + firstError + "\n" +
+		"Every request for approval, escalated permissions, or a command outside the read-only sandbox is refused and ends the attempt. " +
+		"Review from the captured diff above and read files with read tools. Do not build or run tests. " +
+		"Finish with your findings, or exactly `No findings.`\n"
+}
+
 // reviewPrompt pins both trees and labels transcript and repository text as untrusted.
 func reviewPrompt(root string, capture Capture, in intent, previous *Record, diff string, family Family) string {
 	var b strings.Builder
@@ -51,6 +69,7 @@ func reviewPrompt(root string, capture Capture, in intent, previous *Record, dif
 	}
 	if family == Terra || family == Sol {
 		fmt.Fprintf(&b, "Run this exact command yourself to inspect the diff:\ngit -C %s diff --no-ext-diff %s %s\n", shellQuote(root), capture.BaseTree, capture.CheckedTree())
+		b.WriteString(sandboxRules)
 	} else {
 		b.WriteString("Read changed files with file-reading tools; do not run commands.\n")
 	}

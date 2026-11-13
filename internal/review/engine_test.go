@@ -66,8 +66,117 @@ func TestAuthFailureKeepsPartial(t *testing.T) {
 	root, c, store := reviewRepo(t)
 	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra, Flash}, Adapters: map[string][]string{"codex": fakeAdapter("findings", "gpt-6-terra", ""), "dsh": fakeAdapter("auth-required", "deepseek-flash", "")}}}
 	v := Run(context.Background(), store, c, o)
-	if v.Status != StatusFailed || len(v.Reviewers) != 2 || !strings.Contains(v.Reviewers[0].Text, "fake defect") || v.Reviewers[1].Status != StatusFailed {
+	// Findings stand even though the other reviewer failed; a missing login
+	// is not retried.
+	if v.Status != StatusFindings || len(v.Reviewers) != 2 || !strings.Contains(v.Reviewers[0].Text, "fake defect") || v.Reviewers[1].Status != StatusFailed || v.Reviewers[1].FirstError != "" {
 		t.Fatalf("%+v", v)
+	}
+	if err := store.Override("reason", c.Tree); err == nil {
+		t.Fatal("override allowed while a reviewer failed")
+	}
+}
+
+// TestRefusedEscalationIsRetried checks that a Codex reviewer whose turn ends
+// because slopcop refused a command outside its sandbox runs once more in a
+// fresh session, told why, and that its verdict then counts.
+func TestRefusedEscalationIsRetried(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra, Sol}, Adapters: map[string][]string{"codex": fakeAdapter("escalate", "gpt-6.10-terra,gpt-6.1-sol", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusClean || len(v.Reviewers) != 2 {
+		t.Fatalf("%+v", v)
+	}
+	for _, r := range v.Reviewers {
+		if r.Status != StatusClean || !strings.Contains(r.FirstError, "incomplete turn: cancelled") || !strings.Contains(r.FirstError, `"go test ./..."`) || !strings.HasSuffix(r.Log, "-retry.jsonl") || r.FirstLog == "" {
+			t.Fatalf("%+v", r)
+		}
+	}
+	data, _ := os.ReadFile(trace)
+	if strings.Count(string(data), "permission=cancel") != 2 || strings.Count(string(data), "retry-prompt") != 2 {
+		t.Fatalf("trace: %s", data)
+	}
+	// A review with a retried reviewer that finished is complete, so it is
+	// reused.
+	if v = Run(context.Background(), s, c, o); !v.Reused {
+		t.Fatalf("%+v", v)
+	}
+}
+
+// TestDeclineKeepsTheTurnGoing checks that slopcop picks the refusal that
+// lets the reviewer continue when the adapter offers one, so no retry is
+// needed.
+func TestDeclineKeepsTheTurnGoing(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Sol}, Adapters: map[string][]string{"codex": fakeAdapter("escalate-decline", "gpt-6.1-sol", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusClean || v.Reviewers[0].FirstError != "" {
+		t.Fatalf("%+v", v)
+	}
+	data, _ := os.ReadFile(trace)
+	if !strings.Contains(string(data), "permission=decline") || strings.Contains(string(data), "retry-prompt") {
+		t.Fatalf("trace: %s", data)
+	}
+}
+
+// TestMinCompletedReviewers checks the rule for a reviewer that still fails
+// after its retry: the review stands on the reviewers that finished when at
+// least MinCompleted did, and fails otherwise.
+func TestMinCompletedReviewers(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		min       int
+		reviewers []Family
+		want      Status
+	}{
+		{"default one of two", 0, []Family{Terra, Sol}, StatusClean},
+		{"both required", 2, []Family{Terra, Sol}, StatusFailed},
+		{"none finished", 0, []Family{Sol}, StatusFailed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, c, s := reviewRepo(t)
+			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: tc.reviewers, MinCompleted: tc.min, Adapters: map[string][]string{"codex": fakeAdapter("clean", "gpt-6.10-terra", ""), "dsh": fakeAdapter("escalate-always", "deepseek-flash", "")}}}
+			// Sol stands in for a reviewer that keeps failing.
+			for i, f := range o.Settings.Reviewers {
+				if f == Sol {
+					o.Settings.Reviewers[i] = Flash
+				}
+			}
+			v := Run(context.Background(), s, c, o)
+			if v.Status != tc.want {
+				t.Fatalf("%+v", v)
+			}
+			failed := v.Reviewers[len(v.Reviewers)-1]
+			if failed.Status != StatusFailed || !strings.Contains(failed.Error, "retried once") || !strings.Contains(failed.Error, "Run the check again") || failed.FirstLog == "" {
+				t.Fatalf("%+v", failed)
+			}
+			// A review a reviewer did not finish is never reused.
+			if v = Run(context.Background(), s, c, o); v.Reused {
+				t.Fatalf("reused: %+v", v)
+			}
+		})
+	}
+}
+
+func TestReviewStatus(t *testing.T) {
+	clean, findings, failed := Reviewer{Text: CleanReply}, Reviewer{Text: "bug"}, Reviewer{Error: "x"}
+	for _, tc := range []struct {
+		rs   []Reviewer
+		min  int
+		want Status
+	}{
+		{nil, 0, StatusFailed},
+		{[]Reviewer{failed}, 0, StatusFailed},
+		{[]Reviewer{clean, failed}, 0, StatusClean},
+		{[]Reviewer{clean, failed}, 2, StatusFailed},
+		{[]Reviewer{findings, failed}, 2, StatusFindings},
+		{[]Reviewer{clean, findings}, 0, StatusFindings},
+		{[]Reviewer{clean, clean}, 2, StatusClean},
+	} {
+		if got := reviewStatus(tc.rs, tc.min); got != tc.want {
+			t.Errorf("%+v min %d: %s, want %s", tc.rs, tc.min, got, tc.want)
+		}
 	}
 }
 func TestEmptyReviewers(t *testing.T) {

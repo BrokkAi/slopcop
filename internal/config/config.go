@@ -124,9 +124,12 @@ func (c *Config) migrate() {
 
 // Review contains local reviewer settings.
 type Review struct {
-	Reviewers []string           `json:"reviewers,omitempty"`
-	Timeout   string             `json:"timeout,omitempty"`
-	Adapters  map[string]Adapter `json:"adapters,omitempty"`
+	Reviewers []string `json:"reviewers,omitempty"`
+	Timeout   string   `json:"timeout,omitempty"`
+	// MinCompleted is how many reviewers must finish for a clean review;
+	// zero means review.DefaultMinCompleted.
+	MinCompleted int                `json:"minCompleted,omitempty"`
+	Adapters     map[string]Adapter `json:"adapters,omitempty"`
 }
 
 // Gate controls which hosted findings block push approval.

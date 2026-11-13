@@ -6,7 +6,8 @@ sidebar:
 ---
 
 The CLI stores settings in the user config. `slopcop config get|set|unset`
-manages `mode`, `review.reviewers`, and `review.timeout`. Adapter commands are
+manages `mode`, `review.reviewers`, `review.timeout`, and
+`review.minCompleted`. Adapter commands are
 edited in the config file.
 
 ## Precedence
@@ -59,7 +60,11 @@ The review needs no supported origin.
 The config's `mode` is `both`, `static`, or `ai`. `review.reviewers` is an
 ordered list of 1–4 family names; duplicates are allowed. Set it with
 `slopcop config set review.reviewers terra,sol`, or inspect and remove it with
-`get` and `unset`. `review.timeout` defaults to `20m`. Adapter command overrides
+`get` and `unset`. `review.timeout` defaults to `20m`. A reviewer that ends
+without a verdict is retried once in a fresh session; `review.minCompleted`
+(default 1, at most the number of reviewers) is how many must finish for a
+clean review when another still fails. Set it to the number of reviewers to
+require all of them. Adapter command overrides
 are keyed by adapter at `review.adapters.<codex|dsh|claude>.command`. For
 example, keep a DeepSeek key in a file with:
 

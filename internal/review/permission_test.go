@@ -48,6 +48,15 @@ func TestRequestPermission(t *testing.T) {
 	if err != nil || got.Outcome.Selected == nil || got.Outcome.Selected.OptionId != "reject" || !strings.Contains(log.String(), "missing") {
 		t.Fatalf("missing kind: %+v %v %q", got, err, log.String())
 	}
+	// Codex's "decline" refuses the command and lets the turn go on, where
+	// its "cancel" ends the turn.
+	execute := acp.ToolKindExecute
+	title := "Run command"
+	c = &reviewClient{}
+	got, err = c.RequestPermission(context.Background(), acp.RequestPermissionRequest{ToolCall: acp.ToolCallUpdate{Kind: &execute, Title: &title, RawInput: map[string]any{"command": "go test ./..."}}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow_once"}, {Kind: acp.PermissionOptionKindRejectOnce, OptionId: "cancel"}, {Kind: acp.PermissionOptionKindRejectOnce, OptionId: "decline"}}})
+	if err != nil || got.Outcome.Selected == nil || got.Outcome.Selected.OptionId != "decline" || c.deniedEdit != `reviewer requested execute permission: Run command ("go test ./...")` {
+		t.Fatalf("decline: %+v %v %q", got, err, c.deniedEdit)
+	}
 	kind := acp.ToolKindEdit
 	c = &reviewClient{}
 	got, err = c.RequestPermission(context.Background(), acp.RequestPermissionRequest{ToolCall: acp.ToolCallUpdate{Kind: &kind}})

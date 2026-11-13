@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.timeout"
+const configKeys = "mode, review.reviewers, review.timeout, review.minCompleted"
 
 // newConfigCommand builds the user config commands.
 func newConfigCommand() *cobra.Command {
@@ -123,6 +124,11 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return cfg.Review.Timeout, nil
 		}
 		return review.DefaultTimeout.String(), nil
+	case "review.minCompleted":
+		if cfg.Review != nil && cfg.Review.MinCompleted > 0 {
+			return strconv.Itoa(cfg.Review.MinCompleted), nil
+		}
+		return strconv.Itoa(review.DefaultMinCompleted) + " (not set)", nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -159,6 +165,12 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("invalid review.timeout %q (want a positive Go duration)", value)
 		}
 		ensureReview(cfg).Timeout = value
+	case "review.minCompleted":
+		n, err := strconv.Atoi(value)
+		if err != nil || n < 1 || n > review.MaxReviewers {
+			return fmt.Errorf("invalid review.minCompleted %q (want 1-%d)", value, review.MaxReviewers)
+		}
+		ensureReview(cfg).MinCompleted = n
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -184,10 +196,14 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 		if cfg.Review != nil {
 			cfg.Review.Timeout = ""
 		}
+	case "review.minCompleted":
+		if cfg.Review != nil {
+			cfg.Review.MinCompleted = 0
+		}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
-	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && cfg.Review.Timeout == "" && cfg.Review.MinCompleted == 0 && len(cfg.Review.Adapters) == 0 {
 		cfg.Review = nil
 	}
 	return nil

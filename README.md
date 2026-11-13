@@ -475,9 +475,13 @@ through Claude ACP. Each uses the newest model of its family at high effort.
 mode is not static, then saves the first two that work (or one). Configured
 reviewers are left alone; unset `review.reviewers` and run init to pick again.
 `slopcop init --no-reviewers` skips probing. A check runs exactly the configured
-reviewers and fails with exit `2` if one cannot run. Set the ordered list (1–4
+reviewers. One that ends without a verdict runs once more in a fresh session;
+if it still fails, the review stands on the reviewers that finished, provided
+at least `review.minCompleted` (default 1) did, and otherwise fails with exit
+`2`. Findings from any reviewer count. Set the ordered list (1–4
 entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol`.
-Set `review.timeout` (default `20m`) or `mode` with `slopcop config set`;
+Set `review.timeout` (default `20m`), `review.minCompleted` (1 up to the
+number of reviewers) or `mode` with `slopcop config set`;
 adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search

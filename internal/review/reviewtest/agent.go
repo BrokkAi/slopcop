@@ -124,6 +124,35 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		_, _ = a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind, Title: &title}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow"}, {Kind: acp.PermissionOptionKindRejectOnce, OptionId: "reject"}}})
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "Prompt failed"}
 	}
+	if strings.HasPrefix(a.mode, "escalate") {
+		// Codex in read-only mode asks before running a command outside its
+		// sandbox and ends the turn as cancelled when the answer is "cancel".
+		retry := strings.Contains(promptText(p), "## Retry")
+		if retry {
+			a.record("retry-prompt")
+		}
+		if !retry || a.mode == "escalate-always" {
+			kind := acp.ToolKindExecute
+			title := "Run command"
+			options := []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow_once"}, {Kind: acp.PermissionOptionKindAllowAlways, OptionId: "accept_execpolicy_amendment"}}
+			if a.mode == "escalate-decline" {
+				options = append(options, acp.PermissionOption{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "decline"})
+			}
+			options = append(options, acp.PermissionOption{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "cancel"})
+			got, err := a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind, Title: &title, RawInput: map[string]any{"command": "go test ./..."}}, Options: options})
+			if err != nil {
+				return acp.PromptResponse{}, err
+			}
+			chosen := "none"
+			if got.Outcome.Selected != nil {
+				chosen = string(got.Outcome.Selected.OptionId)
+			}
+			a.record("permission=" + chosen)
+			if chosen != "decline" {
+				return acp.PromptResponse{StopReason: acp.StopReasonCancelled}, nil
+			}
+		}
+	}
 	if a.mode == "findings" {
 		text = "- [P1] fake defect"
 	}
@@ -136,6 +165,16 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		}
 	}
 	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
+}
+
+func promptText(p acp.PromptRequest) string {
+	var b strings.Builder
+	for _, block := range p.Prompt {
+		if block.Text != nil {
+			b.WriteString(block.Text.Text)
+		}
+	}
+	return b.String()
 }
 
 // Main runs the fake agent and exits the process when SLOPCOP_FAKE_ACP=1.
