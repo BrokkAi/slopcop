@@ -511,7 +511,8 @@ func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 }
 
 // fileHolds reports whether the settings file at path has h's handler under
-// h's event. With matcher set, a push gate counts only in a group with h's
+// h's event, as a handler of type command, which is the only kind that runs
+// it. With matcher set, a push gate counts only in a group with h's
 // matcher, as install writes it, so that it would run for the shell. An
 // unreadable or malformed file holds none.
 func fileHolds(path string, h harness, matcher bool) bool {
@@ -549,7 +550,8 @@ func fileHolds(path string, h harness, matcher bool) bool {
 				if !ok {
 					continue
 				}
-				if command, _ := handler.get("command"); h.ours(command) {
+				kind, _ := handler.get("type")
+				if command, _ := handler.get("command"); kind == "command" && h.ours(command) {
 					return true
 				}
 			}

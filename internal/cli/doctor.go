@@ -168,7 +168,8 @@ func userSkillAvailable(name string) bool {
 		if !reads {
 			continue
 		}
-		if _, err := os.Stat(filepath.Join(root.dir, skillName, skillFileName)); err == nil {
+		// A file without the skill's frontmatter is not loaded as the skill.
+		if data, err := os.ReadFile(filepath.Join(root.dir, skillName, skillFileName)); err == nil && skillNamed(data, skillName) {
 			return true
 		}
 	}

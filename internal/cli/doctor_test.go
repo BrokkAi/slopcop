@@ -56,6 +56,19 @@ func TestDoctorStates(t *testing.T) {
 		t.Fatalf("no Codex trust note: %+v", ready.Notes)
 	}
 
+	// A skill file without its frontmatter would not load.
+	claudeSkill := filepath.Join(home, ".claude/skills/slopcop", skillFileName)
+	original, _ := os.ReadFile(claudeSkill)
+	if err := os.WriteFile(claudeSkill, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if report := doctorJSON(t, dir); strings.Join(report.Missing, "|") != "Claude Code's slopcop skill" {
+		t.Fatalf("empty skill counted: %+v", report)
+	}
+	if err := os.WriteFile(claudeSkill, original, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
 	// A hook taken out by hand is missing, and doctor only reports it.
 	settings := filepath.Join(home, ".codex/hooks.json")
 	if err := os.WriteFile(settings, []byte("{}\n"), 0o600); err != nil {
@@ -69,9 +82,10 @@ func TestDoctorStates(t *testing.T) {
 		t.Fatalf("doctor changed the settings: %s", data)
 	}
 
-	// A Stop hook under another event, and a gate whose matcher misses the
-	// shell, would not run, so they do not count.
-	misplaced := `{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"slopcop hook codex || true"}]}],` +
+	// A Stop hook of another type or under another event, and a gate whose
+	// matcher misses the shell, would not run, so they do not count.
+	misplaced := `{"hooks":{"Stop":[{"hooks":[{"type":"prompt","command":"slopcop hook codex || true"}]}],` +
+		`"SessionStart":[{"hooks":[{"type":"command","command":"slopcop hook codex || true"}]}],` +
 		`"PreToolUse":[{"matcher":"Read","hooks":[{"type":"command","command":"slopcop gate --hook codex"}]}]}}`
 	if err := os.WriteFile(settings, []byte(misplaced), 0o600); err != nil {
 		t.Fatal(err)
