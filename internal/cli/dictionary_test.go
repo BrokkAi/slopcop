@@ -117,9 +117,10 @@ func TestDictionaryAddPrintsTheServiceRemedy(t *testing.T) {
 func TestDictionaryListPrintsTheWords(t *testing.T) {
 	isolateUserConfig(t)
 	fake := &dictionaryServer{}
-	server := fake.start(t, `{"words": [
-		{"word": "parsr", "addedBy": {"username": "dave", "displayName": "Dave"}, "sourceFindingId": "`+findingID+`", "createdAt": "2026-11-12T08:30:00Z"},
-		{"word": "kubectl\u001b[31m", "addedBy": null, "sourceFindingId": null, "createdAt": "2026-11-13T09:00:00Z"}
+	// The shape GET /v1/dictionary answers with.
+	server := fake.start(t, `{"workspaceId": "`+teamID+`", "limit": 4096, "canRemove": true, "words": [
+		{"word": "kubectl\u001b[31m", "addedBy": null, "sourceFindingId": null, "createdAt": "2026-11-13T09:00:00Z"},
+		{"word": "parsr", "addedBy": "dave", "sourceFindingId": "`+findingID+`", "createdAt": "2026-11-12T08:30:00Z"}
 	]}`)
 
 	code, stdout, stderr := runCLI(t, "dictionary", "list", "--service", server.URL)
@@ -130,8 +131,8 @@ func TestDictionaryListPrintsTheWords(t *testing.T) {
 		t.Errorf("request = %s %s", fake.method, fake.path)
 	}
 	want := "slopcop: 2 words in the workspace dictionary\n" +
-		"  parsr (added 2026-11-12 08:30 UTC by Dave (@dave) from finding " + findingID + ")\n" +
-		"  kubectl\ufffd[31m (added 2026-11-13 09:00 UTC by an unrecorded account)\n" +
+		"  kubectl\ufffd[31m (added 2026-11-13 09:00 UTC by an erased account)\n" +
+		"  parsr (added 2026-11-12 08:30 UTC by @dave from finding " + findingID + ")\n" +
 		"slopcop: remove one with `slopcop dictionary remove <word>`\n"
 	if stdout != want {
 		t.Errorf("stdout = %q\nwant     %q", stdout, want)
@@ -141,14 +142,38 @@ func TestDictionaryListPrintsTheWords(t *testing.T) {
 	var listed struct {
 		Words []map[string]any `json:"words"`
 	}
-	if err := json.Unmarshal([]byte(stdout), &listed); code != 0 || err != nil || len(listed.Words) != 2 || listed.Words[0]["word"] != "parsr" {
+	if err := json.Unmarshal([]byte(stdout), &listed); code != 0 || err != nil || len(listed.Words) != 2 ||
+		listed.Words[1]["word"] != "parsr" || listed.Words[1]["addedBy"] != "dave" {
 		t.Errorf("json exit = %d, err = %v, stdout = %q", code, err, stdout)
+	}
+}
+
+func TestDictionaryListSaysWhoMayRemove(t *testing.T) {
+	isolateUserConfig(t)
+	server := (&dictionaryServer{}).start(t, `{"workspaceId": "`+teamID+`", "limit": 4096, "canRemove": false, "words": [
+		{"word": "parsr", "addedBy": "dave", "sourceFindingId": null, "createdAt": "2026-11-12T08:30:00Z"}
+	]}`)
+
+	code, stdout, _ := runCLI(t, "dictionary", "list", "--service", server.URL)
+	if code != 0 || !strings.HasSuffix(stdout, "slopcop: only the workspace's owners and managers can remove words\n") ||
+		strings.Contains(stdout, "dictionary remove") {
+		t.Errorf("exit = %d, stdout = %q", code, stdout)
+	}
+}
+
+func TestDictionaryAddSaysAWordWasAlreadyThere(t *testing.T) {
+	isolateUserConfig(t)
+	server := (&dictionaryServer{}).start(t, `{"word": "parsr", "status": "present"}`)
+
+	code, stdout, _ := runCLI(t, "dictionary", "add", "--word", "parsr", "--service", server.URL)
+	if code != 0 || stdout != "slopcop: \"parsr\" is already in the workspace dictionary\n" {
+		t.Errorf("exit = %d, stdout = %q", code, stdout)
 	}
 }
 
 func TestDictionaryListSaysWhenEmpty(t *testing.T) {
 	isolateUserConfig(t)
-	server := (&dictionaryServer{}).start(t, `{"words": []}`)
+	server := (&dictionaryServer{}).start(t, `{"workspaceId": "`+teamID+`", "limit": 4096, "canRemove": true, "words": []}`)
 
 	code, stdout, _ := runCLI(t, "dictionary", "list", "--service", server.URL)
 	if code != 0 || stdout != "slopcop: the workspace dictionary is empty\n" {
@@ -159,7 +184,7 @@ func TestDictionaryListSaysWhenEmpty(t *testing.T) {
 func TestDictionaryRemoveDeletesTheWord(t *testing.T) {
 	isolateUserConfig(t)
 	fake := &dictionaryServer{}
-	server := fake.start(t, ``)
+	server := fake.start(t, `{"word": "parsr", "status": "removed"}`)
 
 	code, stdout, stderr := runCLI(t, "dictionary", "remove", "parsr", "--service", server.URL)
 	if code != 0 {

@@ -678,6 +678,38 @@ func TestADictionaryWordDropsEveryFindingOfIt(t *testing.T) {
 	}
 }
 
+func TestADictionaryWordInAnotherWorkspaceKeepsTheOtherFindings(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeFile(t, repo, "other.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go", "other.go")
+	fake := &fakeService{
+		active:   []string{"BrokkAi/slopcop"},
+		findings: []string{"demo.go", "other.go"},
+		words:    []string{"parsr", "parsr"},
+	}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("first output = %+v", output)
+	}
+	t.Chdir(repo)
+	// The word goes into another workspace's dictionary. The finding named
+	// is dropped, but the other one came from a check in the login's own
+	// workspace, whose dictionary does not hold the word.
+	if code, _, stderr := runCLI(t, "dictionary", "add", fakeFindingID(0), "-w", teamID, "--service", server.URL); code != 0 {
+		t.Fatalf("dictionary add exit = %d, stderr = %s", code, stderr)
+	}
+	// A stop after a hold reports what remains instead of holding again.
+	output := runTestHook(t, server.URL, stopPayload(repo, true))
+	if !strings.Contains(output.SystemMessage, "ID: "+fakeFindingID(1)) ||
+		strings.Contains(output.SystemMessage, fakeFindingID(0)) {
+		t.Fatalf("output after the dictionary add elsewhere = %+v", output)
+	}
+}
+
 func TestAnUnignoredFindingIsHandedBack(t *testing.T) {
 	isolateHook(t)
 	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)

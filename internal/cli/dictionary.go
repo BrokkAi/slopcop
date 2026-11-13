@@ -83,10 +83,14 @@ func runDictionaryAdd(cmd *cobra.Command, serviceFlag, version, workspace, findi
 	if err != nil {
 		return serviceFailure(cmd, err)
 	}
-	forgetWord(".", findingID, response.Word)
+	forgetWord(".", resolveWorkspaceName(workspace), findingID, response.Word)
 	added := "the finding's word"
 	if response.Word != "" {
 		added = fmt.Sprintf("%q", report.Printable(response.Word))
+	}
+	if response.Status == service.DictionaryPresent {
+		fmt.Fprintf(cmd.OutOrStdout(), "slopcop: %s is already in the workspace dictionary\n", added)
+		return nil
 	}
 	fmt.Fprintf(
 		cmd.OutOrStdout(),
@@ -140,13 +144,21 @@ func writeDictionary(out io.Writer, listed service.DictionaryList) {
 	for _, word := range listed.Words {
 		fmt.Fprintf(out, "  %s\n", dictionaryLine(word))
 	}
-	fmt.Fprintln(out, "slopcop: remove one with `slopcop dictionary remove <word>`")
+	if listed.CanRemove {
+		fmt.Fprintln(out, "slopcop: remove one with `slopcop dictionary remove <word>`")
+	} else {
+		fmt.Fprintln(out, "slopcop: only the workspace's owners and managers can remove words")
+	}
 }
 
 // dictionaryLine is one word, then when, by whom, and from which finding it
 // was added.
 func dictionaryLine(word service.DictionaryWord) string {
-	line := fmt.Sprintf("%s (added %s by %s", report.Printable(word.Word), ignoredWhen(word.CreatedAt), ignoredBy(word.AddedBy))
+	by := "an erased account"
+	if word.AddedBy != nil && *word.AddedBy != "" {
+		by = "@" + report.Printable(*word.AddedBy)
+	}
+	line := fmt.Sprintf("%s (added %s by %s", report.Printable(word.Word), ignoredWhen(word.CreatedAt), by)
 	if word.SourceFindingID != nil && *word.SourceFindingID != "" {
 		line += " from finding " + report.Printable(*word.SourceFindingID)
 	}

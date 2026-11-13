@@ -31,24 +31,37 @@ type DictionaryAddRequest struct {
 }
 
 // DictionaryAddResponse is the successful POST /v1/dictionary body. Word is
-// the word the dictionary now holds, in lower case.
+// the word the dictionary now holds, in lower case; Status is
+// DictionaryAdded or DictionaryPresent.
 type DictionaryAddResponse struct {
 	Word   string `json:"word"`
 	Status string `json:"status,omitempty"`
 }
 
-// DictionaryList is the GET /v1/dictionary body: the workspace's words.
+// Dictionary add statuses: the word is new, or the workspace had it already.
+const (
+	DictionaryAdded   = "added"
+	DictionaryPresent = "present"
+)
+
+// DictionaryList is the GET /v1/dictionary body: the workspace's words,
+// alphabetical, the most it may hold, and whether this login may remove
+// words.
 type DictionaryList struct {
-	Words []DictionaryWord `json:"words"`
+	WorkspaceID string           `json:"workspaceId"`
+	Limit       int              `json:"limit"`
+	CanRemove   bool             `json:"canRemove"`
+	Words       []DictionaryWord `json:"words"`
 }
 
-// DictionaryWord is one word of a workspace dictionary. SourceFindingID is
-// the finding it was added from, nil when it was added as a word. The
-// service lowercases words, but treat them as hostile text all the same.
+// DictionaryWord is one word of a workspace dictionary. AddedBy is the
+// adder's username, nil once that account is erased. SourceFindingID is the
+// finding it was added from, nil when it was added as a word. The service
+// lowercases words, but treat every field as hostile text all the same.
 type DictionaryWord struct {
-	Word            string     `json:"word"`
-	AddedBy         *IgnoredBy `json:"addedBy"`
-	SourceFindingID *string    `json:"sourceFindingId"`
+	Word            string  `json:"word"`
+	AddedBy         *string `json:"addedBy"`
+	SourceFindingID *string `json:"sourceFindingId"`
 	// CreatedAt is an RFC 3339 time.
 	CreatedAt string `json:"createdAt"`
 }
