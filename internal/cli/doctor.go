@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -176,8 +178,8 @@ func reviewerProbeNote() string {
 // user-level slopcop skill. Claude Code reads its own directory; Codex, Grok
 // and the agents an empty name stands for read ~/.agents/skills, and Codex
 // also its own home. It also returns the skill files the harness reads that
-// lack the skill's frontmatter, which the harness does not load and init,
-// keeping an existing file, does not replace.
+// cannot be read or lack the skill's frontmatter, which the harness does not
+// load and init, keeping an existing file, does not replace.
 func userSkillAvailable(name string) (bool, []string) {
 	roots, err := skillRoots()
 	if err != nil {
@@ -192,10 +194,12 @@ func userSkillAvailable(name string) (bool, []string) {
 		}
 		path := filepath.Join(root.dir, skillName, skillFileName)
 		data, err := os.ReadFile(path)
-		if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
-		if skillNamed(data, skillName) {
+		// Init keeps any existing file, so one it cannot read is as stuck
+		// as one without the frontmatter.
+		if err == nil && skillNamed(data, skillName) {
 			return true, nil
 		}
 		broken = append(broken, path)
