@@ -456,3 +456,106 @@ func writeAtomic(path string, data []byte, mode fs.FileMode) (err error) {
 	}
 	return nil
 }
+
+// Presence says which of SlopCop's user-level hooks one harness has.
+type Presence struct {
+	// Configured says the harness's configuration directory exists, so the
+	// harness is installed here.
+	Configured bool
+	// Stop is the Stop hook.
+	Stop bool
+	// Gate is the push gate.
+	Gate bool
+	// NeedsTrust says the harness runs these hooks only once someone
+	// trusts them, which cannot be read from its files.
+	NeedsTrust bool
+}
+
+// Find reports, for each harness init installs into, which of SlopCop's
+// user-level hooks its settings hold. It only reads files.
+func Find() map[string]Presence {
+	found := map[string]Presence{}
+	for _, h := range userHarnesses() {
+		p := found[h.name]
+		p.Configured, _ = harnessDirExists(h.dir)
+		p.NeedsTrust = p.NeedsTrust || h.needsTrust
+		if fileHolds(filepath.Join(h.dir, h.file), h, true) {
+			if h.gate {
+				p.Gate = true
+			} else {
+				p.Stop = true
+			}
+		}
+		found[h.name] = p
+	}
+	return found
+}
+
+// LegacyRepositoryHooks lists the clone-local settings files under root that
+// still hold a hook written by the releases that installed per repository,
+// leaving out those skip accepts, as the cleanup does for tracked files. A
+// handler counts under its own event with any matcher, which is where the
+// cleanup finds and removes it.
+func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
+	var paths []string
+	for _, h := range repositoryHarnesses(root) {
+		path := filepath.Join(h.dir, h.file)
+		if skip != nil && skip(path) {
+			continue
+		}
+		if fileHolds(path, h, false) {
+			paths = appendUnique(paths, path)
+		}
+	}
+	return paths
+}
+
+// fileHolds reports whether the settings file at path has h's handler under
+// h's event, as a handler of type command, which is the only kind that runs
+// it. With matcher set, a push gate counts only in a group with h's
+// matcher, as install writes it, so that it would run for the shell. An
+// unreadable or malformed file holds none.
+func fileHolds(path string, h harness, matcher bool) bool {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	root, err := decodeSettings(data)
+	if err != nil {
+		return false
+	}
+	hooks, err := childObject(root, "hooks", false)
+	if err != nil || hooks == nil {
+		return false
+	}
+	event := h.event
+	if event == "" {
+		event = "Stop"
+	}
+	for _, key := range hooks.keys {
+		if key != event {
+			continue
+		}
+		groups, _ := hooks.get(key)
+		list, _ := groups.([]any)
+		for _, groupValue := range list {
+			group, ok := groupValue.(*object)
+			if !ok || matcher && h.gate && groupMatcher(group) != h.matcher {
+				continue
+			}
+			handlersValue, _ := group.get("hooks")
+			handlers, _ := handlersValue.([]any)
+			for _, handlerValue := range handlers {
+				handler, ok := handlerValue.(*object)
+				if !ok {
+					continue
+				}
+				kind, _ := handler.get("type")
+				if command, _ := handler.get("command"); kind == "command" && h.ours(command) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}

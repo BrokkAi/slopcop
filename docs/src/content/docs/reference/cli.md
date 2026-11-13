@@ -204,6 +204,15 @@ first time their old hook runs the upgraded binary. See
 | `--no-hooks` | do not install or update the automatic check hook |
 | `--remove-hooks` | remove user-level and legacy repository SlopCop hooks and nothing else |
 
+## `slopcop doctor`
+
+Report whether SlopCop's skill, Stop hook and push gate are installed for each
+agent harness here (Claude Code, Codex, Grok), and the init command that adds
+what is missing. Run in a checkout, it also lists hooks and skills left by the
+earlier per-repository releases. Local only: it sends nothing, probes no
+reviewer and changes nothing. Flags: `--root <path>`, `--format human|json`.
+Exits `0`. See [Checking your setup](/agents/setup-check/).
+
 ## `slopcop hook <claude|codex|grok|kimi>`
 
 Run a check from a Claude Code, Codex, Grok or Kimi Code Stop hook. It reads

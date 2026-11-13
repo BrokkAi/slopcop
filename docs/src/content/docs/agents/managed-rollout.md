@@ -2,7 +2,7 @@
 title: Managed rollout
 description: "For administrators: deploy SlopCop's Stop hook through Claude Code managed settings or Codex's managed requirements instead of having each user run slopcop init."
 sidebar:
-  order: 8
+  order: 9
 ---
 
 `slopcop init` writes [the Stop hook](/agents/stop-hook/) into user-level
