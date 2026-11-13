@@ -10,7 +10,7 @@ import (
 )
 
 // TestInitNoHooksNoSkillKeepUserLevelInstalls checks that the opt-out flags
-// also keep init from removing the user-level hook and skill.
+// leave the machine-wide hook and skill alone.
 func TestInitNoHooksNoSkillKeepUserLevelInstalls(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
@@ -46,10 +46,10 @@ func TestInitNoHooksNoSkillKeepUserLevelInstalls(t *testing.T) {
 	if code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo); code != 0 {
 		t.Fatal(stderr)
 	}
-	if hooked() {
-		t.Fatal("init kept the user-level hook")
+	if !hooked() {
+		t.Fatal("init removed the user-level hook")
 	}
-	if _, err := os.Stat(skill); !os.IsNotExist(err) {
-		t.Fatalf("init kept the user-level skill: %v", err)
+	if _, err := os.Stat(skill); err != nil {
+		t.Fatalf("init removed the user-level skill: %v", err)
 	}
 }

@@ -190,20 +190,19 @@ message.
 
 ## `slopcop init`
 
-Run inside a repository to install local skills and static-only Stop hooks
-and push gates for Claude Code and Codex. Tracked files are
-left alone; paths are added to `.git/info/exclude`. Init removes old
-user-level SlopCop hooks for Claude Code and Codex, and SlopCop skill copies.
-Grok's Stop hook stays at user level, in `hooks/slopcop.json` under
-`GROK_HOME` or `~/.grok`. See
+Run once to install user-level skills and static-only Stop hooks and push gates
+for Claude Code, Codex and Grok. The gate enforces only repositories where
+SlopCop has review state, so it does not block unrelated projects. When run in
+a checkout, init also removes the hooks, skills and exclude entries written by
+the earlier per-repository releases; other checkouts migrate themselves the
+first time their old hook runs the upgraded binary. See
 [The agent skill](/agents/skill/) and [The Stop hook](/agents/stop-hook/).
 
 | Flag | Meaning |
 | --- | --- |
-| `--root PATH` | repository path (default `.`) |
 | `--no-skill` | do not install or update the agent skill |
 | `--no-hooks` | do not install or update the automatic check hook |
-| `--remove-hooks` | remove SlopCop's automatic check hook and nothing else |
+| `--remove-hooks` | remove user-level and legacy repository SlopCop hooks and nothing else |
 
 ## `slopcop hook <claude|codex|grok|kimi>`
 
@@ -232,7 +231,7 @@ accept failed or incomplete reviews or real bugs.
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override. It also
-blocks any shell command that names `refs/slopcop/`.
+blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
 
 ## `slopcop version`
 

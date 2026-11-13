@@ -5,36 +5,33 @@ sidebar:
   order: 7
 ---
 
-`slopcop init` adds a static-only `Stop` hook for Claude Code and Codex inside
-the repository, and for Grok at user level, and leaves everything else in each
-file as it was:
+`slopcop init` adds a static-only `Stop` hook at user level for Claude Code,
+Codex and Grok, and leaves everything else in each file as it was:
 
 | File | Harness |
 | --- | --- |
-| `.claude/settings.local.json` in the repository | Claude Code |
-| `.codex/hooks.json` in the repository | Codex |
+| `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
+| `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
 | `hooks/slopcop.json` under `GROK_HOME`, or `~/.grok` | Grok |
 
-Grok's hook stays at user level, because SlopCop has not verified where Grok
-reads a project's hooks; `slopcop init` installs it there and leaves it in
-place, and `--remove-hooks` removes it. Kimi Code keeps its hooks in
-`config.toml`, which init does not edit; see
+One install covers every checkout. Kimi Code keeps its hooks in `config.toml`,
+which init does not edit; see
 [Grok and Kimi Code](/agents/grok-kimi/) to add the hook there.
 
-Codex reads the repository's `.codex/hooks.json` only once you trust the
-project in Codex, and runs a new or changed hook only once you trust it too:
-open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each time
-it runs, since Codex says nothing of a hook it skips. The hook stays the same
-from one release to the next, so an update does not ask for it again.
+Codex runs a new or changed user-level hook only once you trust it: open Codex
+and review it with `/hooks`. Init never writes that trust itself. The hook
+stays the same from one release to the next, so an update does not ask for it
+again.
 
 The hook is a backstop, not a replacement. The skill keeps telling the agent to
 check as it works; the hook catches a session that stopped without doing so.
 
-The Claude Code and Codex settings also get a PreToolUse push gate. It
+The Claude Code, Codex and Grok settings also get a PreToolUse push gate. It
 blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override.
-Grok runs the Claude Code gate too, in a folder it trusts. The Stop hook
-itself remains hosted static-only; it does not run the local review.
+The gate leaves a repository alone until SlopCop has created review state
+there, so installing it machine-wide does not block unrelated pushes. The Stop
+hook itself remains hosted static-only; it does not run the local review.
 
 ## When it checks
 

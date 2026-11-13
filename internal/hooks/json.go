@@ -8,7 +8,7 @@ import (
 	"reflect"
 )
 
-// reconcileJSON adds or removes SlopCop's Stop handler for h in the text of
+// reconcileJSON adds or removes SlopCop's handler for h in the text of
 // a settings file. Everything else in the file keeps its keys, their order
 // and their values; only the indentation may change.
 func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
@@ -42,7 +42,7 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 	for _, groupValue := range stop {
 		group, ok := groupValue.(*object)
 		if !ok {
-			return nil, false, fmt.Errorf("every hooks.Stop group must be an object")
+			return nil, false, fmt.Errorf("every hooks.%s group must be an object", event)
 		}
 		handlersValue, hasHandlers := group.get("hooks")
 		if !hasHandlers {
@@ -51,7 +51,7 @@ func reconcileJSON(data []byte, install bool, h harness) ([]byte, bool, error) {
 		}
 		handlers, ok := handlersValue.([]any)
 		if !ok {
-			return nil, false, fmt.Errorf("every hooks.Stop group's hooks must be an array")
+			return nil, false, fmt.Errorf("every hooks.%s group's hooks must be an array", event)
 		}
 		kept := make([]any, 0, len(handlers))
 		groupChanged := false

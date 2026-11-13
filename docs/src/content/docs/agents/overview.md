@@ -37,8 +37,8 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 
 ## Set up
 
-For the hosted static check, sign in once with `slopcop login`. Then run
-`slopcop init` inside each repository to install its local skills and hooks.
+For the hosted static check, sign in once with `slopcop login` and run
+`slopcop init` once to install the user-level skills, Stop hooks and push gates.
 
 Once per repository, at a terminal:
 
@@ -51,8 +51,9 @@ that is not enabled exits `4` with `repository_not_enabled`; an automatic check
 can use `--if-enabled` to skip its static half. Local review still runs in
 default `both` mode. `slopcop status` shows where a checkout stands.
 
-`slopcop init` names what it did. A skill that is already there is left alone,
-so running it again is safe. See the [Quickstart](/get-started/quickstart/).
+`slopcop init` names what it did. It is machine-wide and safe to rerun; fresh
+checkouts do not need another install. See the
+[Quickstart](/get-started/quickstart/).
 
 ## How a check works
 
@@ -96,9 +97,8 @@ See [What leaves your machine](/account/privacy/).
 
 ## Per agent
 
-- [Claude Code](/agents/claude-code/): repository skills, `/slopcop`, the Stop
-  hook and push gate in `.claude/settings.local.json`, and the line for
-  `CLAUDE.md`.
+- [Claude Code](/agents/claude-code/): the user-level skill, `/slopcop`, the
+  Stop hook and push gate in `settings.json`, and the line for `CLAUDE.md`.
 - [Codex](/agents/codex/): `.agents/skills/slopcop/`,
   `$slopcop`, trusting the hook with `/hooks`, and the line for `AGENTS.md`.
 - [Pi](/agents/pi/): the skill, and the models the session file records; no
