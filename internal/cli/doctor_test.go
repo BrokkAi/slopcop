@@ -130,6 +130,17 @@ func TestDoctorListsLegacyRepositoryFiles(t *testing.T) {
 	if strings.Join(report.Legacy, "|") != hook+"|"+skill || !strings.Contains(strings.Join(report.Notes, "\n"), "removes the per-repository leftovers") {
 		t.Fatalf("%+v", report)
 	}
+	// A command under another event is beyond the cleanup, so it is not
+	// listed as something init removes.
+	if err := os.WriteFile(hook, []byte(`{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"slopcop hook claude || true"}]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if report := doctorJSON(t, repo); strings.Join(report.Legacy, "|") != skill {
+		t.Fatalf("misplaced legacy hook listed: %+v", report.Legacy)
+	}
+	if err := os.WriteFile(hook, []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook claude || true"}]}]}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	// A tracked settings file is the repository's own; init leaves it, so
 	// doctor does not list it.
 	gitAt(t, repo, "add", "-f", hook)

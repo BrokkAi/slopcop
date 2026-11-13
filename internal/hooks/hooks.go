@@ -494,8 +494,8 @@ func Find() map[string]Presence {
 // LegacyRepositoryHooks lists the clone-local settings files under root that
 // still hold a hook written by the releases that installed per repository,
 // leaving out those skip accepts, as the cleanup does for tracked files. A
-// handler counts under any event or matcher, since the cleanup removes it
-// wherever it is.
+// handler counts under its own event with any matcher, which is where the
+// cleanup finds and removes it.
 func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 	var paths []string
 	for _, h := range repositoryHarnesses(root) {
@@ -510,12 +510,11 @@ func LegacyRepositoryHooks(root string, skip func(string) bool) []string {
 	return paths
 }
 
-// fileHolds reports whether the settings file at path has h's handler. With
-// strict set, the handler counts only where the harness would run it for h:
-// under h's event and, for the push gate, in a group with h's matcher, as
-// install writes it. Otherwise it counts under any event. An unreadable or
-// malformed file holds none.
-func fileHolds(path string, h harness, strict bool) bool {
+// fileHolds reports whether the settings file at path has h's handler under
+// h's event. With matcher set, a push gate counts only in a group with h's
+// matcher, as install writes it, so that it would run for the shell. An
+// unreadable or malformed file holds none.
+func fileHolds(path string, h harness, matcher bool) bool {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return false
@@ -533,14 +532,14 @@ func fileHolds(path string, h harness, strict bool) bool {
 		event = "Stop"
 	}
 	for _, key := range hooks.keys {
-		if strict && key != event {
+		if key != event {
 			continue
 		}
 		groups, _ := hooks.get(key)
 		list, _ := groups.([]any)
 		for _, groupValue := range list {
 			group, ok := groupValue.(*object)
-			if !ok || strict && h.gate && groupMatcher(group) != h.matcher {
+			if !ok || matcher && h.gate && groupMatcher(group) != h.matcher {
 				continue
 			}
 			handlersValue, _ := group.get("hooks")
