@@ -139,6 +139,7 @@ slopcop check --format json
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
 | `repositorySize` | the service's measure of the check's checkout, as it sent it: `files`, `bytes`, `maxFiles`, `maxBytes`, `excludedFiles`, `excludedBytes`, and `nearLimit`; absent from an older service |
 | `sizeBreakdown` | present when `repositorySize.nearLimit` is true: the base tree measured locally, with `base`, `files`, `bytes`, `excludedFiles`, `excludedBytes` (what `.bifrostignore` and `[check] exclude` already leave out), `rankedBy` (`bytes` or `files`), `largest` (at most five paths, each with `path`, `directory`, `files`, `bytes` and the `[check] exclude` `pattern` that leaves it out), the config's current `exclude` list and `hasCheck`, and `configError` when `.slopcop/config.toml` does not parse |
+| `orgRules` | present when the check ran shared rules from the owner's [`.slopcop` repository](/checks/repository-rules/#share-rules-across-an-organization): `repository`, the `commit` they were read at, and each rule file's path in `files` |
 
 Failure, pending, skipped, and AI-only JSON also include `approved` and any
 `omittedFiles`. If the filter omits every changed file, the result is `skipped`

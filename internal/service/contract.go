@@ -140,6 +140,21 @@ type Response struct {
 	// used, counts only. A service or runner from before
 	// BrokkAi/bifrost-service#1192 omits it.
 	RepositorySize *RepositorySize `json:"repositorySize,omitempty"`
+	// OrgRules names the shared rules from the owner's .slopcop repository
+	// that the check ran. Nil when it ran none, or from a service that
+	// predates organization rules.
+	OrgRules *OrgRules `json:"orgRules,omitempty"`
+}
+
+// OrgRules is the set of an owner's shared rules a check ran: where they
+// came from and which files, never their content.
+type OrgRules struct {
+	// Repository is the owner's rules repository, owner/.slopcop.
+	Repository string `json:"repository"`
+	// Commit is the commit of its default branch the rules were read at.
+	Commit string `json:"commit"`
+	// Files is each rule file's path in that repository.
+	Files []string `json:"files"`
 }
 
 // RepositorySize mirrors CheckRepositorySize. It names no paths: a client
