@@ -40,9 +40,10 @@ so.
 When one of the workspace's GitHub, GitLab, or Bitbucket connections needs to
 be reconnected, the page names it with a link to the workspace's settings.
 
-A repository's settings hold what the CLI leaves to the web app: deletion,
-notifications, managed suppressions, custom rules, historical analysis, and
-automatic issue filing.
+A repository's settings hold what the CLI leaves to the web app: pull request
+checks and deleting the repository's records. Custom rules are not a web app
+setting: they are `.rqlp` files in the repository; see
+[Repository rules](/checks/repository-rules/).
 
 ## Checks
 

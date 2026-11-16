@@ -591,7 +591,12 @@ decides a check. `--verbose` prints it.
 The service owns the limits on what a check accepts. When a change is too
 large or touches too many files, the service's `payload_too_large` response is
 printed verbatim, and so is `repository_too_large` when the repository itself is
-over the service's size limit; the CLI does not impose its own limits.
+over the service's size limit; the CLI does not impose its own limits. The
+service names no paths, so when it refuses a repository as too large, or answers
+that its checkout is near the limit (`repositorySize.nearLimit`), the CLI lists
+the base tree's largest paths itself, after what `.bifrostignore` and `[check]
+exclude` already leave out, with a `[check] exclude` snippet to keep the
+generated or data paths among them out of checks.
 
 Every check with a static half also runs the hosted catalog. Rules under
 `.slopcop/policies/**/*.rqlp` are added automatically unless

@@ -3,6 +3,7 @@ module github.com/BrokkAi/slopcop
 go 1.25.0
 
 require (
+	github.com/BurntSushi/toml v1.5.0
 	github.com/coder/acp-go-sdk v0.13.5
 	github.com/spf13/cobra v1.10.2
 	golang.org/x/sys v0.47.0

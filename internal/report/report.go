@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/BrokkAi/slopcop/internal/reposize"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -71,6 +72,10 @@ type Options struct {
 	// installed or replaced, so an agent knows to reread its instructions.
 	// The human format leaves it to the CLI's note on stderr.
 	SkillUpdated []SkillUpdate
+	// SizeBreakdown is what takes up the space in the base tree, measured
+	// locally when the service said the repository is near or over its
+	// checkout size limit.
+	SizeBreakdown *reposize.Breakdown
 }
 
 // OmittedFile is a file left out of both hosted upload and local review.
@@ -215,6 +220,9 @@ func human(response service.Response, options Options) string {
 		out.WriteString("\n")
 	}
 	writeExclusions(&out, response.Exclusions, options.Verbose)
+	if size := response.RepositorySize; size != nil && size.NearLimit {
+		out.WriteString(SizeAdvice(size, options.SizeBreakdown))
+	}
 	out.WriteString(omittedFilesHuman(options))
 	return out.String()
 }
@@ -938,6 +946,12 @@ type jsonReport struct {
 	Exclusions *service.Exclusions `json:"exclusions,omitempty"`
 	// SkillUpdated is set only when this run wrote the skill.
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
+	// RepositorySize is the service's measure of the check's checkout, as
+	// it sent it. A service from before it omits it.
+	RepositorySize *service.RepositorySize `json:"repositorySize,omitempty"`
+	// SizeBreakdown is set only when repositorySize.nearLimit is: the
+	// largest paths of the base tree, measured locally.
+	SizeBreakdown *reposize.Breakdown `json:"sizeBreakdown,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
@@ -966,6 +980,8 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		EmptyChange:          options.EmptyChange,
 		SkillUpdated:         options.SkillUpdated,
 		Exclusions:           response.Exclusions,
+		RepositorySize:       response.RepositorySize,
+		SizeBreakdown:        options.SizeBreakdown,
 	}, "json report")
 }
 
@@ -1113,6 +1129,9 @@ type failureReport struct {
 	InstallURL    string        `json:"installUrl,omitempty"`
 	TopUpURL      string        `json:"topUpUrl,omitempty"`
 	SkillUpdated  []SkillUpdate `json:"skillUpdated,omitempty"`
+	// SizeBreakdown is set only for repository_too_large: the largest
+	// paths of the base tree, measured locally.
+	SizeBreakdown *reposize.Breakdown `json:"sizeBreakdown,omitempty"`
 }
 
 // writeFailureBase renders a check the service refused. The human format prints
@@ -1137,6 +1156,7 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 			InstallURL:    failure.Body.InstallURL,
 			TopUpURL:      failure.Body.TopUpURL,
 			SkillUpdated:  options.SkillUpdated,
+			SizeBreakdown: options.SizeBreakdown,
 		}, "json report")
 	case FormatSARIF:
 		id := failure.Body.Code
@@ -1176,6 +1196,9 @@ func runProperties(properties map[string]any, options Options) map[string]any {
 	}
 	if len(options.SkillUpdated) > 0 {
 		properties["slopcop.skillUpdated"] = options.SkillUpdated
+	}
+	if options.SizeBreakdown != nil {
+		properties["slopcop.sizeBreakdown"] = options.SizeBreakdown
 	}
 	return properties
 }
@@ -1542,6 +1565,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	}
 	if unnamed := inconclusiveUnlisted(response, inconclusive); unnamed > 0 {
 		properties["slopcop.inconclusiveUnlisted"] = unnamed
+	}
+	if size := response.RepositorySize; size != nil {
+		properties["slopcop.repositorySize"] = size
 	}
 	// What .slopcop/config.toml [check] excluded is never silent: the run
 	// carries it, and each rule that matched nothing is a warning.

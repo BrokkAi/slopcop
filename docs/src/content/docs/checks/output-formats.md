@@ -99,6 +99,8 @@ slopcop check --format json
 | `emptyChange` | `true` when the patch was empty |
 | `omittedFiles` | files omitted from both upload and local review by the size filter, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json` or `large-binary`); their contents were not analyzed |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
+| `repositorySize` | the service's measure of the check's checkout, as it sent it: `files`, `bytes`, `maxFiles`, `maxBytes`, `excludedFiles`, `excludedBytes`, and `nearLimit`; absent from an older service |
+| `sizeBreakdown` | present when `repositorySize.nearLimit` is true: the base tree measured locally, with `base`, `files`, `bytes`, `excludedFiles`, `excludedBytes` (what `.bifrostignore` and `[check] exclude` already leave out), `rankedBy` (`bytes` or `files`), `largest` (at most five paths, each with `path`, `directory`, `files`, `bytes` and the `[check] exclude` `pattern` that leaves it out), the config's current `exclude` list and `hasCheck`, and `configError` when `.slopcop/config.toml` does not parse |
 
 Failure, pending, skipped, and AI-only JSON also include `approved` and any
 `omittedFiles`. If the filter omits every changed file, the result is `skipped`
@@ -109,7 +111,7 @@ the filtered scope actually reviewed.
 
 A failed check prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the service
-sent one. A check still running at `--timeout` prints `{"status": "pending",
+sent one, and `sizeBreakdown` for `repository_too_large`. A check still running at `--timeout` prints `{"status": "pending",
 "retryAfter": 5, "message": …, "remedy": …}`. `--if-enabled` with an inactive
 repository prints `{"status": "skipped", "code": "repository_not_enabled",
 "state": …, "repository": …, "message": …}` and exits `0`, because it sent

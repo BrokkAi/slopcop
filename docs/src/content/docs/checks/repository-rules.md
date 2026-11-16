@@ -1,6 +1,6 @@
 ---
 title: Repository rules
-description: "Add your own Bifrost policies under .slopcop/policies and every check evaluates them alongside the hosted catalog. Selecting rules with --policy and skipping discovery."
+description: "Add your own Bifrost policies under .slopcop/policies and every check evaluates them alongside the hosted catalog. Naming rules, replacing a built-in, selecting rules by hand, and testing a rule while you write it."
 sidebar:
   order: 6
 ---
@@ -20,9 +20,10 @@ service evaluates it from the patched checkout.
 ```text
 .slopcop/
   policies/
-    no-raw-sql.rqlp
+    sql/
+      no-raw-query.rqlp          # :id "acme.sql.no-raw-query"
     http/
-      no-network-in-handlers.rqlp
+      no-network-in-handlers.rqlp  # :id "acme.http.no-network-in-handlers"
 ```
 
 ## In pull request checks and agents
@@ -34,16 +35,79 @@ the base with the change applied. A rule a pull request adds or edits applies
 to that pull request. Symbolic links are skipped, and these checks have no
 way to turn discovery off or name other files; use the CLI for that.
 
+## Name a rule
+
+A rule's id is what a finding reports as its `policyId`, what
+[`[[check.exclude_rules]]`](/checks/false-positives/#exclude-paths-from-checks)
+matches, and what decides whether the rule replaces a built-in. We suggest:
+
+- **Id:** `<owner>.<area>.<rule>`, in lowercase words joined by hyphens, where
+  `<owner>` is your organization or team, for example `acme.sql.no-raw-query`.
+  Keep the id once the rule is in use: exclusions that name it stop matching
+  when it changes.
+- **File:** the id after the owner, as a path under `.slopcop/policies`:
+  `acme.sql.no-raw-query` lives in `.slopcop/policies/sql/no-raw-query.rqlp`.
+  One rule per file.
+- **Reserved prefixes:** do not start an id with `bifrost.` or `slopcop.`. The
+  hosted catalog uses them, and a rule with a catalog id replaces that built-in
+  (see below), including one a later catalog adds.
+
+```text
+(policy :schema-version 1
+        :id "acme.sql.no-raw-query"
+        :name "No raw SQL queries"
+        ...)
+```
+
+## Replace a built-in
+
+A rule whose `:id` is a built-in's id runs in place of that built-in. To tune a
+catalog rule for your codebase, copy it into `.slopcop/policies` under its id
+and edit the copy: checks then run your version and not the catalog's.
+
+This holds while the catalog runs by default. A check that also names that
+built-in with `--policy-id` has two policies with one id, and fails with
+`policy_invalid`.
+
 ## Select rules by hand
 
 ```console
-slopcop --policy rules/no-raw-sql.rqlp --policy rules/handlers.rqlp
-slopcop --no-policy-discovery --policy rules/no-raw-sql.rqlp
+slopcop check --policy rules/no-raw-sql.rqlp --policy rules/handlers.rqlp
+slopcop check --no-policy-discovery --policy rules/no-raw-sql.rqlp
 ```
 
 `--policy PATH` names a repository-relative `.rqlp` file to evaluate, and
 repeats. It adds to the discovered rules unless `--no-policy-discovery` drops
-them. The hosted catalog always runs.
+them.
+
+Repository rules always run with the hosted catalog. By default that is the
+whole default catalog; `--policy-id ID`, `--policy-pack PACK` and
+`--policy-category CATEGORY` (each repeatable) run only the built-ins they name
+instead.
+
+## Test a rule while you write it
+
+A check reports a finding only on lines the change wrote, so test a rule on
+code that is part of the change:
+
+1. Write the rule under `.slopcop/policies`.
+2. Add two small files in the language the rule targets: one the rule should
+   flag, and one that only looks similar and should not. Untracked files are
+   part of the change, so there is nothing to commit.
+3. Check with only that rule from the repository, and the static check alone:
+
+   ```console
+   slopcop check --static --no-policy-discovery \
+     --policy .slopcop/policies/sql/no-raw-query.rqlp --format json
+   ```
+
+4. In the JSON, the rule's findings are the `findings` whose `policyId` is your
+   rule's id. The positive file should have one at the line you expect; the
+   look-alike should have none. If the rule appears in `incomplete` as
+   `unreliable` instead, the service could not load it: check the file against
+   the policy format.
+5. Delete the two test files before you commit. Catalog rules run on them too,
+   and the next check would report their findings as new.
 
 ## Writing a rule
 

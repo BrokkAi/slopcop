@@ -21,6 +21,7 @@ import (
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	agenthooks "github.com/BrokkAi/slopcop/internal/hooks"
 	"github.com/BrokkAi/slopcop/internal/report"
+	"github.com/BrokkAi/slopcop/internal/reposize"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -30,10 +31,11 @@ const (
 	failOnFinding   = "finding"
 	// certaintyDefinite and certaintyAll are the --certainty values. The
 	// service answers definite findings only unless asked for all.
-	certaintyDefinite = "definite"
-	certaintyAll      = "all"
-	invalidChange     = "invalid_change"
-	baseNotFound      = "base_not_found"
+	certaintyDefinite  = "definite"
+	certaintyAll       = "all"
+	invalidChange      = "invalid_change"
+	baseNotFound       = "base_not_found"
+	repositoryTooLarge = "repository_too_large"
 	// addRepositoryNeedsWorkspace is the usage error for --add-repository
 	// without --workspace: the approval is for one workspace, so the flag
 	// names it rather than trusting wherever the login points.
@@ -76,6 +78,9 @@ type staticOutcome struct {
 	exit int
 	// status is the static half's own status.
 	status string
+	// sizeBreakdown is the base tree's largest paths, for a repository the
+	// service said is near or over its checkout size limit.
+	sizeBreakdown *reposize.Breakdown
 }
 
 func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version string) error {
@@ -276,6 +281,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		reportOptions.ReviewSkipped = reviewSkippedReason(fallback)
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
+	reportOptions.SizeBreakdown = static.sizeBreakdown
 	if prepared.bytes == 0 && len(prepared.omittedFiles) == 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(prepared.request.BaseCommit))
 		// A base the CLI moved explains an empty patch the user did not
@@ -426,7 +432,13 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	response, err := sendCheck(ctx, client, &request, verbose)
 	var rejected *service.Error
 	if errors.As(err, &rejected) && rejected.Body.Code == baseNotFound {
-		err = &baseRefusal{refusal: rejected, text: baseNotFoundHint(cmd.Context(), prepared.repoRoot, request.BaseCommit)}
+		err = &localRefusal{refusal: rejected, text: baseNotFoundHint(cmd.Context(), prepared.repoRoot, request.BaseCommit)}
+	}
+	if errors.As(err, &rejected) && rejected.Body.Code == repositoryTooLarge {
+		breakdown := measureRepository(cmd, opts.verbose, prepared.repoRoot, request.BaseCommit, nil)
+		outcome := failed(&localRefusal{refusal: rejected, text: strings.TrimRight(report.SizeAdvice(nil, breakdown), "\n")})
+		outcome.sizeBreakdown = breakdown
+		return outcome
 	}
 	if err != nil {
 		var pending *service.Pending
@@ -449,13 +461,40 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		rememberCheck(prepared, response)
 	}
 	exit := response.ExitCode()
+	var breakdown *reposize.Breakdown
+	if size := response.RepositorySize; size != nil && size.NearLimit {
+		breakdown = measureRepository(cmd, opts.verbose, prepared.repoRoot, request.BaseCommit, &reposize.Usage{
+			Files: size.Files, MaxFiles: size.MaxFiles, Bytes: size.Bytes, MaxBytes: size.MaxBytes,
+		})
+	}
 	// The service's status follows failOn, so with --fail-on never, or new
 	// findings below the threshold, it answers clean or incomplete. The
 	// report's status names the result instead; the exit keeps the threshold.
 	if response.KnownStatus() && hasNewFindings(response) {
 		response.Status = service.StatusFindings
 	}
-	return staticOutcome{response: &response, exit: exit, status: response.Status}
+	return staticOutcome{response: &response, exit: exit, status: response.Status, sizeBreakdown: breakdown}
+}
+
+// measureTimeout bounds the local measure of a large repository, which only
+// adds advice to a result the service already gave.
+const measureTimeout = 30 * time.Second
+
+// measureRepository finds the largest paths of base's tree for a repository
+// the service said is near or over its checkout size limit. The service
+// names no paths, so this is the only place they come from. It is advice, so
+// a failure leaves it out, saying why only under --verbose.
+func measureRepository(cmd *cobra.Command, verbose bool, root, base string, usage *reposize.Usage) *reposize.Breakdown {
+	ctx, cancel := context.WithTimeout(cmd.Context(), measureTimeout)
+	defer cancel()
+	breakdown, err := reposize.Compute(ctx, root, base, usage)
+	if err != nil {
+		if verbose {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not measure the repository's largest paths: %v\n", err)
+		}
+		return nil
+	}
+	return breakdown
 }
 
 // hasNewFindings says the change introduced or touched a finding, listed or
@@ -559,17 +598,20 @@ type hinted interface {
 	hint() string
 }
 
-// baseRefusal is base_not_found with what the local clone says about why.
-type baseRefusal struct {
+// localRefusal is a service refusal with what the local clone says about it:
+// for base_not_found, why the service lacks the base; for
+// repository_too_large, the base tree's largest paths and how to leave them
+// out of checks.
+type localRefusal struct {
 	refusal *service.Error
 	text    string
 }
 
-func (r *baseRefusal) Error() string { return r.refusal.Error() }
+func (r *localRefusal) Error() string { return r.refusal.Error() }
 
-func (r *baseRefusal) Unwrap() error { return r.refusal }
+func (r *localRefusal) Unwrap() error { return r.refusal }
 
-func (r *baseRefusal) hint() string { return r.text }
+func (r *localRefusal) hint() string { return r.text }
 
 // baseNotFoundHint explains a base the service does not have when the clone
 // can tell why: origin's default branch moved, as after a rename from main to
