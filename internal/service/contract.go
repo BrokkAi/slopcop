@@ -359,7 +359,18 @@ type Finding struct {
 	Path      string `json:"path"`
 	StartLine *int   `json:"startLine"`
 	EndLine   *int   `json:"endLine"`
-	Title     string `json:"title"`
+	// StartColumn and EndColumn are the analyzer's span: 1-based, StartColumn
+	// on StartLine and EndColumn just past the span on EndLine. A service
+	// from before BrokkAi/bifrost-service#1143 omits them, and so does one
+	// for a finding the analyzer gave no span, or a possible credential.
+	StartColumn *int   `json:"startColumn,omitempty"`
+	EndColumn   *int   `json:"endColumn,omitempty"`
+	Title       string `json:"title"`
+	// Message is what the analyzer observed beyond Title, one line of at
+	// most 500 characters, such as a quality score and its threshold or the
+	// protocol step a typestate rule found broken. Absent when it would say
+	// no more than Title.
+	Message string `json:"message,omitempty"`
 	// New says the change introduced or touched the finding.
 	New bool `json:"new"`
 	// PreviouslyIgnored is the id of an ignored finding this one plausibly

@@ -36,7 +36,9 @@ with the harness, its version, the session id, and each model and effort with
 the files it wrote. The service rejects any other field.
 
 The response carries `status`, `baseCommit`, `applied`, `summary`, `findings`
-(each with an `id` and `new`, and `previouslyIgnored` naming the ignored
+(each with an `id` and `new`, `startColumn` and `endColumn` when the
+analyzer gave a span, `message` when it observed more than the `title` says,
+and `previouslyIgnored` naming the ignored
 finding's id when the finding plausibly is one whose code changed, counted in
 `summary.remappedIgnores`), `incomplete`, `inconclusive`, `inlineSuppressed`
 and `directiveWarnings` when the check met a `slopcop: ignore` comment

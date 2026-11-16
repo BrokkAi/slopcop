@@ -2420,3 +2420,22 @@ func TestPushApprovalWithIncompleteRules(t *testing.T) {
 		})
 	}
 }
+
+// TestHumanQuotesTheSpanFromTheCheckedTree covers
+// BrokkAi/bifrost-service#1143: a finding's span is quoted from the files
+// the check uploaded, so an edit made while the check runs does not move it.
+func TestHumanQuotesTheSpanFromTheCheckedTree(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "lib/feed.ts", "const x = segmnet.length;\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		writeFile(t, repo, "lib/feed.ts", "// edited while the check ran\n")
+		_, _ = w.Write([]byte(`{"status":"findings","summary":{"newFindings":1,"failOn":"finding"},"findings":[{"policyId":"acme.misspelled-identifier","severity":"warning","certainty":"definite","path":"lib/feed.ts","startLine":1,"endLine":1,"startColumn":11,"endColumn":18,"title":"an identifier may be misspelled","message":"Seen once in this repository.","new":true}],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	code, stdout, stderr := runCLI(t, "check", "--mode", "static", "--root", repo, "--service", server.URL)
+	want := "    Message: Seen once in this repository.\n    Location: lib/feed.ts:1:11\n    Code: `segmnet`\n"
+	if code != 1 || !strings.Contains(stdout, want) {
+		t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout, stderr)
+	}
+}

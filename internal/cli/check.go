@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -148,6 +149,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return err
 	}
 	reportOptions.OmittedFiles = prepared.omittedFiles
+	reportOptions.Source = treeSource(prepared.repoRoot, prepared.checkedTree)
 	if notice := omittedFilesNotice(prepared.omittedFiles); notice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
@@ -681,7 +683,10 @@ type preparedCheck struct {
 	snapshot gitx.Snapshot
 	// reviewTree is the same size-filtered scope as the uploaded patch, but
 	// without selected ignored policy files. snapshot.Tree stays unfiltered.
-	reviewTree   string
+	reviewTree string
+	// checkedTree is the tree the uploaded patch makes of the base: the
+	// files the service analyzed.
+	checkedTree  string
 	omittedFiles []report.OmittedFile
 	staticErr    error
 	request      service.Request
@@ -763,7 +768,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree,
+	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, checkedTree: patchTree,
 		omittedFiles: omitted, files: change.Files, bytes: len(change.Patch), base: resolution,
 		request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
 	if opts.mode == modeAI || opts.ai {
@@ -1235,4 +1240,29 @@ func reviewerNames(families []review.Family) string {
 		names[i] = string(f)
 	}
 	return strings.Join(names, ", ")
+}
+
+// maxQuotedFileBytes bounds the file a report reads to quote a finding's
+// span.
+const maxQuotedFileBytes = 4 << 20
+
+// treeSource reads files from the tree a check uploaded, so a report quotes
+// the text the service analyzed rather than a later edit. The path is the
+// service's, so it only ever names an object in that tree.
+func treeSource(root, tree string) report.Source {
+	if tree == "" {
+		return nil
+	}
+	return func(path string) ([]byte, bool) {
+		object := tree + ":" + path
+		size, err := gitx.Run(root, "cat-file", "-s", object)
+		if err != nil {
+			return nil, false
+		}
+		if bytes, err := strconv.Atoi(size); err != nil || bytes > maxQuotedFileBytes {
+			return nil, false
+		}
+		content, err := gitx.RunBytes(root, nil, "cat-file", "blob", object)
+		return content, err == nil
+	}
 }

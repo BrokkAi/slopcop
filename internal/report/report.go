@@ -76,6 +76,9 @@ type Options struct {
 	// locally when the service said the repository is near or over its
 	// checkout size limit.
 	SizeBreakdown *reposize.Breakdown
+	// Source reads the checked tree's files, so the human format can quote
+	// each finding's span. Nil quotes none.
+	Source Source
 }
 
 // OmittedFile is a file left out of both hosted upload and local review.
@@ -184,11 +187,12 @@ func human(response service.Response, options Options) string {
 		}
 	}
 	remapped, rest := splitRemapped(existing)
-	writeBlock(&out, "New findings", blocking)
-	writeBlock(&out, "Notes", notes)
-	writeBlock(&out, "Previously ignored, code changed (never fail the check)", remapped)
+	quote := spanQuoter(options.Source)
+	writeBlock(&out, "New findings", blocking, quote)
+	writeBlock(&out, "Notes", notes, quote)
+	writeBlock(&out, "Previously ignored, code changed (never fail the check)", remapped, quote)
 	if options.ShowExisting {
-		writeBlock(&out, "Already in the code (never fail the check)", rest)
+		writeBlock(&out, "Already in the code (never fail the check)", rest, quote)
 	}
 	// A comment is the easiest way to silence a finding, so every finding one
 	// accepted is shown, not only counted.
@@ -341,29 +345,36 @@ func more(total, listed int) string {
 // caller that shows only some of a check's findings.
 func Findings(findings []service.Finding) string {
 	var out strings.Builder
-	writeBlock(&out, "New findings", findings)
+	writeBlock(&out, "New findings", findings, spanQuoter(nil))
 	return out.String()
 }
 
-func writeBlock(out *strings.Builder, heading string, findings []service.Finding) {
+// writeBlock lists findings under heading. quote gives the text of a
+// finding's span in the checked file, or "".
+func writeBlock(out *strings.Builder, heading string, findings []service.Finding, quote func(service.Finding) string) {
 	if len(findings) == 0 {
 		return
 	}
 	out.WriteString(heading + "\n")
 	for _, finding := range findings {
-		location := printable(finding.Path)
-		if finding.StartLine != nil {
-			location = fmt.Sprintf("%s:%d", location, *finding.StartLine)
-		}
 		fmt.Fprintf(
 			out,
-			"  [%s] %s: %s\n    Location: %s\n    Certainty: %s\n",
+			"  [%s] %s: %s\n",
 			printable(finding.Severity),
 			printable(finding.PolicyID),
 			printable(finding.Title),
-			location,
-			printable(finding.Certainty),
 		)
+		// What the analyzer observed beyond the rule's sentence, and the
+		// text it points at, are what tell one finding of a rule from the
+		// next.
+		if finding.Message != "" {
+			fmt.Fprintf(out, "    Message: %s\n", printable(finding.Message))
+		}
+		fmt.Fprintf(out, "    Location: %s\n", findingLocation(finding))
+		if text := quote(finding); text != "" {
+			fmt.Fprintf(out, "    Code: `%s`\n", printable(text))
+		}
+		fmt.Fprintf(out, "    Certainty: %s\n", printable(finding.Certainty))
 		// The id is what `slopcop ignore` takes; older services send none.
 		if finding.ID != "" {
 			fmt.Fprintf(out, "    ID: %s\n", printable(finding.ID))
@@ -898,8 +909,11 @@ func printable(value string) string {
 type jsonReport struct {
 	OmittedFiles []OmittedFile         `json:"omittedFiles,omitempty"`
 	Checks       []service.CheckNotice `json:"checks,omitempty"`
-	Status       string                `json:"status"`
-	Approved     bool                  `json:"approved"`
+	// CheckID is the check that answered. A service from before it omits
+	// it.
+	CheckID  string `json:"checkId,omitempty"`
+	Status   string `json:"status"`
+	Approved bool   `json:"approved"`
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Review is the local verdict, when one ran.
@@ -958,6 +972,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
 		OmittedFiles:         options.OmittedFiles,
+		CheckID:              response.CheckID,
 		Status:               status(response.Status, options),
 		Checks:               response.Checks,
 		Approved:             options.Approved,
@@ -1278,8 +1293,10 @@ type sarifArtifactLocation struct {
 }
 
 type sarifRegion struct {
-	StartLine int  `json:"startLine"`
-	EndLine   *int `json:"endLine,omitempty"`
+	StartLine   int  `json:"startLine"`
+	StartColumn *int `json:"startColumn,omitempty"`
+	EndLine     *int `json:"endLine,omitempty"`
+	EndColumn   *int `json:"endColumn,omitempty"`
 }
 
 type sarifInvocation struct {
@@ -1331,15 +1348,13 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		physical := sarifPhysicalLocation{
 			ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.Path), URIBaseID: "SRCROOT"},
 		}
-		if start := finding.StartLine; start != nil && *start >= 1 {
-			physical.Region = &sarifRegion{StartLine: *start}
-			if end := finding.EndLine; end != nil && *end >= *start {
-				physical.Region.EndLine = end
-			}
-		}
+		physical.Region = findingRegion(finding)
 		text := finding.Title
 		if text == "" {
 			text = finding.PolicyID
+		}
+		if finding.Message != "" {
+			text += "\n" + finding.Message
 		}
 		result := sarifResult{
 			RuleID:        finding.PolicyID,
@@ -1606,6 +1621,26 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		}},
 		Properties: properties,
 	}), "sarif report")
+}
+
+// findingRegion is a finding's SARIF region: its lines, and its columns
+// when the service sent a span that fits them. SARIF's endColumn, like the
+// service's, is the column just past the region.
+func findingRegion(finding service.Finding) *sarifRegion {
+	start := finding.StartLine
+	if start == nil || *start < 1 {
+		return nil
+	}
+	region := &sarifRegion{StartLine: *start}
+	if end := finding.EndLine; end != nil && *end >= *start {
+		region.EndLine = end
+	}
+	first, last := finding.StartColumn, finding.EndColumn
+	if first != nil && last != nil && *first >= 1 && region.EndLine != nil &&
+		(*region.EndLine > *start || *last > *first) {
+		region.StartColumn, region.EndColumn = first, last
+	}
+	return region
 }
 
 // baselineState is SARIF's word for whether the change touched a finding.
