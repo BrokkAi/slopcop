@@ -38,6 +38,7 @@ has not added, so a check never adds one.
 | `no_access` | 4 | Your account cannot read the repository, or has not authorized SlopCop with the provider. |
 | `base_not_found` | 2 | The service's clone lacks the base commit; pass one origin has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. |
 | `payload_too_large` | 2 | The change is over the service's limit; check a smaller change. |
+| `repository_too_large` | 2 | The repository itself is over the size limit: at most 50,000 files and 512 MiB, the same on every plan. Every file counts, not only source, so large generated or data files committed to the repository can push it over. |
 
 ## Workspace and billing
 

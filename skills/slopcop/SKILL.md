@@ -288,6 +288,7 @@ the usual codes mean:
 | `no_access` | The account needs access to the repository. |
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. Follow that line. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
+| `repository_too_large` | The repository is over the service's size limit (50,000 files or 512 MiB, on every plan), so nothing was checked. Tell the user; retrying will not help. |
 | `finding_not_found` | `slopcop ignore` or `unignore` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
