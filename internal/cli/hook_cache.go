@@ -159,31 +159,6 @@ func omittedScopeDigest(files []report.OmittedFile) string {
 // ignored it, in the repository at dir, so its Stop hook does not hand the
 // finding back.
 func forgetFinding(dir, findingID string) {
-	forgetFindings(dir, func(_ string, finding service.Finding) bool {
-		return strings.EqualFold(finding.ID, findingID)
-	})
-}
-
-// forgetWord drops, as forgetFinding does, the finding findingID names and,
-// from a check in the same workspace, every finding whose suggested word that
-// workspace's dictionary now holds. workspace is the name or id the command
-// was given, empty for the login's own; a check named differently keeps its
-// findings until it runs again. findingID may be empty when a word was added
-// on its own.
-func forgetWord(dir, workspace, findingID, word string) {
-	forgetFindings(dir, func(stateWorkspace string, finding service.Finding) bool {
-		if findingID != "" && strings.EqualFold(finding.ID, findingID) {
-			return true
-		}
-		return word != "" && strings.EqualFold(stateWorkspace, workspace) &&
-			strings.EqualFold(finding.SuggestedWord, word)
-	})
-}
-
-// forgetFindings drops the findings drop picks, given the workspace their
-// check ran in, from the state of the session that runs this command, in the
-// repository at dir.
-func forgetFindings(dir string, drop func(workspace string, finding service.Finding) bool) {
 	sessions := attribution.HookSessions()
 	if len(sessions) == 0 {
 		return
@@ -200,7 +175,7 @@ func forgetFindings(dir string, drop func(workspace string, finding service.Find
 		}
 		kept := make([]service.Finding, 0, len(state.Findings))
 		for _, finding := range state.Findings {
-			if !drop(state.Workspace, finding) {
+			if !strings.EqualFold(finding.ID, findingID) {
 				kept = append(kept, finding)
 			}
 		}
@@ -236,19 +211,57 @@ func forgetCheck(dir string) {
 	}
 }
 
+// forgetEveryCheck drops the last completed check from every session's
+// state, in every repository, so each next Stop hook checks again. A
+// dictionary word holds for a whole workspace, and which cached findings it
+// covers is the service's to say, not this cache's.
+func forgetEveryCheck() {
+	dir := hookStateDir()
+	if dir == "" {
+		return
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		path := filepath.Join(dir, entry.Name())
+		state, loaded := loadHookState(path)
+		if !loaded || state.Fingerprint == "" {
+			continue
+		}
+		state.Fingerprint = ""
+		state.Handed = false
+		saveHookState(path, state)
+	}
+}
+
 // hookStatePath is where the state of one repository in one session is
 // kept, or empty when there is no cache directory to keep it in.
 func hookStatePath(harness, sessionID, repoRoot string) string {
 	if harness == "" || sessionID == "" {
 		return ""
 	}
-	dir, err := os.UserCacheDir()
-	if err != nil {
+	dir := hookStateDir()
+	if dir == "" {
 		return ""
 	}
 	identity := harness + "\x00" + sessionID + "\x00" + repoRoot
 	digest := sha256.Sum256([]byte(identity))
-	return filepath.Join(dir, "slopcop", "checks", hex.EncodeToString(digest[:])+".json")
+	return filepath.Join(dir, hex.EncodeToString(digest[:])+".json")
+}
+
+// hookStateDir holds every session's state, or is empty when there is no
+// cache directory.
+func hookStateDir() string {
+	dir, err := os.UserCacheDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(dir, "slopcop", "checks")
 }
 
 // loadHookState reads the state at path, and says whether there was one.

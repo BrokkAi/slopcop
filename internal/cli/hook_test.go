@@ -31,6 +31,9 @@ type fakeService struct {
 	severities []string
 	// words are the suggested words of the findings, by index.
 	words []string
+	// dictionary holds the words added; a check leaves out their findings,
+	// as the service does.
+	dictionary map[string]bool
 	// dependency, when set, is the dependency evidence every finding carries.
 	dependency *service.Dependency
 	// refusal, when set, is the error body every request is answered with.
@@ -74,6 +77,13 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			response := service.Response{Status: service.StatusClean, BaseCommit: base, Applied: true, Findings: []service.Finding{}, Incomplete: []service.IncompletePolicy{}}
 			line := 1
 			for i, path := range f.findings {
+				word := ""
+				if i < len(f.words) {
+					word = f.words[i]
+				}
+				if word != "" && f.dictionary[word] {
+					continue
+				}
 				severity := "warning"
 				if i < len(f.severities) {
 					severity = f.severities[i]
@@ -82,11 +92,8 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 				response.Findings = append(response.Findings, service.Finding{
 					ID: fakeFindingID(i), PolicyID: "demo.policy", Severity: severity, Certainty: "definite",
 					Path: path, StartLine: &line, Title: "Fix " + path, New: true,
-					Dependency: f.dependency,
+					Dependency: f.dependency, SuggestedWord: word,
 				})
-				if i < len(f.words) {
-					response.Findings[i].SuggestedWord = f.words[i]
-				}
 			}
 			response.Summary.Findings = len(response.Findings)
 			response.Summary.NewFindings = len(response.Findings)
@@ -106,6 +113,10 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 					word = f.words[i]
 				}
 			}
+			if f.dictionary == nil {
+				f.dictionary = map[string]bool{}
+			}
+			f.dictionary[word] = true
 			_ = json.NewEncoder(w).Encode(service.DictionaryAddResponse{Word: word, Status: "added"})
 		default:
 			t.Errorf("path = %s", r.URL.Path)
@@ -668,45 +679,21 @@ func TestADictionaryWordDropsEveryFindingOfIt(t *testing.T) {
 	if output.Decision != "block" || !strings.Contains(output.Reason, "slopcop dictionary add "+fakeFindingID(0)) {
 		t.Fatalf("first output = %+v", output)
 	}
-	t.Chdir(repo)
+	// The dictionary holds for the whole workspace, so a word added from
+	// anywhere, here outside any repository, reaches this session's cache.
+	t.Chdir(t.TempDir())
 	if code, _, stderr := runCLI(t, "dictionary", "add", fakeFindingID(0), "--service", server.URL); code != 0 {
 		t.Fatalf("dictionary add exit = %d, stderr = %s", code, stderr)
 	}
-	// The word covers the other finding too, so neither is handed back.
+	// The tree is unchanged, but the hook checks again: the service knows
+	// which findings the word covers. It covers the other finding too, so
+	// neither is handed back.
+	checks := fake.checks
 	if output := runTestHook(t, server.URL, stopPayload(repo, true)); output != (hookOutput{}) {
 		t.Fatalf("output after the dictionary add = %+v", output)
 	}
-}
-
-func TestADictionaryWordInAnotherWorkspaceKeepsTheOtherFindings(t *testing.T) {
-	isolateHook(t)
-	t.Setenv("CLAUDE_CODE_SESSION_ID", hookSession)
-	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
-	writeFile(t, repo, "demo.go", "package demo\n")
-	writeFile(t, repo, "other.go", "package demo\n")
-	writeSessionEdits(t, repo, "demo.go", "other.go")
-	fake := &fakeService{
-		active:   []string{"BrokkAi/slopcop"},
-		findings: []string{"demo.go", "other.go"},
-		words:    []string{"parsr", "parsr"},
-	}
-	server := fake.start(t, repo)
-
-	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
-		t.Fatalf("first output = %+v", output)
-	}
-	t.Chdir(repo)
-	// The word goes into another workspace's dictionary. The finding named
-	// is dropped, but the other one came from a check in the login's own
-	// workspace, whose dictionary does not hold the word.
-	if code, _, stderr := runCLI(t, "dictionary", "add", fakeFindingID(0), "-w", teamID, "--service", server.URL); code != 0 {
-		t.Fatalf("dictionary add exit = %d, stderr = %s", code, stderr)
-	}
-	// A stop after a hold reports what remains instead of holding again.
-	output := runTestHook(t, server.URL, stopPayload(repo, true))
-	if !strings.Contains(output.SystemMessage, "ID: "+fakeFindingID(1)) ||
-		strings.Contains(output.SystemMessage, fakeFindingID(0)) {
-		t.Fatalf("output after the dictionary add elsewhere = %+v", output)
+	if fake.checks != checks+1 {
+		t.Fatalf("checks = %d, want a fresh check after the dictionary add", fake.checks)
 	}
 }
 

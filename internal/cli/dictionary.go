@@ -83,7 +83,7 @@ func runDictionaryAdd(cmd *cobra.Command, serviceFlag, version, workspace, findi
 	if err != nil {
 		return serviceFailure(cmd, err)
 	}
-	forgetWord(".", resolveWorkspaceName(workspace), findingID, response.Word)
+	forgetEveryCheck()
 	added := "the finding's word"
 	if response.Word != "" {
 		added = fmt.Sprintf("%q", report.Printable(response.Word))
@@ -186,7 +186,7 @@ fine. Only the workspace's owners and managers may remove words.`,
 			if err := client.RemoveDictionaryWord(cmd.Context(), word); err != nil {
 				return serviceFailure(cmd, err)
 			}
-			forgetCheck(".")
+			forgetEveryCheck()
 			fmt.Fprintf(
 				cmd.OutOrStdout(),
 				"slopcop: removed %q from the workspace dictionary; later checks report it as misspelled again\n",
