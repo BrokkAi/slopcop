@@ -19,10 +19,9 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 
 ## The skill
 
-`slopcop init` puts the skill in `.agents/skills/slopcop/` in the
-repository, where Codex reads project skills. It removes SlopCop's copy from
-`~/.agents/skills`: Codex lists a skill in both places twice and then does not
-pick either for `$slopcop`. Codex lists it as
+`slopcop init` puts the skill in `~/.agents/skills/slopcop/` once for every
+project. Codex also discovers the other shared agents that read that directory.
+Codex lists it as
 **SlopCop**. Ask it to check its change, or mention `$slopcop` in a prompt:
 
 ```text
@@ -59,8 +58,9 @@ reviewers run in Codex's read-only sandbox.
 
 ## The push gate
 
-`slopcop init` also adds a `PreToolUse` hook on `Bash` to
-`.codex/hooks.json` that runs `slopcop gate --hook codex`. It blocks
+`slopcop init` also adds a user-level `PreToolUse` hook on `Bash` to
+`$CODEX_HOME/hooks.json` (or `~/.codex/hooks.json`) that runs
+`slopcop gate --hook codex`. It blocks
 `git push` and `gh pr create` until HEAD's tree has a passing check or valid
 override, and names the reason, which Codex hands to the agent. Codex sends
 every shell command to the hook as `Bash` and blocks one when the hook exits
@@ -70,14 +70,13 @@ in a live session. Like the Stop hook, it runs only once you trust it with
 
 ## The Stop hook
 
-`slopcop init` adds a `Stop` hook to Codex's `.codex/hooks.json` in the
-repository, and leaves everything else in the file as it was.
+`slopcop init` adds a user-level `Stop` hook to Codex's `hooks.json`, and
+leaves everything else in the file as it was.
 
-Codex reads the repository's `.codex/hooks.json` only once you trust the
-project in Codex, and runs a new or changed hook only once you trust it too:
-open Codex in the repository and review it with `/hooks`. Init never writes that trust itself, and reminds you each time
-it runs, since Codex says nothing of a hook it skips. The hook stays the same
-from one release to the next, so an update does not ask for it again.
+Codex runs a new or changed user-level hook only once you trust it: open Codex
+and review it with `/hooks`. Init never writes that trust itself. The hook
+stays the same from one release to the next, so an update does not ask for it
+again.
 
 When Codex stops, the hook checks the working tree through the same hosted API,
 but only when the session wrote files in the repository (its subagents

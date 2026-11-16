@@ -26,7 +26,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		}
 	}
 	if len(opts.Settings.Reviewers) == 0 {
-		v.Error = "no reviewers are configured: run `slopcop init` in a repository to pick them from what is available, or set review.reviewers in the user config"
+		v.Error = "no reviewers are configured: run `slopcop init` to pick them from what is available, or set review.reviewers in the user config"
 		save()
 		return v
 	}

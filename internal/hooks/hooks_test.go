@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -61,6 +62,12 @@ func TestInstallIsIdempotentAndRemoveUndoesIt(t *testing.T) {
 	if bytes.Count(data, []byte(`"command": "slopcop hook claude || true"`)) != 1 || !bytes.Contains(data, []byte(`"timeout": 720`)) {
 		t.Fatalf("settings.json =\n%s", data)
 	}
+	if !bytes.Contains(data, []byte(`"command": "slopcop gate --hook claude"`)) {
+		t.Fatalf("settings.json has no push gate:\n%s", data)
+	}
+	if !GateInstalled("") {
+		t.Fatal("GateInstalled = false after user-level install")
+	}
 
 	result, err = Install()
 	if err != nil || len(result.ChangedPaths) != 0 {
@@ -76,6 +83,9 @@ func TestInstallIsIdempotentAndRemoveUndoesIt(t *testing.T) {
 	}
 	if got := string(readConfig(t, path)); got != "{}\n" {
 		t.Fatalf("remove left %q", got)
+	}
+	if GateInstalled("") {
+		t.Fatal("GateInstalled = true after removal")
 	}
 	result, err = Remove()
 	if err != nil || len(result.ChangedPaths) != 0 {
@@ -304,7 +314,8 @@ func TestInstallAddsTheGrokHookInAFileOfItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.NeedsTrust || len(result.Installed) != 2 {
+	if result.NeedsTrust || len(result.Installed) != 2 || len(result.Gates) != 2 ||
+		!slices.Contains(result.Gates, "grok") || !slices.Contains(result.Gates, "claude") {
 		t.Fatalf("result = %+v", result)
 	}
 	path := filepath.Join(grok, "hooks", "slopcop.json")
@@ -312,7 +323,12 @@ func TestInstallAddsTheGrokHookInAFileOfItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{`"Stop"`, `"command": "slopcop hook grok || true"`, `"timeout": 720`} {
+	for _, want := range []string{
+		`"Stop"`, `"command": "slopcop hook grok || true"`,
+		`"PreToolUse"`, `"command": "slopcop gate --hook grok"`,
+		`"matcher": "^(run_terminal_command|Bash|mcp__.+__(create_pull_request|push_files))$"`,
+		`"timeout": 720`,
+	} {
 		if !bytes.Contains(data, []byte(want)) {
 			t.Errorf("slopcop.json lacks %s:\n%s", want, data)
 		}
@@ -325,7 +341,7 @@ func TestInstallAddsTheGrokHookInAFileOfItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	removed, err := os.ReadFile(path)
-	if err != nil || bytes.Contains(removed, []byte("slopcop hook")) {
+	if err != nil || bytes.Contains(removed, []byte("slopcop hook")) || bytes.Contains(removed, []byte("slopcop gate")) {
 		t.Fatalf("slopcop.json after removal: %s, %v", removed, err)
 	}
 	if kept := readConfig(t, mine); !bytes.Contains(kept, []byte(`"command": "mine"`)) {
@@ -494,9 +510,6 @@ func TestRepositoryHooksInstallAndRemove(t *testing.T) {
 		!bytes.Contains(codex, []byte(`"matcher": "Bash"`)) {
 		t.Fatalf("duplicate or missing Codex hook or gate: %s", codex)
 	}
-	if !GateInstalled(repo) {
-		t.Fatal("GateInstalled = false after install")
-	}
 	if _, err := Repository(repo, false, nil); err != nil {
 		t.Fatal(err)
 	}
@@ -504,9 +517,6 @@ func TestRepositoryHooksInstallAndRemove(t *testing.T) {
 		if data := readConfig(t, filepath.Join(repo, path)); bytes.Contains(data, []byte("slopcop")) {
 			t.Fatalf("hook remains in %s: %s", path, data)
 		}
-	}
-	if GateInstalled(repo) {
-		t.Fatal("GateInstalled = true after removal")
 	}
 }
 

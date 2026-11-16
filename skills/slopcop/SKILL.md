@@ -288,6 +288,7 @@ the usual codes mean:
 | `no_access` | The account needs access to the repository. |
 | `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. Follow that line. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
+| `repository_too_large` | The repository is over the service's size limit (50,000 files or 512 MiB, on every plan), so nothing was checked. Tell the user; retrying will not help. |
 | `finding_not_found` | `slopcop ignore`, `unignore` or `dictionary add` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
@@ -493,14 +494,15 @@ nonempty tree removes that ref, including an override. Rerun `slopcop override`
 if the review findings are unchanged.
 The push gate, in Claude Code, Codex, and Grok, blocks `git push`,
 `gh pr create`, and GitHub MCP tools that push files or open a pull request
-until HEAD has exactly that tree. Never write, read, or delete `refs/slopcop/` yourself; the
-gate blocks any command that names it. After checking a dirty tree, commit exactly that state,
+until HEAD has exactly that tree. Never write, read, or delete `refs/slopcop/`
+or `.git/slopcop` yourself; the gate blocks any command that names either.
+After checking a dirty tree, commit exactly that state,
 including untracked files, before pushing. Gate approval does not authorize a push the user did not request. The
 gate checks HEAD in the directory the command runs from and does not follow
 `cd` or `git -C`, so do not use them to get around it.
 
-Run `slopcop init` inside each repository to install local skills, static
-Stop hooks, and the Claude Code gate. A check updates existing skill
+Run `slopcop init` once to install user-level skills, static Stop hooks, and
+push gates for Claude Code, Codex, and Grok. A check updates existing skill
 copies but creates none; login does not install them. Set `mode`,
 `review.reviewers` (1–4 entries, in order; duplicates are allowed), and
 `review.timeout` (default `20m`) with `slopcop config get|set|unset`. Set

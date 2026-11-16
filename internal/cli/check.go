@@ -57,7 +57,7 @@ const (
 	// noReviewersNotice is printed when a check with no mode set runs only
 	// the static half because no reviewers are configured.
 	noReviewersNotice = "slopcop: no reviewers are configured, so only the static check ran. " +
-		"Run `slopcop init` in the repository to add the local review, or `slopcop config set mode static` to stop this notice."
+		"Run `slopcop init` to add the local review, or `slopcop config set mode static` to stop this notice."
 	reviewInterruptedText = "slopcop: local reviewers were stopped before the review finished; run the same check again to retry it."
 	showExistingNotice    = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
@@ -99,6 +99,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	if opts.showExisting {
 		fmt.Fprintln(cmd.ErrOrStderr(), showExistingNotice)
+	}
+	if repo := legacyRepoRoot(opts.root); repo != "" {
+		_ = cleanupInstalledLegacyRepository(repo)
 	}
 	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
 	cfg, err := config.Load()

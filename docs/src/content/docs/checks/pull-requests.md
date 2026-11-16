@@ -76,6 +76,7 @@ contributors without asking.
 | At its limit | Re-run the check later, or raise the workspace's limit. |
 | Need turning on again | The person who turned it on no longer manages the workspace. A manager turns **Check pull requests** on again. |
 | A policy file is invalid | A [repository rule](/checks/repository-rules/) the pull request changes does not compile. Run `slopcop check` locally to see why. |
+| The repository is over the size limit | SlopCop checks repositories of at most 50,000 files and 512 MiB, on every plan. Every file counts, not only source; move large generated or data files out of the repository. |
 
 Binary files are left out of the change: their content is not in GitHub's
 diff, and a binary file holds no finding's line.

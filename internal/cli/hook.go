@@ -132,6 +132,7 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	if err != nil {
 		return hookOutput{}
 	}
+	_ = cleanupInstalledLegacyRepository(repoRoot)
 	cfg, err := config.Load()
 	if err != nil || resolveToken(cfg, resolveServiceURL(cfg, serviceURL)) == "" {
 		return hookOutput{}

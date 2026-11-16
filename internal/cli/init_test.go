@@ -44,46 +44,96 @@ func testInitRepo(t *testing.T) string {
 	return repo
 }
 
-func TestInitRepositoryFilesAndExclude(t *testing.T) {
+func TestInitInstallsOnceAndMigratesLegacyRepository(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
+	makeHarness(t, filepath.Join(home, ".codex"))
+	makeHarness(t, filepath.Join(home, ".grok"))
 	repo := testInitRepo(t)
+	for _, target := range []string{".agents", ".claude"} {
+		files, err := bundledSkillFiles(skillName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := writeSkill(filepath.Join(repo, target, "skills", skillName), files, "v0.0.17"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	makeHarness(t, filepath.Join(repo, ".claude"))
+	if err := os.WriteFile(filepath.Join(repo, ".claude/settings.local.json"), []byte(`{
+  "hooks": {
+    "Stop": [{"hooks": [{"type": "command", "command": "slopcop hook claude || true"}, {"type": "command", "command": "mine"}]}],
+    "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "slopcop gate --hook claude"}]}]
+  }
+}
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	makeHarness(t, filepath.Join(repo, ".codex"))
+	if err := os.WriteFile(filepath.Join(repo, ".codex/hooks.json"), []byte(`{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook codex || true"}]}]}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	exclude := filepath.Join(repo, ".git/info/exclude")
+	if err := os.WriteFile(exclude, []byte("*.log\n# slopcop init\n/.agents/skills/slopcop/\n/.claude/settings.local.json\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
 	for i := 0; i < 2; i++ {
 		code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 		if code != 0 {
 			t.Fatalf("init %d: %s", code, stderr)
 		}
 	}
-	for _, p := range []string{".agents/skills/slopcop/SKILL.md", ".claude/skills/slopcop/SKILL.md", ".claude/settings.local.json", ".codex/hooks.json"} {
-		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
+	for _, p := range []string{
+		".agents/skills/slopcop/SKILL.md",
+		".agents/skills/slopcop-audit/SKILL.md",
+		".claude/skills/slopcop/SKILL.md",
+		".claude/skills/slopcop-audit/SKILL.md",
+		".claude/settings.json",
+		".codex/hooks.json",
+		".grok/hooks/slopcop.json",
+	} {
+		if _, err := os.Stat(filepath.Join(home, p)); err != nil {
 			t.Errorf("%s: %v", p, err)
 		}
 	}
-	data, _ := os.ReadFile(filepath.Join(repo, ".claude/settings.local.json"))
-	if !strings.Contains(string(data), `"command": "slopcop gate --hook claude"`) || strings.Contains(string(data), "slopcop gate --hook claude ||") {
-		t.Fatalf("Claude gate: %s", data)
+	data, _ := os.ReadFile(filepath.Join(home, ".claude/settings.json"))
+	for _, want := range []string{`"command": "slopcop hook claude || true"`, `"command": "slopcop gate --hook claude"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("Claude settings lack %s: %s", want, data)
+		}
+	}
+	data, _ = os.ReadFile(filepath.Join(home, ".codex/hooks.json"))
+	for _, want := range []string{`"command": "slopcop hook codex || true"`, `"command": "slopcop gate --hook codex"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("Codex settings lack %s: %s", want, data)
+		}
+	}
+	data, _ = os.ReadFile(filepath.Join(home, ".grok/hooks/slopcop.json"))
+	for _, want := range []string{`"command": "slopcop hook grok || true"`, `"command": "slopcop gate --hook grok"`} {
+		if !strings.Contains(string(data), want) {
+			t.Fatalf("Grok settings lack %s: %s", want, data)
+		}
+	}
+
+	data, _ = os.ReadFile(filepath.Join(repo, ".claude/settings.local.json"))
+	if strings.Contains(string(data), "slopcop") || !strings.Contains(string(data), `"command": "mine"`) {
+		t.Fatalf("legacy Claude hooks were not removed selectively: %s", data)
 	}
 	data, _ = os.ReadFile(filepath.Join(repo, ".codex/hooks.json"))
-	if !strings.Contains(string(data), `"command": "slopcop gate --hook codex"`) || strings.Contains(string(data), "slopcop gate --hook codex ||") {
-		t.Fatalf("Codex gate: %s", data)
+	if strings.Contains(string(data), "slopcop") {
+		t.Fatalf("legacy Codex hooks remain: %s", data)
 	}
-	path := gitAt(t, repo, "rev-parse", "--git-path", "info/exclude")
-	if !filepath.IsAbs(path) {
-		path = filepath.Join(repo, path)
-	}
-	data, _ = os.ReadFile(path)
-	for _, p := range []string{"/.agents/skills/slopcop/", "/.claude/skills/slopcop/", "/.agents/skills/slopcop-audit/", "/.claude/skills/slopcop-audit/", "/.claude/settings.local.json", "/.codex/hooks.json"} {
-		if strings.Count(string(data), p) != 1 {
-			t.Errorf("exclude %s: %s", p, data)
+	for _, p := range []string{".agents/skills/slopcop", ".claude/skills/slopcop"} {
+		if _, err := os.Stat(filepath.Join(repo, p)); !os.IsNotExist(err) {
+			t.Errorf("legacy repository skill remains at %s: %v", p, err)
 		}
 	}
-	for _, p := range []string{".agents/skills/slopcop-audit/SKILL.md", ".claude/skills/slopcop-audit/scripts/window.py"} {
-		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
-			t.Errorf("audit skill: %v", err)
-		}
+	data, _ = os.ReadFile(exclude)
+	if string(data) != "*.log\n" {
+		t.Fatalf("legacy excludes remain: %q", data)
 	}
 }
-func TestInitTrackedTargetAndSyncExistingOnly(t *testing.T) {
+func TestInitLeavesTrackedLegacyTargetsAlone(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
 	repo := testInitRepo(t)
@@ -93,34 +143,39 @@ func TestInitTrackedTargetAndSyncExistingOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitAt(t, repo, "add", "-f", ".claude/settings.local.json")
-	code, out, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
 	if code != 0 {
 		t.Fatalf("%s", stderr)
-	}
-	if !strings.Contains(out, "tracked target") {
-		t.Fatal(out)
 	}
 	data, _ := os.ReadFile(path)
 	if string(data) != "{}\n" {
 		t.Fatal(string(data))
 	}
 	skill := filepath.Join(repo, ".agents/skills/slopcop/SKILL.md")
+	makeHarness(t, filepath.Dir(skill))
 	if err := os.WriteFile(skill, []byte("---\nname: slopcop\n---\nold"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	updates, err := syncBundledSkill(repo, "test")
-	if err != nil || len(updates) != 1 {
+	if err != nil || len(updates) == 0 {
 		t.Fatalf("updates %v: %v", updates, err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".agents/skills/slopcop")); !os.IsNotExist(err) {
-		t.Fatalf("user skill created: %v", err)
+	if _, err := os.Stat(filepath.Join(home, ".claude/skills/slopcop")); err != nil {
+		t.Fatalf("user skill missing: %v", err)
 	}
 }
 func TestInitOutsideRepository(t *testing.T) {
-	isolateAgentHome(t)
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
 	code, _, stderr := runCLI(t, "init", "--root", t.TempDir())
-	if code == 0 || !strings.Contains(stderr, "requires a Git repository") {
+	if code != 0 {
 		t.Fatalf("%d %s", code, stderr)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude/skills/slopcop/SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".claude/settings.json")); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -247,16 +302,15 @@ func TestSkillNoticeLinksReleaseNotes(t *testing.T) {
 	}
 }
 
-// TestInitLeavesAnExistingSkillAlone preserves a locally edited repo skill.
+// TestInitLeavesAnExistingSkillAlone preserves a locally edited user skill.
 func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
-	isolateAgentHome(t)
-	repo := testInitRepo(t)
-	path := filepath.Join(repo, ".agents/skills/slopcop/SKILL.md")
+	home := isolateAgentHome(t)
+	path := filepath.Join(home, ".agents/skills/slopcop/SKILL.md")
 	makeHarness(t, filepath.Dir(path))
 	if err := os.WriteFile(path, []byte("mine\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir())
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -266,26 +320,26 @@ func TestInitLeavesAnExistingSkillAlone(t *testing.T) {
 	}
 }
 
-// TestInitNoSkillWritesNothing covers both absent and existing repo skills.
+// TestInitNoSkillWritesNothing covers both absent and existing user skills.
 func TestInitNoSkillWritesNothing(t *testing.T) {
-	isolateAgentHome(t)
-	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-skill")
+	home := isolateAgentHome(t)
+	dir := t.TempDir()
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", dir, "--no-skill", "--no-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	path := filepath.Join(repo, ".agents/skills/slopcop/SKILL.md")
+	path := filepath.Join(home, ".agents/skills/slopcop/SKILL.md")
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("--no-skill wrote skill: %v", err)
 	}
-	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo)
+	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", dir, "--no-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
 	if err := os.WriteFile(path, []byte("mine\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", repo, "--no-skill")
+	code, _, stderr = runCLI(t, "init", "--no-reviewers", "--root", dir, "--no-skill", "--no-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
@@ -295,23 +349,22 @@ func TestInitNoSkillWritesNothing(t *testing.T) {
 	}
 }
 
-// TestInitInstallsForEveryHarnessFound checks the two project destinations.
+// TestInitInstallsForEveryHarnessFound checks the user-level destinations.
 func TestInitInstallsForEveryHarnessFound(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
 	makeHarness(t, filepath.Join(home, ".codex"))
-	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir(), "--no-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
 	for _, p := range []string{".agents/skills/slopcop/SKILL.md", ".claude/skills/slopcop/SKILL.md"} {
-		data, err := os.ReadFile(filepath.Join(repo, p))
+		data, err := os.ReadFile(filepath.Join(home, p))
 		if err != nil || string(data) != readEmbeddedSkill(t, "SKILL.md") {
 			t.Errorf("%s: %v", p, err)
 		}
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".codex/skills/slopcop")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".codex/skills/slopcop")); !os.IsNotExist(err) {
 		t.Errorf("unexpected Codex-specific skill: %v", err)
 	}
 }
@@ -319,39 +372,30 @@ func TestInitInstallsForEveryHarnessFound(t *testing.T) {
 // TestInitWithoutAHarnessInstallsTheNeutralSkill covers a fresh agent home.
 func TestInitWithoutAHarnessInstallsTheNeutralSkill(t *testing.T) {
 	home := isolateAgentHome(t)
-	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir(), "--no-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".agents/skills/slopcop/SKILL.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".agents/skills/slopcop/SKILL.md")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(repo, ".claude/skills/slopcop")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".claude/skills/slopcop")); !os.IsNotExist(err) {
 		t.Errorf("unexpected Claude skill: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(home, ".agents/skills/slopcop")); !os.IsNotExist(err) {
-		t.Errorf("unexpected user skill: %v", err)
 	}
 }
 
-// TestInitWithAHarnessSkipsTheNeutralSkill now asserts that the neutral
-// project skill remains present alongside Claude's project skill.
-func TestInitWithAHarnessSkipsTheNeutralSkill(t *testing.T) {
+func TestInitWithOnlyClaudeInstallsSharedAndClaudeSkills(t *testing.T) {
 	home := isolateAgentHome(t)
 	makeHarness(t, filepath.Join(home, ".claude"))
-	repo := testInitRepo(t)
-	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", repo)
+	code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir(), "--no-hooks")
 	if code != 0 {
 		t.Fatal(stderr)
 	}
-	for _, p := range []string{".claude/skills/slopcop/SKILL.md", ".agents/skills/slopcop/SKILL.md"} {
-		if _, err := os.Stat(filepath.Join(repo, p)); err != nil {
-			t.Errorf("%s: %v", p, err)
-		}
+	if _, err := os.Stat(filepath.Join(home, ".claude/skills/slopcop/SKILL.md")); err != nil {
+		t.Errorf("%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".agents/skills/slopcop")); !os.IsNotExist(err) {
-		t.Errorf("unexpected user skill: %v", err)
+	if _, err := os.Stat(filepath.Join(home, ".agents/skills/slopcop")); err != nil {
+		t.Errorf("shared skill missing: %v", err)
 	}
 }
 
@@ -369,9 +413,9 @@ func writeStampedSkill(t *testing.T, dir, version string, contents map[string]st
 // TestCheckNamesTheSkillVersionsAndFilesItChanges exercises the check's sync
 // entry point and its machine-readable update without involving the service.
 func TestCheckNamesTheSkillVersionsAndFilesItChanges(t *testing.T) {
-	isolateAgentHome(t)
+	home := isolateAgentHome(t)
 	repo := testInitRepo(t)
-	dir := filepath.Join(repo, ".agents/skills/slopcop")
+	dir := filepath.Join(home, ".agents/skills/slopcop")
 	writeStampedSkill(t, dir, "v0.0.9", map[string]string{"SKILL.md": "an older skill\n", "notes/stale.md": "stale\n"})
 	var out, errOut bytes.Buffer
 	updates := syncSkillAndReport(&out, &errOut, repo, "test")
@@ -400,9 +444,9 @@ func TestCheckNamesTheSkillVersionsAndFilesItChanges(t *testing.T) {
 
 // TestCheckKeepsACopyOfASkillWithLocalEdits verifies the backup and notice.
 func TestCheckKeepsACopyOfASkillWithLocalEdits(t *testing.T) {
-	isolateAgentHome(t)
+	home := isolateAgentHome(t)
 	repo := testInitRepo(t)
-	dir := filepath.Join(repo, ".claude/skills/slopcop")
+	dir := filepath.Join(home, ".claude/skills/slopcop")
 	writeStampedSkill(t, dir, "v0.0.9", map[string]string{"SKILL.md": "an older skill\n"})
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("my edited skill\n"), 0644); err != nil {
 		t.Fatal(err)

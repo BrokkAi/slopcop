@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/spf13/cobra"
@@ -44,19 +47,25 @@ func pushCommand(command string) bool {
 // as a path under .git, with either path separator.
 var approvalRef = regexp.MustCompile(`refs[/\\]+slopcop\b`)
 
+// reviewStatePath matches the repository-local state directory that arms the
+// push gate. Removing it would turn the gate off without an approval.
+var reviewStatePath = regexp.MustCompile(`\.git[/\\]+slopcop(?:[/\\]|\b)`)
+
 // forgedApproval reports whether a command names SlopCop's approval refs. Only
 // slopcop check and slopcop override write them, and neither is run with the
 // ref on its command line, so an agent's command that names one is most
 // likely writing an approval the check did not give (git update-ref, or a
-// file under .git/refs). Reading them is blocked too: an agent has no need to.
-// Like pushCommand, this guards against an agent's shortcut, not an attacker.
+// file under .git/refs). It also names the state directory that arms the
+// user-level gate so a command cannot simply disable enforcement. Reading
+// either is blocked too: an agent has no need to. Like pushCommand, this
+// guards against an agent's shortcut, not an attacker.
 func forgedApproval(command string) bool {
-	return approvalRef.MatchString(command)
+	return approvalRef.MatchString(command) || reviewStatePath.MatchString(command)
 }
 
 // forgedApprovalText is the reason a command that names the approval refs is
 // blocked.
-const forgedApprovalText = "slopcop: blocked: refs/slopcop/ holds the approvals that slopcop check and slopcop override write, and nothing else may write them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
+const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
 
 // shellTools are the tool names a PreToolUse payload gives a shell command:
 // Bash from Claude Code and Codex, and run_terminal_command from Grok, which
@@ -78,10 +87,21 @@ type gateInput struct {
 }
 
 // gateTree allows a push only when the committed HEAD tree has an approval ref.
-// Hooks pass outside repositories because they can fire for unrelated work.
+// User-level hooks fire in every repository, so a checkout that has never run
+// SlopCop is left alone. The review store is created before a check starts; its
+// presence arms the gate, and after that only an approved HEAD tree may push.
 func gateTree(root string) error {
 	root, err := gitx.Toplevel(root)
 	if err != nil {
+		return nil
+	}
+	gitDir, err := gitx.Run(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil
+	}
+	if _, err := os.Stat(filepath.Join(strings.TrimSpace(gitDir), "slopcop")); errors.Is(err, os.ErrNotExist) {
+		return nil
+	} else if err != nil {
 		return nil
 	}
 	tree, err := gitx.Run(root, "rev-parse", "--verify", "HEAD^{tree}")
@@ -115,13 +135,21 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if hook != "" {
-				if hook != "claude" && hook != "codex" {
+				if hook != "claude" && hook != "codex" && hook != "grok" {
 					return fmt.Errorf("unknown gate hook %q", hook)
+				}
+				// Grok also runs the Claude Code compatibility settings. Its
+				// own hook performs the same gate, so skip the duplicate.
+				if hook == "claude" && os.Getenv("GROK_HOOK_EVENT") != "" {
+					return nil
 				}
 				var input gateInput
 				decoder := json.NewDecoder(io.LimitReader(cmd.InOrStdin(), (4<<20)+1))
 				if err := decoder.Decode(&input); err != nil {
 					return gateBlock(cmd, fmt.Errorf("slopcop: invalid %s hook input: %w", hook, err))
+				}
+				if input.CWD != "" {
+					_ = cleanupInstalledLegacyRepository(legacyRepoRoot(input.CWD))
 				}
 				switch {
 				case shellTools[input.ToolName]:
@@ -140,6 +168,7 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				}
 				root = input.CWD
 			}
+			_ = cleanupInstalledLegacyRepository(legacyRepoRoot(root))
 			return gateBlock(cmd, gateTree(root))
 		},
 	}

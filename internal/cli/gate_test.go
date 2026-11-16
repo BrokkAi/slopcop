@@ -60,8 +60,16 @@ func TestGateReviewedTree(t *testing.T) {
 	}
 	gitAt(t, repo, "add", "a")
 	gitAt(t, repo, "commit", "-m", "a")
-	var out, errOut bytes.Buffer
 	cmd := newGateCommand()
+	cmd.SetArgs([]string{"--root", repo})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("an unarmed repository was blocked: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	cmd = newGateCommand()
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetArgs([]string{"--root", repo})
@@ -97,6 +105,24 @@ func TestGateHookPayload(t *testing.T) {
 	}
 }
 
+func TestClaudeGateDefersToGrok(t *testing.T) {
+	repo := testInitRepo(t)
+	gitAt(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GROK_HOOK_EVENT", "PreToolUse")
+	payload, _ := json.Marshal(map[string]any{
+		"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": "git push"},
+	})
+	cmd := newGateCommand()
+	cmd.SetIn(bytes.NewReader(payload))
+	cmd.SetArgs([]string{"--hook", "claude"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("Claude compatibility gate did not defer to Grok: %v", err)
+	}
+}
+
 // TestGateBlocksForgedApprovals covers commands that would write an approval
 // the check did not give, in a repository where a push itself would pass.
 func TestGateBlocksForgedApprovals(t *testing.T) {
@@ -108,6 +134,7 @@ func TestGateBlocksForgedApprovals(t *testing.T) {
 		{"git update-ref refs/slopcop/reviewed/$(git rev-parse HEAD^{tree}) $(git rev-parse HEAD^{tree})", true},
 		{"echo abc > .git/refs/slopcop/reviewed/abc", true},
 		{`git update-ref refs\slopcop\reviewed\abc abc`, true},
+		{"rm -rf .git/slopcop", true},
 		{"git for-each-ref refs/slopcop", true},
 		{"slopcop check --format json", false},
 		{`slopcop override --reason "the finding is wrong"`, false},
@@ -137,6 +164,9 @@ func TestGateBlocksForgedApprovals(t *testing.T) {
 func TestGateHookToolNames(t *testing.T) {
 	repo := testInitRepo(t)
 	gitAt(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	for _, tc := range []struct {
 		hook, tool, command string
 		blocked             bool

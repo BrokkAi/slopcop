@@ -28,7 +28,7 @@ another deployment and leaves the other logins, and the default service, as
 they are; pass --default to also make it the default for every command,
 which asks at a terminal like service use does.
 
-Run slopcop init in a repository to install the agent skill and hooks.`,
+Run slopcop init once to install the agent skills and user-level hooks.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			cfg, err := config.Load()

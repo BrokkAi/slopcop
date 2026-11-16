@@ -19,9 +19,10 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 
 ## The skill
 
-`slopcop init` puts the skill in `.claude/skills/slopcop/` in the current
-repository, so it is available for that project. Claude uses it when you ask it
-to check its change, and you can run it yourself with `/slopcop`.
+`slopcop init` puts the skill in `~/.claude/skills/slopcop/` (or
+`$CLAUDE_CONFIG_DIR/skills/slopcop/`) once for every project. Claude uses it
+when you ask it to check its change, and you can run it yourself with
+`/slopcop`.
 
 ```console
 slopcop init
@@ -58,8 +59,8 @@ The default check includes local review and can take minutes. Run Bash with
 `run_in_background: true`, then poll TaskOutput until it finishes. The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
-reviewers run in Codex's read-only sandbox. The push gate init installs in
-`.claude/settings.local.json` blocks `git push`, `gh pr create`, and the
+reviewers run in Codex's read-only sandbox. The user-level push gate init
+installs in `settings.json` blocks `git push`, `gh pr create`, and the
 GitHub MCP tools that push files or open a pull request (`create_pull_request`
 and `push_files`, under any server name) until HEAD's tree has a passing
 check or valid override. After
@@ -70,18 +71,18 @@ checks HEAD in the directory Claude Code runs the command from: it does not
 follow `cd` or `git -C` in the command, read the pushed refspecs, or expand
 shell aliases. It matches commands by text, so it can also block a command
 that only mentions `git push`. Pushes from your own terminal are not affected.
-It also blocks any command that names `refs/slopcop/`, where approvals are
-kept, so the agent cannot write an approval the check did not give with
-`git update-ref` or a file under `.git`.
-`slopcop init` lists its files in the repository's `.git/info/exclude`, which
-linked worktrees of the same repository share.
+It also blocks any command that names `refs/slopcop/` or `.git/slopcop`, where
+approvals and gate state are kept, so the agent cannot forge an approval or
+turn the gate off.
+The gate activates after a check creates SlopCop state in a repository, so a
+machine-wide install does not block unrelated projects.
 
 ## The Stop hook
 
-`slopcop init` also adds a `Stop` hook to Claude Code's
-`.claude/settings.local.json` in the repository, and leaves everything else in
-the file as it was. When Claude stops, the hook checks the working tree through
-the same hosted API, but only when the session wrote files in the repository (or
+`slopcop init` also adds a user-level `Stop` hook to Claude Code's
+`settings.json`, and leaves everything else in the file as it was. When Claude
+stops, the hook checks the working tree through the same hosted API, but only
+when the session wrote files in the repository (or
 a dependency manifest or lockfile changed), slopcop is signed in with the
 repository active, and the tree differs from the last check in the session.
 
