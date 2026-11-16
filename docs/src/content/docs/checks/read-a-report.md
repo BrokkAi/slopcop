@@ -157,9 +157,42 @@ result covers.
   omitted every changed file, the result is `skipped` with no analysis or push
   approval. Otherwise the working tree matches the base; rerun with `--base`
   if you meant to check committed work.
+- **`repositorySize`**: how much of the checkout bounds (50,000 files and
+  512 MiB) the check used. See [Repository size](#repository-size).
 - **`skillUpdated`**: present only when this run installed or replaced the
   [agent skill](/agents/skill/). An agent's loaded copy of the instructions is
   then out of date.
+
+## Repository size
+
+The service checks out the base commit with the change applied, and refuses a
+repository whose checkout is over 50,000 files or 512 MiB with
+`repository_too_large`. Every file counts, not only source, except paths
+`.bifrostignore` or a [`[check] exclude`](/checks/false-positives/#exclude-paths-from-checks)
+keep out of checks. `repositorySize` says how much a check used, and
+`nearLimit` that it used at least 80% of either bound.
+
+The service names no paths. When the repository is near the limit, or refused
+as over it, the CLI measures the base commit's tree locally, leaves out what the
+repository already excludes, and lists the five largest top-level paths (or the
+one subdirectory that holds most of one), by size or by file count, whichever
+bound is closer:
+
+```text
+Repository near the size limit: the check's checkout held 21,400 of 50,000 files and 452.3 MiB of 512.0 MiB.
+Base tree 5c1e9a7d20b4: 21,380 file(s), 301.7 MiB. Largest paths by size:
+  data/recordings/  240.2 MiB  9,812 file(s)
+  web/               34.0 MiB  6,120 file(s)
+  server/            19.8 MiB  4,402 file(s)
+Keep the generated, vendored or data paths among them out of every check in .slopcop/config.toml, for example:
+  [check]
+  exclude = ["data/recordings/**"]
+Or talk to us about an enterprise agreement for higher limits.
+```
+
+The service also counts the history it fetches into `.git`, so its totals are
+higher than the local tree's. Exclude only generated, vendored, recorded or data paths; an
+excluded path is never checked. In `json` the list is `sizeBreakdown`.
 
 ## The human summary line
 

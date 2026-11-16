@@ -136,6 +136,29 @@ type Response struct {
 	// .slopcop/config.toml excluded. Nil when the tree has none, or from a
 	// service from before BrokkAi/bifrost-service#1103.
 	Exclusions *Exclusions `json:"exclusions,omitempty"`
+	// RepositorySize is how much of the checkout bounds the check's checkout
+	// used, counts only. A service or runner from before
+	// BrokkAi/bifrost-service#1192 omits it.
+	RepositorySize *RepositorySize `json:"repositorySize,omitempty"`
+}
+
+// RepositorySize mirrors CheckRepositorySize. It names no paths: a client
+// told the repository is near the limit finds what is large in its own
+// checkout.
+type RepositorySize struct {
+	// Files and Bytes are what the checkout held, its fetched history
+	// included, which is what the bounds count.
+	Files int64 `json:"files"`
+	Bytes int64 `json:"bytes"`
+	// MaxFiles and MaxBytes are the bounds.
+	MaxFiles int64 `json:"maxFiles"`
+	MaxBytes int64 `json:"maxBytes"`
+	// ExcludedFiles and ExcludedBytes count the files of the checked tree
+	// that .bifrostignore and [check] exclude left out, and their size.
+	ExcludedFiles int64 `json:"excludedFiles"`
+	ExcludedBytes int64 `json:"excludedBytes"`
+	// NearLimit says the checkout used at least 80% of either bound.
+	NearLimit bool `json:"nearLimit"`
 }
 
 // Exclusions mirrors CheckExclusions. Paths, rules and reasons come from the
