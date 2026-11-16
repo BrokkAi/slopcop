@@ -179,27 +179,57 @@ func TestReviewStatus(t *testing.T) {
 	}
 }
 
+// runTimingOut reviews with a fake adapter in mode, which hangs once it
+// records marker, under a reviewer timeout short enough to end the hang. The
+// timeout also covers launching the adapter, which a loaded runner (Windows
+// especially) can spend in full before marker, so the review runs again with
+// a longer timeout until the fake records marker before the deadline.
+func runTimingOut(t *testing.T, mode, marker string) (Verdict, string) {
+	t.Helper()
+	var data []byte
+	for _, timeout := range []time.Duration{300 * time.Millisecond, time.Second, 3 * time.Second, 10 * time.Second} {
+		root, c, s := reviewRepo(t)
+		trace := filepath.Join(t.TempDir(), "trace")
+		o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: timeout, Adapters: map[string][]string{"codex": fakeAdapter(mode, "gpt-6.10-terra", trace)}}}
+		v := Run(context.Background(), s, c, o)
+		data, _ = os.ReadFile(trace)
+		if strings.Contains(string(data), marker+"\n") {
+			return v, string(data)
+		}
+	}
+	t.Fatalf("the fake adapter never recorded %s before the timeout: %s", marker, data)
+	return Verdict{}, ""
+}
+
 // TestReviewerSessionsAreDeleted checks that slopcop deletes each reviewer's
 // session from the adapter's history when the reviewer is done, whether it
 // finished, failed, or timed out, and only when the adapter supports it.
 func TestReviewerSessionsAreDeleted(t *testing.T) {
 	for _, tc := range []struct {
 		mode    string
-		timeout time.Duration
 		deletes int
 	}{
-		{"clean", 0, 1},
-		{"escalate-always", 0, 2},
-		{"hang", 300 * time.Millisecond, 1},
-		{"no-delete", 0, 0},
+		{"clean", 1},
+		{"escalate-always", 2},
+		{"hang", 1},
+		{"no-delete", 0},
 	} {
 		t.Run(tc.mode, func(t *testing.T) {
-			root, c, s := reviewRepo(t)
-			trace := filepath.Join(t.TempDir(), "trace")
-			o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: tc.timeout, Adapters: map[string][]string{"codex": fakeAdapter(tc.mode, "gpt-6.10-terra", trace)}}}
-			v := Run(context.Background(), s, c, o)
-			data, _ := os.ReadFile(trace)
-			if got := strings.Count(string(data), "delete=fake"); got != tc.deletes {
+			var v Verdict
+			var data string
+			if tc.mode == "hang" {
+				// The session exists once the prompt arrives; the timeout
+				// then ends the hung prompt.
+				v, data = runTimingOut(t, tc.mode, "prompt")
+			} else {
+				root, c, s := reviewRepo(t)
+				trace := filepath.Join(t.TempDir(), "trace")
+				o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter(tc.mode, "gpt-6.10-terra", trace)}}}
+				v = Run(context.Background(), s, c, o)
+				raw, _ := os.ReadFile(trace)
+				data = string(raw)
+			}
+			if got := strings.Count(data, "delete=fake"); got != tc.deletes {
 				log, _ := os.ReadFile(filepath.Join(v.LogDir, "1-terra.stderr.log"))
 				t.Fatalf("deletes %d, want %d: %s\n%s", got, tc.deletes, data, log)
 			}
@@ -211,12 +241,8 @@ func TestReviewerSessionsAreDeleted(t *testing.T) {
 // times out fails without a second attempt, which would wait out another
 // full timeout.
 func TestStartupTimeoutIsNotRetried(t *testing.T) {
-	root, c, s := reviewRepo(t)
-	trace := filepath.Join(t.TempDir(), "trace")
-	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: 300 * time.Millisecond, Adapters: map[string][]string{"codex": fakeAdapter("hang-session", "gpt-6.10-terra", trace)}}}
-	v := Run(context.Background(), s, c, o)
-	data, _ := os.ReadFile(trace)
-	if v.Status != StatusFailed || v.Reviewers[0].FirstError != "" || !strings.Contains(v.Reviewers[0].Error, "deadline exceeded") || strings.Count(string(data), "new-session") != 1 {
+	v, data := runTimingOut(t, "hang-session", "new-session")
+	if v.Status != StatusFailed || v.Reviewers[0].FirstError != "" || !strings.Contains(v.Reviewers[0].Error, "deadline exceeded") || strings.Count(data, "new-session") != 1 {
 		t.Fatalf("%+v\n%s", v, data)
 	}
 }
