@@ -8,7 +8,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/service"
@@ -66,19 +65,9 @@ func runIgnored(cmd *cobra.Command, opts *ignoredOptions, serviceFlag, version s
 	if err != nil {
 		return err
 	}
-	cfg, err := config.Load()
+	client, err := workspaceClient(cmd, serviceFlag, version, opts.workspace)
 	if err != nil {
 		return err
-	}
-	target := resolveServiceURL(cfg, serviceFlag)
-	client, err := service.New(target, resolveToken(cfg, target), "slopcop/"+version, ignoreTimeout)
-	if err != nil {
-		return err
-	}
-	noticeService(cmd.ErrOrStderr(), client.BaseURL)
-	noticeUpdates(client, cmd.ErrOrStderr(), version)
-	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
-		return serviceFailure(cmd, err)
 	}
 	listed, err := client.Ignores(cmd.Context(), repoURL, opts.page-1)
 	if err != nil {

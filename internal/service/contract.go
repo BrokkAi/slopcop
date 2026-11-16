@@ -345,6 +345,11 @@ type Finding struct {
 	// ignore` with ID does. A service from before
 	// BrokkAi/bifrost-service#953 omits it.
 	PreviouslyIgnored string `json:"previouslyIgnored,omitempty"`
+	// SuggestedWord is, for a misspelled-identifier finding, the flagged
+	// identifier part, which `slopcop dictionary add` with ID adds to the
+	// workspace dictionary. A service from before
+	// BrokkAi/bifrost-service#962 omits it.
+	SuggestedWord string `json:"suggestedWord,omitempty"`
 	// Dependency is set on a dependency advisory finding: the package, the
 	// advisory and the fix. A service from before BrokkAi/bifrost-service#884
 	// omits it, and the client drops one it cannot validate.
