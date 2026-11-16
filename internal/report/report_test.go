@@ -1385,6 +1385,93 @@ func TestHumanSaysASharedIncompleteReasonOnce(t *testing.T) {
 	}
 }
 
+// A repository rule file that did not load says why, in the analyzer's
+// words and at its place in the file, in every format; a catalog rule,
+// which the service sends no diagnostic for, adds nothing.
+func TestEveryFormatSaysWhyARuleFileDidNotLoad(t *testing.T) {
+	line, column := 3, 14
+	failed := withIncomplete(
+		response(service.StatusIncomplete, "finding", []service.Finding{}),
+		3,
+		service.IncompletePolicy{
+			PolicyID: "acme.ledger", Reason: "unreliable",
+			Detail: "type=incomplete diagnostics=policy-validation-failed",
+			Diagnostic: &service.PolicyFileDiagnostic{
+				Message: "resolved-call :proof declared\x1b[2J requires a callable",
+				Line:    &line, Column: &column,
+			},
+		},
+		service.IncompletePolicy{
+			PolicyID: "acme.probe", Reason: "other", Detail: "type=failed reasons=invalid_execution_plan",
+			Diagnostic: &service.PolicyFileDiagnostic{Message: "match policies require a query selector"},
+		},
+		service.IncompletePolicy{PolicyID: "bifrost.catalog", Reason: "timed_out"},
+	)
+
+	human := render(t, failed, FormatHuman)
+	for _, want := range []string{
+		"\nRule acme.ledger (line 3, column 14): resolved-call :proof declared�[2J requires a callable\n",
+		"\nRule acme.probe: match policies require a query selector\n",
+	} {
+		if !strings.Contains(human, want) {
+			t.Errorf("human lacks %q:\n%s", want, human)
+		}
+	}
+	if strings.Contains(human, "Rule bifrost.catalog") {
+		t.Errorf("a catalog rule said a rule file line:\n%s", human)
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, failed, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	incomplete := document["incomplete"].([]any)
+	wantDiagnostic := map[string]any{
+		"message": "resolved-call :proof declared\x1b[2J requires a callable",
+		"line":    float64(3), "column": float64(14),
+	}
+	if got := incomplete[0].(map[string]any)["diagnostic"]; !reflect.DeepEqual(got, wantDiagnostic) {
+		t.Errorf("json diagnostic = %v", got)
+	}
+	if _, ok := incomplete[2].(map[string]any)["diagnostic"]; ok {
+		t.Errorf("a catalog rule carried a diagnostic: %v", incomplete[2])
+	}
+
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, failed, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	notifications := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	var ledger, probe map[string]any
+	for _, notification := range notifications {
+		note := notification.(map[string]any)
+		descriptor, _ := note["descriptor"].(map[string]any)
+		switch descriptor["id"] {
+		case "acme.ledger":
+			ledger = note
+		case "acme.probe":
+			probe = note
+		}
+	}
+	if ledger == nil || probe == nil {
+		t.Fatalf("notifications = %v", notifications)
+	}
+	properties := ledger["properties"].(map[string]any)
+	if properties["slopcop.ruleMessage"] != "resolved-call :proof declared\x1b[2J requires a callable" ||
+		properties["slopcop.ruleLine"] != float64(3) || properties["slopcop.ruleColumn"] != float64(14) {
+		t.Errorf("sarif ledger properties = %v", properties)
+	}
+	wantText := "acme.ledger did not complete (unreliable: type=incomplete diagnostics=policy-validation-failed) " +
+		"(line 3, column 14): resolved-call :proof declared\x1b[2J requires a callable"
+	if ledger["message"].(map[string]any)["text"] != wantText {
+		t.Errorf("sarif ledger text = %v", ledger["message"])
+	}
+	if _, ok := probe["properties"].(map[string]any)["slopcop.ruleLine"]; ok {
+		t.Errorf("an unplaced diagnostic had a line: %v", probe)
+	}
+}
+
 func TestJSONSaysTheIncompleteListWasCut(t *testing.T) {
 	var document map[string]any
 	if err := json.Unmarshal([]byte(render(t, cut(), FormatJSON)), &document); err != nil {

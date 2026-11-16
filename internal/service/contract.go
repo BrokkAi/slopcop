@@ -329,9 +329,24 @@ type IncompletePolicy struct {
 	// BrokkAi/bifrost-service#993 omits it, and one from before run failures
 	// omits it for unreliable.
 	Detail string `json:"detail,omitempty"`
+	// Diagnostic is what the analyzer said about one of the repository's own
+	// rule files that did not load, compile or run. The service never sends
+	// it for a catalog rule, nor does one from before
+	// BrokkAi/bifrost-service#1210.
+	Diagnostic *PolicyFileDiagnostic `json:"diagnostic,omitempty"`
 	// Scope is "run" when every check in the analyzer run shares the cause,
 	// which RunFailures then names once. Empty otherwise.
 	Scope string `json:"scope,omitempty"`
+}
+
+// PolicyFileDiagnostic mirrors PolicyFileDiagnostic. Message is one bounded
+// line of the analyzer's text about the caller's own rule file, so it is
+// repository data. Line and Column are 1-based, in the rule file, when the
+// analyzer placed it there.
+type PolicyFileDiagnostic struct {
+	Message string `json:"message"`
+	Line    *int   `json:"line,omitempty"`
+	Column  *int   `json:"column,omitempty"`
 }
 
 // ScopeRun marks an incomplete check whose cause is the whole analyzer run's.
