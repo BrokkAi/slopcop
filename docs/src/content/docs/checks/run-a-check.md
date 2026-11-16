@@ -130,6 +130,7 @@ work passed.
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable); see [Repository rules](/checks/repository-rules/) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
+| `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); see [Repository rules](/checks/repository-rules/#select-rules-by-hand) |
 | `--timeout DURATION` | how long to wait for the result (default `10m`); a check still running then exits `3` |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's; see [Workspaces](/account/workspaces/) |
 | `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` and send nothing. For automatic checks; see [Repositories](/account/repositories/) |

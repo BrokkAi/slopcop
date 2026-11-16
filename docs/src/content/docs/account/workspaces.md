@@ -63,8 +63,8 @@ A team workspace has one **owner**, and any number of **managers** and
 | Run checks, and add this checkout's repository with `slopcop enable` (within the workspace's limits) | yes | yes | yes |
 | Ignore a false positive | yes | yes | yes |
 | Unignore a finding | yes | yes | yes |
-| Read repository settings, rules, suppressions, and run history | yes | yes | yes |
-| Report false positives and manage suppressions and custom rules in the web app | no | yes | yes |
+| Read repository settings and check history | yes | yes | yes |
+| Turn a repository's pull request checks on or off in the web app | no | yes | yes |
 | Choose which repositories are active: `repo enable`, `repo disable` | no | no | yes |
 | Delete a repository and its records | no | no | yes |
 | Invite and remove members; make a member a manager and back | no | no | yes |
