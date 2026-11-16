@@ -51,6 +51,7 @@ slopcop --root ../repo --base origin/main
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` policy file to evaluate (repeatable) |
 | `--no-policy-discovery` | do not include `.slopcop/policies` rules automatically |
+| `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); repository rules still run |
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
 | `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
 | `--if-enabled` | check only if the repository is active in the workspace; otherwise exit `0` without sending a check |
