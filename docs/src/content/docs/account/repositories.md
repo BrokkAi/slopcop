@@ -83,5 +83,6 @@ app. A check of a repository over the limit answers
 ## What stays in the web app
 
 Deleting a repository and its records, archiving a workspace, members, credits,
-and repository settings (automatic issue filing, notifications, suppressions,
-custom rules) stay in the web app. See [The web app](/account/web-app/).
+and turning [pull request checks](/checks/pull-requests/) on or off stay in the
+web app. See [The web app](/account/web-app/). A repository's own rules live in
+the repository itself; see [Repository rules](/checks/repository-rules/).
