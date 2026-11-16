@@ -124,7 +124,7 @@ slopcop check --format json
 | `baseCommit` | the commit the patch was applied to |
 | `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it; and, when the check met a `slopcop: ignore` comment, `inlineSuppressed` and `directiveWarnings` |
 | `findings` | each new finding with its `id`, `new`, `policyId`, `severity`, `certainty`, `path`, `startLine` and `endLine`, and `title`, the rule's sentence. `startColumn` and `endColumn` are the analyzer's span when it gave one: 1-based, with `endColumn` the column just past it on `endLine`. `message` is what the analyzer observed beyond the title, such as a score and its threshold or the protocol step a typestate rule found broken: one line of at most 500 characters, absent when it would repeat the title. `previouslyIgnored` is the id of an ignored finding it matches, and a finding with it is listed even when it is not new; `suggestedWord` is a misspelled-identifier finding's flagged word. A possible credential carries no columns or message |
-| `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
+| `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, `diagnostic` (`message`, and `line` and `column` when known) for a repository rule file that did not load, compile or run, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
 | `incompleteUnlisted` | present when the service cut `incomplete`: how many of `summary.incompletePolicies` it does not name |
 | `incompleteReasons` | present when a rule did not complete: the named rules grouped by `reason` and `detail`, each with a `policies` count, most common first |
@@ -172,7 +172,9 @@ The static results carry `baselineState` `new` and the finding id
 in `properties["slopcop.findingId"]`, and the id of an ignored finding it
 matches in `properties["slopcop.previouslyIgnored"]`, counted in the run's
 `slopcop.remappedIgnores`. Each incomplete rule is a `warning` notification
-with `slopcop.reason` and, when sent, `slopcop.detail`; when the service cut
+with `slopcop.reason` and, when sent, `slopcop.detail`; a repository rule
+file that did not load also has `slopcop.ruleMessage`, and `slopcop.ruleLine`
+and `slopcop.ruleColumn` when known, with the message in its text; when the service cut
 the list, one more `warning` notification counts the rest in
 `slopcop.unlisted`, and the run carries `slopcop.incompleteUnlisted` and
 `slopcop.incompleteReasons`. Each run failure is a `warning` notification with

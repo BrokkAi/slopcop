@@ -103,9 +103,11 @@ code that is part of the change:
 
 4. In the JSON, the rule's findings are the `findings` whose `policyId` is your
    rule's id. The positive file should have one at the line you expect; the
-   look-alike should have none. If the rule appears in `incomplete` as
-   `unreliable` instead, the service could not load it: check the file against
-   the policy format.
+   look-alike should have none. If the rule appears in `incomplete` instead,
+   it did not load, compile or run, and its `diagnostic` says why: the
+   analyzer's message about your file, with the `line` and `column` in the
+   `.rqlp` file when it has them. The human output prints the same thing as
+   `Rule <id> (line 3, column 14): <message>`.
 5. Delete the two test files before you commit. Catalog rules run on them too,
    and the next check would report their findings as new.
 
@@ -119,9 +121,12 @@ from a fix your team keeps making. A rule has a stable id, a severity, and a
 match or data-flow body; its findings come back in a check like the catalog's,
 with the same certainty and the same new-versus-existing split.
 
-A policy file the service cannot load makes that rule `unreliable` in the
-report's `incomplete` list rather than silently clean, so a typo in a rule shows
-up on the next check.
+A policy file the service cannot load, compile or run puts that rule in the
+report's `incomplete` list rather than leaving it silently clean, so a typo in a
+rule shows up on the next check. Its entry carries a `diagnostic` with the
+analyzer's message about the file and, when it has one, the line and column, in
+`slopcop check`'s human, JSON and SARIF output and in the MCP `check` tool. The
+catalog's own rules never carry one.
 
 ## Rules written for you
 

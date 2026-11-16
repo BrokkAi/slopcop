@@ -211,6 +211,12 @@ func human(response service.Response, options Options) string {
 		out.WriteString(line)
 		out.WriteString("\n")
 	}
+	for _, policy := range response.Incomplete {
+		if line := ruleFileLine(policy); line != "" {
+			out.WriteString(line)
+			out.WriteString("\n")
+		}
+	}
 	for _, check := range response.Checks {
 		fmt.Fprintf(&out, "Note: %s (%s): %s\n", printable(check.PolicyID), printable(check.Status), printable(check.Message))
 	}
@@ -726,6 +732,30 @@ func runFailureLine(failure service.RunFailure) string {
 		"Analyzer run failed (%s): %d check(s) did not complete",
 		printable(why(failure.Reason, failure.Detail)), failure.Policies,
 	)
+}
+
+// ruleFileLine says why one of the repository's own rule files did not load,
+// compile or run, in the analyzer's words and at its place in the file, such
+// as `Rule acme.ledger (line 3, column 14): resolved-call :proof declared
+// requires an active semantic-model callable`. Empty when the service sent no
+// diagnostic, as for a catalog rule.
+func ruleFileLine(policy service.IncompletePolicy) string {
+	if policy.Diagnostic == nil || policy.Diagnostic.Message == "" {
+		return ""
+	}
+	return fmt.Sprintf("Rule %s%s: %s", printable(policy.PolicyID), rulePlace(*policy.Diagnostic), printable(policy.Diagnostic.Message))
+}
+
+// rulePlace is ` (line 3, column 14)`, ` (line 3)` or nothing.
+func rulePlace(diagnostic service.PolicyFileDiagnostic) string {
+	switch {
+	case diagnostic.Line == nil:
+		return ""
+	case diagnostic.Column == nil:
+		return fmt.Sprintf(" (line %d)", *diagnostic.Line)
+	default:
+		return fmt.Sprintf(" (line %d, column %d)", *diagnostic.Line, *diagnostic.Column)
+	}
 }
 
 // incompleteWhy is a check's reason, followed by its detail when it has one.
@@ -1499,9 +1529,20 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		if policy.Scope != "" {
 			properties["slopcop.scope"] = policy.Scope
 		}
+		text := fmt.Sprintf("%s did not complete (%s)", policy.PolicyID, incompleteWhy(policy))
+		if diagnostic := policy.Diagnostic; diagnostic != nil && diagnostic.Message != "" {
+			properties["slopcop.ruleMessage"] = diagnostic.Message
+			if diagnostic.Line != nil {
+				properties["slopcop.ruleLine"] = *diagnostic.Line
+			}
+			if diagnostic.Column != nil {
+				properties["slopcop.ruleColumn"] = *diagnostic.Column
+			}
+			text += rulePlace(*diagnostic) + ": " + diagnostic.Message
+		}
 		notifications = append(notifications, sarifNotification{
 			Level:      "warning",
-			Message:    sarifMessage{Text: fmt.Sprintf("%s did not complete (%s)", policy.PolicyID, incompleteWhy(policy))},
+			Message:    sarifMessage{Text: text},
 			Descriptor: &sarifDescriptor{ID: policy.PolicyID},
 			Properties: properties,
 		})
