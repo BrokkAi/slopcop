@@ -131,7 +131,8 @@ captured diff; approval and overrides still bind the complete snapshot identity.
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
 through Claude ACP. Each uses the newest model of its family at high effort.
-A clean reply is exactly `No findings.`. `slopcop
+A clean reply is a last message of exactly `No findings.`; earlier messages,
+such as progress notes, do not count. `slopcop
 init` probes each family once when reviewers are not configured and the mode is
 not static, then saves the first two that work (or one) as reviewers and the
 rest that work as `review.fallbacks`. Probe prompts use your logins. Already
