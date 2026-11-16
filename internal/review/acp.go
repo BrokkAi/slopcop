@@ -25,9 +25,14 @@ type reviewClient struct {
 	permissionError error
 	deniedEdit      string
 	stderr          io.Writer
+	// messageID names the message text belongs to, when the adapter names
+	// messages.
+	messageID string
 }
 
-// SessionUpdate retains only agent message chunks after the last tool update.
+// SessionUpdate retains only the agent's last message after its last tool
+// update, so the verdict is the reviewer's final reply and not progress notes
+// sent before it. Messages are told apart by their ids.
 func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -37,6 +42,17 @@ func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotificatio
 		c.text.Reset()
 	}
 	if u.AgentMessageChunk != nil && u.AgentMessageChunk.Content.Text != nil {
+		id := ""
+		if u.AgentMessageChunk.MessageId != nil {
+			id = *u.AgentMessageChunk.MessageId
+		}
+		// A new message replaces the one before it. Only the adapter can say
+		// where a message starts; chunks without an id stay one message, so a
+		// reply is never cut short.
+		if id != "" && id != c.messageID {
+			c.text.Reset()
+			c.messageID = id
+		}
 		c.text.WriteString(u.AgentMessageChunk.Content.Text.Text)
 	}
 	return nil
