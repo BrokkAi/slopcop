@@ -13,19 +13,34 @@ the same analysis.
 
 ## human
 
-The default. One block per new finding, with an `ID:` line when the service
-names one, then a summary line, then any omitted new findings, incomplete
-rules, and the `Inconclusive:` count.
+The default. One block per new finding, then a summary line, then any omitted
+new findings, incomplete rules, and the `Inconclusive:` count. Each block has
+the finding's rule and title, a `Message:` line when the analyzer observed more
+than the title says, its location (with the column when the service sent the
+span), and a `Code:` line quoting a short one-line span from the files the
+check uploaded. It has an `ID:` line when the service names one.
 
 ```text
-src/main/java/orders/ExportServlet.java:48  request parameter reaches SQL text  definite · error
-  ID: 0f8fad5b-d9cb-469f-a165-70867728950e
-  bifrost.security.java.servlet-parameter-to-jdbc: req.getParameter("q") reaches
-  Statement.executeQuery(String) through OrderQuery.build (OrderQuery.java:21).
+New findings
+  [warning] bifrost.javascript-codeql-quality.misspelled-identifier: an identifier may be misspelled
+    Location: client/lib/feed.ts:16:11
+    Code: `segmnet`
+    Certainty: possible
+    ID: 0f8fad5b-d9cb-469f-a165-70867728950e
+    Word: segmnet; add it to the workspace dictionary with `slopcop dictionary add 0f8fad5b-d9cb-469f-a165-70867728950e`
 
-1 new finding across 1 file(s); 72 already in the code | Analysis complete
-Inconclusive: 3 (2 elsewhere)
+  [warning] bifrost.maintainability.cognitive-complexity: Cognitive complexity 32: renderFeed
+    Message: Bifrost computed a score of 32; the quick-review threshold is 15.
+    Location: client/lib/feed.ts:40:1
+    Certainty: definite
+    ID: 7c9e6679-7425-40de-944b-e07fc1f90ae7
+
+2 new findings across 1 file(s); 72 already in the code | Analysis complete
+Inconclusive: 1 check(s); they never fail the check.
 ```
+
+The title, message and quoted code come from the analyzed repository; the
+CLI prints them with control characters replaced.
 
 A static-only failed check prints nothing on stdout; stderr starts with
 `slopcop: <code>:` followed by the service's message and remedy, verbatim, and
@@ -48,24 +63,47 @@ slopcop check --format json
 {
   "checkId": "6f1c2a7e-3b4d-4e5f-8a9b-0c1d2e3f4a5b",
   "status": "findings",
+  "approved": false,
   "baseCommit": "0123456789abcdef0123456789abcdef01234567",
-  "applied": true,
   "summary": {
-    "newFindings": 1,
+    "files": 1,
+    "findings": 74,
+    "newFindings": 2,
     "existingFindings": 72,
+    "incompletePolicies": 0,
+    "incompletePolicyIds": [],
+    "inconclusive": 1,
     "omittedFindings": 0,
-    "inconclusive": 3
+    "failOn": "warning"
   },
   "findings": [
     {
       "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+      "policyId": "bifrost.javascript-codeql-quality.misspelled-identifier",
+      "severity": "warning",
+      "certainty": "possible",
+      "path": "client/lib/feed.ts",
+      "startLine": 16,
+      "endLine": 16,
+      "startColumn": 11,
+      "endColumn": 18,
+      "title": "an identifier may be misspelled",
       "new": true,
-      "policyId": "bifrost.security.java.servlet-parameter-to-jdbc",
-      "severity": "error",
+      "suggestedWord": "segmnet"
+    },
+    {
+      "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "policyId": "bifrost.maintainability.cognitive-complexity",
+      "severity": "warning",
       "certainty": "definite",
-      "path": "src/main/java/orders/ExportServlet.java",
-      "line": 48,
-      "message": "req.getParameter(\"q\") reaches Statement.executeQuery(String) through OrderQuery.build (OrderQuery.java:21)."
+      "path": "client/lib/feed.ts",
+      "startLine": 40,
+      "endLine": 88,
+      "startColumn": 1,
+      "endColumn": 2,
+      "title": "Cognitive complexity 32: renderFeed",
+      "message": "Bifrost computed a score of 32; the quick-review threshold is 15.",
+      "new": true
     }
   ],
   "incomplete": [],
@@ -77,15 +115,15 @@ slopcop check --format json
 
 | Field | Meaning |
 | --- | --- |
+| `checkId` | the check that answered; absent from an older service |
 | `staticStatus` | the static half's status when it differs from merged `status` |
 | `review` | `status`, `reviewers`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
 | `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), or `staticMode` (static mode chosen by flag or config). A static-only `clean` is not a reviewed change |
 | `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
 | `baseCommit` | the commit the patch was applied to |
-| `applied` | whether the analysis completed; `false` whenever it did not |
 | `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it; and, when the check met a `slopcop: ignore` comment, `inlineSuppressed` and `directiveWarnings` |
-| `findings` | each new finding with its `id`, `new`, policy, severity, certainty, location, and message, and `previouslyIgnored` with the id of an ignored finding it matches; a finding with `previouslyIgnored` is listed even when it is not new |
+| `findings` | each new finding with its `id`, `new`, `policyId`, `severity`, `certainty`, `path`, `startLine` and `endLine`, and `title`, the rule's sentence. `startColumn` and `endColumn` are the analyzer's span when it gave one: 1-based, with `endColumn` the column just past it on `endLine`. `message` is what the analyzer observed beyond the title, such as a score and its threshold or the protocol step a typestate rule found broken: one line of at most 500 characters, absent when it would repeat the title. `previouslyIgnored` is the id of an ignored finding it matches, and a finding with it is listed even when it is not new; `suggestedWord` is a misspelled-identifier finding's flagged word. A possible credential carries no columns or message |
 | `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
 | `incompleteUnlisted` | present when the service cut `incomplete`: how many of `summary.incompletePolicies` it does not name |
@@ -127,6 +165,9 @@ slopcop check --format sarif > slopcop.sarif
 
 A SARIF 2.1.0 log with a second run, `slopcop-review`, containing
 reviewer findings as location-free results and failures as notifications.
+Each static result's `message.text` is the finding's title, then its
+`message` on a second line when it has one, and its region carries
+`startColumn` and `endColumn` when the service sent the span.
 The static results carry `baselineState` `new` and the finding id
 in `properties["slopcop.findingId"]`, and the id of an ignored finding it
 matches in `properties["slopcop.previouslyIgnored"]`, counted in the run's

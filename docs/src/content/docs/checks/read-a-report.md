@@ -143,8 +143,7 @@ result covers.
   file. Findings already in the code that were left out are counted in
   `existingFindings`, not here.
 - **`failure`**: the analysis as a whole did not complete, and the report
-  makes no claim about the code, even if it lists findings. `applied` is
-  `false` whenever the analysis did not complete.
+  makes no claim about the code, even if it lists findings.
 - **`repositoryAdded`**: `true` only when this check carried an approved add,
   as `slopcop enable` or `--add-repository` does. A check never adds a
   repository by itself. See [Repositories](/account/repositories/).
