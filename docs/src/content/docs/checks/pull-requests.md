@@ -9,7 +9,8 @@ Turn on pull request checks for a GitHub repository, and every pull request
 opened, reopened, or pushed to gets a **SlopCop** check in GitHub. It is the
 same answer `slopcop check --base <target branch>` gives on the pull request's
 head: the change since the pull request branched, checked against every rule,
-with any new finding failing it. Nothing runs in your CI and no token is
+your [repository's own rules](/checks/repository-rules/) included, with any new
+finding failing it. Nothing runs in your CI and no token is
 stored.
 
 ## Turn it on
@@ -75,7 +76,7 @@ contributors without asking.
 | The repository is turned off | A workspace owner turns it on in **Repositories**. See [Repositories](/account/repositories/). |
 | At its limit | Re-run the check later, or raise the workspace's limit. |
 | Need turning on again | The person who turned it on no longer manages the workspace. A manager turns **Check pull requests** on again. |
-| A policy file is invalid | A [repository rule](/checks/repository-rules/) the pull request changes does not compile. Run `slopcop check` locally to see why. |
+| A rule in .slopcop/policies is invalid | The [repository rules](/checks/repository-rules/) cannot be used: two declare the same id, one declares an id SlopCop reserves, or there are more than 256. Run `slopcop check` locally to see why. |
 | The repository is over the size limit | SlopCop checks repositories of at most 50,000 files and 512 MiB, on every plan. Every file counts, not only source; move large generated or data files out of the repository. |
 
 Binary files are left out of the change: their content is not in GitHub's

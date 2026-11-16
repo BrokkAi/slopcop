@@ -26,6 +26,15 @@ service evaluates it from the patched checkout.
       no-network-in-handlers.rqlp  # :id "acme.http.no-network-in-handlers"
 ```
 
+## In pull request checks and agents
+
+[Pull request checks](/checks/pull-requests/) and checks an agent starts through
+the SlopCop MCP server have no local tree to read, so the service finds the
+rules itself: every `.rqlp` file under `.slopcop/policies` in the checked tree,
+the base with the change applied. A rule a pull request adds or edits applies
+to that pull request. Symbolic links are skipped, and these checks have no
+way to turn discovery off or name other files; use the CLI for that.
+
 ## Name a rule
 
 A rule's id is what a finding reports as its `policyId`, what
