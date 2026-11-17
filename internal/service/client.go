@@ -105,6 +105,20 @@ func sameOrigin(request *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// noAnswer reports whether a request failed in the network, such as a name
+// that does not resolve, a refused or dropped connection, or a timeout, rather
+// than on a redirect the client refused.
+func noAnswer(err error) bool {
+	var netError net.Error
+	if errors.As(err, &netError) && netError.Timeout() {
+		return true
+	}
+	var opError *net.OpError
+	var dnsError *net.DNSError
+	return errors.As(err, &opError) || errors.As(err, &dnsError) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // Timeout is the longest a check waits for its result.
 func (c *Client) Timeout() time.Duration {
 	if c.HTTP != nil && c.HTTP.Timeout > 0 {
@@ -337,7 +351,11 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 	}
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("reach %s: %w", c.BaseURL, err)
+		err = fmt.Errorf("reach %s: %w", c.BaseURL, err)
+		if ctx.Err() != nil || !noAnswer(err) {
+			return 0, nil, nil, err
+		}
+		return 0, nil, nil, unreachable(err)
 	}
 	defer response.Body.Close()
 	if latest := strings.TrimSpace(response.Header.Get(latestVersionHeader)); latest != "" && c.LatestVersion != nil {
@@ -346,7 +364,11 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("read response: %w", err)
+		err = fmt.Errorf("read response: %w", err)
+		if ctx.Err() != nil || !noAnswer(err) {
+			return 0, nil, nil, err
+		}
+		return 0, nil, nil, unreachable(err)
 	}
 	if len(responseBody) > maxResponseBytes {
 		return 0, nil, nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)

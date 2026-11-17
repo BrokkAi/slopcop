@@ -675,3 +675,66 @@ func TestCheckKeepsTheServicesOwnTooLargeAnswer(t *testing.T) {
 		t.Fatalf("Check error = %v; want the service's own answer", err)
 	}
 }
+
+func TestUnreachableServiceIsRetryable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	baseURL := server.URL
+	server.Close()
+	client := &Client{BaseURL: baseURL}
+	_, err := client.Check(context.Background(), Request{})
+	var serviceError *Error
+	if !errors.As(err, &serviceError) {
+		t.Fatalf("err = %#v, want *Error", err)
+	}
+	body := serviceError.Body
+	if body.Code != ServiceUnreachable || !body.Retryable || body.Remedy == "" || !strings.Contains(body.Message, baseURL) || serviceError.NeedsPerson() {
+		t.Fatalf("body = %+v", body)
+	}
+	if serviceError.Unwrap() == nil {
+		t.Fatal("transport error not kept")
+	}
+}
+
+func TestCanceledRequestIsNotUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := (&Client{BaseURL: server.URL}).Check(ctx, Request{})
+	var serviceError *Error
+	if errors.As(err, &serviceError) {
+		t.Fatalf("canceled request reported as %+v", serviceError.Body)
+	}
+}
+
+func TestRefusedRedirectIsNotUnreachable(t *testing.T) {
+	away := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer away.Close()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, away.URL+r.URL.Path, http.StatusTemporaryRedirect)
+	}))
+	defer server.Close()
+	_, err := (&Client{BaseURL: server.URL}).Check(context.Background(), Request{})
+	var serviceError *Error
+	if err == nil || errors.As(err, &serviceError) || !errors.Is(err, errRedirectedAway) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDroppedResponseBodyIsUnreachable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status"`))
+		conn, _, err := http.NewResponseController(w).Hijack()
+		if err == nil {
+			conn.Close()
+		}
+	}))
+	defer server.Close()
+	_, err := (&Client{BaseURL: server.URL}).Check(context.Background(), Request{})
+	var serviceError *Error
+	if !errors.As(err, &serviceError) || serviceError.Body.Code != ServiceUnreachable {
+		t.Fatalf("err = %v", err)
+	}
+}
