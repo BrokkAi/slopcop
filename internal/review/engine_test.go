@@ -329,6 +329,23 @@ func TestNoEchoAndNoAllow(t *testing.T) {
 	}
 }
 
+// TestConnectionErrorReplyFails checks that an adapter that ends its turn
+// with its own connection error is a failed reviewer that gets its retry, not
+// a reviewer with findings.
+func TestConnectionErrorReplyFails(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("offline", "gpt-6.10-terra", trace)}}}
+	v := Run(context.Background(), s, c, o)
+	if v.Status != StatusFailed || len(v.Reviewers) != 1 || v.Reviewers[0].Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "could not be reached") {
+		t.Fatalf("%+v", v)
+	}
+	data, _ := os.ReadFile(trace)
+	if strings.Count(string(data), "\nprompt\n") != 2 {
+		t.Fatalf("reviewer was not retried: %s", data)
+	}
+}
+
 // TestReviewerWithoutRestrictiveModeFails checks that a reviewer whose adapter
 // offers no read-only mode fails rather than running in the adapter's default.
 func TestReviewerWithoutRestrictiveModeFails(t *testing.T) {

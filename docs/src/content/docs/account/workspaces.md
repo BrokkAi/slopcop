@@ -66,6 +66,13 @@ it, checks of that checkout stop with `workspace_not_found` and say how to map
 it again. They do not fall back to the login's workspace, which would then be
 billed without your choosing it.
 
+A check adds a repository its workspace has never added. When it does, it
+says which workspace that was, how it was chosen, and how to change it, on
+stderr and as `addedToWorkspace` in `json`, so an agent that ran the check can
+tell you. To move the repository, run `slopcop workspace map <name>` in the
+checkout; the owner of the workspace it was added to removes it there with
+`slopcop repo disable`.
+
 A checkout with no mapping checks in the login's workspace, as before. The
 first check of such a repository, when your account has more than one
 workspace, says so once, and names any other workspace of yours that already

@@ -13,6 +13,7 @@ import (
 
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -182,22 +183,32 @@ func chosenWorkspace(whoami service.Whoami, choice workspaceChoice) (service.Wor
 	}
 }
 
-// resolvedWorkspace is the name of the workspace client's requests run in,
-// and whether the service could say.
-func resolvedWorkspace(ctx context.Context, client *service.Client) (string, bool) {
-	whoami, err := client.Whoami(ctx)
-	if err != nil {
-		return "", false
-	}
-	if client.Workspace == "" {
-		return whoami.Workspace.Name, true
-	}
-	for _, workspace := range whoami.Workspaces {
-		if strings.EqualFold(workspace.ID, client.Workspace) {
-			return workspace.Name, true
+// changeWorkspaceStep is how the person moves a repository's checks to
+// another workspace. An agent passes it on; it cannot take the step.
+const changeWorkspaceStep = "To check it in another workspace instead, the user runs `slopcop workspace map <name>` in the checkout at a terminal (`slopcop workspace list` names the workspaces), and its owner can remove it from this one with `slopcop repo disable`."
+
+// noticeAdded says, on stderr, which workspace a check just added the
+// repository to, why that one, and how the person changes it, and returns
+// the same for the report. A check adds a repository without asking, so this
+// is where the user, or the agent that ran the check for them, learns which
+// workspace now checks and bills it.
+func noticeAdded(cmd *cobra.Command, client *service.Client, repoURL string, choice workspaceChoice) *report.AddedWorkspace {
+	added := &report.AddedWorkspace{ID: client.Workspace, Source: choice.Source, Change: changeWorkspaceStep}
+	if whoami, err := client.Whoami(cmd.Context()); err == nil {
+		workspace := whoami.Workspace
+		for _, candidate := range whoami.Workspaces {
+			if client.Workspace != "" && strings.EqualFold(candidate.ID, client.Workspace) {
+				workspace = candidate
+			}
+		}
+		if client.Workspace == "" || strings.EqualFold(workspace.ID, client.Workspace) {
+			added.ID, added.Name = workspace.ID, workspace.Name
 		}
 	}
-	return "", false
+	stderr := cmd.ErrOrStderr()
+	fmt.Fprintf(stderr, "slopcop: added %s to %s\n", repositoryName(repoURL), workspaceName(added.Name, added.Name != ""))
+	fmt.Fprintf(stderr, "slopcop: that workspace now checks and bills it; it was chosen by %s. %s\n", sourceText(choice.Source), changeWorkspaceStep)
+	return added
 }
 
 // workspaceName is a resolved workspace's name, quoted, for a question or

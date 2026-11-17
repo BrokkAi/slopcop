@@ -25,6 +25,20 @@ func TestVerdictAndSelection(t *testing.T) {
 		t.Fatal(m)
 	}
 }
+func TestConnectionReply(t *testing.T) {
+	for text, want := range map[string]bool{
+		"Codex can't reach chatgpt.com to look up your ChatGPT workspace. Check your network connection and any proxy, VPN, or firewall that blocks chatgpt.com, then try again.": true,
+		"stream disconnected before completion: error sending request for url":                                                                                                    true,
+		"- [P1] Retry loop ignores connection refused\nsrc/net.go:10-12\nThe dial error is dropped.":                                                                              false,
+		"- [P2] Missing nil check": false,
+		CleanReply:                 false,
+		"":                         false,
+	} {
+		if got := connectionReply(text); got != want {
+			t.Errorf("connectionReply(%q) = %v, want %v", text, got, want)
+		}
+	}
+}
 func TestPrompt(t *testing.T) {
 	p := reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{Source: "not available"}, nil, "+added line\n", Terra)
 	for _, v := range []string{"snapshot of the working tree", "Base tree: base", "Snapshot tree: snap", "+added line", "git -C '/repo' diff --no-ext-diff base snap", "No findings."} {

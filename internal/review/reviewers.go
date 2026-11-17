@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -216,10 +217,27 @@ func failureCause(text string) cause {
 		return causeQuota
 	case has("rate limit", "rate_limit", "too many requests", "status 429", "code 429"):
 		return causeRate
-	case has("econnrefused", "enotfound", "econnreset", "etimedout", "network error", "connection refused", "connection reset", "no such host", "could not resolve", "service unavailable", "overloaded"):
+	case has(networkWords...):
 		return causeNetwork
 	}
 	return ""
+}
+
+// networkWords are the transport failures adapters report.
+var networkWords = []string{"econnrefused", "enotfound", "econnreset", "etimedout", "network error", "connection refused", "connection reset", "no such host", "could not resolve", "service unavailable", "overloaded", "can't reach", "cannot reach", "could not reach", "unable to reach", "check your network connection", "stream disconnected", "error sending request"}
+
+// priorityTag matches the [Pn] tag that starts each review finding.
+var priorityTag = regexp.MustCompile(`\[P[0-3]\]`)
+
+// connectionReply reports whether a reply is an adapter's own connection
+// error rather than a review: it has no [Pn] finding and names a transport
+// failure. A review always tags its findings, so a finding that mentions a
+// network problem is never mistaken for one.
+func connectionReply(text string) bool {
+	if text == "" || priorityTag.MatchString(text) {
+		return false
+	}
+	return failureCause(text) == causeNetwork
 }
 
 // explainFailure turns a reviewer's final error into one that says what to do.

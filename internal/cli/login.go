@@ -55,7 +55,7 @@ Run slopcop init once to install the agent skills and user-level hooks.`,
 				if !hosted {
 					fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: signing in to %s\n", config.Origin(target))
 				}
-				noticeUpdates(client, cmd.ErrOrStderr(), version)
+				noticeUpdates(cmd, client, version)
 				start, err := client.StartDevice(cmd.Context())
 				if err != nil {
 					return remedyError(err)

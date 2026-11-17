@@ -62,7 +62,7 @@ The finding description should be one paragraph.
 
 OUTPUT FORMAT:
 
-Write your findings as plain text, highest priority first. Start each finding on its own line with a dash, then the `[Pn]` tag and title, then the file path and the shortest line range that locates the problem (`path/to/file.rs:120-124`), then one paragraph explaining why it is a problem. The location must overlap the diff. Do not generate a fix.
+Write your findings as plain text, highest priority first. Start each finding on its own line with a dash, then the `[Pn]` tag and title, then the file path and the shortest line range that locates the problem, in backticks (`path/to/file.rs:120-124`), then one paragraph explaining why it is a problem. The location must overlap the diff. Do not generate a fix.
 
 If there is no finding that a person would definitely want to fix, your entire answer must be exactly:
 

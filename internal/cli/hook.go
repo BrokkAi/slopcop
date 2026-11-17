@@ -263,15 +263,21 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 		return hookFailure(err, state), false
 	}
 	if !state.Active {
-		active, err := repositoryActive(ctx, prepared.client, prepared.request.RepoURL)
+		repository, err := repositoryStatus(ctx, prepared.client, prepared.request.RepoURL)
 		if err != nil {
 			return hookFailure(err, state), false
 		}
-		if !active {
+		switch {
+		case repository.Active:
+		case repository.State == statusNotAdded:
+			// A repository the workspace has never added is added by this
+			// check, so the session is not stopped to ask. One it disabled,
+			// or has past its limit, stays off.
+			prepared.request.AddRepository = true
+		default:
 			state.Off = true
 			return "", false
 		}
-		state.Active = true
 	}
 	response, err := sendCheck(ctx, prepared.client, &prepared.request, nil)
 	if err != nil {
@@ -282,31 +288,6 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 	}
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	return "", true
-}
-
-// repositoryActive reports whether the workspace checks the repository now,
-// by its provider and owner/name. A repository it has not added, or has
-// disabled, is not sent at all.
-func repositoryActive(ctx context.Context, client *service.Client, repoURL string) (bool, error) {
-	parsed, err := url.Parse(repoURL)
-	if err != nil {
-		return false, nil
-	}
-	provider := repositoryProviders[parsed.Hostname()]
-	if provider == "" {
-		return false, nil
-	}
-	name := repositoryName(repoURL)
-	listed, err := client.Repositories(ctx)
-	if err != nil {
-		return false, err
-	}
-	for _, repository := range listed.Repositories {
-		if repository.Active && strings.EqualFold(repository.Provider, provider) && strings.EqualFold(repository.FullName, name) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // hookFailure is what to tell the user about a check that got no result. A

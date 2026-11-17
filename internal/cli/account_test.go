@@ -14,6 +14,31 @@ import (
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
+// typedInTurn stands in for a terminal where the person answers each
+// question in turn: a prompt that only looks for a terminal takes none.
+func typedInTurn(t *testing.T, answers ...string) {
+	t.Helper()
+	original := confirmInput
+	asked := 0
+	confirmInput = func(*cobra.Command) (io.Reader, bool) {
+		return readerFunc(func(buffer []byte) (int, error) {
+			if asked >= len(answers) {
+				return 0, io.EOF
+			}
+			count := copy(buffer, answers[asked])
+			asked++
+			return count, nil
+		}), true
+	}
+	t.Cleanup(func() { confirmInput = original })
+}
+
+// readerFunc is a reader that hands out one answer a read, as a terminal
+// hands out one line.
+type readerFunc func([]byte) (int, error)
+
+func (read readerFunc) Read(buffer []byte) (int, error) { return read(buffer) }
+
 // typed stands in for a terminal where the person types answer.
 func typed(t *testing.T, answer string) {
 	t.Helper()

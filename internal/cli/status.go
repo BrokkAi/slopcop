@@ -69,8 +69,7 @@ the origin remote names is added to that workspace and active.
 then the workspace this machine maps the checkout to ('slopcop workspace
 map'), then the one the login is bound to.
 
-A repository that is not added is added by 'slopcop enable' from its checkout,
-at a terminal. A disabled one is not checked or charged; the workspace's owner
+A repository that is not added is added by its first check. A disabled one is not checked or charged; the workspace's owner
 enables it with 'slopcop repo enable'. SlopCop checks repositories on
 github.com, gitlab.com and bitbucket.org.`,
 		Args: cobra.NoArgs,
@@ -239,7 +238,7 @@ func writeStatus(out io.Writer, answer statusReport) {
 func statusText(repository statusRepository) string {
 	switch repository.State {
 	case statusNotAdded:
-		return "not added (run 'slopcop enable' from the checkout to add it)"
+		return "not added (the next check adds it)"
 	case statusUnsupported:
 		return "unsupported (SlopCop checks github.com, gitlab.com and bitbucket.org)"
 	case statusOverLimit:

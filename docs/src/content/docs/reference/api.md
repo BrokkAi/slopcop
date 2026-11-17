@@ -27,10 +27,9 @@ by default.
 }
 ```
 
-`addRepository` is sent only after a person confirms adding the repository:
-by `slopcop enable` at a terminal, or by `--add-repository` for the workspace
-they approved. A check without it never adds a repository; the CLI refuses a
-repository the workspace has not added locally, before sending anything.
+`addRepository` is sent when the workspace has never added the repository, so
+the check adds it. The CLI refuses a repository the workspace has disabled, or
+has past its active limit, locally, before sending anything.
 Run from an agent session, the request also carries an `attribution` object
 with the harness, its version, the session id, and each model and effort with
 the files it wrote. The service rejects any other field.

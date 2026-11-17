@@ -54,8 +54,7 @@ slopcop --root ../repo --base origin/main
 | `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); repository rules still run |
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
 | `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this checkout is mapped to or this login is bound to (also `SLOPCOP_WORKSPACE`) |
-| `--if-enabled` | check only if the repository is active in the workspace; otherwise exit `0` without sending a check |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
+| `--if-enabled` | skip a repository the workspace has disabled or has past its active limit, exiting `0` without sending a check; one it has never added is added |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 Exit codes: `0` clean, `1` new findings, `2` incomplete or failed, `3` still
@@ -68,8 +67,10 @@ Add the repository the `origin` remote names to the workspace that checks and
 bills it, and run its first check. A repository already added but disabled is
 enabled again. The command names the workspace and the cost, asks you to type
 the repository's `owner/name`, and refuses when stdin is not a terminal. It
-exits with the first check's result. A check never adds a repository by
-itself. See [Repositories](/account/repositories/).
+exits with the first check's result. A check adds a repository the workspace
+has never added by itself, so `enable` is optional for that; it is how a
+person turns a disabled repository back on. See
+[Repositories](/account/repositories/).
 
 | Flag | Meaning |
 | --- | --- |
@@ -89,8 +90,8 @@ way to answer whether a checkout is handled by SlopCop. See
 | `--format human\|json` | output format (default `human`) |
 | `-w`, `--workspace NAME\|ID` | workspace to inspect, by name or id, instead of the one this checkout is mapped to or this login is bound to (also `SLOPCOP_WORKSPACE`) |
 
-States: `active`; `disabled`; `enabled, over the limit`; `not added` (run
-`slopcop enable` from the checkout to add it); and `unsupported` (SlopCop checks
+States: `active`; `disabled`; `enabled, over the limit`; `not added` (the
+next check adds it); and `unsupported` (SlopCop checks
 repositories on github.com, gitlab.com and bitbucket.org). `json` carries the
 same state as `active`,
 `disabled`, `over_limit`, `not_added`, or `unsupported`, with the repository's
@@ -263,6 +264,13 @@ Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr cre
 open a pull request until HEAD's tree has a passing check or valid override. It also
 blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
 
+## `slopcop update`
+
+Update slopcop to the latest release. A slopcop installed by the install script
+replaces its own binary, after checking the download against the release's
+checksums; one installed through npm, pip, pipx or uv is told the command to
+run. See [Automatic updates](/get-started/install/#automatic-updates).
+
 ## `slopcop version`
 
 Print the version. A release binary prints its tag; a plain `go install` prints
@@ -275,7 +283,8 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | `SLOPCOP_TOKEN` | a token for this run; wins over the stored credential |
 | `SLOPCOP_SERVICE` | the service URL; `--service` wins over it |
 | `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, `dictionary`, and `repo`; `-w` wins over it, and it wins over a checkout's mapping |
-| `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice |
+| `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice and turns automatic updates off |
+| `SLOPCOP_NO_AUTO_UPDATE` | any non-empty value keeps slopcop from replacing its own binary; the notice still prints |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
 | `CODEX_THREAD_ID`, `CODEX_HOME` | set by Codex; the same |
 | `OPENCODE_SESSION_ID`, `OPENCODE_DB`, `XDG_DATA_HOME` | set by OpenCode or you; the same |

@@ -16,7 +16,7 @@ script or an agent can act on the code alone for check completion; use
 
 | Exit | Meaning | What to do |
 | --- | --- | --- |
-| `0` | The check completed and no new finding crossed `--fail-on`; or `--if-enabled` found the repository inactive and sent nothing. | Carry on. On an empty change or a skip, nothing was checked; see below. |
+| `0` | The check completed and no new finding crossed `--fail-on`; or `--if-enabled` found the repository disabled or past the active limit and sent nothing. | Carry on. On an empty change or a skip, nothing was checked; see below. |
 | `1` | A new finding crossed `--fail-on`. | Fix the new findings and run the check again. |
 | `2` | No new finding crossed `--fail-on`, but some rule did not complete; or the CLI or service failed. | With a report: say which rules did not complete, and why; running again usually gives the same answer. Without one: read the code on stderr. Never treat it as clean. |
 | `3` | The check was still running when `--timeout` ran out. | Run the same check again; it picks up the same analysis. |
@@ -86,9 +86,11 @@ refusal: signing in (`auth_required`, `auth_expired`), access to the repository
 workspace checks (`repository_disabled`, `repository_add_unconfirmed`,
 `workspace_repository_limit_reached`, `active_repository_limit_reached`,
 `owner_required`), or something only the browser can do (`browser_required`).
-The CLI also exits `4` with `repository_not_enabled` when the workspace has not
-added the repository: it refuses locally, before sending anything, so a check
-never adds one. Scripts stop instead of retrying.
+The CLI exits `4` with `repository_disabled` itself when the workspace has
+disabled the repository, and with `active_repository_limit_reached` when it is
+past the active limit: it refuses locally, before sending anything or starting
+the local reviewers. A repository the workspace has never added is added by
+the check instead. Scripts stop instead of retrying.
 [Error codes](/reference/error-codes/) lists the remedies.
 
 ## An empty change
@@ -101,8 +103,7 @@ work passes `--base`; an agent reads the flag and does the same. See
 
 ## A skipped repository
 
-`--if-enabled` exits `0` without sending a check when the repository is not
-active in the workspace. The machine formats carry `"status": "skipped"` and
-the reason, so it cannot be mistaken for a clean check. A plain check of a
-repository the workspace has not added exits `4` with
-`repository_not_enabled` instead.
+`--if-enabled` exits `0` without sending a check when the workspace has
+disabled the repository or has it past the active limit. The machine formats
+carry `"status": "skipped"` and the reason, so it cannot be mistaken for a
+clean check. A plain check of such a repository exits `4` instead.

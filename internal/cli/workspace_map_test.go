@@ -366,6 +366,44 @@ func TestOnlyAPersonAtATerminalChangesAMapping(t *testing.T) {
 	}
 }
 
+func TestACheckThatAddsARepositorySaysWhereAndHowToChangeIt(t *testing.T) {
+	isolateUserConfig(t)
+	realRepositoryCheck(t)
+	repo := newRepo(t, "https://github.com/Acme/widgets.git")
+	svc := &mapService{}
+	server := svc.start(t, "")
+	mapTo(t, server.URL, "https://github.com/Acme/widgets", teamID, "Acme team")
+	// An agent's shell: nothing is asked, and the check adds the repository.
+	pipedStdin(t, "")
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
+	if code != 0 || len(svc.checks) != 1 || svc.checks[0] != teamID {
+		t.Fatalf("exit = %d, checks = %q, stderr = %s", code, svc.checks, stderr)
+	}
+	for _, want := range []string{
+		"slopcop: added Acme/widgets to \"Acme team\"\n",
+		"it was chosen by this checkout's mapping",
+		"the user runs `slopcop workspace map <name>` in the checkout at a terminal",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	}
+	var document struct {
+		RepositoryAdded bool `json:"repositoryAdded"`
+		AddedTo         struct {
+			ID, Name, Source, Change string
+		} `json:"addedToWorkspace"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &document); err != nil {
+		t.Fatalf("stdout is not JSON: %v\n%s", err, stdout)
+	}
+	if !document.RepositoryAdded || document.AddedTo.ID != teamID || document.AddedTo.Name != "Acme team" ||
+		document.AddedTo.Source != sourceMapping || !strings.Contains(document.AddedTo.Change, "slopcop workspace map") {
+		t.Errorf("addedToWorkspace = %+v", document.AddedTo)
+	}
+}
+
 func TestEnableMapsTheCheckoutToTheWorkspaceItAddsTo(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/Acme/widgets.git")

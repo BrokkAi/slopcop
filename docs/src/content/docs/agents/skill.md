@@ -47,14 +47,12 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 
 ## What it tells an agent
 
-For hosted static checks, the skill uses repositories the workspace has enabled.
-Local review in `ai` mode does not need enablement. Before an automatic check it
-uses `slopcop check --if-enabled`, which skips only the static half when the
-repository is not active. Local review still runs in default `both` mode. It
-never adds a repository and never asks the user to add one as a side effect of a
-check; `slopcop enable` is the step a person takes at a terminal, and the skill
-only points to it when the user explicitly asks for a check of a repository that
-is not enabled.
+For hosted static checks, a check of a repository the workspace has never added
+adds it, so the skill does not stop to ask. Local review in `ai` mode does not
+need a repository in the workspace. Before an automatic check it uses `slopcop
+check --if-enabled`, which skips only the static half when the workspace has
+disabled the repository. Local review still runs in default `both` mode. It
+never turns a disabled repository back on; that is a step a person takes.
 
 ## Where it goes
 
