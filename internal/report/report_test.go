@@ -2224,6 +2224,74 @@ func TestChosenStaticModeHasNoHumanReviewLine(t *testing.T) {
 	}
 }
 
+// TestReviewFindingsAreStructuredAndCounted checks that a reviewer's
+// findings reach every format with their location, and that the static JSON
+// summary counts them beside the service's own counts.
+func TestReviewFindingsAreStructuredAndCounted(t *testing.T) {
+	verdict := review.Verdict{Status: review.StatusFindings, Reviewers: []review.Reviewer{
+		{Name: "1-terra", Status: review.StatusFindings, Text: "- [P1] Drops errors — internal/x.go:12-14. The error from Close is lost.\n- [P3] Slow loop in internal/y.go:3"},
+		{Name: "2-sol", Status: review.StatusClean, Text: review.CleanReply},
+	}}
+	options := Options{Review: &verdict, Status: "findings"}
+
+	var out bytes.Buffer
+	if err := Write(&out, service.Response{Status: service.StatusClean}, FormatJSON, options); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Summary struct {
+			NewFindings    int  `json:"newFindings"`
+			ReviewFindings *int `json:"reviewFindings"`
+		} `json:"summary"`
+		Review struct {
+			Findings []review.Finding `json:"findings"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if doc.Summary.ReviewFindings == nil || *doc.Summary.ReviewFindings != 2 || doc.Summary.NewFindings != 0 {
+		t.Fatalf("summary: %s", out.String())
+	}
+	first := doc.Review.Findings[0]
+	if len(doc.Review.Findings) != 2 || first.Reviewer != "1-terra" || first.Priority != "P1" || first.Path != "internal/x.go" ||
+		*first.StartLine != 12 || *first.EndLine != 14 || first.Title != "Drops errors" || first.Message != "The error from Close is lost." {
+		t.Fatalf("findings: %s", out.String())
+	}
+
+	run := sarifLogWithReview(options, sarifRun{}).Runs[1]
+	if len(run.Results) != 2 {
+		t.Fatalf("sarif results: %+v", run.Results)
+	}
+	result := run.Results[0]
+	if result.Level != "error" || result.RuleID != "1-terra" || result.Properties["slopcop.priority"] != "P1" ||
+		result.Locations[0].PhysicalLocation.ArtifactLocation.URI != "internal/x.go" ||
+		result.Locations[0].PhysicalLocation.Region.StartLine != 12 || *result.Locations[0].PhysicalLocation.Region.EndLine != 14 {
+		t.Fatalf("sarif result: %+v", result)
+	}
+	if run.Results[1].Level != "note" {
+		t.Fatalf("P3 level: %+v", run.Results[1])
+	}
+
+	out.Reset()
+	writeReviewHuman(&out, verdict)
+	if !strings.Contains(out.String(), "Review: findings\n  2 findings reported\n") {
+		t.Fatalf("human: %q", out.String())
+	}
+}
+
+// TestStaticSummaryOmitsReviewFindingsWithoutReview checks that a static-only
+// report does not claim the review found nothing.
+func TestStaticSummaryOmitsReviewFindingsWithoutReview(t *testing.T) {
+	var out bytes.Buffer
+	if err := Write(&out, service.Response{Status: service.StatusClean}, FormatJSON, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "reviewFindings") {
+		t.Fatal(out.String())
+	}
+}
+
 func TestHumanReportCountsExcludedFilesAndNamesOnlyAFew(t *testing.T) {
 	omitted := []OmittedFile{{Path: "big.json", Bytes: 600000, Reason: "large-json"}}
 	for i := range listedExcluded + 3 {

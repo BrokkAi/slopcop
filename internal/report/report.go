@@ -980,7 +980,7 @@ type jsonReport struct {
 	// when it did not.
 	ReviewSkipped string                     `json:"reviewSkipped,omitempty"`
 	BaseCommit    string                     `json:"baseCommit"`
-	Summary       service.Summary            `json:"summary"`
+	Summary       summaryJSON                `json:"summary"`
 	Findings      []service.Finding          `json:"findings"`
 	Incomplete    []service.IncompletePolicy `json:"incomplete"`
 	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
@@ -1041,7 +1041,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Review:               reviewValue(options.Review),
 		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
-		Summary:              response.Summary,
+		Summary:              summaryValue(response.Summary, options.Review),
 		Findings:             listed(response, options),
 		Incomplete:           response.Incomplete,
 		IncompleteUnlisted:   incompleteUnlisted(response),
@@ -1833,6 +1833,26 @@ type aiReport struct {
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
+// summaryJSON is the service's summary plus the count of findings the local
+// reviewers reported, which the service never sees.
+type summaryJSON struct {
+	service.Summary
+	// ReviewFindings counts review.findings: every finding a reviewer
+	// reported, one per reviewer that reported it. Absent when no review
+	// ran.
+	ReviewFindings *int `json:"reviewFindings,omitempty"`
+}
+
+// summaryValue adds the review's finding count to the service's summary.
+func summaryValue(summary service.Summary, v *review.Verdict) summaryJSON {
+	result := summaryJSON{Summary: summary}
+	if v != nil {
+		count := len(v.Findings())
+		result.ReviewFindings = &count
+	}
+	return result
+}
+
 // reviewJSON gives the local verdict its public JSON field names.
 type reviewJSON struct {
 	// Status is the local review's Status field.
@@ -1849,6 +1869,8 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
+	// Findings is what the reviewers reported, parsed from their replies.
+	Findings []review.Finding `json:"findings"`
 	// Incomplete is set when fewer reviewers finished than review.minCompleted.
 	Incomplete bool `json:"incomplete,omitempty"`
 	// Error is the local review's Error field.
@@ -1870,7 +1892,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Findings: v.Findings(), Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -1896,10 +1918,10 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
 	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed && !v.Incomplete}}, Properties: properties}
+	for _, finding := range v.Findings() {
+		run.Results = append(run.Results, reviewSARIFResult(finding))
+	}
 	for _, r := range v.Reviewers {
-		if r.Status == review.StatusFindings {
-			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})
-		}
 		if r.Status == review.StatusFailed {
 			run.Invocations[0].ToolExecutionNotifications = append(run.Invocations[0].ToolExecutionNotifications, sarifNotification{Level: "error", Message: sarifMessage{Text: r.Error}})
 		}
@@ -1909,6 +1931,42 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	}
 	log.Runs = append(log.Runs, run)
 	return log
+}
+
+// reviewSARIFResult is one reviewer finding as a SARIF result: the rule is
+// the reviewer, and the location is set when the reviewer gave one.
+func reviewSARIFResult(finding review.Finding) sarifResult {
+	text := finding.Title
+	if finding.Message != "" {
+		text = strings.TrimSpace(text + "\n\n" + finding.Message)
+	}
+	// The rubric asks reviewers to flag only what the change introduced.
+	result := sarifResult{RuleID: finding.Reviewer, Level: reviewSARIFLevel(finding.Priority), Message: sarifMessage{Text: text}, Locations: []sarifLocation{}, BaselineState: "new"}
+	if finding.Priority != "" {
+		result.Properties = map[string]any{"slopcop.priority": finding.Priority}
+	}
+	if finding.Path != "" {
+		location := sarifLocation{PhysicalLocation: sarifPhysicalLocation{
+			ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.Path), URIBaseID: "SRCROOT"},
+		}}
+		if start := finding.StartLine; start != nil && *start >= 1 {
+			location.PhysicalLocation.Region = &sarifRegion{StartLine: *start, EndLine: finding.EndLine}
+		}
+		result.Locations = append(result.Locations, location)
+	}
+	return result
+}
+
+// reviewSARIFLevel maps a reviewer's priority tag to a SARIF level.
+func reviewSARIFLevel(priority string) string {
+	switch priority {
+	case "P0", "P1":
+		return "error"
+	case "P3":
+		return "note"
+	default:
+		return "warning"
+	}
 }
 
 // writeReview renders the review section when a verdict exists.
@@ -1934,6 +1992,13 @@ func failedReviewers(v review.Verdict) int {
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
+	switch count := len(v.Findings()); count {
+	case 0:
+	case 1:
+		fmt.Fprintln(w, "  1 finding reported")
+	default:
+		fmt.Fprintf(w, "  %d findings reported\n", count)
+	}
 	for _, r := range v.Reviewers {
 		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)
 		if r.StandsInFor != "" {
