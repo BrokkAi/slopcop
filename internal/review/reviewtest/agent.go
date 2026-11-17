@@ -180,6 +180,10 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 	if a.mode == "empty" {
 		text = ""
 	}
+	if a.mode == "offline" {
+		// Codex ends its turn normally with its connection error as the reply.
+		text = "Codex can't reach chatgpt.com to look up your ChatGPT workspace. Check your network connection and any proxy, VPN, or firewall that blocks chatgpt.com, then try again. (workspace routing discovery failed)"
+	}
 	if text != "" {
 		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText(text)}); err != nil {
 			return acp.PromptResponse{}, err

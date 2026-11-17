@@ -69,10 +69,32 @@ var personCodes = map[string]bool{
 	"browser_required":                   true,
 }
 
-// Error is a non-2xx response from the check API.
+// ServiceUnreachable is the local code for a request that never reached the
+// service, such as when the network is down.
+const ServiceUnreachable = "service_unreachable"
+
+// Error is a non-2xx response from the check API, or a request that could
+// not reach it.
 type Error struct {
 	StatusCode int
 	Body       ErrorBody
+	// cause is the transport error of a request that got no answer.
+	cause error
+}
+
+// Unwrap returns the transport error of a request that got no answer.
+func (e *Error) Unwrap() error { return e.cause }
+
+// unreachable says a request got no answer and that sending it again may
+// work once the connection is back. It does not say whether the service
+// acted on the request: the connection may have dropped after it did.
+func unreachable(err error) *Error {
+	return &Error{cause: err, Body: ErrorBody{
+		Code:      ServiceUnreachable,
+		Message:   "SlopCop got no answer from the service: " + err.Error(),
+		Remedy:    "Check the network connection and any proxy, VPN or firewall, then run the same command again.",
+		Retryable: true,
+	}}
 }
 
 // Error returns the service's message when the response carried the contract.

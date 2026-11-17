@@ -70,6 +70,7 @@ is added by the check.
 | `client_outdated` | 2 | This slopcop is older than the service accepts. [Upgrade](/get-started/install/#upgrade) and run the check again. |
 | `rate_limited` | 2, retryable | Too many requests; wait the `Retry-After`. |
 | `service_unavailable` | 2, retryable | Retry; the service is unavailable. |
+| `service_unreachable` | 2, retryable | The CLI answers this itself when a request gets no answer, such as when the network is down or the service's host does not resolve. The service may still have received the request. Check the connection and any proxy, VPN, or firewall, then run the same command again. |
 
 ## Login polling
 

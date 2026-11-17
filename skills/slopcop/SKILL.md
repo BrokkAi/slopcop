@@ -290,6 +290,7 @@ the usual codes mean:
 | `repository_add_unconfirmed` | An older slopcop reached a repository the workspace does not have without adding it. Update slopcop and check again. |
 | `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
+| `service_unreachable` | The CLI got no answer from the service, usually because the network is down. Check the connection, then run the same command again. |
 
 ## What a result claims
 
