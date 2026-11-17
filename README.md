@@ -23,9 +23,9 @@ The full documentation is at <https://docs.slopcop.com>.
 The hosted static analyzer needs no per-language install. Local review uses your
 existing harness logins and Node.js with `npx`. `--mode ai` needs no SlopCop
 login, enabled repository, or supported origin. Use `--mode static` for a
-hosted-only check or CI without reviewer harness logins. A check never adds a
-repository; `--if-enabled` skips one the workspace has not enabled, and says it
-was skipped.
+hosted-only check or CI without reviewer harness logins. A check of a
+repository the workspace has never added adds it; `--if-enabled` skips one the
+workspace has disabled, and says it was skipped.
 
 ## Install
 
@@ -263,10 +263,9 @@ Use `slopcop init --no-hooks` to install only the skill, or
 Ordinary checks do not reinstall a removed hook. The skill remains the way to
 check from other harnesses.
 
-The hook is dormant in a repository until it is enabled in the workspace. Run
-`slopcop enable` in the checkout, at a terminal, to add it and run its first
-check. The hook then checks what an agent writes and hands findings back; it
-never adds a repository and sends nothing for one that is not active.
+The hook checks what an agent writes and hands findings back. Its first check
+of a repository the workspace has never added adds it, as any check does; it
+sends nothing for one the workspace has disabled or has past its active limit.
 
 ### Managed rollout
 
@@ -371,23 +370,19 @@ providers a repository name, pass the id the listing prints.
 first check. It names the workspace and what adding the repository costs, asks
 you to type the repository's `owner/name`, and refuses when stdin is not a
 terminal. A repository that is already added but disabled is enabled again;
-one that is already active is left alone. An agent runs with your login and
-the service cannot tell it from you, so adding a repository stays a step you
-take yourself.
+one that is already active is left alone. Turning a disabled repository back
+on stays a step you take yourself.
 
-The static half never adds a repository. A check of one the workspace has not
-added exits `4` with `repository_not_added` and sends nothing, and one it has
-disabled exits `4` with `repository_disabled` (or
-`active_repository_limit_reached` when it is past the active limit); these stop
-before the local reviewers start, so the report has no review. `status` shows
-the same state, and a check that is not at a terminal asks nothing. Once a
-person has approved adding one, `check --add-repository --workspace <name|id>`
-carries that approval without a terminal; the flag needs `--workspace` (the flag
-itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one workspace cannot
-add the repository to the one the login happens to point at. The flag changes
-nothing for a repository already in that workspace. `slopcop enable` says `added
-owner/name to "Workspace"` on stderr, and `json` reports `"repositoryAdded":
-true`. Deleting repositories, archiving workspaces, members, credits and
+A check does not need `enable` first: a check of a repository the workspace has
+never added adds it to the workspace the check runs in (the login's, or the one
+`--workspace` names), which then pays for its checks, so an agent is not
+stopped to ask. A check of one the workspace has disabled exits `4` with
+`repository_disabled`, and one past the active limit with
+`active_repository_limit_reached`; these stop before the local reviewers start,
+so the report has no review. A check that adds a repository, like `slopcop
+enable`, says `added owner/name to "Workspace"` on stderr, and `json` reports
+`"repositoryAdded": true`. `--add-repository` is no longer needed; it is still
+accepted. Deleting repositories, archiving workspaces, members, credits and
 repository settings stay in the web app. `enable` exits with its first check's
 result; the other account commands exit `0` on success and `2` with the
 service's message and remedy otherwise, as `ignore` does.
@@ -396,7 +391,7 @@ service's message and remedy otherwise, as `ignore` does.
 
 ```console
 slopcop                          # check the change in the current checkout
-slopcop check --if-enabled       # automatic check: skip a repository not enabled here
+slopcop check --if-enabled       # automatic check: skip a repository disabled here
 slopcop check --format json      # same, machine-readable
 slopcop --root ../repo --base origin/main
 ```
@@ -449,8 +444,7 @@ Flags:
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's |
-| `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` without sending a check |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it. A check without it never adds a repository |
+| `--if-enabled` | skip a repository the workspace has disabled or has past its active limit, exiting `0` without sending a check; one it has never added is added |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 The hosted `slopcop.similarity` check runs by default, including when the
@@ -729,14 +723,14 @@ disabled it is the one this login is bound to, and `--workspace` after
 refusal (`auth_required`, `auth_expired`, `account_required`,
 `repo_not_indexed`, `app_not_installed`, `app_no_repo_access`,
 `gitlab_not_connected`, `no_access`, `insufficient_credits`,
-`repository_disabled`, `repository_not_added`,
-`repository_add_unconfirmed`, `workspace_repository_limit_reached`,
+`repository_disabled`, `repository_add_unconfirmed`, `workspace_repository_limit_reached`,
 `active_repository_limit_reached`, `owner_required`, and `browser_required`),
 so a script can stop instead of retrying, and `2` otherwise. The CLI refuses a
-check of a repository the workspace has not added locally, as
-`repository_not_added`, and one it has disabled as `repository_disabled`,
-before sending anything or starting the local reviewers. Stderr starts with
-the code, as in `slopcop: repository_not_added: …`. `human` prints nothing on
+check of a repository the workspace has disabled locally, as
+`repository_disabled`, and one past the active limit as
+`active_repository_limit_reached`, before sending anything or starting the
+local reviewers. Stderr starts with the code, as in `slopcop:
+repository_disabled: …`. `human` prints nothing on
 stdout; `json` prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the
 service sent one; `sarif` prints a run with `slopcop.status` `failed`, whose
@@ -758,8 +752,8 @@ The CLI calls `POST <service>/v1/check` with a bearer token:
 }
 ```
 
-`addRepository` is sent only after a person confirms adding the repository, at
-the terminal or with `--add-repository`. The service rejects any other field.
+`addRepository` is sent when the workspace has never added the repository, so
+the check adds it. The service rejects any other field.
 With `--workspace`, every request, the check's, the ignore's and the account
 routes', carries the workspace's id in the `SlopCop-Workspace` header; a name
 is first looked up with `GET <service>/v1/whoami`. The response carries `status`,

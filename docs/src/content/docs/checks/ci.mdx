@@ -29,11 +29,11 @@ step is needed. The token runs checks in, and bills, the workspace it was
 approved in. Pass `-w`/`--workspace` (or set `SLOPCOP_WORKSPACE`) to use another
 one; see [Workspaces](/account/workspaces/).
 
-<Aside type="caution" title="A check never adds a repository">
-A check of a repository the workspace has not added exits `4` with
-`repository_not_added` and sends nothing. Add it first with `slopcop enable`
-from the checkout at a terminal, or once a person has approved it, pass
-`--add-repository --workspace <name>`. See [Repositories](/account/repositories/).
+<Aside type="caution" title="A check adds the repository">
+A check of a repository the workspace has never added adds it to the workspace
+the token checks in, which then pays for its checks. A check of one the
+workspace has disabled exits `4` with `repository_disabled` and sends nothing.
+See [Repositories](/account/repositories/).
 </Aside>
 
 A CI job, one with `CI` set (or `TF_BUILD` or `JENKINS_URL`), runs only the

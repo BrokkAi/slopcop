@@ -34,22 +34,11 @@ var knownErrors = map[string]ErrorBody{
 		Message: "SlopCop has no such finding for this login.",
 		Remedy:  "Use a finding id from a check you ran with this login.",
 	},
-	"repository_not_added": {
-		Message: "This repository has not been added to your SlopCop workspace, so the check did not run.",
-		Remedy:  RepositoryNotAddedRemedy,
-	},
 	"repository_disabled": {
 		Message: "This repository was disabled in your SlopCop workspace, so the check did not run.",
 		Remedy:  RepositoryDisabledRemedy,
 	},
 }
-
-// RepositoryNotAddedRemedy is what to do about a repository the workspace has
-// never added: a person approves adding it, since the workspace then pays for
-// its checks, and the approval is then carried by --add-repository.
-const RepositoryNotAddedRemedy = "Adding it makes the workspace pay for its checks, so a person must approve it. " +
-	"Once they have, run the check again with `--add-repository --workspace <name|id>` for the workspace they approved, " +
-	"or they can run `slopcop enable` in the repository at a terminal."
 
 // RepositoryDisabledRemedy is what to do about a repository the workspace has
 // disabled, whether a person switched it off or it was added past the active
@@ -73,7 +62,6 @@ var personCodes = map[string]bool{
 	"insufficient_credits":               true,
 	"repository_disabled":                true,
 	"repository_not_enabled":             true,
-	"repository_not_added":               true,
 	"repository_add_unconfirmed":         true,
 	"workspace_repository_limit_reached": true,
 	"active_repository_limit_reached":    true,

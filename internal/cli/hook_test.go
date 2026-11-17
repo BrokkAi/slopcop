@@ -26,6 +26,8 @@ const hookSession = "session-one"
 type fakeService struct {
 	// active names the repositories the workspace checks.
 	active []string
+	// disabled names the repositories the workspace has but does not check.
+	disabled []string
 	// findings are the paths the check reports a new finding in.
 	findings   []string
 	severities []string
@@ -42,6 +44,8 @@ type fakeService struct {
 	outages int
 	lists   int
 	checks  int
+	// adds counts the checks that asked to add the repository.
+	adds int
 	// workspaces are the SlopCop-Workspace headers the requests carried.
 	workspaces []string
 }
@@ -71,9 +75,17 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			for _, name := range f.active {
 				listed.Repositories = append(listed.Repositories, service.Repository{ID: name, Provider: "github", FullName: name, Enabled: true, Active: true})
 			}
+			for _, name := range f.disabled {
+				listed.Repositories = append(listed.Repositories, service.Repository{ID: name, Provider: "github", FullName: name})
+			}
 			_ = json.NewEncoder(w).Encode(listed)
 		case "/v1/check":
 			f.checks++
+			var body service.Request
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			if body.AddRepository {
+				f.adds++
+			}
 			response := service.Response{Status: service.StatusClean, BaseCommit: base, Applied: true, Findings: []service.Finding{}, Incomplete: []service.IncompletePolicy{}}
 			line := 1
 			for i, path := range f.findings {
@@ -402,12 +414,28 @@ func TestHookDoesNotHoldTheAgentForFindingsOutsideItsFiles(t *testing.T) {
 	}
 }
 
-func TestHookSendsNothingForARepositoryTheWorkspaceDoesNotCheck(t *testing.T) {
+func TestHookAddsARepositoryTheWorkspaceNeverAdded(t *testing.T) {
 	isolateHook(t)
 	repo := newRepo(t, "https://github.com/someone/private.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
 	writeSessionEdits(t, repo, "demo.go")
 	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
+		t.Fatalf("output = %+v", output)
+	}
+	if fake.checks != 1 || fake.adds != 1 {
+		t.Fatalf("checks = %d, adds = %d, want one check that adds the repository", fake.checks, fake.adds)
+	}
+}
+
+func TestHookSendsNothingForARepositoryTheWorkspaceDoesNotCheck(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/someone/private.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, disabled: []string{"someone/private"}, findings: []string{"demo.go"}}
 	server := fake.start(t, repo)
 
 	for i := 0; i < 2; i++ {
@@ -555,18 +583,20 @@ func TestHookTreatsABriefOutageAsPassing(t *testing.T) {
 
 func TestHookMatchesTheRepositoryProvider(t *testing.T) {
 	isolateHook(t)
-	// The workspace has github.com/BrokkAi/slopcop; this is a GitLab clone.
+	// The workspace disabled github.com/BrokkAi/slopcop; this is a GitLab
+	// clone, which it never added, so the hook adds it rather than taking
+	// the GitHub one's state.
 	repo := newRepo(t, "https://gitlab.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
 	writeSessionEdits(t, repo, "demo.go")
-	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	fake := &fakeService{disabled: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
 	server := fake.start(t, repo)
 
-	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output.Decision != "block" {
 		t.Fatalf("output = %+v", output)
 	}
-	if fake.checks != 0 {
-		t.Fatalf("checks = %d, want none", fake.checks)
+	if fake.checks != 1 || fake.adds != 1 {
+		t.Fatalf("checks = %d, adds = %d, want one check that adds the repository", fake.checks, fake.adds)
 	}
 }
 
@@ -576,15 +606,15 @@ func TestACheckByHandTurnsTheHookBackOn(t *testing.T) {
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
 	writeSessionEdits(t, repo, "demo.go")
-	fake := &fakeService{findings: []string{"demo.go"}}
+	fake := &fakeService{disabled: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
 	server := fake.start(t, repo)
 
-	// Not active yet: the hook turns off.
+	// Disabled: the hook turns off.
 	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) || fake.checks != 0 {
 		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
 	}
-	// The person adds the repository with a check by hand.
-	fake.active = []string{"BrokkAi/slopcop"}
+	// The person turns the repository back on and checks it by hand.
+	fake.active, fake.disabled = []string{"BrokkAi/slopcop"}, nil
 	if code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL); code != 1 {
 		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
 	}
@@ -622,15 +652,15 @@ func TestACheckByHandInAnotherWorkspaceDoesNotOpenTheGate(t *testing.T) {
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
 	writeSessionEdits(t, repo, "demo.go")
-	fake := &fakeService{}
+	fake := &fakeService{disabled: []string{"BrokkAi/slopcop"}}
 	server := fake.start(t, repo)
 
 	const other = "6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b"
 	code, _, stderr := runCLI(t, "check", "--root", repo, "-w", other, "--service", server.URL)
-	if code != service.ExitNeedsPerson || !strings.Contains(stderr, repositoryNotAddedCode) {
+	if code != service.ExitNeedsPerson || !strings.Contains(stderr, repositoryDisabledCode) {
 		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
 	}
-	// The login's own workspace does not have the repository either, so the
+	// The login's own workspace has it disabled too, so the
 	// check by hand in another workspace opens no gate.
 	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) {
 		t.Fatalf("output = %+v", output)

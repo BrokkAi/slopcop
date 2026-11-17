@@ -72,8 +72,9 @@ with the shell instead, for example a heredoc or `cp` from a scratch file.
    or the range has no commits, write a one-line report ("nothing landed
    since <sha>"), update `lastRun`, and stop.
 2. `slopcop whoami --format json` and `slopcop status`. The repository must be
-   `active`. If it is not, stop and say so. Never run `slopcop enable` and never
-   pass `--add-repository`. Never pass a workspace the user did not name.
+   `active` or `not added` (the first check adds it). If it is disabled or over
+   the limit, stop and say so. Never run `slopcop enable`. Never pass a
+   workspace the user did not name.
 3. Pass `--certainty all` on every check. An audit exists to triage the
    `possible` and `heuristic` findings too.
 4. Pass `--mode static` on every check. An audit runs only the hosted half.

@@ -219,7 +219,7 @@ func writeStatus(out io.Writer, answer statusReport) {
 func statusText(repository statusRepository) string {
 	switch repository.State {
 	case statusNotAdded:
-		return "not added (run 'slopcop enable' from the checkout to add it)"
+		return "not added (the next check adds it)"
 	case statusUnsupported:
 		return "unsupported (SlopCop checks github.com, gitlab.com and bitbucket.org)"
 	case statusOverLimit:

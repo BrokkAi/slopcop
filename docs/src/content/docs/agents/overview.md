@@ -21,7 +21,8 @@ the loop:
 The CLI itself is built for this: it never prompts, the static half sends one
 request, and it answers with a closed exit-code contract. Any agent that can run
 a shell command can run it. `--if-enabled` skips the static half when the
-repository is inactive; local review still runs in default `both` mode.
+workspace has disabled the repository; local review still runs in default
+`both` mode.
 
 ## Local review
 
@@ -40,17 +41,18 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 For the hosted static check, sign in once with `slopcop login` and run
 `slopcop init` once to install the user-level skills, Stop hooks and push gates.
 
-Once per repository, at a terminal:
+A check adds a repository the workspace has never added, so this is optional.
+To add one ahead of its first check, at a terminal:
 
 ```console
 slopcop enable   # add this checkout to the workspace and run its first check
 ```
 
-After that the agent can check the repository by itself. A static check of one
-the workspace has not added exits `4` with `repository_not_added`, and one it
-has disabled with `repository_disabled`; an automatic check
-can use `--if-enabled` to skip its static half. Local review still runs in
-default `both` mode. `slopcop status` shows where a checkout stands.
+The agent can also check a repository the workspace has never added: the check
+adds it. A check of one the workspace has disabled exits `4` with
+`repository_disabled`; an automatic check can use `--if-enabled` to skip its
+static half. Local review still runs in default `both` mode. `slopcop status`
+shows where a checkout stands.
 
 `slopcop init` names what it did. It is machine-wide and safe to rerun; fresh
 checkouts do not need another install. See the

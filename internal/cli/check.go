@@ -37,18 +37,9 @@ const (
 	invalidChange      = "invalid_change"
 	baseNotFound       = "base_not_found"
 	repositoryTooLarge = "repository_too_large"
-	// addRepositoryNeedsWorkspace is the usage error for --add-repository
-	// without --workspace: the approval is for one workspace, so the flag
-	// names it rather than trusting wherever the login points.
-	addRepositoryNeedsWorkspace = "--add-repository needs --workspace <name|id>: name the workspace the user approved adding the repository to, so it cannot be added to another"
 	// repositoryNotEnabledCode is --if-enabled's skip of a repository the
 	// workspace does not have active, whatever its state.
 	repositoryNotEnabledCode = "repository_not_enabled"
-	// repositoryNotAddedCode is the CLI's refusal of a check of a repository
-	// the workspace has never added. The CLI refuses locally so a check never
-	// adds, and bills for, a repository by itself; an agent may add it once a
-	// person approves.
-	repositoryNotAddedCode = "repository_not_added"
 	// repositoryDisabledCode is the refusal of a check of a repository the
 	// workspace has disabled, which only a person may turn back on.
 	repositoryDisabledCode = "repository_disabled"
@@ -109,9 +100,6 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		opts.certainty = certaintyAll
 	default:
 		return fmt.Errorf("unknown certainty %q (expected definite or all)", opts.certainty)
-	}
-	if opts.addRepository && strings.TrimSpace(opts.workspace) == "" {
-		return errors.New(addRepositoryNeedsWorkspace)
 	}
 	if opts.showExisting {
 		fmt.Fprintln(cmd.ErrOrStderr(), showExistingNotice)
@@ -423,11 +411,12 @@ const (
 )
 
 // gateCheck decides, before anything is reviewed or sent, whether the check
-// may run: it picks the workspace and looks up the repository. It runs
-// before the local reviewers start, so a refused check of a repository the
-// workspace has not added or has disabled spends no reviewer time and
-// reports no review beside its refusal. Unless it returns gateSend, the
-// outcome is the static half's.
+// may run: it picks the workspace and looks up the repository. A repository
+// the workspace has never added is added by the check itself, so an agent
+// does not have to stop and ask. It runs before the local reviewers start, so
+// a refused check of a repository the workspace has disabled spends no
+// reviewer time and reports no review beside its refusal. Unless it returns
+// gateSend, the outcome is the static half's.
 func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, version string) (staticOutcome, gateResult) {
 	if prepared.staticErr != nil {
 		return staticFailure(cmd, prepared.staticErr), gateStatic
@@ -442,10 +431,9 @@ func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, 
 	if err != nil {
 		return staticFailure(cmd, err), gateStatic
 	}
-	// --add-repository is approval to add a repository the workspace does
-	// not have, not to turn back on one it disabled. It changes nothing for
-	// one already in the workspace.
-	if opts.addRepository && (repository.Active || repository.State == statusNotAdded) {
+	// Adding is not turning back on: a disabled repository stays the
+	// workspace's choice.
+	if repository.State == statusNotAdded {
 		prepared.request.AddRepository = true
 		return staticOutcome{}, gateSend
 	}
@@ -459,8 +447,6 @@ func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, 
 		return staticOutcome{skipped: &report.Skipped{Code: repositoryNotEnabledCode, State: repository.State, Repository: name, Message: message}, status: "skipped"}, gateStatic
 	}
 	switch repository.State {
-	case statusNotAdded:
-		return staticFailure(cmd, repositoryNotAdded(repository)), gateInactive
 	case statusDisabled:
 		return staticFailure(cmd, repositoryDisabled(repository)), gateInactive
 	case statusOverLimit:
@@ -669,19 +655,6 @@ func inactiveReason(state string) string {
 		return "is on a host SlopCop does not check"
 	}
 	return "is not active in your SlopCop workspace"
-}
-
-// repositoryNotAdded is the local refusal of a check of a repository the
-// workspace has never added. It is local so the check never sends the request
-// that would add, and bill for, the repository. Adding it is a step a person
-// approves, after which --add-repository carries that approval.
-func repositoryNotAdded(repository statusRepository) *service.Error {
-	return &service.Error{Body: service.ErrorBody{
-		Code:      repositoryNotAddedCode,
-		Message:   fmt.Sprintf("%s has not been added to your SlopCop workspace, so the check did not run.", repositoryDisplayName(repository)),
-		Remedy:    service.RepositoryNotAddedRemedy,
-		Retryable: false,
-	}}
 }
 
 // repositoryDisabled is the local refusal of a check of a repository the

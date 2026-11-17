@@ -51,11 +51,9 @@ type Request struct {
 	// Attribution is optional and advisory: the service validates each field
 	// on its own and drops what fails, so it never refuses a check.
 	Attribution *Attribution `json:"attribution,omitempty"`
-	// AddRepository confirms adding the repository to the workspace that
-	// then checks and bills it. The CLI sends it only for an explicit,
-	// approved add: `slopcop enable` at a terminal, or --add-repository for
-	// the workspace a person named. A check never adds a repository by
-	// itself.
+	// AddRepository adds the repository to the workspace that then checks
+	// and bills it. The CLI sends it when that workspace has never added the
+	// repository, never for one it has disabled.
 	AddRepository bool `json:"addRepository,omitempty"`
 }
 
