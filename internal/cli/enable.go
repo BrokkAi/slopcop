@@ -1,7 +1,13 @@
 package cli
 
 import (
+	"bufio"
+	"context"
+	"errors"
 	"fmt"
+	"io"
+	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -24,6 +30,10 @@ not one. An agent runs with your login, and the service cannot tell it from
 you, so adding a repository stays a step you take yourself. Once a person has
 confirmed it, 'check --add-repository --workspace <name|id>' carries the same
 approval without a terminal.
+
+An account with more than one workspace is asked which one checks the
+repository, unless --workspace names it, and is told when another of its
+workspaces already has the repository, so it is not added twice by accident.
 
 Adding a repository through 'enable' also runs its first check.`,
 		Args: cobra.NoArgs,
@@ -50,8 +60,9 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 		return serviceFailure(cmd, err)
 	}
 	target := whoami.Workspace
-	if wanted := resolveWorkspaceName(workspace); wanted != "" {
-		target, err = findWorkspace(whoami.Workspaces, wanted)
+	named := resolveWorkspaceName(workspace) != ""
+	if named {
+		target, err = findWorkspace(whoami.Workspaces, resolveWorkspaceName(workspace))
 		if err != nil {
 			return err
 		}
@@ -61,20 +72,142 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	if err != nil {
 		return serviceFailure(cmd, err)
 	}
+	// Adding is where a repository lands in the wrong workspace: a login checks
+	// in one workspace for every checkout on the machine, so a work repository
+	// is one 'enable' away from a personal workspace. An account with a choice
+	// makes it here, knowing which of its workspaces already have the repository.
+	// An agent or a script is not asked and costs no extra requests: the
+	// confirmation below refuses it without a terminal.
+	if _, atTerminal := confirmInput(cmd); atTerminal && repository.State == statusNotAdded && len(whoami.Workspaces) > 1 {
+		holders := workspacesWithRepository(cmd.Context(), client, whoami.Workspaces, repository.URL, target.ID)
+		if !named {
+			chosen, err := askWorkspace(cmd, repository.FullName, whoami.Workspaces, target, holders)
+			if err != nil {
+				return err
+			}
+			if chosen.ID != target.ID {
+				target = chosen
+				client.Workspace = target.ID
+				if repository, err = lookupRepositoryStatus(cmd.Context(), client, repoRoot); err != nil {
+					return serviceFailure(cmd, err)
+				}
+			}
+		}
+		if repository.State == statusNotAdded {
+			warnAlreadyElsewhere(cmd, repository.FullName, target, holders)
+		}
+	}
 	switch repository.State {
 	case statusActive:
 		fmt.Fprintf(cmd.OutOrStdout(), "slopcop: %s is already enabled in %s\n",
 			repository.FullName, workspaceName(target.Name, true))
-		return nil
 	case statusUnsupported:
 		return fmt.Errorf("SlopCop checks repositories on github.com, gitlab.com and bitbucket.org, not %s", repository.URL)
 	case statusDisabled, statusOverLimit:
-		return enableExisting(cmd, client, repository, target)
+		err = enableExisting(cmd, client, repository, target)
 	case statusNotAdded:
-		return addRepository(cmd, repoRoot, repository, target, serviceFlag, version)
+		err = addRepository(cmd, repoRoot, repository, target, serviceFlag, version)
 	default:
 		return fmt.Errorf("this repository is %s, so it cannot be enabled", repository.State)
 	}
+	if enabledIn(err) && target.ID != whoami.Workspace.ID {
+		// The login still checks in its own workspace, where a plain check of
+		// this repository would be refused.
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: this login checks in %s. To check this repository in %s, pass --workspace %q, or set SLOPCOP_WORKSPACE.\n",
+			workspaceName(whoami.Workspace.Name, true), workspaceName(target.Name, true), target.Name)
+	}
+	return err
+}
+
+// enabledIn reports whether the repository ended up enabled: nothing failed,
+// or the first check ran and answered, with findings or without.
+func enabledIn(err error) bool {
+	var exit silentExit
+	if errors.As(err, &exit) {
+		return exit.code == service.ExitClean || exit.code == service.ExitFindings
+	}
+	return err == nil
+}
+
+// workspacesWithRepository lists the account's workspaces, other than the one
+// with id except, that already have repoURL, enabled or not. It asks each
+// workspace for its repositories; one that does not answer is left out, since
+// this only informs a choice the person still makes.
+func workspacesWithRepository(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) []service.Workspace {
+	current := client.Workspace
+	defer func() { client.Workspace = current }()
+	var holders []service.Workspace
+	for _, workspace := range workspaces {
+		if strings.EqualFold(workspace.ID, except) {
+			continue
+		}
+		client.Workspace = workspace.ID
+		repository, err := repositoryStatus(ctx, client, repoURL)
+		if err != nil || repository.State == statusNotAdded || repository.State == statusUnsupported {
+			continue
+		}
+		holders = append(holders, workspace)
+	}
+	return holders
+}
+
+// askWorkspace asks the person at the terminal which of the account's
+// workspaces should check, and bill, the repository, naming the login's own
+// and those that already have it. Without a terminal it answers target
+// unasked: the confirmation that follows refuses there anyway.
+func askWorkspace(cmd *cobra.Command, name string, workspaces []service.Workspace, target service.Workspace, holders []service.Workspace) (service.Workspace, error) {
+	input, ok := confirmInput(cmd)
+	if !ok {
+		return target, nil
+	}
+	out := cmd.ErrOrStderr()
+	fmt.Fprintf(out, "slopcop: your account has %d workspaces. Which one should check, and bill, %s?\n", len(workspaces), name)
+	for index, workspace := range workspaces {
+		notes := []string{workspace.Kind}
+		if workspace.ID == target.ID {
+			notes = append(notes, "this login's")
+		}
+		if holdsRepository(holders, workspace) {
+			notes = append(notes, "already has it")
+		}
+		fmt.Fprintf(out, "  %d  %s (%s)\n", index+1, workspace.Name, strings.Join(notes, ", "))
+	}
+	fmt.Fprint(out, "Number: ")
+	answer, err := bufio.NewReader(input).ReadString('\n')
+	if err != nil && !errors.Is(err, io.EOF) {
+		return target, err
+	}
+	number, err := strconv.Atoi(strings.TrimSpace(answer))
+	if err != nil || number < 1 || number > len(workspaces) {
+		return target, fmt.Errorf("that is not a number from 1 to %d, so nothing was changed", len(workspaces))
+	}
+	return workspaces[number-1], nil
+}
+
+// warnAlreadyElsewhere says, before the repository is added to target, which
+// other workspaces of the account already have it, so a second copy that is
+// checked and billed twice is a choice and not an accident.
+func warnAlreadyElsewhere(cmd *cobra.Command, name string, target service.Workspace, holders []service.Workspace) {
+	var names []string
+	for _, workspace := range holders {
+		if workspace.ID != target.ID {
+			names = append(names, workspaceName(workspace.Name, true))
+		}
+	}
+	if len(names) == 0 {
+		return
+	}
+	fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %s is already in %s. Adding it to %s too checks and bills it in each; to check it there instead, stop here and pass --workspace to your checks.\n",
+		name, strings.Join(names, " and "), workspaceName(target.Name, true))
+}
+
+func holdsRepository(holders []service.Workspace, workspace service.Workspace) bool {
+	for _, holder := range holders {
+		if holder.ID == workspace.ID {
+			return true
+		}
+	}
+	return false
 }
 
 // enableExisting turns an added but disabled repository back on. A repository

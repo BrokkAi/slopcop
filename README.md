@@ -375,8 +375,18 @@ one that is already active is left alone. An agent runs with your login and
 the service cannot tell it from you, so adding a repository stays a step you
 take yourself.
 
+When your account has more than one workspace and the repository is in neither
+the login's nor the one `--workspace` names, `enable` first lists the
+workspaces by number, marking the login's own and any that already have the
+repository, and asks which one should check and bill it. Before it adds a
+repository another of your workspaces already has, it says so, since both would
+then check and bill it. After enabling in a workspace other than the login's it
+reminds you that a plain check still runs in the login's workspace: pass
+`--workspace`, or set `SLOPCOP_WORKSPACE`, to check there.
+
 The static half never adds a repository. A check of one the workspace has not
-added exits `4` with `repository_not_enabled` and sends nothing; `status` shows
+added exits `4` with `repository_not_enabled`, naming the workspace the check
+ran in, and sends nothing; `status` shows
 the same state, and a check that is not at a terminal asks nothing. Once a
 person has approved adding one, `check --add-repository --workspace <name|id>`
 carries that approval without a terminal; the flag needs `--workspace` (the flag

@@ -408,7 +408,8 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 				return staticOutcome{skipped: &report.Skipped{Code: repositoryNotEnabledCode, State: repository.State, Repository: name, Message: message}, status: "skipped"}
 			}
 			if repository.State == statusNotAdded {
-				return failed(repositoryNotEnabled(repository))
+				workspace, known := resolvedWorkspace(cmd.Context(), client)
+				return failed(repositoryNotEnabled(repository, workspace, known))
 			}
 		}
 	}
@@ -549,15 +550,21 @@ var checkRepository = lookupRepositoryStatus
 // repositoryNotEnabled is the local refusal of a check of a repository the
 // workspace has not added. It is local so the check never sends the request
 // that would add, and bill for, the repository.
-func repositoryNotEnabled(repository statusRepository) *service.Error {
+func repositoryNotEnabled(repository statusRepository, workspace string, known bool) *service.Error {
 	name := repository.FullName
 	if name == "" {
 		name = repository.URL
 	}
+	// The workspace by name: a login checks in one workspace on every checkout,
+	// and the one it is bound to is often not the one the person has in mind.
+	where := "your SlopCop workspace"
+	if known {
+		where = fmt.Sprintf("%q, the workspace this check ran in", workspace)
+	}
 	return &service.Error{Body: service.ErrorBody{
 		Code:      repositoryNotEnabledCode,
-		Message:   fmt.Sprintf("%s is not enabled in your SlopCop workspace, so the check did not run.", name),
-		Remedy:    "Run `slopcop enable` in the repository at a terminal to add it to the workspace, then check again.",
+		Message:   fmt.Sprintf("%s is not enabled in %s, so the check did not run.", name, where),
+		Remedy:    "Run `slopcop enable` in the repository at a terminal to add it, or pass `--workspace <name>` if another of your workspaces checks it, then check again.",
 		Retryable: false,
 	}}
 }
