@@ -54,8 +54,7 @@ slopcop --root ../repo --base origin/main
 | `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); repository rules still run |
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
 | `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
-| `--if-enabled` | check only if the repository is active in the workspace; otherwise exit `0` without sending a check |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; pass it once the user has approved that. A check without it never adds a repository |
+| `--if-enabled` | skip a repository the workspace has disabled or has past its active limit, exiting `0` without sending a check; one it has never added is added |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
 Exit codes: `0` clean, `1` new findings, `2` incomplete or failed, `3` still
@@ -68,8 +67,10 @@ Add the repository the `origin` remote names to the workspace that checks and
 bills it, and run its first check. A repository already added but disabled is
 enabled again. The command names the workspace and the cost, asks you to type
 the repository's `owner/name`, and refuses when stdin is not a terminal. It
-exits with the first check's result. A check never adds a repository by
-itself. See [Repositories](/account/repositories/).
+exits with the first check's result. A check adds a repository the workspace
+has never added by itself, so `enable` is optional for that; it is how a
+person turns a disabled repository back on. See
+[Repositories](/account/repositories/).
 
 | Flag | Meaning |
 | --- | --- |
@@ -89,8 +90,8 @@ way to answer whether a checkout is handled by SlopCop. See
 | `--format human\|json` | output format (default `human`) |
 | `-w`, `--workspace NAME\|ID` | workspace to inspect, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
 
-States: `active`; `disabled`; `enabled, over the limit`; `not added` (run
-`slopcop enable` from the checkout to add it); and `unsupported` (SlopCop checks
+States: `active`; `disabled`; `enabled, over the limit`; `not added` (the
+next check adds it); and `unsupported` (SlopCop checks
 repositories on github.com, gitlab.com and bitbucket.org). `json` carries the
 same state as `active`,
 `disabled`, `over_limit`, `not_added`, or `unsupported`, with the repository's

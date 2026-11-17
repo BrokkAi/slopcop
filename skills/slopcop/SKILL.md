@@ -11,32 +11,30 @@ patch from the base commit to the working tree; the service applies it, runs the
 hosted policy catalog plus the repository rules selected, and returns the
 report. The hosted static analyzer needs no per-language install. `--mode ai`
 runs local review without the service, login, enabled repository, or supported
-origin. `--if-enabled` skips only the static half for an inactive repository;
-local review still runs in `both` mode. Run from a Claude Code or Codex session,
+origin. `--if-enabled` skips only the static half for a repository the
+workspace has disabled; local review still runs in `both` mode. Run from a Claude Code or Codex session,
 a check also sends which models wrote each changed file, read from the session's
 own record; `--verbose` prints it.
 
 ## Hosted static check and repository enablement
 
-The hosted static half checks only repositories enabled in the workspace.
-Local review in `ai` mode does not require enablement. `slopcop status`
-says whether this checkout is added and active. `slopcop enable` adds it, and
-only a person at a terminal can run it; it shows the workspace and what adding
-the repository costs.
+A check of a repository the workspace has never added adds it to the workspace
+the check runs in and checks it, so do not stop to ask the user first. It says
+`added owner/name to "Workspace"` on stderr, and `json` carries
+`"repositoryAdded": true`; mention it in your summary. Local review in `ai`
+mode does not need the repository in the workspace. `slopcop status` says
+whether this checkout is added and active.
 
 Before an automatic or routine check, run `slopcop check --if-enabled`. The
-static half sends nothing when the repository is inactive. In `both` mode the
-local review still runs; inspect `review` and the merged exit. In `static` mode
-the result is `"status": "skipped"` and exit `0`. When a check says the
-repository is not active, do nothing: do not run `slopcop enable`, do not ask
-the user to add it, and do not describe the change as checked. Mention it only
-when the user asks about SlopCop.
+static half sends nothing when the workspace has disabled the repository or
+has it past its active limit. In `both` mode the local review still runs;
+inspect `review` and the merged exit. In `static` mode the result is
+`"status": "skipped"` and exit `0`. When a check says the repository is
+disabled, do nothing about it: do not run `slopcop enable`, and do not describe
+the change as checked. Mention it only when the user asks about SlopCop.
 
-When the user asks for a hosted static check of a repository that is not
-enabled, tell them to run `slopcop enable` at a terminal. `--mode ai` can
-still run the local review. Never run `slopcop enable` yourself, and never pass
-`--add-repository` without the user's explicit approval for the workspace they
-named.
+Never turn a disabled repository back on. `slopcop enable` does that, and only
+a person at a terminal runs it.
 
 ## Sign in
 
@@ -86,19 +84,14 @@ names, whether the workspace has it and whether it is active.
   charged. A check of a disabled repository answers `repository_disabled`.
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
-- A check never adds a repository. The only ways a repository joins a
-  workspace are `slopcop enable`, run by a person at a terminal, or
-  `check --add-repository --workspace <name|id>` after a person approved
-  adding it to that workspace. `slopcop enable` runs the first check and says
-  `added owner/name to "Workspace"` on stderr; `json` carries
-  `"repositoryAdded": true`.
-- A plain check of a repository the workspace has not added exits `4` with
-  `repository_not_enabled` and sends nothing. Tell the user to run `slopcop
-  enable` at a terminal when they asked for a check; otherwise continue
-  without checking, as `--if-enabled` says.
-- Do not pass `--add-repository` without the user's explicit approval, do not
-  pick a workspace they did not name, and do not pipe an answer into a
-  command that asks at a terminal.
+- A check adds a repository the workspace has never added, to the workspace
+  the check runs in. `--add-repository` is no longer needed.
+- A check of a repository the workspace has disabled exits `4` with
+  `repository_disabled`, and one past the active limit with
+  `active_repository_limit_reached`. Which repositories stay active is the
+  workspace's choice: stop and tell the user, and never re-enable it yourself.
+- Do not pick a workspace the user did not name, and do not pipe an answer
+  into a command that asks at a terminal.
 
 ## Modes and reviewer requirements
 
@@ -106,9 +99,11 @@ Where reviewers are configured, a check runs the hosted static half and local
 review concurrently (`both` mode). With none configured, or in CI, a check with
 no mode set runs only the static half and, outside CI, says so on stderr.
 The JSON report then has no `review` and sets `reviewSkipped` (`noReviewers`,
-`ci`, or `staticMode`): a `clean` status there covers only the static half.
+`ci`, `staticMode`, or `repositoryInactive`): a `clean` status there covers
+only the static half.
 `--mode static` or `--static` runs only the hosted half; `--mode ai` or `--ai`
-runs only review. `--if-enabled` skips only an inactive static half. The Stop
+runs only review. `--if-enabled` skips only the static half of a disabled
+repository. The Stop
 hook and `slopcop enable` remain static-only. A single captured snapshot
 includes committed, uncommitted, and untracked work, excluding ignored
 files. Both halves omit changed JSON data (`.json`, `.jsonl`, `.ndjson`) and
@@ -178,7 +173,7 @@ to `20m`. A complete review is reused when its inputs have not changed.
 
 ```console
 slopcop                            # check the current checkout
-slopcop check --if-enabled         # automatic check: skip an inactive repository
+slopcop check --if-enabled         # automatic check: skip a disabled repository
 slopcop check --format json        # machine-readable report
 slopcop --root ../repo --base origin/main
 ```
@@ -190,7 +185,7 @@ the `origin/HEAD` merge base instead. In modes with static analysis, one request
 goes out even when nothing changed: an empty patch is a real check, not a skip.
 Its report has `"emptyChange": true` and stderr says so; a `clean` status then
 means nothing was checked, not that the work passed. `--if-enabled` is the one
-skip: it sends nothing when the repository is not active.
+skip: it sends nothing when the workspace has disabled the repository.
 
 When you check work you have already committed, pass `--base` with the branch
 the change targets, such as the PR's base (`--base origin/main`), instead of
@@ -216,10 +211,8 @@ PATH` for a repository-relative `.rqlp` file (repeatable), and
 otherwise join automatically. `--timeout DURATION` bounds the whole wait for a
 result (default 10 minutes) and `--verbose` prints the resolved request to
 stderr. `--if-enabled` is the automatic path for the static half: it sends
-nothing when the repository is inactive, but local review still runs.
-`--add-repository`, with `--workspace`, adds the repository once the user has
-approved it (see above); prefer `slopcop enable`, which asks the person
-directly.
+nothing when the workspace has disabled the repository, but local review still
+runs.
 
 When the service reports a newer release, the CLI prints one line on stderr,
 at most once a day, starting `slopcop vX.Y.Z is available`. It never touches
@@ -300,10 +293,9 @@ the usual codes mean:
 | `repository_too_large` | The repository is over the service's size limit (50,000 files or 512 MiB, on every plan), so nothing was checked, and retrying as is will not help. The lines after the remedy (and `sizeBreakdown` in `--format json`) name the base tree's largest paths, measured locally, and a ready `[check] exclude` snippet. Act on it as for `repositorySize.nearLimit`. |
 | `finding_not_found` | `slopcop ignore`, `unignore` or `dictionary add` got an id that is not from a check run with this login; use one a check printed. |
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
-| `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
-| `repository_not_enabled` | The repository is not added to this workspace, so nothing was checked. When the user asked for the check, tell them to run `slopcop enable` at a terminal; when the check was automatic, continue without mentioning it. |
+| `repository_disabled` | The workspace has the repository disabled, by a person or past its active limit. Do not re-enable or re-add it; run `slopcop whoami` to name that workspace, and tell the user that only a person can turn it back on. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
-| `repository_add_unconfirmed` | The check tried to add a repository the workspace then pays for. Do not retry with `--add-repository` unless the user approved it for the workspace named; otherwise tell them to run `slopcop enable` at a terminal. |
+| `repository_add_unconfirmed` | An older slopcop reached a repository the workspace does not have without adding it. Update slopcop and check again. |
 | `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
 

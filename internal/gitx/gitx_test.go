@@ -599,3 +599,79 @@ func TestRemoteDefaultBranchFollowsARename(t *testing.T) {
 		t.Fatal("a directory with no origin named a default branch")
 	}
 }
+
+func TestTreePatchDeletionsCarryNoContent(t *testing.T) {
+	root := initRepo(t)
+	text := strings.Repeat("old text line\n", 2000)
+	writeFile(t, root, "text.txt", text)
+	writeFile(t, root, "data.bin", "\x00"+strings.Repeat("binary", 2000))
+	writeFile(t, root, "empty.txt", "")
+	writeFile(t, root, "tool.sh", "#!/bin/sh\necho old tool\n")
+	writeFile(t, root, "kept.txt", "before\n")
+	git(t, root, "add", "-A")
+	git(t, root, "update-index", "--chmod=+x", "tool.sh")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+	for _, name := range []string{"text.txt", "data.bin", "empty.txt", "tool.sh"} {
+		if err := os.Remove(filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	writeFile(t, root, "kept.txt", "after\n")
+	snapshot, err := CaptureWorkingTree(root, nil)
+	if err != nil {
+		t.Fatalf("CaptureWorkingTree: %v", err)
+	}
+	change, err := TreePatch(root, base, snapshot.Tree)
+	if err != nil {
+		t.Fatalf("TreePatch: %v", err)
+	}
+	if change.Files != 5 {
+		t.Errorf("Files = %d; want 5", change.Files)
+	}
+	patch := string(change.Patch)
+	if strings.Contains(patch, "old text line") || strings.Contains(patch, "old tool") || len(patch) > 2000 {
+		t.Errorf("deletions carry their old content (%d bytes):\n%s", len(patch), patch)
+	}
+	if !strings.Contains(patch, "-before\n+after\n") {
+		t.Errorf("an edit lost its hunk:\n%s", patch)
+	}
+
+	clone := filepath.Join(t.TempDir(), "clone")
+	cloneFixture(t, root, clone)
+	git(t, clone, "checkout", "-q", base)
+	apply := func() ([]byte, error) {
+		command := exec.Command("git", "-C", clone, "apply", "--binary", "-")
+		command.Stdin = bytes.NewReader(change.Patch)
+		return command.CombinedOutput()
+	}
+	// A deletion still applies only to the content it names.
+	writeFile(t, clone, "text.txt", text+"edited\n")
+	if output, err := apply(); err == nil {
+		t.Fatalf("patch deleted a file whose content differs from the base:\n%s", output)
+	}
+	writeFile(t, clone, "text.txt", text)
+	if output, err := apply(); err != nil {
+		t.Fatalf("apply: %v\n%s", err, output)
+	}
+	for _, name := range []string{"text.txt", "data.bin", "empty.txt", "tool.sh"} {
+		if _, err := os.Lstat(filepath.Join(clone, name)); !os.IsNotExist(err) {
+			t.Errorf("%s survived the patch (stat err %v)", name, err)
+		}
+	}
+	if got := readFile(t, clone, "kept.txt"); got != "after\n" {
+		t.Errorf("kept.txt = %q", got)
+	}
+}
+
+func TestCompactDeletionsKeepsOtherSections(t *testing.T) {
+	zero := strings.Repeat("0", 40)
+	old := strings.Repeat("a", 40)
+	gitlink := "diff --git a/sub b/sub\ndeleted file mode 160000\nindex " + old + ".." + zero + "\n--- a/sub\n+++ /dev/null\n@@ -1 +0,0 @@\n-Subproject commit " + old + "\n"
+	edit := "diff --git a/x b/x\nindex " + old + ".." + strings.Repeat("b", 40) + " 100644\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-deleted file mode 100644\n+diff --git a/y b/y\n"
+	for _, patch := range []string{gitlink, edit, gitlink + edit} {
+		if got := string(compactDeletions([]byte(patch))); got != patch {
+			t.Errorf("compactDeletions rewrote\n%s\ninto\n%s", patch, got)
+		}
+	}
+}

@@ -21,7 +21,7 @@ completed.
 | `incomplete` | The change has no new finding, but some rule could not answer for the changed files, or the analysis failed. Neither a pass nor a fault in the code. Exit `2`. |
 | `pending` | Not a result yet: the check was still running when `--timeout` ran out. Run the same check again. Exit `3`. |
 | `failed` | The service refused or could not run the check. Carries a `code`, `message`, and `remedy`. Exit `4` when only a person can clear it, `2` otherwise. |
-| `skipped` | The CLI sent nothing because `--if-enabled` found the repository not active. Carries `code: repository_not_enabled`, the repository, and its state. Exit `0`; this is not a check result. |
+| `skipped` | The CLI sent nothing because `--if-enabled` found the repository disabled or past the active limit. Carries `code: repository_not_enabled`, the repository, and its state. Exit `0`; this is not a check result. |
 
 The CLI merges static and review statuses. Top-level JSON `status` matches
 the exit code, except that new findings below `--fail-on` (or with
@@ -29,7 +29,7 @@ the exit code, except that new findings below `--fail-on` (or with
 half's status when it differs.
 Review details are in `review`, including each configured reviewer, its error
 if it could not run, and its log path. When the review did not run, `review`
-is absent and `reviewSkipped` says why (`noReviewers`, `ci`, or `staticMode`). Exit `0` can include a static skip or empty review;
+is absent and `reviewSkipped` says why (`noReviewers`, `ci`, `staticMode`, or `repositoryInactive`). Exit `0` can include a static skip or empty review;
 inspect those statuses before calling the change checked.
 
 ## New and existing findings
@@ -155,14 +155,16 @@ result covers.
   `existingFindings`, not here.
 - **`failure`**: the analysis as a whole did not complete, and the report
   makes no claim about the code, even if it lists findings.
-- **`repositoryAdded`**: `true` only when this check carried an approved add,
-  as `slopcop enable` or `--add-repository` does. A check never adds a
-  repository by itself. See [Repositories](/account/repositories/).
+- **`repositoryAdded`**: `true` when this check added the repository to the
+  workspace, because the workspace had never added it. See
+  [Repositories](/account/repositories/).
 - **`omittedFiles`**: JSON data and binary artifacts omitted from upload and
-  local review by the 500,000-byte size filter. Each entry gives the path,
-  larger base/current size in bytes, and reason. Those contents were not
+  local review by the 500,000-byte size filter, and changed files that
+  `.bifrostignore` or `[check] exclude` keep out of every check. Each entry
+  gives the path, larger base/current size in bytes, and reason
+  (`large-json`, `large-binary` or `excluded`). Those contents were not
   analyzed; a passing check covers the retained scope. Repeatable `--include`
-  paths or globs opt particular files back in. See [Run a check](/checks/run-a-check/).
+  paths or globs opt particular large files back in. See [Run a check](/checks/run-a-check/).
 - **`emptyChange`**: the patch has no in-scope changes. If the size filter
   omitted every changed file, the result is `skipped` with no analysis or push
   approval. Otherwise the working tree matches the base; rerun with `--base`

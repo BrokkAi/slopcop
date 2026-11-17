@@ -118,7 +118,7 @@ slopcop check --format json
 | `checkId` | the check that answered; absent from an older service |
 | `staticStatus` | the static half's status when it differs from merged `status` |
 | `review` | `status`, `reviewers`, `findings`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused`. `findings` is what the reviewers reported, parsed from each one's reply: `reviewer`, `priority` (`P0` to `P3`, absent when untagged), `path`, `startLine` and `endLine` when the reviewer named a location, `title`, and `message`. A reply without a tagged finding is one finding holding the whole reply. Review findings have no `id`, so `slopcop ignore` does not take them; use `slopcop override` for wrong ones |
-| `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), or `staticMode` (static mode chosen by flag or config). A static-only `clean` is not a reviewed change |
+| `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), `staticMode` (static mode chosen by flag or config), or `repositoryInactive` (the check was refused as `repository_disabled` or `active_repository_limit_reached` before the review started). A static-only `clean` is not a reviewed change |
 | `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
 | `baseCommit` | the commit the patch was applied to |
@@ -135,13 +135,14 @@ slopcop check --format json
 | `failure` | present when the analysis as a whole did not complete |
 | `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
-| `omittedFiles` | files omitted from both upload and local review by the size filter, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json` or `large-binary`); their contents were not analyzed |
+| `omittedFiles` | files omitted from both upload and local review by the size filter or because `.bifrostignore` or `[check] exclude` keeps them out of checks, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json`, `large-binary` or `excluded`); their contents were not analyzed |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
 | `repositorySize` | the service's measure of the check's checkout, as it sent it: `files`, `bytes`, `maxFiles`, `maxBytes`, `excludedFiles`, `excludedBytes`, and `nearLimit`; absent from an older service |
 | `sizeBreakdown` | present when `repositorySize.nearLimit` is true: the base tree measured locally, with `base`, `files`, `bytes`, `excludedFiles`, `excludedBytes` (what `.bifrostignore` and `[check] exclude` already leave out), `rankedBy` (`bytes` or `files`), `largest` (at most five paths, each with `path`, `directory`, `files`, `bytes` and the `[check] exclude` `pattern` that leaves it out), the config's current `exclude` list and `hasCheck`, and `configError` when `.slopcop/config.toml` does not parse |
+| `orgRules` | present when the check ran shared rules from the owner's [`.slopcop` repository](/checks/repository-rules/#share-rules-across-an-organization): `repository`, the `commit` they were read at, and each rule file's path in `files` |
 
 Failure, pending, skipped, and AI-only JSON also include `approved` and any
-`omittedFiles`. If the filter omits every changed file, the result is `skipped`
+`omittedFiles`. If the size filter omits every changed file, the result is `skipped`
 with no approval or analysis. The first SARIF run has `slopcop.approved` in its
 properties; `slopcop.omittedFiles` lists omissions on each run. A local review's
 `tree` identifies the complete snapshot, while optional `diffTree` identifies
@@ -150,7 +151,7 @@ the filtered scope actually reviewed.
 A failed check prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the service
 sent one, and `sizeBreakdown` for `repository_too_large`. A check still running at `--timeout` prints `{"status": "pending",
-"retryAfter": 5, "message": …, "remedy": …}`. `--if-enabled` with an inactive
+"retryAfter": 5, "message": …, "remedy": …}`. `--if-enabled` with a disabled
 repository prints `{"status": "skipped", "code": "repository_not_enabled",
 "state": …, "repository": …, "message": …}` and exits `0`, because it sent
 nothing.

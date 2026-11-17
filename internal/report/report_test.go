@@ -3,12 +3,14 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -1290,6 +1292,41 @@ func TestStaticJSONFieldOrderIsUnchanged(t *testing.T) {
 	}
 }
 
+// TestJSONNamesTheOrgRulesTheCheckRan checks that the owner's shared rules
+// the service names reach the JSON report as sent, and that a check that ran
+// none leaves the field out.
+func TestJSONNamesTheOrgRulesTheCheckRan(t *testing.T) {
+	response := service.Response{Status: service.StatusClean, BaseCommit: "base", OrgRules: &service.OrgRules{
+		Repository: "acme/.slopcop",
+		Commit:     strings.Repeat("c", 40),
+		Files:      []string{".slopcop/policies/sql/no-raw-query.rqlp"},
+	}}
+	var out bytes.Buffer
+	if err := Write(&out, response, FormatJSON, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	want := map[string]any{
+		"repository": "acme/.slopcop",
+		"commit":     strings.Repeat("c", 40),
+		"files":      []any{".slopcop/policies/sql/no-raw-query.rqlp"},
+	}
+	if !reflect.DeepEqual(document["orgRules"], want) {
+		t.Fatalf("orgRules = %v", document["orgRules"])
+	}
+	response.OrgRules = nil
+	out.Reset()
+	if err := Write(&out, response, FormatJSON, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "orgRules") {
+		t.Fatalf("a check without org rules names them: %s", out.String())
+	}
+}
+
 // TestReviewHumanNamesFailedReviewers checks that a clean review a reviewer
 // did not finish says so, and shows the retried reviewer's first failure.
 func TestReviewHumanNamesFailedReviewers(t *testing.T) {
@@ -2252,5 +2289,27 @@ func TestStaticSummaryOmitsReviewFindingsWithoutReview(t *testing.T) {
 	}
 	if strings.Contains(out.String(), "reviewFindings") {
 		t.Fatal(out.String())
+	}
+}
+
+func TestHumanReportCountsExcludedFilesAndNamesOnlyAFew(t *testing.T) {
+	omitted := []OmittedFile{{Path: "big.json", Bytes: 600000, Reason: "large-json"}}
+	for i := range listedExcluded + 3 {
+		omitted = append(omitted, OmittedFile{Path: fmt.Sprintf("records/%02d.json", i), Bytes: 2, Reason: gitx.OmittedExcluded})
+	}
+	got := omittedFilesHuman(Options{OmittedFiles: omitted})
+	for _, want := range []string{
+		"due to size: 1 file(s), 600000 bytes total.",
+		"  big.json (600000 bytes): large-json\n",
+		"[check] exclude keeps them out of checks: 13 file(s), 26 bytes total.",
+		"  records/09.json (2 bytes)\n",
+		"  ... and 3 more; --format json lists them all.\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("human report missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "records/10.json") {
+		t.Errorf("human report names more than %d excluded files:\n%s", listedExcluded, got)
 	}
 }

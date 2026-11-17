@@ -16,6 +16,14 @@ import (
 // the filtered patch tree.
 const MaxCheckDataBytes int64 = 500000
 
+// OmittedExcluded is the reason given for a changed path the repository's
+// own exclusions keep out of every check.
+const OmittedExcluded = "excluded"
+
+// Excluder reports which of the changed paths the repository's own
+// configuration keeps out of every check, so they need not be sent.
+type Excluder func(paths []string) (map[string]bool, error)
+
 // OmittedFile describes one changed path restored to its base-tree state.
 type OmittedFile struct {
 	Path   string
@@ -43,9 +51,11 @@ type rawTreeChange struct {
 
 // FilterCheckTree makes a patch tree from an immutable captured tree. It
 // classifies changed paths without creating a patch, then uses a private index
-// to restore omitted paths to base. The caller's index and worktree are never
-// changed, and tree itself remains the original captured snapshot.
-func FilterCheckTree(root, base, tree string, include ...string) (FilteredTree, error) {
+// to restore omitted paths to base: large data files, unless include names
+// them, and the paths exclude, when set, reports. The caller's index and
+// worktree are never changed, and tree itself remains the original captured
+// snapshot.
+func FilterCheckTree(root, base, tree string, exclude Excluder, include ...string) (FilteredTree, error) {
 	includedPaths, err := resolveIncludedPaths(root, base, tree, include)
 	if err != nil {
 		return FilteredTree{}, err
@@ -95,6 +105,16 @@ func FilterCheckTree(root, base, tree string, include ...string) (FilteredTree, 
 	for i := range changes {
 		changeByPath[changes[i].path] = &changes[i]
 	}
+	excluded := map[string]bool{}
+	if exclude != nil {
+		paths := make([]string, len(changes))
+		for i := range changes {
+			paths[i] = changes[i].path
+		}
+		if excluded, err = exclude(paths); err != nil {
+			return FilteredTree{}, err
+		}
+	}
 	reasons := make(map[string]string)
 	for i := range changes {
 		change := &changes[i]
@@ -141,6 +161,18 @@ func FilterCheckTree(root, base, tree string, include ...string) (FilteredTree, 
 		reasons[pair[1]] = reason
 	}
 	for _, group := range directoryFileChangeGroups(changes) {
+		// A transition the exclusions cover whole stays out whole; one they
+		// cover in part is sent whole, as restoring part of it cannot.
+		allExcluded := true
+		for _, name := range group {
+			allExcluded = allExcluded && excluded[name]
+		}
+		if allExcluded {
+			continue
+		}
+		for _, name := range group {
+			delete(excluded, name)
+		}
 		omittedPath := ""
 		included := false
 		for _, name := range group {
@@ -165,6 +197,14 @@ func FilterCheckTree(root, base, tree string, include ...string) (FilteredTree, 
 		}
 	}
 
+	// An excluded path is left out whatever its size, and --include, which
+	// only overrides the size filter, cannot bring it back: the service would
+	// leave it out of the check anyway.
+	for name, ok := range excluded {
+		if ok && changeByPath[name] != nil {
+			reasons[name] = OmittedExcluded
+		}
+	}
 	if len(reasons) == 0 {
 		return FilteredTree{Tree: tree}, nil
 	}

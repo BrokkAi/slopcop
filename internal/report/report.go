@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/reposize"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
@@ -33,6 +34,9 @@ const (
 	ReviewSkippedCI = "ci"
 	// ReviewSkippedStaticMode is static mode chosen by flag or config file.
 	ReviewSkippedStaticMode = "staticMode"
+	// ReviewSkippedRepositoryInactive is a check of a repository the
+	// workspace has not added or has disabled, stopped before the review.
+	ReviewSkippedRepositoryInactive = "repositoryInactive"
 )
 
 const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
@@ -60,7 +64,7 @@ type Options struct {
 	// the new ones. They are counted either way.
 	ShowExisting bool
 	// EmptyChange marks a check whose patch had no in-scope changes. With
-	// OmittedFiles, the size filter removed them all; otherwise the snapshot
+	// OmittedFiles, the size filter or the exclusions removed them all; otherwise the snapshot
 	// matched the base. The human format leaves it to the CLI's stderr note.
 	EmptyChange bool
 	// Verbose lists the inconclusive checks in the human format, which
@@ -239,25 +243,49 @@ func human(response service.Response, options Options) string {
 
 // omittedFilesHuman always names files left out of analysis, with their sizes
 // and reasons. Scope changes must be visible without an extra verbosity flag.
+// Files the repository's exclusions cover are counted and named only up to
+// listedExcluded, since removing an excluded folder can touch thousands.
 func omittedFilesHuman(options Options) string {
-	if len(options.OmittedFiles) == 0 {
-		return ""
-	}
-	totalBytes := int64(0)
+	var large, excluded []OmittedFile
+	var largeBytes, excludedBytes int64
 	for _, file := range options.OmittedFiles {
-		totalBytes += file.Bytes
+		if file.Reason == gitx.OmittedExcluded {
+			excluded = append(excluded, file)
+			excludedBytes += file.Bytes
+		} else {
+			large = append(large, file)
+			largeBytes += file.Bytes
+		}
 	}
 
 	var out strings.Builder
-	fmt.Fprintf(&out,
-		"Files omitted from both hosted upload and local review due to size: %d file(s), %d bytes total. Their contents were not analyzed.\n",
-		len(options.OmittedFiles), totalBytes,
-	)
-	for _, file := range options.OmittedFiles {
-		fmt.Fprintf(&out, "  %s (%d bytes): %s\n", printable(file.Path), file.Bytes, printable(file.Reason))
+	if len(large) > 0 {
+		fmt.Fprintf(&out,
+			"Files omitted from both hosted upload and local review due to size: %d file(s), %d bytes total. Their contents were not analyzed.\n",
+			len(large), largeBytes,
+		)
+		for _, file := range large {
+			fmt.Fprintf(&out, "  %s (%d bytes): %s\n", printable(file.Path), file.Bytes, printable(file.Reason))
+		}
+	}
+	if len(excluded) > 0 {
+		fmt.Fprintf(&out,
+			"Files left out of both hosted upload and local review because .bifrostignore or [check] exclude keeps them out of checks: %d file(s), %d bytes total.\n",
+			len(excluded), excludedBytes,
+		)
+		for i, file := range excluded {
+			if i == listedExcluded {
+				fmt.Fprintf(&out, "  ... and %d more; --format json lists them all.\n", len(excluded)-i)
+				break
+			}
+			fmt.Fprintf(&out, "  %s (%d bytes)\n", printable(file.Path), file.Bytes)
+		}
 	}
 	return out.String()
 }
+
+// listedExcluded is how many excluded files the human report names.
+const listedExcluded = 10
 
 // writeHumanOmittedAndReview preserves the usual review output while making
 // omitted analysis scope visible for result shapes with no static summary.
@@ -996,6 +1024,9 @@ type jsonReport struct {
 	// SizeBreakdown is set only when repositorySize.nearLimit is: the
 	// largest paths of the base tree, measured locally.
 	SizeBreakdown *reposize.Breakdown `json:"sizeBreakdown,omitempty"`
+	// OrgRules names the owner's shared rules the check ran, as the service
+	// sent it. It is set only when the check ran some.
+	OrgRules *service.OrgRules `json:"orgRules,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
@@ -1027,6 +1058,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Exclusions:           response.Exclusions,
 		RepositorySize:       response.RepositorySize,
 		SizeBreakdown:        options.SizeBreakdown,
+		OrgRules:             response.OrgRules,
 	}, "json report")
 }
 

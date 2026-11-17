@@ -19,7 +19,7 @@ func TestFilteredCaptureDiffAndReuseScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	filtered, err := gitx.FilterCheckTree(root, original.BaseCommit, snapshot.Tree)
+	filtered, err := gitx.FilterCheckTree(root, original.BaseCommit, snapshot.Tree, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

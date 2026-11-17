@@ -51,11 +51,9 @@ type Request struct {
 	// Attribution is optional and advisory: the service validates each field
 	// on its own and drops what fails, so it never refuses a check.
 	Attribution *Attribution `json:"attribution,omitempty"`
-	// AddRepository confirms adding the repository to the workspace that
-	// then checks and bills it. The CLI sends it only for an explicit,
-	// approved add: `slopcop enable` at a terminal, or --add-repository for
-	// the workspace a person named. A check never adds a repository by
-	// itself.
+	// AddRepository adds the repository to the workspace that then checks
+	// and bills it. The CLI sends it when that workspace has never added the
+	// repository, never for one it has disabled.
 	AddRepository bool `json:"addRepository,omitempty"`
 }
 
@@ -140,6 +138,21 @@ type Response struct {
 	// used, counts only. A service or runner from before
 	// BrokkAi/bifrost-service#1192 omits it.
 	RepositorySize *RepositorySize `json:"repositorySize,omitempty"`
+	// OrgRules names the shared rules from the owner's .slopcop repository
+	// that the check ran. Nil when it ran none, or from a service that
+	// predates organization rules.
+	OrgRules *OrgRules `json:"orgRules,omitempty"`
+}
+
+// OrgRules is the set of an owner's shared rules a check ran: where they
+// came from and which files, never their content.
+type OrgRules struct {
+	// Repository is the owner's rules repository, owner/.slopcop.
+	Repository string `json:"repository"`
+	// Commit is the commit of its default branch the rules were read at.
+	Commit string `json:"commit"`
+	// Files is each rule file's path in that repository.
+	Files []string `json:"files"`
 }
 
 // RepositorySize mirrors CheckRepositorySize. It names no paths: a client

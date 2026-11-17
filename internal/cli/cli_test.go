@@ -1481,13 +1481,85 @@ func (s *enableService) start(t *testing.T, repo string) *httptest.Server {
 	return server
 }
 
-func TestCheckNeverAddsARepository(t *testing.T) {
+func TestCheckAddsARepositoryTheWorkspaceNeverAdded(t *testing.T) {
 	isolateUserConfig(t)
 	realRepositoryCheck(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 
-	t.Run("a plain check refuses without sending one", func(t *testing.T) {
+	t.Run("a plain check adds it and checks it", func(t *testing.T) {
 		svc := &enableService{}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+		if code != 0 || strings.Contains(stderr, "[y/N]") || strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Dave\"\n") != 1 {
+			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		}
+		if len(svc.checks) != 1 || svc.checks[0]["addRepository"] != true {
+			t.Errorf("checks = %v, want one check that adds the repository", svc.checks)
+		}
+	})
+
+	t.Run("--workspace picks the workspace it is added to", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "-w", "Acme team", "--service", server.URL)
+		if code != 0 || !strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"") {
+			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		}
+		if len(svc.workspaces) == 0 {
+			t.Error("no request named a workspace")
+		}
+		for _, workspace := range svc.workspaces {
+			if workspace != teamID {
+				t.Errorf("workspaces = %v, want only the named workspace", svc.workspaces)
+				break
+			}
+		}
+	})
+
+	t.Run("--if-enabled adds it too", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
+		if code != 0 || len(svc.checks) != 1 || svc.checks[0]["addRepository"] != true {
+			t.Errorf("exit = %d, checks = %v, stderr = %q", code, svc.checks, stderr)
+		}
+	})
+
+	t.Run("an active repository is checked without adding it", func(t *testing.T) {
+		svc := &enableService{repositories: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+		}}}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
+		if code != 0 || len(svc.checks) != 1 || svc.checks[0]["addRepository"] == true {
+			t.Errorf("exit = %d, checks = %v, stderr = %q", code, svc.checks, stderr)
+		}
+	})
+
+	t.Run("the retired --add-repository flag is still accepted", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "--service", server.URL)
+		if code != 0 || len(svc.checks) != 1 {
+			t.Errorf("exit = %d, checks = %v, stderr = %q", code, svc.checks, stderr)
+		}
+	})
+}
+
+func TestCheckDoesNotTurnAnInactiveRepositoryBackOn(t *testing.T) {
+	isolateUserConfig(t)
+	realRepositoryCheck(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+
+	t.Run("a disabled repository is refused without a command to re-enable it", func(t *testing.T) {
+		svc := &enableService{repositories: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: false, Active: false,
+		}}}
 		server := svc.start(t, repo)
 		pipedStdin(t, "")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
@@ -1495,17 +1567,22 @@ func TestCheckNeverAddsARepository(t *testing.T) {
 		if err := json.Unmarshal([]byte(stdout), &document); err != nil {
 			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
 		}
-		if code != service.ExitNeedsPerson || document["status"] != "failed" ||
-			document["code"] != repositoryNotEnabledCode || document["retryable"] != false {
+		if code != service.ExitNeedsPerson || document["status"] != "failed" || document["code"] != repositoryDisabledCode {
 			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
 		}
-		if len(svc.checks) != 0 || svc.lists != 1 {
-			t.Errorf("checks = %d, lists = %d, want 0 and 1", len(svc.checks), svc.lists)
+		remedy, _ := document["remedy"].(string)
+		if strings.Contains(remedy, "slopcop enable") || strings.Contains(remedy, "--add-repository") {
+			t.Errorf("remedy = %q, want no command that re-enables the repository", remedy)
+		}
+		if len(svc.checks) != 0 {
+			t.Errorf("checks = %v, want none", svc.checks)
 		}
 	})
 
-	t.Run("--if-enabled skips without sending a check", func(t *testing.T) {
-		svc := &enableService{}
+	t.Run("--if-enabled skips a disabled repository", func(t *testing.T) {
+		svc := &enableService{repositories: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: false, Active: false,
+		}}}
 		server := svc.start(t, repo)
 		pipedStdin(t, "")
 		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
@@ -1514,7 +1591,7 @@ func TestCheckNeverAddsARepository(t *testing.T) {
 			t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
 		}
 		if code != 0 || document["status"] != "skipped" || document["code"] != repositoryNotEnabledCode ||
-			document["state"] != statusNotAdded || !strings.Contains(stderr, "is not enabled in your SlopCop workspace, so nothing was checked") {
+			document["state"] != statusDisabled || !strings.Contains(stderr, "was disabled in your SlopCop workspace, so nothing was checked") {
 			t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
 		}
 		if len(svc.checks) != 0 {
@@ -1522,53 +1599,34 @@ func TestCheckNeverAddsARepository(t *testing.T) {
 		}
 	})
 
-	t.Run("--if-enabled checks an active repository", func(t *testing.T) {
+	t.Run("a repository past the active limit is refused without sending one", func(t *testing.T) {
 		svc := &enableService{repositories: []service.Repository{{
-			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: false,
 		}}}
 		server := svc.start(t, repo)
 		pipedStdin(t, "")
-		code, _, stderr := runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
-		if code != 0 || len(svc.checks) != 1 {
-			t.Errorf("exit = %d, checks = %d, stderr = %q", code, len(svc.checks), stderr)
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+		if code != service.ExitNeedsPerson || !strings.Contains(stderr, activeLimitCode) || len(svc.checks) != 0 {
+			t.Errorf("exit = %d, checks = %v, stderr = %q", code, svc.checks, stderr)
 		}
 	})
 
-	t.Run("--add-repository sends one confirmed check", func(t *testing.T) {
-		svc := &enableService{}
+	t.Run("--add-repository does not re-enable a disabled repository", func(t *testing.T) {
+		svc := &enableService{repositories: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: false, Active: false,
+		}}}
 		server := svc.start(t, repo)
 		pipedStdin(t, "")
 		code, _, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "-w", "Acme team", "--service", server.URL)
-		if code != 0 {
-			t.Fatalf("exit = %d, stderr = %s", code, stderr)
-		}
-		if strings.Contains(stderr, "[y/N]") || strings.Count(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") != 1 {
-			t.Errorf("stderr = %q", stderr)
-		}
-		if len(svc.checks) != 1 || svc.checks[0]["addRepository"] != true {
-			t.Errorf("checks = %v, want one confirmed check", svc.checks)
-		}
-		if len(svc.workspaces) != 1 || svc.workspaces[0] != teamID {
-			t.Errorf("workspaces = %v, want the named workspace", svc.workspaces)
-		}
-	})
-
-	t.Run("--add-repository without --workspace sends nothing", func(t *testing.T) {
-		svc := &enableService{}
-		server := svc.start(t, repo)
-		t.Setenv("SLOPCOP_WORKSPACE", "Acme team")
-		code, stdout, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "--format", "json", "--service", server.URL)
-		if code != 2 || stdout != "" || !strings.HasPrefix(stderr, "slopcop: --add-repository needs --workspace <name|id>: ") {
-			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
-		}
-		if len(svc.checks) != 0 {
-			t.Errorf("checks = %v, want none", svc.checks)
+		if code != service.ExitNeedsPerson || !strings.Contains(stderr, repositoryDisabledCode) || len(svc.checks) != 0 {
+			t.Errorf("exit = %d, checks = %v, stderr = %q", code, svc.checks, stderr)
 		}
 	})
 }
 
 func TestEnableAddsARepositoryAfterConfirmation(t *testing.T) {
 	isolateUserConfig(t)
+	realRepositoryCheck(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	svc := &enableService{}
 	server := svc.start(t, repo)
@@ -1649,6 +1707,7 @@ func TestEnableTurnsADisabledRepositoryBackOn(t *testing.T) {
 
 func TestEnableUsesTheWorkspaceFlag(t *testing.T) {
 	isolateUserConfig(t)
+	realRepositoryCheck(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	svc := &enableService{}
 	server := svc.start(t, repo)
@@ -1658,16 +1717,23 @@ func TestEnableUsesTheWorkspaceFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if len(svc.workspaces) != 2 || svc.workspaces[0] != teamID || svc.workspaces[1] != teamID {
-		t.Errorf("workspaces = %v, want the listing and the check in Acme team", svc.workspaces)
+	if len(svc.workspaces) < 2 {
+		t.Errorf("workspaces = %v, want the listing and the check", svc.workspaces)
+	}
+	for _, workspace := range svc.workspaces {
+		if workspace != teamID {
+			t.Errorf("workspaces = %v, want every request in Acme team", svc.workspaces)
+			break
+		}
 	}
 	if !strings.Contains(stderr, `slopcop: added BrokkAi/slopcop to "Acme team"`) {
 		t.Errorf("stderr = %q", stderr)
 	}
 }
 
-func TestCheckSaysWhenItAddedARepositoryThroughTheFlag(t *testing.T) {
+func TestCheckSaysWhenItAddedARepository(t *testing.T) {
 	isolateUserConfig(t)
+	realRepositoryCheck(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	svc := &enableService{}
 	server := svc.start(t, repo)
@@ -1959,6 +2025,82 @@ func TestBothReviewRunsWhenStaticCannotStart(t *testing.T) {
 	}
 	if doc.Status != "failed" || doc.Review.Status != "clean" {
 		t.Fatalf("%+v", doc)
+	}
+}
+
+func TestBothReviewDoesNotRunForADisabledRepository(t *testing.T) {
+	isolateUserConfig(t)
+	realRepositoryCheck(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$"}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc := &enableService{repositories: []service.Repository{{
+		ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: false, Active: false,
+	}}}
+	server := svc.start(t, repo)
+	pipedStdin(t, "")
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL)
+	if code != service.ExitNeedsPerson {
+		t.Fatalf("exit %d out %s stderr %s", code, out, stderr)
+	}
+	if strings.Contains(stderr, "reviewing with") {
+		t.Errorf("reviewers started for a refused check: %s", stderr)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(out), &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := document["review"]; has || document["status"] != "failed" ||
+		document["code"] != repositoryDisabledCode || document["reviewSkipped"] != "repositoryInactive" {
+		t.Errorf("document = %v", document)
+	}
+	if len(svc.checks) != 0 {
+		t.Errorf("checks = %v, want none", svc.checks)
+	}
+
+	// --if-enabled skips only the static half: the local review needs no
+	// active repository, so an automatic check still gets it.
+	code, out, stderr = runCLI(t, "check", "--root", repo, "--if-enabled", "--format", "json", "--service", server.URL)
+	if code != 0 || !strings.Contains(stderr, "reviewing with") {
+		t.Fatalf("exit %d out %s stderr %s", code, out, stderr)
+	}
+	document = nil
+	if err := json.Unmarshal([]byte(out), &document); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := document["review"]; !has || document["status"] != "skipped" {
+		t.Errorf("document = %v", document)
+	}
+}
+
+func TestARefusedCheckWithdrawsTheStaticPassFromOverride(t *testing.T) {
+	isolateUserConfig(t)
+	realRepositoryCheck(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "README.md", "changed\n")
+	t.Setenv("SLOPCOP_FAKE_ACP", "1")
+	cfg := config.Config{Mode: "both", Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	svc := &enableService{repositories: []service.Repository{{
+		ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+	}}}
+	server := svc.start(t, repo)
+	pipedStdin(t, "")
+	if code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL); code != service.ExitFindings {
+		t.Fatalf("first check exit %d out %s stderr %s", code, out, stderr)
+	}
+	svc.repositories[0].Enabled, svc.repositories[0].Active = false, false
+	if code, out, stderr := runCLI(t, "check", "--root", repo, "--format", "json", "--service", server.URL); code != service.ExitNeedsPerson {
+		t.Fatalf("refused check exit %d out %s stderr %s", code, out, stderr)
+	}
+	if code, out, stderr := runCLI(t, "override", "--root", repo, "--reason", "false positive"); code == 0 {
+		t.Fatalf("override after a refused check succeeded: %s %s", out, stderr)
 	}
 }
 

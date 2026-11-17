@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -628,5 +629,49 @@ func TestARedirectToAnotherOriginIsRefused(t *testing.T) {
 	}
 	if elsewhereHits != 0 {
 		t.Fatalf("the request followed the redirect %d times", elsewhereHits)
+	}
+}
+
+func TestCheckNamesAnUploadAProxyRefusedAsTooLarge(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = w.Write([]byte("<html><center><h1>413 Payload Too Large</h1></center></html>"))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	request := Request{Change: strings.Repeat("A", 1000)}
+	_, err = client.Check(context.Background(), request)
+	var failure *Error
+	if !errors.As(err, &failure) {
+		t.Fatalf("Check error = %v; want *Error", err)
+	}
+	sent, _ := json.Marshal(request)
+	body := failure.Body
+	if body.Code != "payload_too_large" || body.Retryable ||
+		!strings.Contains(body.Message, strconv.Itoa(len(sent))+" bytes") ||
+		!strings.Contains(body.Remedy, "[check] exclude") || strings.Contains(body.Remedy, "<html>") {
+		t.Fatalf("413 failure = %+v", body)
+	}
+}
+
+func TestCheckKeepsTheServicesOwnTooLargeAnswer(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusRequestEntityTooLarge)
+		_, _ = w.Write([]byte(`{"code":"payload_too_large","message":"The change touches too many files.","remedy":"Check a smaller change.","retryable":false}`))
+	}))
+	defer server.Close()
+
+	client, err := New(server.URL, "secret", "", 0)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = client.Check(context.Background(), Request{})
+	var failure *Error
+	if !errors.As(err, &failure) || failure.Body.Message != "The change touches too many files." {
+		t.Fatalf("Check error = %v; want the service's own answer", err)
 	}
 }
