@@ -456,6 +456,9 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		}
 		return failed(err)
 	}
+	if response.RepositoryAdded && opts.added != nil {
+		*opts.added = true
+	}
 	if response.RepositoryAdded {
 		workspace, known := resolvedWorkspace(cmd.Context(), client)
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n", repositoryName(request.RepoURL), workspaceName(workspace, known))

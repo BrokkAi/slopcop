@@ -117,19 +117,25 @@ func addRepository(cmd *cobra.Command, repoRoot string, repository statusReposit
 	if err := confirmChange(cmd, repository.FullName, "add"); err != nil {
 		return err
 	}
-	// The person chose this workspace for the checkout, so later checks
-	// run there whether or not this first one finds something.
-	if err := confirmed(); err != nil {
-		return err
-	}
 	// runCheck sends --add-repository with the workspace named here, so the
 	// approval cannot add the repository to another one.
-	return runCheck(cmd, &checkOptions{
+	added := false
+	checkErr := runCheck(cmd, &checkOptions{
 		root:          repoRoot,
 		mode:          modeStatic,
 		workspace:     target.ID,
 		addRepository: true,
+		added:         &added,
 	}, serviceFlag, version)
+	// The checkout is mapped only once the service has added the
+	// repository, whatever the first check then found: a check that never
+	// reached the service leaves an earlier mapping as it was.
+	if added {
+		if err := confirmed(); err != nil {
+			return err
+		}
+	}
+	return checkErr
 }
 
 func notifyCost(cmd *cobra.Command, action, repository, workspace string) {

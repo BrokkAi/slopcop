@@ -280,13 +280,20 @@ const workspaceNoticeLifetime = 7 * 24 * time.Hour
 
 // workspaceNoticeTimeout bounds the lookups behind the note, which must
 // never hold up a check.
-const workspaceNoticeTimeout = 15 * time.Second
+const workspaceNoticeTimeout = 5 * time.Second
+
+// workspaceNoticeRetry is how long a lookup that failed is left alone, so a
+// service that does not answer costs one wait, not one per check.
+const workspaceNoticeRetry = time.Hour
 
 // workspaceNotice records one unmapped checkout the note was considered for.
 type workspaceNotice struct {
 	At time.Time `json:"at"`
 	// Said is whether the note was printed; a printed note is not repeated.
 	Said bool `json:"said,omitempty"`
+	// Failed is whether the service could not be asked, which is tried
+	// again sooner than an answer with nothing to say.
+	Failed bool `json:"failed,omitempty"`
 }
 
 func workspaceNoticesPath() (string, error) {
@@ -353,13 +360,24 @@ func noticeUnmapped(cmd *cobra.Command, client *service.Client, choice workspace
 	}
 	key := config.Origin(client.BaseURL) + " " + strings.ToLower(choice.RepoURL)
 	notices := loadWorkspaceNotices()
-	if seen, ok := notices[key]; ok && (seen.Said || time.Since(seen.At) < workspaceNoticeLifetime) {
-		return
+	if seen, ok := notices[key]; ok {
+		wait := workspaceNoticeLifetime
+		if seen.Failed {
+			wait = workspaceNoticeRetry
+		}
+		if seen.Said || time.Since(seen.At) < wait {
+			return
+		}
+	}
+	failed := func() {
+		notices[key] = workspaceNotice{At: time.Now().UTC(), Failed: true}
+		saveWorkspaceNotices(notices)
 	}
 	ctx, cancel := context.WithTimeout(cmd.Context(), workspaceNoticeTimeout)
 	defer cancel()
 	whoami, err := client.Whoami(ctx)
 	if err != nil {
+		failed()
 		return
 	}
 	said := false
@@ -376,6 +394,7 @@ func noticeUnmapped(cmd *cobra.Command, client *service.Client, choice workspace
 			if err != nil {
 				// Half an answer would read as "nowhere else"; ask again
 				// on a later check.
+				failed()
 				return
 			}
 			if repository.State != statusNotAdded && repository.State != statusUnsupported {

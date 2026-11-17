@@ -160,6 +160,8 @@ type checkOptions struct {
 	showExisting     bool
 	timeout          time.Duration
 	workspace        string
+	// added, when set, is told that the check added the repository.
+	added *bool
 	// addRepository carries the user's approval of adding the repository to
 	// the workspace --workspace names, which then pays for it.
 	addRepository bool
