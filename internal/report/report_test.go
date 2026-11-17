@@ -1290,6 +1290,41 @@ func TestStaticJSONFieldOrderIsUnchanged(t *testing.T) {
 	}
 }
 
+// TestJSONNamesTheOrgRulesTheCheckRan checks that the owner's shared rules
+// the service names reach the JSON report as sent, and that a check that ran
+// none leaves the field out.
+func TestJSONNamesTheOrgRulesTheCheckRan(t *testing.T) {
+	response := service.Response{Status: service.StatusClean, BaseCommit: "base", OrgRules: &service.OrgRules{
+		Repository: "acme/.slopcop",
+		Commit:     strings.Repeat("c", 40),
+		Files:      []string{".slopcop/policies/sql/no-raw-query.rqlp"},
+	}}
+	var out bytes.Buffer
+	if err := Write(&out, response, FormatJSON, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	var document map[string]any
+	if err := json.Unmarshal(out.Bytes(), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	want := map[string]any{
+		"repository": "acme/.slopcop",
+		"commit":     strings.Repeat("c", 40),
+		"files":      []any{".slopcop/policies/sql/no-raw-query.rqlp"},
+	}
+	if !reflect.DeepEqual(document["orgRules"], want) {
+		t.Fatalf("orgRules = %v", document["orgRules"])
+	}
+	response.OrgRules = nil
+	out.Reset()
+	if err := Write(&out, response, FormatJSON, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out.String(), "orgRules") {
+		t.Fatalf("a check without org rules names them: %s", out.String())
+	}
+}
+
 // TestReviewHumanNamesFailedReviewers checks that a clean review a reviewer
 // did not finish says so, and shows the retried reviewer's first failure.
 func TestReviewHumanNamesFailedReviewers(t *testing.T) {

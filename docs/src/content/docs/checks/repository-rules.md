@@ -35,6 +35,59 @@ the base with the change applied. A rule a pull request adds or edits applies
 to that pull request. Symbolic links are skipped, and these checks have no
 way to turn discovery off or name other files; use the CLI for that.
 
+## Share rules across an organization
+
+An organization or user on GitHub can keep rules that all of its repositories
+run in one repository named `.slopcop`, the way GitHub's `.github` repository
+holds shared settings. Put them at the same path as in any repository:
+
+```text
+acme/.slopcop
+  .slopcop/
+    policies/
+      sql/
+        no-raw-query.rqlp        # :id "acme.sql.no-raw-query"
+```
+
+Every check of another `acme` repository runs these rules beside that
+repository's own: `slopcop check`, pull request checks, and checks your agent
+starts through the SlopCop MCP server. There is nothing to configure in each
+repository.
+
+- **Version.** A check runs the rules on the default branch of `.slopcop` as
+  they are when the check starts. A change merged there applies to checks
+  started about a minute later.
+- **Only your own repositories.** Only repositories with the same owner run
+  its rules, and a pull request from a fork runs the rules of the repository
+  it targets.
+- **Access.** If you installed the SlopCop app on selected repositories only,
+  include `.slopcop`. When SlopCop cannot read the repository, checks run
+  without its rules.
+- **Private rules.** A private `.slopcop` applies to the owner's private
+  repositories only. Anyone can check a public repository, and a finding shows
+  its rule's id and message, so public repositories run only a public
+  `.slopcop`'s rules.
+- **Override or turn off.** A repository rule with the same `:id` runs in place
+  of the organization's. To turn an organization rule off in one repository,
+  exclude it everywhere in that repository's `.slopcop/config.toml`:
+
+  ```toml
+  [[check.exclude_rules]]
+  paths = ["**"]
+  rules = ["acme.sql.no-raw-query"]
+  reason = "This service has no SQL."
+  ```
+
+- **Limits.** At most 256 rule files, 64 KiB each and 1 MiB in all. The
+  repository's own rules and the organization's count together toward the 256.
+  Two organization rules with one id, or a set past the limits, fail the check
+  with `policy_invalid`.
+
+The check's JSON names the rules it ran in `orgRules`: the repository, the
+commit and each file's path. A check of the `.slopcop` repository runs its
+rules as that repository's own, so you test them there the way you test any
+repository rule (see below).
+
 ## Name a rule
 
 A rule's id is what a finding reports as its `policyId`, what

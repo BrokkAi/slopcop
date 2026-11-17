@@ -996,6 +996,9 @@ type jsonReport struct {
 	// SizeBreakdown is set only when repositorySize.nearLimit is: the
 	// largest paths of the base tree, measured locally.
 	SizeBreakdown *reposize.Breakdown `json:"sizeBreakdown,omitempty"`
+	// OrgRules names the owner's shared rules the check ran, as the service
+	// sent it. It is set only when the check ran some.
+	OrgRules *service.OrgRules `json:"orgRules,omitempty"`
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
@@ -1027,6 +1030,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Exclusions:           response.Exclusions,
 		RepositorySize:       response.RepositorySize,
 		SizeBreakdown:        options.SizeBreakdown,
+		OrgRules:             response.OrgRules,
 	}, "json report")
 }
 
