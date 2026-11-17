@@ -157,6 +157,7 @@ finishes its own work, then downloads that release, checks the archive against
 its `checksums.txt`, and replaces its own binary:
 
 ```text
+slopcop: updating from v0.0.7 to v0.0.9...
 slopcop: updated from v0.0.7 to v0.0.9; the next run uses it.
 ```
 
@@ -166,7 +167,9 @@ prints the upgrade notice with the reason, and is tried again a day later.
 pip, pipx or uv is not replaced, because that tool owns the file; it gets the
 notice above, and `slopcop update` names the command to run. Nothing updates
 itself when `$SLOPCOP_NO_AUTO_UPDATE` or `$CI` is set, so a job keeps the
-version it installed, or in a `dev` build or a `Stop` hook run.
+version it installed, or in a `Stop` hook run. Only a release build is replaced:
+a `dev` build, or one built ahead of a release, stays as built, and a
+pre-release is never installed by itself.
 
 ### Go
 

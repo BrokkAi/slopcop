@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -57,7 +56,10 @@ func noticeUpdates(cmd *cobra.Command, client *service.Client, version string) {
 	stamp, _ := config.NoticePath()
 	notifier := update.New(cmd.ErrOrStderr(), version, stamp)
 	client.LatestVersion = notifier.Notify
-	if collected, ok := cmd.Context().Value(updatersKey{}).(*updaters); ok && notifier != nil {
+	if notifier == nil || cmd.Context() == nil {
+		return
+	}
+	if collected, ok := cmd.Context().Value(updatersKey{}).(*updaters); ok {
 		collected.mu.Lock()
 		collected.list = append(collected.list, notifier)
 		collected.mu.Unlock()
@@ -72,7 +74,7 @@ func newUpdateCommand(version string) *cobra.Command {
 
 A slopcop installed by the install script replaces its own binary, after
 checking the download against the release's checksums. It also does this by
-itself after a check when the service reports a newer release, unless
+itself after a command when the service reports a newer release, unless
 $` + update.AutoDisableEnv + ` or $CI is set. A slopcop installed through npm, pipx, uv
 or pip is upgraded by that tool; this command names the command to run.`,
 		Args: cobra.NoArgs,
@@ -83,9 +85,13 @@ or pip is upgraded by that tool; this command names the command to run.`,
 }
 
 func runUpdate(ctx context.Context, out io.Writer, version string) error {
-	executable, err := os.Executable()
+	executable, err := update.Executable()
 	if err != nil {
 		return err
+	}
+	if !update.IsRelease(version) {
+		fmt.Fprintf(out, "slopcop: %s is not a release build, so it is left as it is\n", version)
+		return nil
 	}
 	if !update.SelfManaged(executable) {
 		fmt.Fprintf(out, "slopcop: this slopcop is not one it updates itself. Upgrade: %s\n", update.UpgradeCommand(executable))
@@ -97,7 +103,6 @@ func runUpdate(ctx context.Context, out io.Writer, version string) error {
 	if err != nil {
 		return err
 	}
-	// A dev build is behind nothing, so it is told so rather than replaced.
 	if !update.Newer(latest, version) {
 		fmt.Fprintf(out, "slopcop: %s is up to date (latest release %s)\n", version, latest)
 		return nil

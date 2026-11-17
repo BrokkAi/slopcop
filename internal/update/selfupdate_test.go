@@ -86,7 +86,7 @@ func TestApplyReplacesTheBinaryWithTheVerifiedRelease(t *testing.T) {
 		t.Fatalf("binary = %q, %v", data, err)
 	}
 	if info, _ := os.Stat(executable); runtime.GOOS != "windows" && info.Mode().Perm() != 0o755 {
-		t.Errorf("mode = %v, want 0755", info.Mode().Perm())
+		t.Errorf("mode = %v, want the old binary's 0755", info.Mode().Perm())
 	}
 	left, _ := filepath.Glob(filepath.Join(filepath.Dir(executable), ".slopcop-update-*"))
 	if len(left) != 0 {
@@ -156,7 +156,7 @@ func TestASelfManagedBinaryUpdatesWhenTheCommandIsDone(t *testing.T) {
 	}
 	n.Finish(context.Background())
 	n.Finish(context.Background())
-	if applied != "v0.0.9" || out.String() != "slopcop: updated from v0.0.7 to v0.0.9; the next run uses it.\n" {
+	if applied != "v0.0.9" || out.String() != "slopcop: updating from v0.0.7 to v0.0.9...\nslopcop: updated from v0.0.7 to v0.0.9; the next run uses it.\n" {
 		t.Errorf("applied %q, printed %q", applied, out.String())
 	}
 
@@ -168,7 +168,7 @@ func TestASelfManagedBinaryUpdatesWhenTheCommandIsDone(t *testing.T) {
 	n = notifier()
 	n.Notify("v0.0.9")
 	n.Finish(context.Background())
-	want := "slopcop v0.0.9 is available (you have v0.0.7), but updating to it failed: permission denied. Upgrade: " + InstallGuide + "\n"
+	want := "slopcop: updating from v0.0.7 to v0.0.9...\nslopcop v0.0.9 is available (you have v0.0.7), but updating to it failed: permission denied. Upgrade: " + InstallGuide + "\n"
 	if out.String() != want {
 		t.Errorf("printed %q, want %q", out.String(), want)
 	}
@@ -181,11 +181,48 @@ func TestASelfManagedBinaryUpdatesWhenTheCommandIsDone(t *testing.T) {
 		t.Errorf("a second try the same day: applied %q, printed %q", applied, out.String())
 	}
 
+	// A pre-release is announced, never installed.
+	now = now.Add(25 * time.Hour)
+	n = notifier()
+	n.Notify("v0.1.0-rc1")
+	n.Finish(context.Background())
+	if applied != "" || !strings.Contains(out.String(), "slopcop v0.1.0 is available") {
+		t.Errorf("a pre-release: applied %q, printed %q", applied, out.String())
+	}
+
+	// An interrupted update is tried again on the next run.
+	out.Reset()
+	now = now.Add(25 * time.Hour)
+	failure = nil
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	n = notifier()
+	n.Notify("v0.0.9")
+	n.Finish(canceled)
+	applied = ""
+	n = notifier()
+	n.Notify("v0.0.9")
+	n.Finish(context.Background())
+	if applied != "v0.0.9" {
+		t.Errorf("an interrupted update was not tried again")
+	}
+
 	// Nothing newer, nothing to do.
+	applied = ""
 	n = notifier()
 	n.Finish(context.Background())
 	if applied != "" {
 		t.Errorf("Finish updated with no newer release")
+	}
+}
+
+func TestOnlyAReleaseBuildIsReplaced(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"v0.0.9": true, "0.0.9": true, "v0.0.9-3-gabc123-dirty": false, "v0.1.0-rc1": false, "v0.0.9+build": false, "dev": false,
+	} {
+		if got := IsRelease(raw); got != want {
+			t.Errorf("IsRelease(%q) = %v, want %v", raw, got, want)
+		}
 	}
 }
 

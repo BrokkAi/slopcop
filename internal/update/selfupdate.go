@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 const (
@@ -27,6 +28,9 @@ const (
 	// list, so a wrong answer cannot fill memory.
 	maxArchive   = 256 << 20
 	maxChecksums = 1 << 20
+	// stagedPrefix starts the name of a new binary written beside the old
+	// one before it is moved into place.
+	stagedPrefix = ".slopcop-update-"
 )
 
 // releases is where release files and the latest-release redirect live. A
@@ -53,6 +57,23 @@ func autoUpdates() bool {
 // UpgradeCommand names the command that upgrades the binary at executable
 // through the channel it was installed by.
 func UpgradeCommand(executable string) string { return upgradeCommand(executable) }
+
+// Executable is the running binary, with symlinks resolved: the file an
+// update would replace.
+func Executable() (string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	return executable, nil
+}
+
+// IsRelease reports whether raw is exactly a release version, as a release
+// build carries, with no pre-release or build suffix.
+func IsRelease(raw string) bool { return isRelease(raw) }
 
 // Newer reports whether latest is a release after current. A dev build, or
 // anything that is not a release version, is never behind.
@@ -216,7 +237,20 @@ func replace(executable string, binary []byte) error {
 	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
 		executable = resolved
 	}
-	staged, err := os.CreateTemp(filepath.Dir(executable), ".slopcop-update-*")
+	// The new binary keeps the old one's permissions.
+	mode := os.FileMode(0o755)
+	if info, err := os.Stat(executable); err == nil {
+		mode = info.Mode().Perm()
+	}
+	// An update that was killed can leave its staged file behind.
+	if stale, err := filepath.Glob(filepath.Join(filepath.Dir(executable), stagedPrefix+"*")); err == nil {
+		for _, file := range stale {
+			if info, err := os.Stat(file); err == nil && time.Since(info.ModTime()) > time.Hour {
+				_ = os.Remove(file)
+			}
+		}
+	}
+	staged, err := os.CreateTemp(filepath.Dir(executable), stagedPrefix+"*")
 	if err != nil {
 		return err
 	}
@@ -225,7 +259,7 @@ func replace(executable string, binary []byte) error {
 		staged.Close()
 		return err
 	}
-	if err := staged.Chmod(0o755); err != nil {
+	if err := staged.Chmod(mode); err != nil {
 		staged.Close()
 		return err
 	}
