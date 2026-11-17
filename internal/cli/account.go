@@ -339,7 +339,7 @@ func newRepoListCommand(serviceURL, workspace *string, version string) *cobra.Co
 				return writeJSON(out, listed)
 			}
 			if len(listed.Repositories) == 0 {
-				fmt.Fprintln(out, "slopcop: this workspace has no repositories yet; run 'slopcop enable' in a checkout to add one")
+				fmt.Fprintln(out, "slopcop: this workspace has no repositories yet; a check in a checkout adds its repository")
 				return nil
 			}
 			table := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)

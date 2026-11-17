@@ -59,8 +59,7 @@ func newStatusCommand(serviceURL *string, version string) *cobra.Command {
 		Long: `Show the account and workspace that bill checks, and whether the repository
 the origin remote names is added to that workspace and active.
 
-A repository that is not added is added by 'slopcop enable' from its checkout,
-at a terminal. A disabled one is not checked or charged; the workspace's owner
+A repository that is not added is added by its first check. A disabled one is not checked or charged; the workspace's owner
 enables it with 'slopcop repo enable'. SlopCop checks repositories on
 github.com, gitlab.com and bitbucket.org.`,
 		Args: cobra.NoArgs,
