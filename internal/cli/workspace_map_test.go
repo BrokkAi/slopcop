@@ -221,6 +221,7 @@ func TestStatusSaysWhyAWorkspaceWasChosen(t *testing.T) {
 		"State:      active\n",
 		"Workspace:  Acme team (team, member)\n",
 		"Chosen by:  this checkout's mapping (`slopcop workspace map`)\n",
+		"Plan:       Free (the plan of \"Dave\", this login's workspace)\n",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout = %q, want %q", stdout, want)
@@ -233,6 +234,12 @@ func TestStatusSaysWhyAWorkspaceWasChosen(t *testing.T) {
 		!strings.Contains(stdout, "Checkout:  Acme/widgets checks in, and bills, \"Acme team\" instead") {
 		t.Errorf("whoami: exit = %d, stdout = %q", code, stdout)
 	}
+	// The environment wins over the mapping, and whoami says so.
+	t.Setenv("SLOPCOP_WORKSPACE", "Dave")
+	if _, stdout, _ := runCLI(t, "whoami", "--service", server.URL); !strings.Contains(stdout, "but $SLOPCOP_WORKSPACE is set and wins") {
+		t.Errorf("whoami under the environment: stdout = %q", stdout)
+	}
+	t.Setenv("SLOPCOP_WORKSPACE", "")
 	code, stdout, _ = runCLI(t, "workspace", "mappings", "--service", server.URL)
 	if code != 0 || !strings.Contains(stdout, "https://github.com/acme/widgets  Acme team  "+teamID) {
 		t.Errorf("mappings: exit = %d, stdout = %q", code, stdout)

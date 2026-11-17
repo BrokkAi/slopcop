@@ -76,7 +76,7 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 		}
 		return recordMapping(cmd, client.BaseURL, repoURL, target)
 	case statusNotAdded:
-		return addRepository(cmd, repoRoot, repository, target, serviceFlag, version, func() error {
+		return addRepository(cmd, client, repoRoot, repository, target, serviceFlag, version, func() error {
 			return recordMapping(cmd, client.BaseURL, repoURL, target)
 		})
 	default:
@@ -112,7 +112,7 @@ func enableExisting(cmd *cobra.Command, client *service.Client, repository statu
 // addRepository is the one path that adds a repository to a workspace: a
 // person confirms it at a terminal, then the first check carries that
 // approval to the service.
-func addRepository(cmd *cobra.Command, repoRoot string, repository statusRepository, target service.Workspace, serviceFlag, version string, confirmed func() error) error {
+func addRepository(cmd *cobra.Command, client *service.Client, repoRoot string, repository statusRepository, target service.Workspace, serviceFlag, version string, confirmed func() error) error {
 	notifyCost(cmd, "adding", repository.FullName, target.Name)
 	if err := confirmChange(cmd, repository.FullName, "add"); err != nil {
 		return err
@@ -130,6 +130,14 @@ func addRepository(cmd *cobra.Command, repoRoot string, repository statusReposit
 	// The checkout is mapped only once the service has added the
 	// repository, whatever the first check then found: a check that never
 	// reached the service leaves an earlier mapping as it was.
+	if !added && checkErr != nil {
+		// A first check that timed out or was interrupted may have added
+		// the repository without saying so; the workspace's own list tells.
+		if listed, err := lookupRepositoryStatus(cmd.Context(), client, repoRoot); err == nil &&
+			listed.State != statusNotAdded && listed.State != statusUnsupported {
+			added = true
+		}
+	}
 	if added {
 		if err := confirmed(); err != nil {
 			return err

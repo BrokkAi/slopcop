@@ -37,8 +37,11 @@ type statusReport struct {
 	Account   service.Account   `json:"account"`
 	Workspace service.Workspace `json:"workspace"`
 	// Source says how Workspace was chosen: flag, env, mapping or login.
-	Source     string           `json:"workspaceSource"`
-	Plan       string           `json:"plan"`
+	Source string `json:"workspaceSource"`
+	Plan   string `json:"plan"`
+	// PlanOf is the login's own workspace, which Plan describes, when
+	// Workspace is another one: whoami answers only that plan.
+	PlanOf     string           `json:"planOf,omitempty"`
 	Repository statusRepository `json:"repository"`
 }
 
@@ -126,6 +129,9 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 		Source:     choice.Source,
 		Plan:       whoami.Plan,
 		Repository: repository,
+	}
+	if !strings.EqualFold(workspace.ID, whoami.Workspace.ID) {
+		answer.PlanOf = whoami.Workspace.Name
 	}
 	if opts.format == "json" {
 		return writeJSON(cmd.OutOrStdout(), answer)
@@ -220,7 +226,11 @@ func writeStatus(out io.Writer, answer statusReport) {
 	fmt.Fprintf(out, "Account:    %s\n", account)
 	fmt.Fprintf(out, "Workspace:  %s (%s, %s)\n", answer.Workspace.Name, answer.Workspace.Kind, answer.Workspace.Role)
 	fmt.Fprintf(out, "Chosen by:  %s\n", sourceText(answer.Source))
-	fmt.Fprintf(out, "Plan:       %s\n", planName(answer.Plan))
+	plan := planName(answer.Plan)
+	if answer.PlanOf != "" {
+		plan += fmt.Sprintf(" (the plan of %q, this login's workspace)", answer.PlanOf)
+	}
+	fmt.Fprintf(out, "Plan:       %s\n", plan)
 	fmt.Fprintf(out, "Service:    %s\n", answer.Service)
 }
 

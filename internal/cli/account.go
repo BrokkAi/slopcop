@@ -153,9 +153,16 @@ type checkoutMapping struct {
 	// Usable is false when the account can no longer use that workspace,
 	// so checks of the checkout are refused until it is mapped again.
 	Usable bool `json:"usable"`
+	// Overridden is true while $SLOPCOP_WORKSPACE names a workspace, which
+	// wins over the mapping.
+	Overridden bool `json:"overridden,omitempty"`
 }
 
 func (c checkoutMapping) text() string {
+	if c.Overridden {
+		return fmt.Sprintf("%s is mapped to %q, but $SLOPCOP_WORKSPACE is set and wins; `slopcop status` shows the workspace a check here runs in",
+			repositoryName(c.Repository), valueOr(c.WorkspaceName, c.WorkspaceID))
+	}
 	if !c.Usable {
 		return fmt.Sprintf("%s is mapped to %q, which this account cannot use; run `slopcop workspace map` or `slopcop workspace unmap`",
 			repositoryName(c.Repository), valueOr(c.WorkspaceName, c.WorkspaceID))
@@ -171,7 +178,8 @@ func whoamiCheckout(cfg config.Config, serviceURL string, whoami service.Whoami)
 	if repoURL == "" || !ok {
 		return nil
 	}
-	checkout := &checkoutMapping{Repository: repoURL, WorkspaceID: mapped.ID, WorkspaceName: mapped.Name}
+	checkout := &checkoutMapping{Repository: repoURL, WorkspaceID: mapped.ID, WorkspaceName: mapped.Name,
+		Overridden: strings.TrimSpace(os.Getenv("SLOPCOP_WORKSPACE")) != ""}
 	for _, workspace := range whoami.Workspaces {
 		if strings.EqualFold(workspace.ID, mapped.ID) {
 			checkout.Usable, checkout.WorkspaceName = true, workspace.Name
