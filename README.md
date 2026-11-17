@@ -244,21 +244,11 @@ own `--workspace` instead of switching it.
 
 Names match without regard to case; when two workspaces share a name, or two
 providers a repository name, pass the id the listing prints. There is no `repo
-add`: a first check adds a repository. When the workspace would then pay for
-it (it already has an active repository and is charged), the service refuses
-the check with `repository_add_unconfirmed` until a person confirms: at a
-terminal `check` prints what it costs, asks `Add owner/name to "Workspace"?
-[y/N]`, and on a yes sends the check again and says `added owner/name to
-"Workspace"` on stderr. With no terminal, as for an agent or CI (a pipe or the
-null device is not one), nothing is asked: the check exits `4` with the
-service's remedy, a line naming the command that confirms it, and, in `json`,
-a `failed` report naming the code. A no at the terminal ends the same way.
-Once the person has approved it, `check --add-repository --workspace
-<name|id>` confirms without a terminal; the flag needs `--workspace` (the
-flag itself, not `$SLOPCOP_WORKSPACE`), so an approval given for one
-workspace cannot add the repository to the one the login happens to point at.
-The flag changes nothing for a repository already in that workspace. A
-workspace's first repository is added without asking. Deleting repositories,
+add`: a check adds its repository, in the same run. When the workspace would
+then pay for it (it already has an active repository and is charged), `check`
+still adds it and runs, and says `added owner/name to "Workspace"` on stderr;
+nothing is asked, at a terminal or without one, and there is no second
+command to run. To stop paying for it, `repo disable` it. Deleting repositories,
 archiving workspaces, members, credits and repository settings stay in the web
 app. The commands exit `0` on success and `2` with the service's message and
 remedy otherwise, as `ignore` does.
@@ -302,7 +292,6 @@ Flags:
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
 | `--timeout DURATION` | how long to wait for the result (default `10m`) |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for it, without asking at a terminal; for after the user approved it |
 | `--verbose` | print the resolved request to stderr |
 
 ### What is sent
@@ -432,18 +421,16 @@ rewrite them. The remedies name no client, so the CLI adds its own command
 after some: `slopcop login` when the remedy is to sign in, the listing to
 choose from after `workspace_not_found` or `workspace_repository_not_found`,
 and `slopcop whoami` after `repository_disabled`, since the workspace that
-disabled it is the one this login is bound to, `--workspace` after
-`owner_required`, and `--add-repository --workspace "Name"`, with the
-workspace the check would have added the repository to, after
-`repository_add_unconfirmed`. A failed check exits `4` when only a person can
+disabled it is the one this login is bound to, and `--workspace` after
+`owner_required`. A failed check exits `4` when only a person can
 clear the refusal (`auth_required`, `auth_expired`, `account_required`,
 `repo_not_indexed`, `app_not_installed`, `app_no_repo_access`,
 `gitlab_not_connected`, `no_access`, `insufficient_credits`,
-`repository_disabled`, `repository_add_unconfirmed`,
+`repository_disabled`,
 `workspace_repository_limit_reached`, `active_repository_limit_reached`,
 `owner_required`, and `browser_required`), so a script can stop instead of
 retrying, and `2` otherwise. Stderr starts with the code, as in `slopcop:
-repository_add_unconfirmed: …`. `human` prints nothing on stdout; `json`
+repository_disabled: …`. `human` prints nothing on stdout; `json`
 prints `{"status": "failed", "code": …, "message": …, "remedy": …,
 "retryable": …}`, plus `installUrl` or `topUpUrl` when the service sent one;
 `sarif` prints a run with `slopcop.status` `failed`, whose invocation is
@@ -465,8 +452,9 @@ The CLI calls `POST <service>/v1/check` with a bearer token:
 }
 ```
 
-`addRepository` is sent only after a person confirms adding the repository, at
-the terminal or with `--add-repository`. The service rejects any other field.
+`addRepository` is sent when the service holds a check back with
+`repository_add_unconfirmed`: the CLI sends it again with the field set. The
+service rejects any other field.
 With `--workspace`, every request, the check's, the ignore's and the account
 routes', carries the workspace's id in the `SlopCop-Workspace` header; a name
 is first looked up with `GET <service>/v1/whoami`. The response carries `status`,

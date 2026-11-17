@@ -144,8 +144,8 @@ type checkOptions struct {
 	showExisting bool
 	timeout      time.Duration
 	workspace    string
-	// addRepository carries the user's approval of adding the repository to
-	// the workspace --workspace names, which then pays for it.
+	// addRepository is the old --add-repository, which a check no longer
+	// needs: it adds the repository itself.
 	addRepository bool
 }
 
@@ -168,7 +168,10 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.BoolVar(&opts.verbose, "verbose", false, "print the resolved request to stderr")
 	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "how long to wait for the result; a check still running then exits 3")
 	addWorkspaceFlag(command, false, &opts.workspace)
-	flags.BoolVar(&opts.addRepository, "add-repository", false, "add the repository to the workspace --workspace names, which then pays for it, without asking at a terminal; pass it once the user has approved that")
+	// A check adds its repository without being told to. The flag stays,
+	// hidden and without effect, so commands that pass it keep working.
+	flags.BoolVar(&opts.addRepository, "add-repository", false, "no longer needed: a check adds its repository itself")
+	_ = flags.MarkHidden("add-repository")
 }
 
 func newVersionCommand(version string) *cobra.Command {
