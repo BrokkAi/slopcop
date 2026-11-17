@@ -312,6 +312,36 @@ func TestTheHookChecksInTheMappedWorkspace(t *testing.T) {
 	}
 }
 
+func TestTheHookSaysWhichWorkspaceItAddedARepositoryTo(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/Acme/widgets.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	// No workspace has it yet, so the hook's first check adds it.
+	svc := &mapService{}
+	server := svc.start(t, "")
+
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	if len(svc.checks) != 1 || svc.checks[0] != "" {
+		t.Fatalf("checks ran in %q, want one in the login's workspace", svc.checks)
+	}
+	for _, want := range []string{
+		"slopcop: added Acme/widgets to \"Dave\" (the automatic check)",
+		"it was chosen by this login's workspace",
+		"the user runs `slopcop workspace map <name>` in the checkout at a terminal",
+	} {
+		if !strings.Contains(output.SystemMessage, want) {
+			t.Errorf("system message = %q, want %q", output.SystemMessage, want)
+		}
+	}
+	// It is said in the turn the repository was added, and not again.
+	svc.repositories = map[string][]string{personalID: {"Acme/widgets"}}
+	writeFile(t, repo, "demo.go", "package demo // again\n")
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); strings.Contains(output.SystemMessage, "added Acme/widgets") {
+		t.Errorf("second output = %+v, want the add said once", output)
+	}
+}
+
 func TestOnlyAPersonAtATerminalChangesAMapping(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/Acme/widgets.git")

@@ -198,6 +198,14 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	if fresh {
 		output = state.namingService(prepared.client.BaseURL, output)
 	}
+	if state.added != "" {
+		// The user reads the system message; a held agent is told too, in
+		// the reason, which is all some harnesses pass on.
+		if output.Decision == "block" {
+			output.Reason = boundedHookText(state.added + "\n" + output.Reason)
+		}
+		output.SystemMessage = boundedHookText(strings.TrimSpace(state.added + "\n" + output.SystemMessage))
+	}
 	if fresh || scopeChanged {
 		if notice := hookOmittedFilesNotice(prepared.omittedFiles); notice != "" {
 			output.SystemMessage = boundedHookText(notice + "\n" + output.SystemMessage)
@@ -285,6 +293,13 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 	}
 	if !response.KnownStatus() {
 		return fmt.Sprintf("slopcop: the service answered status %q, which this version of slopcop does not know. Update slopcop.", response.Status), false
+	}
+	if response.RepositoryAdded {
+		// The hook adds a repository with no one watching, so it says
+		// which workspace now checks and bills it. It happens once: the
+		// workspace has the repository from here on.
+		first, second := addedLines(prepared.request.RepoURL, addedWorkspace(ctx, prepared.client, prepared.choice))
+		state.added = first + " (the automatic check)\n" + second
 	}
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	return "", true

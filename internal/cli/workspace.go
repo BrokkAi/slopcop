@@ -187,27 +187,44 @@ func chosenWorkspace(whoami service.Whoami, choice workspaceChoice) (service.Wor
 // another workspace. An agent passes it on; it cannot take the step.
 const changeWorkspaceStep = "To check it in another workspace instead, the user runs `slopcop workspace map <name>` in the checkout at a terminal (`slopcop workspace list` names the workspaces), and its owner can remove it from this one with `slopcop repo disable`."
 
+// addedWorkspace is the workspace a check just added the repository to,
+// with how it was chosen and how the person changes it. The name is the
+// service's, and is left empty when it could not be asked.
+func addedWorkspace(ctx context.Context, client *service.Client, choice workspaceChoice) *report.AddedWorkspace {
+	added := &report.AddedWorkspace{ID: client.Workspace, Source: choice.Source, Change: changeWorkspaceStep}
+	whoami, err := client.Whoami(ctx)
+	if err != nil {
+		return added
+	}
+	if client.Workspace == "" {
+		added.ID, added.Name = whoami.Workspace.ID, whoami.Workspace.Name
+		return added
+	}
+	for _, workspace := range whoami.Workspaces {
+		if strings.EqualFold(workspace.ID, client.Workspace) {
+			added.ID, added.Name = workspace.ID, workspace.Name
+		}
+	}
+	return added
+}
+
+// addedLines are the two lines that say which workspace a check added the
+// repository to, why that one, and how the person changes it.
+func addedLines(repoURL string, added *report.AddedWorkspace) (string, string) {
+	return fmt.Sprintf("slopcop: added %s to %s", repositoryName(repoURL), workspaceName(added.Name, added.Name != "")),
+		fmt.Sprintf("slopcop: that workspace now checks and bills it; it was chosen by %s. %s", sourceText(added.Source), added.Change)
+}
+
 // noticeAdded says, on stderr, which workspace a check just added the
 // repository to, why that one, and how the person changes it, and returns
 // the same for the report. A check adds a repository without asking, so this
 // is where the user, or the agent that ran the check for them, learns which
 // workspace now checks and bills it.
 func noticeAdded(cmd *cobra.Command, client *service.Client, repoURL string, choice workspaceChoice) *report.AddedWorkspace {
-	added := &report.AddedWorkspace{ID: client.Workspace, Source: choice.Source, Change: changeWorkspaceStep}
-	if whoami, err := client.Whoami(cmd.Context()); err == nil {
-		workspace := whoami.Workspace
-		for _, candidate := range whoami.Workspaces {
-			if client.Workspace != "" && strings.EqualFold(candidate.ID, client.Workspace) {
-				workspace = candidate
-			}
-		}
-		if client.Workspace == "" || strings.EqualFold(workspace.ID, client.Workspace) {
-			added.ID, added.Name = workspace.ID, workspace.Name
-		}
-	}
-	stderr := cmd.ErrOrStderr()
-	fmt.Fprintf(stderr, "slopcop: added %s to %s\n", repositoryName(repoURL), workspaceName(added.Name, added.Name != ""))
-	fmt.Fprintf(stderr, "slopcop: that workspace now checks and bills it; it was chosen by %s. %s\n", sourceText(choice.Source), changeWorkspaceStep)
+	added := addedWorkspace(cmd.Context(), client, choice)
+	first, second := addedLines(repoURL, added)
+	fmt.Fprintln(cmd.ErrOrStderr(), first)
+	fmt.Fprintln(cmd.ErrOrStderr(), second)
 	return added
 }
 
