@@ -111,6 +111,9 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			response.Summary.NewFindings = len(response.Findings)
 			response.Summary.FailOn = failOnFinding
 			_ = json.NewEncoder(w).Encode(response)
+		case "/v1/whoami":
+			// A refused check names the workspace it ran in.
+			_, _ = w.Write([]byte(whoamiBody))
 		case "/v1/ignore", "/v1/unignore":
 			var body service.IgnoreRequest
 			_ = json.NewDecoder(r.Body).Decode(&body)

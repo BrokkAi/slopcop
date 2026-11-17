@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strings"
 	"syscall"
 	"testing"
@@ -1418,12 +1419,17 @@ func TestFormatAndListingAreNotPartOfTheRequest(t *testing.T) {
 // call asked for. It starts with the repositories named in the test.
 type enableService struct {
 	repositories []service.Repository
-	lists        int
-	checks       []map[string]any
-	states       []map[string]any
-	workspaces   []string
-	base         string
-	added        bool
+	// inTeam is what the Acme team workspace has, when a test gives it its
+	// own; otherwise every workspace answers repositories.
+	inTeam []service.Repository
+	// teamFails makes the Acme team workspace refuse to list its repositories.
+	teamFails  bool
+	lists      int
+	checks     []map[string]any
+	states     []map[string]any
+	workspaces []string
+	base       string
+	added      bool
 }
 
 func (s *enableService) start(t *testing.T, repo string) *httptest.Server {
@@ -1437,7 +1443,16 @@ func (s *enableService) start(t *testing.T, repo string) *httptest.Server {
 		case "/v1/repositories":
 			s.lists++
 			s.workspaces = append(s.workspaces, r.Header.Get("SlopCop-Workspace"))
-			_ = json.NewEncoder(w).Encode(service.RepositoryList{Repositories: s.repositories})
+			if s.teamFails && r.Header.Get("SlopCop-Workspace") == teamID {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"code": "unavailable", "message": "Unavailable.", "retryable": true}`))
+				return
+			}
+			listed := s.repositories
+			if s.inTeam != nil && r.Header.Get("SlopCop-Workspace") == teamID {
+				listed = s.inTeam
+			}
+			_ = json.NewEncoder(w).Encode(service.RepositoryList{Repositories: listed})
 		case "/v1/check":
 			s.workspaces = append(s.workspaces, r.Header.Get("SlopCop-Workspace"))
 			var body map[string]any
@@ -1630,13 +1645,15 @@ func TestEnableAddsARepositoryAfterConfirmation(t *testing.T) {
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	svc := &enableService{}
 	server := svc.start(t, repo)
-	typed(t, "BrokkAi/slopcop\n")
+	typedInTurn(t, "1\n", "BrokkAi/slopcop\n")
 
 	code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
 	for _, want := range []string{
+		"slopcop: your account has 2 workspaces. Which one should check, and bill, BrokkAi/slopcop?",
+		"  1  Dave (personal, this login's)\n  2  Acme team (team)\nNumber: ",
 		"lets that workspace check and bill it",
 		"Type BrokkAi/slopcop to add it:",
 		"slopcop: added BrokkAi/slopcop to \"Dave\"",
@@ -1717,17 +1734,95 @@ func TestEnableUsesTheWorkspaceFlag(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if len(svc.workspaces) < 2 {
-		t.Errorf("workspaces = %v, want the listing and the check", svc.workspaces)
+	// The listing in Acme team, a look at whether the personal workspace
+	// already has the repository, then the check's requests in Acme team.
+	if len(svc.workspaces) < 3 || !slices.Equal(svc.workspaces[:2], []string{teamID, personalID}) ||
+		slices.ContainsFunc(svc.workspaces[2:], func(workspace string) bool { return workspace != teamID }) {
+		t.Errorf("workspaces = %v, want Acme team, the personal one, then Acme team alone", svc.workspaces)
 	}
-	for _, workspace := range svc.workspaces {
-		if workspace != teamID {
-			t.Errorf("workspaces = %v, want every request in Acme team", svc.workspaces)
-			break
-		}
+	if strings.Contains(stderr, "Which one should check") || !strings.Contains(stderr, `slopcop: this login checks in "Dave". To check this repository in "Acme team", pass --workspace "Acme team", or set SLOPCOP_WORKSPACE.`) {
+		t.Errorf("stderr = %q, want no question and where the login checks", stderr)
 	}
 	if !strings.Contains(stderr, `slopcop: added BrokkAi/slopcop to "Acme team"`) {
 		t.Errorf("stderr = %q", stderr)
+	}
+}
+
+func TestEnableAsksWhichWorkspaceAndSaysWhereTheRepositoryAlreadyIs(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+
+	t.Run("choosing the workspace that has it adds nothing", func(t *testing.T) {
+		svc := &enableService{inTeam: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+		}}}
+		server := svc.start(t, repo)
+		typedInTurn(t, "2\n")
+		code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+		if code != 0 || !strings.Contains(stdout, `slopcop: BrokkAi/slopcop is already enabled in "Acme team"`) {
+			t.Errorf("exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+		}
+		for _, want := range []string{
+			"  2  Acme team (team, already has it)\n",
+			`slopcop: this login checks in "Dave". To check this repository in "Acme team", pass --workspace "Acme team"`,
+		} {
+			if !strings.Contains(stderr, want) {
+				t.Errorf("stderr = %q, want %q", stderr, want)
+			}
+		}
+		if len(svc.checks) != 0 || len(svc.states) != 0 {
+			t.Errorf("checks = %d, states = %d, want none", len(svc.checks), len(svc.states))
+		}
+	})
+
+	t.Run("adding it a second time is said first", func(t *testing.T) {
+		svc := &enableService{inTeam: []service.Repository{{
+			ID: widgetsID, Provider: "github", FullName: "BrokkAi/slopcop", Enabled: true, Active: true,
+		}}}
+		server := svc.start(t, repo)
+		typedInTurn(t, "1\n", "no\n")
+		code, _, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+		warning := `slopcop: BrokkAi/slopcop is already in "Acme team". Adding it to "Dave" too checks and bills it in each`
+		if code != 2 || !strings.Contains(stderr, warning) || !strings.Contains(stderr, "that is not BrokkAi/slopcop, so nothing was changed") {
+			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		}
+		if strings.Index(stderr, warning) > strings.Index(stderr, "Type BrokkAi/slopcop to add it:") {
+			t.Errorf("stderr = %q, want the warning before the confirmation", stderr)
+		}
+		if len(svc.checks) != 0 {
+			t.Errorf("checks = %v, want none", svc.checks)
+		}
+	})
+
+	t.Run("a workspace that does not answer is named before the choice", func(t *testing.T) {
+		svc := &enableService{teamFails: true}
+		server := svc.start(t, repo)
+		typedInTurn(t, "1\n", "no\n")
+		_, _, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+		unknown := `slopcop: couldn't tell whether "Acme team" already has BrokkAi/slopcop.`
+		if !strings.Contains(stderr, unknown) || strings.Index(stderr, unknown) > strings.Index(stderr, "Which one should check") {
+			t.Errorf("stderr = %q, want %q before the question", stderr, unknown)
+		}
+	})
+
+	t.Run("an answer that is no workspace changes nothing", func(t *testing.T) {
+		svc := &enableService{}
+		server := svc.start(t, repo)
+		typedInTurn(t, "Acme\n", "BrokkAi/slopcop\n")
+		code, _, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+		if code != 2 || !strings.Contains(stderr, "that is not a number from 1 to 2, so nothing was changed") || len(svc.checks) != 0 {
+			t.Errorf("exit = %d, stderr = %q, checks = %v", code, stderr, svc.checks)
+		}
+	})
+}
+
+func TestWorkspaceSelectorUsesTheIDForASharedName(t *testing.T) {
+	workspaces := []service.Workspace{{ID: personalID, Name: "Dave"}, {ID: teamID, Name: "Acme"}, {ID: widgetsID, Name: "acme"}}
+	if got := workspaceSelector(workspaces, workspaces[1]); got != teamID {
+		t.Errorf("selector = %q, want the id of a workspace whose name another shares", got)
+	}
+	if got := workspaceSelector(workspaces, workspaces[0]); got != "Dave" {
+		t.Errorf("selector = %q, want the name", got)
 	}
 }
 

@@ -373,6 +373,16 @@ terminal. A repository that is already added but disabled is enabled again;
 one that is already active is left alone. Turning a disabled repository back
 on stays a step you take yourself.
 
+When your account has more than one workspace and the repository is in neither
+the login's nor the one `--workspace` names, `enable` first lists the
+workspaces by number, marking the login's own and any that already have the
+repository, and asks which one should check and bill it. Before it adds a
+repository another of your workspaces already has, it says so, since both would
+then check and bill it. After enabling in a workspace other than the login's it
+reminds you that a plain check still runs in the login's workspace, and would
+add the repository there: pass `--workspace`, or set `SLOPCOP_WORKSPACE`, to
+check where you enabled it.
+
 A check does not need `enable` first: a check of a repository the workspace has
 never added adds it to the workspace the check runs in (the login's, or the one
 `--workspace` names), which then pays for its checks, so an agent is not
