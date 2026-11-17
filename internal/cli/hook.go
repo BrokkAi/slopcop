@@ -298,7 +298,7 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 		// The hook adds a repository with no one watching, so it says
 		// which workspace now checks and bills it. It happens once: the
 		// workspace has the repository from here on.
-		first, second := addedLines(prepared.request.RepoURL, addedWorkspace(ctx, prepared.client, prepared.choice))
+		first, second := addedLines(prepared.request.RepoURL, addedWorkspace(ctx, prepared.client, prepared.request.RepoURL, prepared.choice))
 		state.added = first + " (the automatic check)\n" + second
 	}
 	state.completed(prepared.workspace, prepared.fingerprint, response)

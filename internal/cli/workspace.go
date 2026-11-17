@@ -184,27 +184,34 @@ func chosenWorkspace(whoami service.Whoami, choice workspaceChoice) (service.Wor
 }
 
 // changeWorkspaceStep is how the person moves a repository's checks to
-// another workspace. An agent passes it on; it cannot take the step.
-const changeWorkspaceStep = "To check it in another workspace instead, the user runs `slopcop workspace map <name>` in the checkout at a terminal (`slopcop workspace list` names the workspaces), and its owner can remove it from this one with `slopcop repo disable`."
+// another workspace, and removes it from the one a check added it to. The
+// removal names that workspace: once the checkout is mapped elsewhere, a
+// plain 'repo disable' there would act in the new one. An agent passes it
+// on; it cannot take either step.
+func changeWorkspaceStep(repoURL, workspaceID string) string {
+	remove := fmt.Sprintf("`slopcop repo disable %s`", repositoryName(repoURL))
+	if workspaceID != "" {
+		remove = fmt.Sprintf("`slopcop repo disable %s --workspace %s`", repositoryName(repoURL), workspaceID)
+	}
+	return "To check it in another workspace instead, the user runs `slopcop workspace map <name>` in the checkout at a terminal (`slopcop workspace list` names the workspaces), and this workspace's owner removes it here with " + remove + "."
+}
 
 // addedWorkspace is the workspace a check just added the repository to,
 // with how it was chosen and how the person changes it. The name is the
 // service's, and is left empty when it could not be asked.
-func addedWorkspace(ctx context.Context, client *service.Client, choice workspaceChoice) *report.AddedWorkspace {
-	added := &report.AddedWorkspace{ID: client.Workspace, Source: choice.Source, Change: changeWorkspaceStep}
-	whoami, err := client.Whoami(ctx)
-	if err != nil {
-		return added
-	}
-	if client.Workspace == "" {
-		added.ID, added.Name = whoami.Workspace.ID, whoami.Workspace.Name
-		return added
-	}
-	for _, workspace := range whoami.Workspaces {
-		if strings.EqualFold(workspace.ID, client.Workspace) {
-			added.ID, added.Name = workspace.ID, workspace.Name
+func addedWorkspace(ctx context.Context, client *service.Client, repoURL string, choice workspaceChoice) *report.AddedWorkspace {
+	added := &report.AddedWorkspace{ID: client.Workspace, Source: choice.Source}
+	if whoami, err := client.Whoami(ctx); err == nil {
+		if client.Workspace == "" {
+			added.ID, added.Name = whoami.Workspace.ID, whoami.Workspace.Name
+		}
+		for _, workspace := range whoami.Workspaces {
+			if strings.EqualFold(workspace.ID, client.Workspace) {
+				added.ID, added.Name = workspace.ID, workspace.Name
+			}
 		}
 	}
+	added.Change = changeWorkspaceStep(repoURL, added.ID)
 	return added
 }
 
@@ -221,7 +228,7 @@ func addedLines(repoURL string, added *report.AddedWorkspace) (string, string) {
 // is where the user, or the agent that ran the check for them, learns which
 // workspace now checks and bills it.
 func noticeAdded(cmd *cobra.Command, client *service.Client, repoURL string, choice workspaceChoice) *report.AddedWorkspace {
-	added := addedWorkspace(cmd.Context(), client, choice)
+	added := addedWorkspace(cmd.Context(), client, repoURL, choice)
 	first, second := addedLines(repoURL, added)
 	fmt.Fprintln(cmd.ErrOrStderr(), first)
 	fmt.Fprintln(cmd.ErrOrStderr(), second)

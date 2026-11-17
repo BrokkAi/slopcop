@@ -414,6 +414,7 @@ func TestACheckThatAddsARepositorySaysWhereAndHowToChangeIt(t *testing.T) {
 		"slopcop: added Acme/widgets to \"Acme team\"\n",
 		"it was chosen by this checkout's mapping",
 		"the user runs `slopcop workspace map <name>` in the checkout at a terminal",
+		"`slopcop repo disable Acme/widgets --workspace " + teamID + "`",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want %q", stderr, want)

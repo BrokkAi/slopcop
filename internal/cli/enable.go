@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -138,14 +139,24 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	mapped := enabledIn(err)
 	var ran silentExit
 	if !mapped && repository.State == statusNotAdded && errors.As(err, &ran) {
-		if listed, lookupErr := lookupRepositoryStatus(cmd.Context(), client, repoRoot); lookupErr == nil &&
+		// An interrupt has cancelled the command's context, and this is the
+		// case the lookup is for, so it runs on its own short one.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), 10*time.Second)
+		defer cancel()
+		if listed, lookupErr := lookupRepositoryStatus(ctx, client, repoRoot); lookupErr == nil &&
 			listed.State != statusNotAdded && listed.State != statusUnsupported {
 			mapped = true
 		}
 	}
 	if mapped {
-		if mapErr := recordMapping(cmd, client.BaseURL, repoURL, target); mapErr != nil && err == nil {
-			err = mapErr
+		if mapErr := recordMapping(cmd, client.BaseURL, repoURL, target); mapErr != nil {
+			// The repository is enabled there, but later checks would not
+			// know to run there: say so whatever the first check found.
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not map this checkout to %s: %v. Run `slopcop workspace map %q` to try again.\n",
+				workspaceName(target.Name, true), mapErr, workspaceSelector(whoami.Workspaces, target))
+			if err == nil || (errors.As(err, &ran) && ran.code == service.ExitClean) {
+				err = mapErr
+			}
 		}
 	}
 	return err
