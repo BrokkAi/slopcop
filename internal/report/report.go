@@ -43,7 +43,23 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 
 // Options shape what a report lists. Rendering never changes the check, so
 // none of them is sent to the service.
+// AddedWorkspace is the workspace a check added a repository to, how it was
+// chosen, and how the person changes it, so an agent can tell the user which
+// workspace now checks and bills the repository.
+type AddedWorkspace struct {
+	ID   string `json:"id,omitempty"`
+	Name string `json:"name,omitempty"`
+	// Source is flag, env, mapping or login.
+	Source string `json:"source"`
+	// Change is the step that moves the repository's checks to another
+	// workspace. Only a person at a terminal can take it.
+	Change string `json:"change"`
+}
+
 type Options struct {
+	// AddedTo is the workspace a check added the repository to, when it
+	// added one.
+	AddedTo *AddedWorkspace
 	// OmittedFiles lists files left out of both hosted upload and local review
 	// because of their size. The report only describes this scope; it does not
 	// affect the check's status or approval.
@@ -1004,6 +1020,9 @@ type jsonReport struct {
 	// RepositoryAdded is set only when the check added the repository to
 	// the workspace.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
+	// AddedToWorkspace names the workspace the repository was added to. It
+	// is set only with RepositoryAdded.
+	AddedToWorkspace *AddedWorkspace `json:"addedToWorkspace,omitempty"`
 	// InlineSuppressed is the service's list of findings inline
 	// `slopcop: ignore` comments accepted, as it sent it; summary counts
 	// them all. It is set only when there is one.
@@ -1051,6 +1070,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		InconclusiveUnlisted: inconclusiveUnlisted(response, inconclusive),
 		Failure:              response.Failure,
 		RepositoryAdded:      response.RepositoryAdded,
+		AddedToWorkspace:     options.AddedTo,
 		InlineSuppressed:     response.InlineSuppressed,
 		DirectiveWarnings:    response.DirectiveWarnings,
 		EmptyChange:          options.EmptyChange,

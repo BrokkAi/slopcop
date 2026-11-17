@@ -25,7 +25,8 @@ const hookStateLifetime = 7 * 24 * time.Hour
 // Claude Code or Codex session.
 type hookState struct {
 	// Workspace is the workspace Active and Off are about, as a check names
-	// it: --workspace or $SLOPCOP_WORKSPACE, or empty for the login's own.
+	// it: --workspace or $SLOPCOP_WORKSPACE, the id the checkout is mapped
+	// to, or empty for the login's own.
 	Workspace string `json:"workspace,omitempty"`
 	// Active says the workspace checks this repository, so the hook may
 	// send a check of it.
@@ -56,6 +57,9 @@ type hookState struct {
 	// last told the hook's checks go to, so it is said once and not every
 	// turn.
 	ServiceNamed string `json:"serviceNamed,omitempty"`
+	// added is what to say, in this turn only, about a repository the
+	// hook's check just added to a workspace.
+	added string
 }
 
 // namingService adds to output, once in a session for a given service, that

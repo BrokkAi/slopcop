@@ -23,6 +23,8 @@ import (
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/review/reviewtest"
+	"github.com/spf13/cobra"
+
 	"github.com/BrokkAi/slopcop/internal/service"
 	"github.com/BrokkAi/slopcop/internal/update"
 )
@@ -36,7 +38,17 @@ func TestMain(m *testing.M) {
 	checkRepository = func(context.Context, *service.Client, string) (statusRepository, error) {
 		return statusRepository{State: statusActive, Enabled: true, Active: true}, nil
 	}
+	unmappedNotice = func(*cobra.Command, *service.Client, workspaceChoice) {}
 	os.Exit(m.Run())
+}
+
+// realUnmappedNotice makes a check consider the note about an unmapped
+// checkout, for tests about that note.
+func realUnmappedNotice(t *testing.T) {
+	t.Helper()
+	original := unmappedNotice
+	unmappedNotice = noticeUnmapped
+	t.Cleanup(func() { unmappedNotice = original })
 }
 
 // realRepositoryCheck makes a check use the real repository gate, for tests
@@ -1740,8 +1752,8 @@ func TestEnableUsesTheWorkspaceFlag(t *testing.T) {
 		slices.ContainsFunc(svc.workspaces[2:], func(workspace string) bool { return workspace != teamID }) {
 		t.Errorf("workspaces = %v, want Acme team, the personal one, then Acme team alone", svc.workspaces)
 	}
-	if strings.Contains(stderr, "Which one should check") || !strings.Contains(stderr, `slopcop: this login checks in "Dave". To check this repository in "Acme team", pass --workspace "Acme team", or set SLOPCOP_WORKSPACE.`) {
-		t.Errorf("stderr = %q, want no question and where the login checks", stderr)
+	if strings.Contains(stderr, "Which one should check") || !strings.Contains(stderr, `slopcop: checkouts of BrokkAi/slopcop on this machine now check in, and bill, "Acme team"`) {
+		t.Errorf("stderr = %q, want no question and the checkout mapped there", stderr)
 	}
 	if !strings.Contains(stderr, `slopcop: added BrokkAi/slopcop to "Acme team"`) {
 		t.Errorf("stderr = %q", stderr)
@@ -1764,7 +1776,7 @@ func TestEnableAsksWhichWorkspaceAndSaysWhereTheRepositoryAlreadyIs(t *testing.T
 		}
 		for _, want := range []string{
 			"  2  Acme team (team, already has it)\n",
-			`slopcop: this login checks in "Dave". To check this repository in "Acme team", pass --workspace "Acme team"`,
+			`slopcop: checkouts of BrokkAi/slopcop on this machine now check in, and bill, "Acme team"`,
 		} {
 			if !strings.Contains(stderr, want) {
 				t.Errorf("stderr = %q, want %q", stderr, want)

@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/service"
@@ -32,11 +33,16 @@ type statusOptions struct {
 // statusReport is the human and json answer. Account, Workspace and Plan come
 // from whoami; Repository describes the checkout the origin remote names.
 type statusReport struct {
-	Service    string            `json:"service"`
-	Account    service.Account   `json:"account"`
-	Workspace  service.Workspace `json:"workspace"`
-	Plan       string            `json:"plan"`
-	Repository statusRepository  `json:"repository"`
+	Service   string            `json:"service"`
+	Account   service.Account   `json:"account"`
+	Workspace service.Workspace `json:"workspace"`
+	// Source says how Workspace was chosen: flag, env, mapping or login.
+	Source string `json:"workspaceSource"`
+	Plan   string `json:"plan"`
+	// PlanOf is the login's own workspace, which Plan describes, when
+	// Workspace is another one: whoami answers only that plan.
+	PlanOf     string           `json:"planOf,omitempty"`
+	Repository statusRepository `json:"repository"`
 }
 
 // statusRepository is the checkout's repository, with the workspace's record
@@ -58,6 +64,10 @@ func newStatusCommand(serviceURL *string, version string) *cobra.Command {
 		Short: "Show whether this checkout's repository is checked in the workspace",
 		Long: `Show the account and workspace that bill checks, and whether the repository
 the origin remote names is added to that workspace and active.
+
+"Chosen by" says why that workspace: --workspace, then $SLOPCOP_WORKSPACE,
+then the workspace this machine maps the checkout to ('slopcop workspace
+map'), then the one the login is bound to.
 
 A repository that is not added is added by its first check. A disabled one is not checked or charged; the workspace's owner
 enables it with 'slopcop repo enable'. SlopCop checks repositories on
@@ -98,12 +108,13 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 	if err != nil {
 		return serviceFailure(cmd, err)
 	}
-	workspace := whoami.Workspace
-	if wanted := resolveWorkspaceName(opts.workspace); wanted != "" {
-		workspace, err = findWorkspace(whoami.Workspaces, wanted)
-		if err != nil {
-			return err
-		}
+	cfg, _ := config.Load()
+	choice := chooseWorkspace(opts.workspace, cfg, client.BaseURL, repoURL)
+	workspace, err := chosenWorkspace(whoami, choice)
+	if err != nil {
+		return serviceFailure(cmd, err)
+	}
+	if choice.Source != sourceLogin {
 		client.Workspace = workspace.ID
 	}
 	repository, err := repositoryStatus(cmd.Context(), client, repoURL)
@@ -114,8 +125,12 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 		Service:    client.BaseURL,
 		Account:    whoami.Account,
 		Workspace:  workspace,
+		Source:     choice.Source,
 		Plan:       whoami.Plan,
 		Repository: repository,
+	}
+	if !strings.EqualFold(workspace.ID, whoami.Workspace.ID) {
+		answer.PlanOf = whoami.Workspace.Name
 	}
 	if opts.format == "json" {
 		return writeJSON(cmd.OutOrStdout(), answer)
@@ -209,7 +224,12 @@ func writeStatus(out io.Writer, answer statusReport) {
 	}
 	fmt.Fprintf(out, "Account:    %s\n", account)
 	fmt.Fprintf(out, "Workspace:  %s (%s, %s)\n", answer.Workspace.Name, answer.Workspace.Kind, answer.Workspace.Role)
-	fmt.Fprintf(out, "Plan:       %s\n", planName(answer.Plan))
+	fmt.Fprintf(out, "Chosen by:  %s\n", sourceText(answer.Source))
+	plan := planName(answer.Plan)
+	if answer.PlanOf != "" {
+		plan += fmt.Sprintf(" (the plan of %q, this login's workspace)", answer.PlanOf)
+	}
+	fmt.Fprintf(out, "Plan:       %s\n", plan)
 	fmt.Fprintf(out, "Service:    %s\n", answer.Service)
 }
 

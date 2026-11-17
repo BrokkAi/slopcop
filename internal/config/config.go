@@ -31,14 +31,83 @@ type Config struct {
 	// Logins holds one credential per service, keyed by Origin, so a
 	// credential is only ever sent to the service that issued it.
 	Logins map[string]Login `json:"logins,omitempty"`
-	Mode   string           `json:"mode,omitempty"`
-	Review *Review          `json:"review,omitempty"`
-	Gate   *Gate            `json:"gate,omitempty"`
+	// RepositoryWorkspaces says, per service (keyed by Origin) and per
+	// repository (keyed by its canonical URL), which workspace a checkout
+	// of that repository checks in, and bills, instead of the one the
+	// login is bound to. It is kept apart from Logins so that signing in
+	// again, or signing out, does not forget it.
+	RepositoryWorkspaces map[string]map[string]RepositoryWorkspace `json:"repositoryWorkspaces,omitempty"`
+	Mode                 string                                    `json:"mode,omitempty"`
+	Review               *Review                                   `json:"review,omitempty"`
+	Gate                 *Gate                                     `json:"gate,omitempty"`
 }
 
 // Login is the credential one service issued.
 type Login struct {
 	Token string `json:"token"`
+}
+
+// RepositoryWorkspace is the workspace one repository's checkouts check in.
+// ID is what a request names; Name is the workspace's name when the mapping
+// was made, kept only to say which workspace a stale mapping pointed at.
+type RepositoryWorkspace struct {
+	ID   string `json:"workspaceId"`
+	Name string `json:"workspaceName,omitempty"`
+}
+
+// repositoryKey is the key a repository's mapping is stored under: its
+// canonical URL, lowercased, since providers do not tell owner/name apart by
+// case.
+func repositoryKey(repoURL string) string {
+	return strings.ToLower(strings.TrimRight(strings.TrimSpace(repoURL), "/"))
+}
+
+// WorkspaceFor is the workspace mapped to the repository on the service, and
+// whether there is one.
+func (c Config) WorkspaceFor(serviceURL, repoURL string) (RepositoryWorkspace, bool) {
+	mapped, ok := c.RepositoryWorkspaces[Origin(serviceURL)][repositoryKey(repoURL)]
+	if !ok || strings.TrimSpace(mapped.ID) == "" {
+		return RepositoryWorkspace{}, false
+	}
+	return mapped, true
+}
+
+// MapRepository makes checkouts of the repository check in the workspace on
+// the service, replacing an earlier mapping.
+func (c *Config) MapRepository(serviceURL, repoURL string, workspace RepositoryWorkspace) {
+	if c.RepositoryWorkspaces == nil {
+		c.RepositoryWorkspaces = map[string]map[string]RepositoryWorkspace{}
+	}
+	origin := Origin(serviceURL)
+	if c.RepositoryWorkspaces[origin] == nil {
+		c.RepositoryWorkspaces[origin] = map[string]RepositoryWorkspace{}
+	}
+	c.RepositoryWorkspaces[origin][repositoryKey(repoURL)] = workspace
+}
+
+// UnmapRepository drops the repository's mapping on the service and reports
+// whether there was one.
+func (c *Config) UnmapRepository(serviceURL, repoURL string) bool {
+	origin, key := Origin(serviceURL), repositoryKey(repoURL)
+	if _, mapped := c.RepositoryWorkspaces[origin][key]; !mapped {
+		return false
+	}
+	delete(c.RepositoryWorkspaces[origin], key)
+	if len(c.RepositoryWorkspaces[origin]) == 0 {
+		delete(c.RepositoryWorkspaces, origin)
+	}
+	return true
+}
+
+// MappedRepositories lists the canonical URLs mapped on the service, sorted.
+func (c Config) MappedRepositories(serviceURL string) []string {
+	mapped := c.RepositoryWorkspaces[Origin(serviceURL)]
+	urls := make([]string, 0, len(mapped))
+	for repoURL := range mapped {
+		urls = append(urls, repoURL)
+	}
+	sort.Strings(urls)
+	return urls
 }
 
 // Origin is the key a service's login is stored under: its scheme and host,

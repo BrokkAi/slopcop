@@ -65,7 +65,7 @@ func runIgnored(cmd *cobra.Command, opts *ignoredOptions, serviceFlag, version s
 	if err != nil {
 		return err
 	}
-	client, err := workspaceClient(cmd, serviceFlag, version, opts.workspace)
+	client, err := workspaceClientAt(cmd, serviceFlag, version, opts.workspace, repoRoot)
 	if err != nil {
 		return err
 	}

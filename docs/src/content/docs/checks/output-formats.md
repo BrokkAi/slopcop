@@ -134,6 +134,7 @@ slopcop check --format json
 | `directiveWarnings` | present when a `slopcop: ignore` comment ignored nothing: each with `kind` (`unused`, `missing_reason`, `malformed`), `path`, `line`, `policies`, `detail` for a malformed one, and `new`; at most 300 |
 | `failure` | present when the analysis as a whole did not complete |
 | `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
+| `addedToWorkspace` | with `repositoryAdded`: `id` and `name` of the workspace the repository was added to, `source` (`flag`, `env`, `mapping` or `login`) saying how it was chosen, and `change`, how a person checks it in another workspace instead |
 | `emptyChange` | `true` when the patch was empty |
 | `omittedFiles` | files omitted from both upload and local review by the size filter or because `.bifrostignore` or `[check] exclude` keeps them out of checks, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json`, `large-binary` or `excluded`); their contents were not analyzed |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |

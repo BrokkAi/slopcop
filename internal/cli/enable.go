@@ -8,9 +8,11 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -34,7 +36,9 @@ An account with more than one workspace is asked which one checks the
 repository, unless --workspace names it, and is told when another of its
 workspaces already has the repository, so it is not added twice by accident.
 
-Adding a repository through 'enable' also runs its first check.`,
+Adding a repository through 'enable' also runs its first check, and maps this
+machine's checkouts of it to that workspace, so later checks run there
+whatever workspace the login is bound to ('slopcop workspace map').`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runEnable(cmd, root, workspace, *serviceURL, version)
@@ -58,14 +62,19 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	if err != nil {
 		return serviceFailure(cmd, err)
 	}
-	target := whoami.Workspace
-	named := resolveWorkspaceName(workspace) != ""
-	if named {
-		target, err = findWorkspace(whoami.Workspaces, resolveWorkspaceName(workspace))
-		if err != nil {
-			return err
-		}
+	// The workspace the command names, else the one this checkout is mapped
+	// to, else the login's: what a check here would use, and the choice the
+	// question below starts from.
+	cfg, _ := config.Load()
+	repoURL := checkoutRepoURL(repoRoot)
+	choice := chooseWorkspace(workspace, cfg, client.BaseURL, repoURL)
+	named := choice.Source == sourceFlag || choice.Source == sourceEnv
+	target, err := chosenWorkspace(whoami, choice)
+	if err != nil {
+		return serviceFailure(cmd, err)
 	}
+	// asked is whether the person was asked, and answered, which workspace.
+	asked := false
 	client.Workspace = target.ID
 	repository, err := lookupRepositoryStatus(cmd.Context(), client, repoRoot)
 	if err != nil {
@@ -86,6 +95,7 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 				joinWorkspaceNames(unanswered), repository.FullName)
 		}
 		if !named {
+			asked = true
 			chosen, err := askWorkspace(cmd, repository.FullName, whoami.Workspaces, target, holders)
 			if err != nil {
 				return err
@@ -106,6 +116,12 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	case statusActive:
 		fmt.Fprintf(cmd.OutOrStdout(), "slopcop: %s is already enabled in %s\n",
 			repository.FullName, workspaceName(target.Name, true))
+		if asked {
+			// The answer to "which workspace" is the choice a mapping
+			// records, so it is not asked a second time.
+			return recordMapping(cmd, client.BaseURL, repoURL, target)
+		}
+		return offerMapping(cmd, client.BaseURL, repoURL, target)
 	case statusUnsupported:
 		return fmt.Errorf("SlopCop checks repositories on github.com, gitlab.com and bitbucket.org, not %s", repository.URL)
 	case statusDisabled, statusOverLimit:
@@ -115,13 +131,33 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	default:
 		return fmt.Errorf("this repository is %s, so it cannot be enabled", repository.State)
 	}
-	// With $SLOPCOP_WORKSPACE naming the workspace, a plain check already runs there.
-	fromEnvironment := strings.TrimSpace(workspace) == "" && named
-	if enabledIn(err) && target.ID != whoami.Workspace.ID && !fromEnvironment {
-		// The login still checks in its own workspace, where a plain check of
-		// this repository would be refused.
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: this login checks in %s. To check this repository in %s, pass --workspace %q, or set SLOPCOP_WORKSPACE.\n",
-			workspaceName(whoami.Workspace.Name, true), workspaceName(target.Name, true), workspaceSelector(whoami.Workspaces, target))
+	// The person confirmed this workspace for the repository at the
+	// terminal, so the checkout is mapped to it and later checks, the Stop
+	// hook's included, run there whatever the login is bound to. A first
+	// check that was cut short may still have added the repository; the
+	// workspace's own list tells.
+	mapped := enabledIn(err)
+	var ran silentExit
+	if !mapped && repository.State == statusNotAdded && errors.As(err, &ran) {
+		// An interrupt has cancelled the command's context, and this is the
+		// case the lookup is for, so it runs on its own short one.
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(cmd.Context()), 10*time.Second)
+		defer cancel()
+		if listed, lookupErr := lookupRepositoryStatus(ctx, client, repoRoot); lookupErr == nil &&
+			listed.State != statusNotAdded && listed.State != statusUnsupported {
+			mapped = true
+		}
+	}
+	if mapped {
+		if mapErr := recordMapping(cmd, client.BaseURL, repoURL, target); mapErr != nil {
+			// The repository is enabled there, but later checks would not
+			// know to run there: say so whatever the first check found.
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not map this checkout to %s: %v. Run `slopcop workspace map %q` to try again.\n",
+				workspaceName(target.Name, true), mapErr, workspaceSelector(whoami.Workspaces, target))
+			if err == nil || (errors.As(err, &ran) && ran.code == service.ExitClean) {
+				err = mapErr
+			}
+		}
 	}
 	return err
 }

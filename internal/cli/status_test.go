@@ -22,6 +22,7 @@ func TestStatusShowsAnActiveRepository(t *testing.T) {
 		"State:      active\n" +
 		"Account:    dave <dave@example.com>\n" +
 		"Workspace:  Dave (personal, owner)\n" +
+		"Chosen by:  this login's workspace (`slopcop workspace use`)\n" +
 		"Plan:       Free\n" +
 		"Service:    " + server.URL + "\n"
 	if stdout != want {

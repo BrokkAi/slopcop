@@ -42,9 +42,12 @@ API, but only when all of these hold:
   session's subagents included), or the working tree has a changed dependency
   manifest or lockfile (below);
 - slopcop is signed in, and the workspace a check would use
-  (`SLOPCOP_WORKSPACE`, or the login's) has the repository active or has never
+  (`SLOPCOP_WORKSPACE`, the one the checkout is mapped to, or the login's) has the repository active or has never
   added it, in which case the first check adds it. Nothing is sent for a
-  repository the workspace has disabled or has past its active limit;
+  repository the workspace has disabled or has past its active limit. When
+  the hook's check adds a repository, it says once which workspace that was,
+  how it was chosen, and how to check the repository in another one
+  ([A workspace per repository](/account/workspaces/#a-workspace-per-repository));
 - the tree differs from the last check in the session, including a check the
   agent ran by hand. A check whose result the session already has is not sent
   again.

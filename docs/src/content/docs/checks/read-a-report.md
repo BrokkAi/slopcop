@@ -158,6 +158,11 @@ result covers.
 - **`repositoryAdded`**: `true` when this check added the repository to the
   workspace, because the workspace had never added it. See
   [Repositories](/account/repositories/).
+- **`addedToWorkspace`**: with `repositoryAdded`, the workspace it was added
+  to (`id`, `name`), how that workspace was chosen (`source`: `flag`, `env`,
+  `mapping` or `login`), and `change`, the step that checks the repository in
+  another workspace instead. See
+  [A workspace per repository](/account/workspaces/#a-workspace-per-repository).
 - **`omittedFiles`**: JSON data and binary artifacts omitted from upload and
   local review by the 500,000-byte size filter, and changed files that
   `.bifrostignore` or `[check] exclude` keep out of every check. Each entry

@@ -80,6 +80,8 @@ type staticOutcome struct {
 	exit int
 	// status is the static half's own status.
 	status string
+	// addedTo is the workspace the check added the repository to.
+	addedTo *report.AddedWorkspace
 	// sizeBreakdown is the base tree's largest paths, for a repository the
 	// service said is near or over its checkout size limit.
 	sizeBreakdown *reposize.Breakdown
@@ -338,6 +340,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	case mode == modeAI:
 		writeErr = report.WriteAI(cmd.OutOrStdout(), format, reportOptions)
 	case static.response != nil:
+		reportOptions.AddedTo = static.addedTo
 		writeErr = report.Write(cmd.OutOrStdout(), *static.response, format, reportOptions)
 	case static.failure != nil:
 		writeErr = report.WriteFailure(cmd.OutOrStdout(), static.failure, format, reportOptions)
@@ -424,9 +427,12 @@ func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, 
 	client := prepared.client
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(cmd, client, version)
-	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
+	if err := useWorkspace(cmd.Context(), client, prepared.choice); err != nil {
 		return staticFailure(cmd, err), gateStatic
 	}
+	// Before the lookup that may lead to adding the repository, so the
+	// person reads which workspace that would be.
+	unmappedNotice(cmd, client, prepared.choice)
 	repository, err := checkRepository(cmd.Context(), client, prepared.repoRoot)
 	if err != nil {
 		return staticFailure(cmd, err), gateStatic
@@ -540,9 +546,9 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		}
 		return staticFailure(cmd, err)
 	}
+	var addedTo *report.AddedWorkspace
 	if response.RepositoryAdded {
-		workspace, known := resolvedWorkspace(cmd.Context(), client)
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n", repositoryName(request.RepoURL), workspaceName(workspace, known))
+		addedTo = noticeAdded(cmd, client, request.RepoURL, prepared.choice)
 	}
 	if !response.KnownStatus() {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n", response.Status)
@@ -562,7 +568,7 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	if response.KnownStatus() && hasNewFindings(response) {
 		response.Status = service.StatusFindings
 	}
-	return staticOutcome{response: &response, exit: exit, status: response.Status, sizeBreakdown: breakdown}
+	return staticOutcome{response: &response, exit: exit, status: response.Status, sizeBreakdown: breakdown, addedTo: addedTo}
 }
 
 // measureTimeout bounds the local measure of a large repository, which only
@@ -768,8 +774,10 @@ type preparedCheck struct {
 	request      service.Request
 	repoRoot     string
 	// workspace is the workspace the check is asked to run in, by the name
-	// it was given.
+	// or id it was given or mapped to; empty for the login's own.
 	workspace string
+	// choice is that workspace with where it came from.
+	choice workspaceChoice
 	// fingerprint names the check without its attribution, in that
 	// workspace, so the Stop hook can tell a check it already has the
 	// result of.
@@ -887,10 +895,12 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
-	workspace := resolveWorkspaceName(opts.workspace)
+	choice := chooseWorkspace(opts.workspace, cfg, target, repoURL)
+	workspace := choice.Value
 	prepared.client = client
 	prepared.request = request
 	prepared.workspace = workspace
+	prepared.choice = choice
 	prepared.fingerprint = fingerprintCheck(target, token, workspace, request)
 	return prepared, nil
 }

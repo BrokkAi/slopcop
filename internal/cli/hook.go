@@ -139,7 +139,9 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	}
 	path := hookStatePath(input.Harness, input.SessionID, repoRoot)
 	state, loaded := loadHookState(path)
-	state.inWorkspace(resolveWorkspaceName(""))
+	// The same choice prepareCheck makes, made early so a session that is
+	// off for this workspace costs nothing more.
+	state.inWorkspace(chooseWorkspace("", cfg, resolveServiceURL(cfg, serviceURL), checkoutRepoURL(repoRoot)).Value)
 	if state.Off {
 		return hookOutput{}
 	}
@@ -195,6 +197,14 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	output := state.answer(written, fresh, input.StopHookActive, loaded)
 	if fresh {
 		output = state.namingService(prepared.client.BaseURL, output)
+	}
+	if state.added != "" {
+		// The user reads the system message; a held agent is told too, in
+		// the reason, which is all some harnesses pass on.
+		if output.Decision == "block" {
+			output.Reason = boundedHookText(state.added + "\n" + output.Reason)
+		}
+		output.SystemMessage = boundedHookText(strings.TrimSpace(state.added + "\n" + output.SystemMessage))
 	}
 	if fresh || scopeChanged {
 		if notice := hookOmittedFilesNotice(prepared.omittedFiles); notice != "" {
@@ -252,7 +262,7 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 	// The hook runs in the workspace a check by hand would. A workspace
 	// the account does not have will not appear later in the session; a
 	// failure to ask the service can pass.
-	if err := useWorkspace(ctx, prepared.client, ""); err != nil {
+	if err := useWorkspace(ctx, prepared.client, prepared.choice); err != nil {
 		var serviceError *service.Error
 		var transport *url.Error
 		if !errors.As(err, &serviceError) && !errors.As(err, &transport) && ctx.Err() == nil {
@@ -283,6 +293,13 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 	}
 	if !response.KnownStatus() {
 		return fmt.Sprintf("slopcop: the service answered status %q, which this version of slopcop does not know. Update slopcop.", response.Status), false
+	}
+	if response.RepositoryAdded {
+		// The hook adds a repository with no one watching, so it says
+		// which workspace now checks and bills it. It happens once: the
+		// workspace has the repository from here on.
+		first, second := addedLines(prepared.request.RepoURL, addedWorkspace(ctx, prepared.client, prepared.request.RepoURL, prepared.choice))
+		state.added = first + " (the automatic check)\n" + second
 	}
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	return "", true

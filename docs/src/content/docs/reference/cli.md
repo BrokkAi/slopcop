@@ -53,7 +53,7 @@ slopcop --root ../repo --base origin/main
 | `--no-policy-discovery` | do not include `.slopcop/policies` rules automatically |
 | `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); repository rules still run |
 | `--timeout DURATION` | how long to wait for the result; a check still running then exits `3` (default `10m0s`) |
-| `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
+| `-w`, `--workspace NAME\|ID` | workspace to run in, and bill, by name or id, instead of the one this checkout is mapped to or this login is bound to (also `SLOPCOP_WORKSPACE`) |
 | `--if-enabled` | skip a repository the workspace has disabled or has past its active limit, exiting `0` without sending a check; one it has never added is added |
 | `--verbose` | print the resolved request to stderr, and name each inconclusive check in `human` |
 
@@ -75,7 +75,7 @@ person turns a disabled repository back on. See
 | Flag | Meaning |
 | --- | --- |
 | `--root PATH` | repository path (default `.`) |
-| `-w`, `--workspace NAME\|ID` | workspace to add it to, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
+| `-w`, `--workspace NAME\|ID` | workspace to add it to, by name or id, instead of the one this checkout is mapped to or this login is bound to (also `SLOPCOP_WORKSPACE`) |
 
 ## `slopcop status`
 
@@ -88,7 +88,7 @@ way to answer whether a checkout is handled by SlopCop. See
 | --- | --- |
 | `--root PATH` | repository path (default `.`) |
 | `--format human\|json` | output format (default `human`) |
-| `-w`, `--workspace NAME\|ID` | workspace to inspect, by name or id, instead of the one this login is bound to (also `SLOPCOP_WORKSPACE`) |
+| `-w`, `--workspace NAME\|ID` | workspace to inspect, by name or id, instead of the one this checkout is mapped to or this login is bound to (also `SLOPCOP_WORKSPACE`) |
 
 States: `active`; `disabled`; `enabled, over the limit`; `not added` (the
 next check adds it); and `unsupported` (SlopCop checks
@@ -135,23 +135,28 @@ List the services this machine is signed in to, or change the default.
 ## `slopcop whoami`
 
 Show the account behind this login, the workspace it is bound to (the one its
-checks and ignores run in, and bill), that workspace's plan, and the service
-URL. With logins stored for more than one service, it also lists them and
+checks and ignores run in, and bill, unless the checkout is mapped to
+another), that workspace's plan, and the service URL. In a checkout this
+machine maps to a workspace, a `Checkout` line names that workspace. With logins stored for more than one service, it also lists them and
 marks the default. Run it before a check when it matters which workspace pays.
 
 | Flag | Meaning |
 | --- | --- |
-| `--format human\|json` | output format (default `human`); `json` has `service`, `account`, `workspace`, `plan`, `services` |
+| `--format human\|json` | output format (default `human`); `json` has `service`, `account`, `workspace`, `plan`, `services`, and `checkout` in a mapped checkout |
 
 ## `slopcop workspace`
 
-List your account's workspaces, or bind this login to another of them. See
+List your account's workspaces, map a repository to one of them, or bind this
+login to another of them. See
 [Workspaces](/account/workspaces/).
 
 | Command | Meaning |
 | --- | --- |
 | `workspace list [--format human\|json]` | the account's workspaces; `*` marks this login's |
 | `workspace use <name\|id> [--format human\|json]` | bind this login to another workspace; moves every agent and script using the login, so it asks `[y/N]` and refuses when stdin is not a terminal |
+| `workspace map <name\|id> [--root PATH]` | check this checkout's repository in that workspace from now on, on this machine; it decides which workspace pays, so it asks `[y/N]` and refuses when stdin is not a terminal |
+| `workspace unmap [--root PATH]` | forget the mapping, so the repository checks in the login's workspace again; asks `[y/N]` at a terminal |
+| `workspace mappings [--format human\|json]` | the repositories this machine maps, and to which workspace |
 
 ## `slopcop repo`
 
@@ -277,7 +282,7 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | --- | --- |
 | `SLOPCOP_TOKEN` | a token for this run; wins over the stored credential |
 | `SLOPCOP_SERVICE` | the service URL; `--service` wins over it |
-| `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, `dictionary`, and `repo`; `-w` wins over it |
+| `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, `dictionary`, and `repo`; `-w` wins over it, and it wins over a checkout's mapping |
 | `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice and turns automatic updates off |
 | `SLOPCOP_NO_AUTO_UPDATE` | any non-empty value keeps slopcop from replacing its own binary; the notice still prints |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
