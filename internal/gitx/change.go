@@ -84,7 +84,8 @@ func writeTree(root string, env []string) (string, error) {
 }
 
 // TreePatch builds the complete binary patch between a base commit or tree
-// and a captured tree. Files counts the patch's diff headers.
+// and a captured tree. Files counts the patch's diff headers. A deleted file
+// carries no content: see compactDeletions.
 func TreePatch(root, base, tree string) (WorkingChange, error) {
 	var change WorkingChange
 	patch, err := RunBytes(root, nil,
@@ -97,8 +98,72 @@ func TreePatch(root, base, tree string) (WorkingChange, error) {
 		return change, err
 	}
 	change.Files = countDiffHeaders(patch)
-	change.Patch = patch
+	change.Patch = compactDeletions(patch)
 	return change, nil
+}
+
+// emptyBinaryHunk is the forward hunk of a binary patch whose new side is
+// empty, as git writes it for a deleted binary file.
+const emptyBinaryHunk = "GIT binary patch\nliteral 0\nHcmV?d00001\n\n"
+
+// compactDeletions rewrites each deleted file's section of a --full-index
+// patch as a binary deletion with no reverse hunk, so it no longer carries
+// the file's old content: removing a large folder then costs a few headers
+// per file instead of the folder's size. `git apply` still deletes the file
+// only when its content is the blob the full-length index line names, so the
+// patch is as exact as before; only `git apply -R` cannot use it. A section
+// splits only at a line starting "diff --git ": a hunk line starts with a
+// space, '+', '-' or '\', and a base85 line has no space.
+func compactDeletions(patch []byte) []byte {
+	if !bytes.Contains(patch, []byte("\ndeleted file mode ")) {
+		return patch
+	}
+	header := []byte("diff --git ")
+	var out bytes.Buffer
+	out.Grow(len(patch))
+	for rest := patch; len(rest) > 0; {
+		end := bytes.Index(rest[1:], append([]byte("\n"), header...))
+		section := rest
+		if end >= 0 {
+			section = rest[:end+2]
+		}
+		rest = rest[len(section):]
+		out.Write(compactDeletion(section))
+	}
+	return out.Bytes()
+}
+
+// compactDeletion is one patch section, rewritten when it deletes a regular
+// file or symlink and carries its content.
+func compactDeletion(section []byte) []byte {
+	lines := bytes.SplitAfter(section, []byte("\n"))
+	deleted := false
+	for i, line := range lines {
+		if i == 0 {
+			continue
+		}
+		switch {
+		case bytes.HasPrefix(line, []byte("deleted file mode ")):
+			mode := strings.TrimSpace(string(line[len("deleted file mode "):]))
+			deleted = isBlobMode(mode)
+		case bytes.HasPrefix(line, []byte("index ")):
+			_, newID, ok := strings.Cut(strings.TrimSpace(string(line[len("index "):])), "..")
+			if !deleted || !ok || len(newID) < 40 || strings.Trim(newID, "0") != "" {
+				return section
+			}
+			if i+1 == len(lines) || len(lines[i+1]) == 0 {
+				// An empty file's deletion has no content to drop.
+				return section
+			}
+			var out bytes.Buffer
+			for _, kept := range lines[:i+1] {
+				out.Write(kept)
+			}
+			out.WriteString(emptyBinaryHunk)
+			return out.Bytes()
+		}
+	}
+	return section
 }
 
 // WorkingTreePatch builds one git patch that carries the complete change from

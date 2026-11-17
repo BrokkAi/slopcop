@@ -150,7 +150,9 @@ to it is reviewed like any other code. Unlike `.bifrostignore`, it changes only
 what SlopCop checks, never what Bifrost analyzes elsewhere. `.bifrostignore`
 still applies first; `[check]` only removes more.
 
-- `exclude` keeps the files it matches from every rule.
+- `exclude` keeps the files it matches from every rule. The CLI leaves the
+  changed files it matches out of the upload as well, and lists them in the
+  report's `omittedFiles` with reason `excluded`.
 - An `exclude_rules` entry drops only its rules' findings on its paths. Every
   other rule keeps checking those files.
 - An exclusion is never silent. Every report lists each scope with its reason,

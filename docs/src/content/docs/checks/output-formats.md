@@ -135,14 +135,14 @@ slopcop check --format json
 | `failure` | present when the analysis as a whole did not complete |
 | `repositoryAdded` | `true` when this check carried an approved add and the service added the repository to the workspace |
 | `emptyChange` | `true` when the patch was empty |
-| `omittedFiles` | files omitted from both upload and local review by the size filter, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json` or `large-binary`); their contents were not analyzed |
+| `omittedFiles` | files omitted from both upload and local review by the size filter or because `.bifrostignore` or `[check] exclude` keeps them out of checks, each with `path`, `bytes` (the larger base/current size), and `reason` (`large-json`, `large-binary` or `excluded`); their contents were not analyzed |
 | `skillUpdated` | present when this run installed or updated the [agent skill](/agents/skill/): each entry's `dir`, `from`, `to`, `changed`, and `backup` |
 | `repositorySize` | the service's measure of the check's checkout, as it sent it: `files`, `bytes`, `maxFiles`, `maxBytes`, `excludedFiles`, `excludedBytes`, and `nearLimit`; absent from an older service |
 | `sizeBreakdown` | present when `repositorySize.nearLimit` is true: the base tree measured locally, with `base`, `files`, `bytes`, `excludedFiles`, `excludedBytes` (what `.bifrostignore` and `[check] exclude` already leave out), `rankedBy` (`bytes` or `files`), `largest` (at most five paths, each with `path`, `directory`, `files`, `bytes` and the `[check] exclude` `pattern` that leaves it out), the config's current `exclude` list and `hasCheck`, and `configError` when `.slopcop/config.toml` does not parse |
 | `orgRules` | present when the check ran shared rules from the owner's [`.slopcop` repository](/checks/repository-rules/#share-rules-across-an-organization): `repository`, the `commit` they were read at, and each rule file's path in `files` |
 
 Failure, pending, skipped, and AI-only JSON also include `approved` and any
-`omittedFiles`. If the filter omits every changed file, the result is `skipped`
+`omittedFiles`. If the size filter omits every changed file, the result is `skipped`
 with no approval or analysis. The first SARIF run has `slopcop.approved` in its
 properties; `slopcop.omittedFiles` lists omissions on each run. A local review's
 `tree` identifies the complete snapshot, while optional `diffTree` identifies

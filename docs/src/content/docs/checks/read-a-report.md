@@ -159,10 +159,12 @@ result covers.
   workspace, because the workspace had never added it. See
   [Repositories](/account/repositories/).
 - **`omittedFiles`**: JSON data and binary artifacts omitted from upload and
-  local review by the 500,000-byte size filter. Each entry gives the path,
-  larger base/current size in bytes, and reason. Those contents were not
+  local review by the 500,000-byte size filter, and changed files that
+  `.bifrostignore` or `[check] exclude` keep out of every check. Each entry
+  gives the path, larger base/current size in bytes, and reason
+  (`large-json`, `large-binary` or `excluded`). Those contents were not
   analyzed; a passing check covers the retained scope. Repeatable `--include`
-  paths or globs opt particular files back in. See [Run a check](/checks/run-a-check/).
+  paths or globs opt particular large files back in. See [Run a check](/checks/run-a-check/).
 - **`emptyChange`**: the patch has no in-scope changes. If the size filter
   omitted every changed file, the result is `skipped` with no analysis or push
   approval. Otherwise the working tree matches the base; rerun with `--base`

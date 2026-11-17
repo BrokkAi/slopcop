@@ -62,7 +62,7 @@ func TestFilterCheckTreeClassificationAndPatchRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CaptureWorkingTree: %v", err)
 	}
-	result, err := FilterCheckTree(root, base, snapshot.Tree)
+	result, err := FilterCheckTree(root, base, snapshot.Tree, nil)
 	if err != nil {
 		t.Fatalf("FilterCheckTree: %v", err)
 	}
@@ -198,7 +198,7 @@ func TestFilterCheckTreeIncludesExactGlobAndRenamePaths(t *testing.T) {
 		t.Fatalf("CaptureWorkingTree: %v", err)
 	}
 
-	defaultResult, err := FilterCheckTree(root, base, target.Tree)
+	defaultResult, err := FilterCheckTree(root, base, target.Tree, nil)
 	if err != nil {
 		t.Fatalf("FilterCheckTree default: %v", err)
 	}
@@ -206,7 +206,7 @@ func TestFilterCheckTreeIncludesExactGlobAndRenamePaths(t *testing.T) {
 		t.Fatalf("default omitted paths = %+v; want all six large JSON rename endpoints and files", defaultResult.OmittedFiles)
 	}
 
-	included, err := FilterCheckTree(root, base, target.Tree,
+	included, err := FilterCheckTree(root, base, target.Tree, nil,
 		"literal[1].json",        // exact path wins over glob metacharacter interpretation
 		"src/**/*.json",          // Git globstar spans both src levels
 		"rename-destination.txt", // either endpoint includes the whole detected rename
@@ -233,7 +233,7 @@ func TestFilterCheckTreeIncludesExactGlobAndRenamePaths(t *testing.T) {
 		t.Errorf("omitted paths after includes = %v; want only literal1.json", gotOmitted)
 	}
 
-	nonmatch, err := FilterCheckTree(root, base, target.Tree, "absent/**/*.ndjson")
+	nonmatch, err := FilterCheckTree(root, base, target.Tree, nil, "absent/**/*.ndjson")
 	if err != nil {
 		t.Fatalf("FilterCheckTree with nonmatching include: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestFilterCheckTreeUnusualPaths(t *testing.T) {
 		t.Fatalf("CaptureWorkingTree: %v", err)
 	}
 
-	filtered, err := FilterCheckTree(root, base, target.Tree)
+	filtered, err := FilterCheckTree(root, base, target.Tree, nil)
 	if err != nil {
 		t.Fatalf("FilterCheckTree: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestFilterCheckTreeUnusualPaths(t *testing.T) {
 
 	// A literal include must work even when the actual path contains Git
 	// pathspec metacharacters, a colon, a tab, and a newline.
-	included, err := FilterCheckTree(root, base, target.Tree, jsonPath)
+	included, err := FilterCheckTree(root, base, target.Tree, nil, jsonPath)
 	if err != nil {
 		t.Fatalf("FilterCheckTree exact unusual include: %v", err)
 	}
@@ -342,10 +342,10 @@ func TestFilterCheckTreeDirectoryFileTransitionRequiresInclude(t *testing.T) {
 		t.Fatalf("CaptureWorkingTree: %v", err)
 	}
 
-	if _, err := FilterCheckTree(root, base, target.Tree); err == nil || !strings.Contains(err.Error(), "--include") {
+	if _, err := FilterCheckTree(root, base, target.Tree, nil); err == nil || !strings.Contains(err.Error(), "--include") {
 		t.Fatalf("FilterCheckTree error = %v; want an actionable file/directory conflict with --include remedy", err)
 	}
-	withInclude, err := FilterCheckTree(root, base, target.Tree, "large.json/main.go")
+	withInclude, err := FilterCheckTree(root, base, target.Tree, nil, "large.json/main.go")
 	if err != nil {
 		t.Fatalf("FilterCheckTree with transition include: %v", err)
 	}
@@ -365,4 +365,95 @@ func firstDifferentByte(a, b string) int {
 		}
 	}
 	return limit
+}
+
+func TestFilterCheckTreeLeavesOutExcludedPaths(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, root, "records/a.json", `{"a":1}`)
+	writeFile(t, root, "records/b.json", strings.Repeat("b", 500001))
+	writeFile(t, root, "records/moved.txt", "moved out\n")
+	writeFile(t, root, "src/main.go", "package main\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+	for _, name := range []string{"records/a.json", "records/b.json"} {
+		if err := os.Remove(filepath.Join(root, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Rename(filepath.Join(root, "records/moved.txt"), filepath.Join(root, "src/moved.txt")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "records/new.json", `{"new":true}`)
+	writeFile(t, root, "src/main.go", "package main\n\nfunc main() {}\n")
+	target, err := CaptureWorkingTree(root, nil)
+	if err != nil {
+		t.Fatalf("CaptureWorkingTree: %v", err)
+	}
+	var asked []string
+	exclude := func(paths []string) (map[string]bool, error) {
+		asked = paths
+		excluded := map[string]bool{}
+		for _, name := range paths {
+			excluded[name] = strings.HasPrefix(name, "records/")
+		}
+		return excluded, nil
+	}
+
+	// --include overrides only the size filter, never an exclusion.
+	result, err := FilterCheckTree(root, base, target.Tree, exclude, "records/b.json")
+	if err != nil {
+		t.Fatalf("FilterCheckTree: %v", err)
+	}
+	if len(asked) != 6 {
+		t.Errorf("exclude was asked about %q; want the six changed paths", asked)
+	}
+	want := []OmittedFile{
+		{Path: "records/a.json", Bytes: 7, Reason: OmittedExcluded},
+		{Path: "records/b.json", Bytes: 500001, Reason: OmittedExcluded},
+		{Path: "records/moved.txt", Bytes: 10, Reason: OmittedExcluded},
+		{Path: "records/new.json", Bytes: 12, Reason: OmittedExcluded},
+	}
+	if len(result.OmittedFiles) != len(want) {
+		t.Fatalf("omitted = %+v; want %+v", result.OmittedFiles, want)
+	}
+	for i := range want {
+		if result.OmittedFiles[i] != want[i] {
+			t.Errorf("omitted[%d] = %+v; want %+v", i, result.OmittedFiles[i], want[i])
+		}
+	}
+	if got := git(t, root, "diff", "--name-only", "--no-renames", base, result.Tree); got != "src/main.go\nsrc/moved.txt" {
+		t.Errorf("filtered change = %q; want only the paths outside records/", got)
+	}
+}
+
+func TestFilterCheckTreeSendsAPartlyExcludedTransitionWhole(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, root, "data", "a file\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "base")
+	base := git(t, root, "rev-parse", "HEAD")
+	if err := os.Remove(filepath.Join(root, "data")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, root, "data/main.go", "package main\n")
+	target, err := CaptureWorkingTree(root, nil)
+	if err != nil {
+		t.Fatalf("CaptureWorkingTree: %v", err)
+	}
+	partly := func([]string) (map[string]bool, error) { return map[string]bool{"data": true}, nil }
+	result, err := FilterCheckTree(root, base, target.Tree, partly)
+	if err != nil || result.Tree != target.Tree || len(result.OmittedFiles) != 0 {
+		t.Errorf("partly excluded transition = %+v, %v; want it sent whole", result, err)
+	}
+	whole := func([]string) (map[string]bool, error) {
+		return map[string]bool{"data": true, "data/main.go": true}, nil
+	}
+	result, err = FilterCheckTree(root, base, target.Tree, whole)
+	if err != nil || len(result.OmittedFiles) != 2 {
+		t.Fatalf("wholly excluded transition = %+v, %v; want both sides left out", result, err)
+	}
+	if got := git(t, root, "rev-parse", result.Tree+"^{tree}"); got != git(t, root, "rev-parse", base+"^{tree}") {
+		t.Errorf("wholly excluded transition left a change: %s", git(t, root, "diff", "--stat", base, result.Tree))
+	}
 }

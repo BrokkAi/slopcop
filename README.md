@@ -561,6 +561,12 @@ Patterns are relative to the repository root; quote globs so the shell does
 not expand them. They only override the size filter and do not exclude other
 changed source files. Service payload limits still apply to the resulting patch.
 
+Changed files that `.bifrostignore` or `[check] exclude` keep out of every
+check are left out of the upload and local review too, listed in
+`omittedFiles` with reason `excluded`; `--include` does not bring them back.
+A deleted file is sent without its old content, so removing a large folder
+does not cost its size.
+
 A check run by a Claude Code, Codex or OpenCode agent also sends which models wrote the
 change, so the service can tie each finding to the model that wrote its file.
 The CLI finds the agent's session from its environment and reads that

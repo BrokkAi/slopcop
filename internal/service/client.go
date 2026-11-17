@@ -192,11 +192,32 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 // checkOnce posts the change once. It returns the service's Retry-After wait
 // alongside a failure.
 func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time.Duration, error) {
-	status, header, payload, err := c.postJSON(ctx, checkPath, request)
+	body, err := json.Marshal(request)
+	if err != nil {
+		return Response{}, 0, fmt.Errorf("encode request: %w", err)
+	}
+	status, header, payload, err := c.send(ctx, http.MethodPost, checkPath, body)
 	if err != nil {
 		return Response{}, 0, err
 	}
-	return checkAnswer(status, header, payload)
+	response, wait, err := checkAnswer(status, header, payload)
+	var failure *Error
+	if status == http.StatusRequestEntityTooLarge && errors.As(err, &failure) && failure.Body.Code == "" {
+		failure.Body = uploadTooLarge(len(body))
+	}
+	return response, wait, err
+}
+
+// uploadTooLarge is the failure for a check whose upload something in front
+// of the service, such as a proxy, refused with HTTP 413 before the service
+// could answer with its own payload_too_large.
+func uploadTooLarge(bytes int) ErrorBody {
+	return ErrorBody{
+		Code:    "payload_too_large",
+		Message: fmt.Sprintf("The change is too large to upload: the check request was %d bytes, and the check service refused it (HTTP 413).", bytes),
+		Remedy: "Keep generated or data paths out of checks with a [check] exclude in .slopcop/config.toml, which also keeps them out of the upload, " +
+			"or check a smaller change, such as the pushed commit by headCommit through the MCP check tool.",
+	}
 }
 
 // pollOnce asks for a running check by its id once, without the change. The
