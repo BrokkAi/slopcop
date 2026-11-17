@@ -1421,7 +1421,9 @@ type enableService struct {
 	repositories []service.Repository
 	// inTeam is what the Acme team workspace has, when a test gives it its
 	// own; otherwise every workspace answers repositories.
-	inTeam     []service.Repository
+	inTeam []service.Repository
+	// teamFails makes the Acme team workspace refuse to list its repositories.
+	teamFails  bool
 	lists      int
 	checks     []map[string]any
 	states     []map[string]any
@@ -1441,6 +1443,11 @@ func (s *enableService) start(t *testing.T, repo string) *httptest.Server {
 		case "/v1/repositories":
 			s.lists++
 			s.workspaces = append(s.workspaces, r.Header.Get("SlopCop-Workspace"))
+			if s.teamFails && r.Header.Get("SlopCop-Workspace") == teamID {
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = w.Write([]byte(`{"code": "unavailable", "message": "Unavailable.", "retryable": true}`))
+				return
+			}
 			listed := s.repositories
 			if s.inTeam != nil && r.Header.Get("SlopCop-Workspace") == teamID {
 				listed = s.inTeam
@@ -1727,6 +1734,17 @@ func TestEnableAsksWhichWorkspaceAndSaysWhereTheRepositoryAlreadyIs(t *testing.T
 		}
 	})
 
+	t.Run("a workspace that does not answer is named before the choice", func(t *testing.T) {
+		svc := &enableService{teamFails: true}
+		server := svc.start(t, repo)
+		typedInTurn(t, "1\n", "no\n")
+		_, _, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+		unknown := `slopcop: couldn't tell whether "Acme team" already has BrokkAi/slopcop.`
+		if !strings.Contains(stderr, unknown) || strings.Index(stderr, unknown) > strings.Index(stderr, "Which one should check") {
+			t.Errorf("stderr = %q, want %q before the question", stderr, unknown)
+		}
+	})
+
 	t.Run("an answer that is no workspace changes nothing", func(t *testing.T) {
 		svc := &enableService{}
 		server := svc.start(t, repo)
@@ -1736,6 +1754,16 @@ func TestEnableAsksWhichWorkspaceAndSaysWhereTheRepositoryAlreadyIs(t *testing.T
 			t.Errorf("exit = %d, stderr = %q, checks = %v", code, stderr, svc.checks)
 		}
 	})
+}
+
+func TestWorkspaceSelectorUsesTheIDForASharedName(t *testing.T) {
+	workspaces := []service.Workspace{{ID: personalID, Name: "Dave"}, {ID: teamID, Name: "Acme"}, {ID: widgetsID, Name: "acme"}}
+	if got := workspaceSelector(workspaces, workspaces[1]); got != teamID {
+		t.Errorf("selector = %q, want the id of a workspace whose name another shares", got)
+	}
+	if got := workspaceSelector(workspaces, workspaces[0]); got != "Dave" {
+		t.Errorf("selector = %q, want the name", got)
+	}
 }
 
 func TestCheckSaysWhenItAddedARepositoryThroughTheFlag(t *testing.T) {

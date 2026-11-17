@@ -79,7 +79,13 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	// An agent or a script is not asked and costs no extra requests: the
 	// confirmation below refuses it without a terminal.
 	if _, atTerminal := confirmInput(cmd); atTerminal && repository.State == statusNotAdded && len(whoami.Workspaces) > 1 {
-		holders := workspacesWithRepository(cmd.Context(), client, whoami.Workspaces, repository.URL, target.ID)
+		holders, unanswered := workspacesWithRepository(cmd.Context(), client, whoami.Workspaces, repository.URL, target.ID)
+		if len(unanswered) > 0 {
+			// Without an answer the "already has it" mark and the warning below
+			// cannot be relied on, and the person is about to choose by them.
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: couldn't tell whether %s already has %s. 'slopcop repo list --workspace <name>' shows a workspace's repositories.\n",
+				joinWorkspaceNames(unanswered), repository.FullName)
+		}
 		if !named {
 			chosen, err := askWorkspace(cmd, repository.FullName, whoami.Workspaces, target, holders)
 			if err != nil {
@@ -114,7 +120,7 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 		// The login still checks in its own workspace, where a plain check of
 		// this repository would be refused.
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: this login checks in %s. To check this repository in %s, pass --workspace %q, or set SLOPCOP_WORKSPACE.\n",
-			workspaceName(whoami.Workspace.Name, true), workspaceName(target.Name, true), target.Name)
+			workspaceName(whoami.Workspace.Name, true), workspaceName(target.Name, true), workspaceSelector(whoami.Workspaces, target))
 	}
 	return err
 }
@@ -130,25 +136,46 @@ func enabledIn(err error) bool {
 }
 
 // workspacesWithRepository lists the account's workspaces, other than the one
-// with id except, that already have repoURL, enabled or not. It asks each
-// workspace for its repositories; one that does not answer is left out, since
-// this only informs a choice the person still makes.
-func workspacesWithRepository(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) []service.Workspace {
+// with id except, that already have repoURL, enabled or not, and those whose
+// repositories the service would not list, about which nothing is known.
+func workspacesWithRepository(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) (holders, unanswered []service.Workspace) {
 	current := client.Workspace
 	defer func() { client.Workspace = current }()
-	var holders []service.Workspace
 	for _, workspace := range workspaces {
 		if strings.EqualFold(workspace.ID, except) {
 			continue
 		}
 		client.Workspace = workspace.ID
 		repository, err := repositoryStatus(ctx, client, repoURL)
-		if err != nil || repository.State == statusNotAdded || repository.State == statusUnsupported {
-			continue
+		switch {
+		case err != nil:
+			unanswered = append(unanswered, workspace)
+		case repository.State != statusNotAdded && repository.State != statusUnsupported:
+			holders = append(holders, workspace)
 		}
-		holders = append(holders, workspace)
 	}
-	return holders
+	return holders, unanswered
+}
+
+// joinWorkspaceNames is the workspaces' quoted names in a sentence.
+func joinWorkspaceNames(workspaces []service.Workspace) string {
+	names := make([]string, len(workspaces))
+	for index, workspace := range workspaces {
+		names[index] = workspaceName(workspace.Name, true)
+	}
+	return strings.Join(names, " and ")
+}
+
+// workspaceSelector is what --workspace takes for target: its name, or its id
+// when another of the account's workspaces shares the name, which a name
+// alone would be refused for.
+func workspaceSelector(workspaces []service.Workspace, target service.Workspace) string {
+	for _, workspace := range workspaces {
+		if workspace.ID != target.ID && strings.EqualFold(workspace.Name, target.Name) {
+			return target.ID
+		}
+	}
+	return target.Name
 }
 
 // askWorkspace asks the person at the terminal which of the account's
@@ -188,17 +215,17 @@ func askWorkspace(cmd *cobra.Command, name string, workspaces []service.Workspac
 // other workspaces of the account already have it, so a second copy that is
 // checked and billed twice is a choice and not an accident.
 func warnAlreadyElsewhere(cmd *cobra.Command, name string, target service.Workspace, holders []service.Workspace) {
-	var names []string
+	var others []service.Workspace
 	for _, workspace := range holders {
 		if workspace.ID != target.ID {
-			names = append(names, workspaceName(workspace.Name, true))
+			others = append(others, workspace)
 		}
 	}
-	if len(names) == 0 {
+	if len(others) == 0 {
 		return
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %s is already in %s. Adding it to %s too checks and bills it in each; to check it there instead, stop here and pass --workspace to your checks.\n",
-		name, strings.Join(names, " and "), workspaceName(target.Name, true))
+		name, joinWorkspaceNames(others), workspaceName(target.Name, true))
 }
 
 func holdsRepository(holders []service.Workspace, workspace service.Workspace) bool {
