@@ -20,10 +20,9 @@ disabled is enabled again.
 
 This changes what the workspace checks, and may cost credits every 30 days, so
 it asks for the repository's owner/name at a terminal and refuses when stdin is
-not one. An agent runs with your login, and the service cannot tell it from
-you, so adding a repository stays a step you take yourself. Once a person has
-confirmed it, 'check --add-repository --workspace <name|id>' carries the same
-approval without a terminal.
+not one. A check adds a repository the workspace has never added by itself, so
+'enable' is optional for that; turning a disabled repository back on stays a
+step you take here.
 
 Adding a repository through 'enable' also runs its first check.`,
 		Args: cobra.NoArgs,
@@ -110,13 +109,12 @@ func addRepository(cmd *cobra.Command, repoRoot string, repository statusReposit
 	if err := confirmChange(cmd, repository.FullName, "add"); err != nil {
 		return err
 	}
-	// runCheck sends --add-repository with the workspace named here, so the
-	// approval cannot add the repository to another one.
+	// The check runs in the workspace named here, and adds the repository
+	// there because that workspace has never added it.
 	return runCheck(cmd, &checkOptions{
-		root:          repoRoot,
-		mode:          modeStatic,
-		workspace:     target.ID,
-		addRepository: true,
+		root:      repoRoot,
+		mode:      modeStatic,
+		workspace: target.ID,
 	}, serviceFlag, version)
 }
 

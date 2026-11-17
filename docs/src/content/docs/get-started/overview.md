@@ -26,7 +26,7 @@ push. The same command gates a change in CI.
 
 The static analyzer needs no per-language install. In default `both` mode, the
 CLI also runs local review. In `ai` mode, it runs review without the service,
-login, or an enabled repository. `--if-enabled` skips an inactive static half;
+login, or an enabled repository. `--if-enabled` skips the static half of a disabled repository;
 in `both` mode the local review still runs. A static-only skip is marked
 `skipped`, not clean.
 

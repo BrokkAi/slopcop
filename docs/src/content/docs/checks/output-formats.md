@@ -118,7 +118,7 @@ slopcop check --format json
 | `checkId` | the check that answered; absent from an older service |
 | `staticStatus` | the static half's status when it differs from merged `status` |
 | `review` | `status`, `reviewers`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
-| `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), or `staticMode` (static mode chosen by flag or config). A static-only `clean` is not a reviewed change |
+| `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), `staticMode` (static mode chosen by flag or config), or `repositoryInactive` (the check was refused as `repository_disabled` or `active_repository_limit_reached` before the review started). A static-only `clean` is not a reviewed change |
 | `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
 | `baseCommit` | the commit the patch was applied to |
@@ -151,7 +151,7 @@ the filtered scope actually reviewed.
 A failed check prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the service
 sent one, and `sizeBreakdown` for `repository_too_large`. A check still running at `--timeout` prints `{"status": "pending",
-"retryAfter": 5, "message": …, "remedy": …}`. `--if-enabled` with an inactive
+"retryAfter": 5, "message": …, "remedy": …}`. `--if-enabled` with a disabled
 repository prints `{"status": "skipped", "code": "repository_not_enabled",
 "state": …, "repository": …, "message": …}` and exits `0`, because it sent
 nothing.

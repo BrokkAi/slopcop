@@ -33,6 +33,9 @@ const (
 	ReviewSkippedCI = "ci"
 	// ReviewSkippedStaticMode is static mode chosen by flag or config file.
 	ReviewSkippedStaticMode = "staticMode"
+	// ReviewSkippedRepositoryInactive is a check of a repository the
+	// workspace has not added or has disabled, stopped before the review.
+	ReviewSkippedRepositoryInactive = "repositoryInactive"
 )
 
 const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"

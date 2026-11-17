@@ -7,7 +7,7 @@ sidebar:
 
 ```console
 slopcop                          # check the change in the current checkout
-slopcop check --if-enabled       # automatic check: skip a repository not enabled here
+slopcop check --if-enabled       # automatic check: skip a repository disabled here
 slopcop check --format json      # same, machine-readable
 slopcop --root ../repo --base origin/main
 ```
@@ -15,7 +15,7 @@ slopcop --root ../repo --base origin/main
 Running `slopcop` with no subcommand runs the check; `slopcop check` is the same
 command. The static half sends one request and its result comes from the
 service. The local review has a separate result. `--if-enabled` can skip a
-repository the workspace has not enabled; that is a `skipped` result, never a
+repository the workspace has disabled; that is a `skipped` result, never a
 clean one.
 
 ## Local review
@@ -133,8 +133,7 @@ work passed.
 | `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); see [Repository rules](/checks/repository-rules/#select-rules-by-hand) |
 | `--timeout DURATION` | how long to wait for the result (default `10m`); a check still running then exits `3` |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's; see [Workspaces](/account/workspaces/) |
-| `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` and send nothing. For automatic checks; see [Repositories](/account/repositories/) |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
+| `--if-enabled` | skip a repository the workspace has disabled or has past its active limit: exit `0` and send nothing. One it has never added is added. For automatic checks; see [Repositories](/account/repositories/) |
 | `--service URL` | the check service (also `SLOPCOP_SERVICE`) |
 | `--verbose` | print the resolved request to stderr, and in `human` name each inconclusive check and the files and rules each [`.slopcop/config.toml` exclusion](/checks/false-positives/#exclude-paths-from-checks) resolved to |
 
@@ -177,12 +176,13 @@ its result.
 
 ## A check of a repository that is not enabled
 
-A check never adds a repository. A check of one the workspace has not added
-exits `4` with `repository_not_enabled` and sends nothing. Run `slopcop
-enable` in the checkout, at a terminal, to add it and run its first check.
-An automatic check can pass `--if-enabled` to exit `0` and send nothing
-instead. [Repositories](/account/repositories/) explains adding, the
-`--add-repository` flag for after a person approved it, and the active limit.
+A check of a repository the workspace has never added adds it to the workspace
+the check runs in, which then pays for its checks, and says so on stderr. A
+repository the workspace disabled exits `4` with `repository_disabled`, and one
+past the active limit with `active_repository_limit_reached`, without sending
+anything or starting the local reviewers; only a person turns it back on. An
+automatic check can pass `--if-enabled` to exit `0` and send nothing instead.
+[Repositories](/account/repositories/) explains adding and the active limit.
 A private repository needs the workspace's
 [GitHub App, GitLab, or Bitbucket connection](/account/private-repositories/)
 first.

@@ -285,8 +285,9 @@ names, or enable or disable one.
 
 Each active repository after a workspace's first costs credits every 30 days;
 a disabled one is not checked or charged, and keeps its reports, findings and
-settings. Only the workspace's owner enables or disables. 'slopcop enable'
-adds a repository from its checkout; a check never adds one by itself.`,
+settings. Only the workspace's owner enables or disables. A check adds a
+repository the workspace has never added; 'slopcop enable' turns a disabled
+one back on.`,
 		Args: cobra.NoArgs,
 	}
 	workspace := ""

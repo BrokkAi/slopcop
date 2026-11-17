@@ -160,11 +160,11 @@ type checkOptions struct {
 	showExisting     bool
 	timeout          time.Duration
 	workspace        string
-	// addRepository carries the user's approval of adding the repository to
-	// the workspace --workspace names, which then pays for it.
+	// addRepository is accepted and ignored: a check now adds a repository
+	// the workspace has never added by itself.
 	addRepository bool
 	// ifEnabled makes an automatic check skip, rather than refuse, a
-	// repository the workspace does not have active.
+	// repository the workspace has disabled or has past its active limit.
 	ifEnabled bool
 	// include exempts selected paths/globs from the large-data filter.
 	include []string
@@ -199,9 +199,12 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringArrayVar(&opts.include, "include", nil, "repository-relative path or glob to include even above the 500,000-byte data-file limit (repeatable)")
 	flags.DurationVar(&opts.timeout, "timeout", 10*time.Minute, "how long to wait for the result; a check still running then exits 3")
 	addWorkspaceFlag(command, false, &opts.workspace)
-	flags.BoolVar(&opts.addRepository, "add-repository", false, "add the repository to the workspace --workspace names, which then pays for it, without asking at a terminal; pass it once the user has approved that")
-	flags.BoolVar(&opts.ifEnabled, "if-enabled", false, "check only when the repository is active in the workspace; otherwise exit 0 without sending a check")
-	command.MarkFlagsMutuallyExclusive("if-enabled", "add-repository")
+	// A check adds a repository the workspace has never added by itself, so
+	// --add-repository is no longer needed. It stays, hidden, so scripts and
+	// older skills that pass it keep working.
+	flags.BoolVar(&opts.addRepository, "add-repository", false, "no longer needed: a check adds a repository the workspace has never added")
+	_ = flags.MarkHidden("add-repository")
+	flags.BoolVar(&opts.ifEnabled, "if-enabled", false, "skip a repository the workspace has disabled or has past its active limit, exiting 0 without sending a check; one it has never added is added")
 }
 
 func newVersionCommand(version string) *cobra.Command {
