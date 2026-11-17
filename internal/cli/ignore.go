@@ -89,7 +89,7 @@ func workspaceClient(cmd *cobra.Command, serviceFlag, version, workspace string)
 		return nil, err
 	}
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
-	noticeUpdates(client, cmd.ErrOrStderr(), version)
+	noticeUpdates(cmd, client, version)
 	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
 		return nil, serviceFailure(cmd, err)
 	}

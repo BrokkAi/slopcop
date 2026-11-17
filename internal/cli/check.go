@@ -423,7 +423,7 @@ func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, 
 	}
 	client := prepared.client
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
-	noticeUpdates(client, cmd.ErrOrStderr(), version)
+	noticeUpdates(cmd, client, version)
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
 		return staticFailure(cmd, err), gateStatic
 	}

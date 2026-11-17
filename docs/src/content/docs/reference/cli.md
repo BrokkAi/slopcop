@@ -259,6 +259,13 @@ Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr cre
 open a pull request until HEAD's tree has a passing check or valid override. It also
 blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
 
+## `slopcop update`
+
+Update slopcop to the latest release. A slopcop installed by the install script
+replaces its own binary, after checking the download against the release's
+checksums; one installed through npm, pip, pipx or uv is told the command to
+run. See [Automatic updates](/get-started/install/#automatic-updates).
+
 ## `slopcop version`
 
 Print the version. A release binary prints its tag; a plain `go install` prints
@@ -271,7 +278,8 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | `SLOPCOP_TOKEN` | a token for this run; wins over the stored credential |
 | `SLOPCOP_SERVICE` | the service URL; `--service` wins over it |
 | `SLOPCOP_WORKSPACE` | the workspace for `check`, `ignore`, `unignore`, `ignored`, `dictionary`, and `repo`; `-w` wins over it |
-| `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice |
+| `SLOPCOP_NO_UPDATE_NOTICE` | any non-empty value silences the upgrade notice and turns automatic updates off |
+| `SLOPCOP_NO_AUTO_UPDATE` | any non-empty value keeps slopcop from replacing its own binary; the notice still prints |
 | `CLAUDE_CODE_SESSION_ID`, `CLAUDE_CONFIG_DIR` | set by Claude Code; name the session the CLI reads model attribution from |
 | `CODEX_THREAD_ID`, `CODEX_HOME` | set by Codex; the same |
 | `OPENCODE_SESSION_ID`, `OPENCODE_DB`, `XDG_DATA_HOME` | set by OpenCode or you; the same |

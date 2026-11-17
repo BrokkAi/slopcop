@@ -1,8 +1,10 @@
-// Package update tells a person, at most once a day, when the service reports
-// a newer slopcop release than the one running.
+// Package update keeps slopcop current: when the service reports a newer
+// release than the one running, a binary slopcop manages replaces itself, and
+// any other is told, at most once a day, how to upgrade.
 package update
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -30,9 +32,13 @@ type Notifier struct {
 	stamp   string
 	now     func() time.Time
 	upgrade string
+	// apply, when set, replaces this binary with a release; Notify then
+	// leaves the newer release to Finish instead of printing the notice.
+	apply func(ctx context.Context, tag string) error
 
-	mu   sync.Mutex
-	done bool
+	mu      sync.Mutex
+	done    bool
+	pending *version
 }
 
 // New returns the notifier for this build, or nil when there is never a
@@ -47,13 +53,24 @@ func New(out io.Writer, current, stamp string) *Notifier {
 		return nil
 	}
 	executable, _ := os.Executable()
-	return &Notifier{
+	// The file a symlink names is the one that would be replaced, so it is
+	// the one judged.
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	notifier := &Notifier{
 		out:     out,
 		current: parsed,
 		stamp:   stamp,
 		now:     time.Now,
 		upgrade: upgradeCommand(executable),
 	}
+	// Only a release build is replaced: a build ahead of a release, such as
+	// a developer's own, stays the one they built.
+	if executable != "" && isRelease(current) && SelfManaged(executable) && autoUpdates() {
+		notifier.apply = func(ctx context.Context, tag string) error { return Apply(ctx, tag, executable) }
+	}
+	return notifier
 }
 
 // Notify prints the notice when latest is newer than this build and none was
@@ -77,8 +94,45 @@ func (n *Notifier) Notify(latest string) {
 	if last, ok := n.lastNotice(); ok && now.Sub(last) < interval && !last.After(now) {
 		return
 	}
-	fmt.Fprintf(n.out, "slopcop %s is available (you have %s). Upgrade: %s\n", newer, n.current, n.upgrade)
+	// A pre-release is announced but never installed by itself. The update
+	// is recorded once it has been tried, so one that was interrupted is
+	// tried again on the next run.
+	if n.apply != nil && isRelease(latest) {
+		n.pending = &newer
+		return
+	}
 	n.record(now)
+	fmt.Fprintf(n.out, "slopcop %s is available (you have %s). Upgrade: %s\n", newer, n.current, n.upgrade)
+}
+
+// Finish, called once the command's own work is done, replaces this binary
+// with the newer release Notify heard of, and says so; the next run uses it.
+// An update that fails is tried again a day later, and never fails the
+// command: it prints the notice instead, with why.
+func (n *Notifier) Finish(ctx context.Context) {
+	if n == nil {
+		return
+	}
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.pending == nil {
+		return
+	}
+	newer := *n.pending
+	n.pending = nil
+	// Said first, so a caller waiting on the process knows what it waits for.
+	fmt.Fprintf(n.out, "slopcop: updating from %s to %s...\n", n.current, newer)
+	err := n.apply(ctx, newer.String())
+	if ctx.Err() != nil {
+		// Interrupted: nothing was replaced, and the next run tries again.
+		return
+	}
+	n.record(n.now())
+	if err != nil {
+		fmt.Fprintf(n.out, "slopcop %s is available (you have %s), but updating to it failed: %v. Upgrade: %s\n", newer, n.current, err, n.upgrade)
+		return
+	}
+	fmt.Fprintf(n.out, "slopcop: updated from %s to %s; the next run uses it.\n", n.current, newer)
 }
 
 func (n *Notifier) lastNotice() (time.Time, bool) {
@@ -147,6 +201,13 @@ func parse(raw string) (version, bool) {
 		parsed[i] = number
 	}
 	return parsed, true
+}
+
+// isRelease reports whether raw is exactly a release version, with no
+// pre-release or build suffix.
+func isRelease(raw string) bool {
+	parsed, ok := parse(raw)
+	return ok && parsed.String() == "v"+strings.TrimPrefix(strings.TrimSpace(raw), "v")
 }
 
 func (v version) after(other version) bool {

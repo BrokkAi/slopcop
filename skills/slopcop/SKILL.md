@@ -217,7 +217,10 @@ runs.
 When the service reports a newer release, the CLI prints one line on stderr,
 at most once a day, starting `slopcop vX.Y.Z is available`. It never touches
 stdout or the exit code; mention it to the user rather than upgrading on your
-own. `SLOPCOP_NO_UPDATE_NOTICE=1` turns it off.
+own. `SLOPCOP_NO_UPDATE_NOTICE=1` turns it off. A slopcop installed by the
+install script updates itself instead, after the check, and says `slopcop:
+updated from vX to vY; the next run uses it.` on stderr; there is nothing to
+do. `SLOPCOP_NO_AUTO_UPDATE=1` or `CI` keeps it from doing that.
 
 In Claude Code and Codex, `slopcop init` can install a `Stop` hook that checks
 the change when you stop and hands back new findings in files you wrote. It

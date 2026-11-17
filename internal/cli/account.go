@@ -33,7 +33,7 @@ func accountClient(cmd *cobra.Command, serviceFlag, version string) (*service.Cl
 		return nil, err
 	}
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
-	noticeUpdates(client, cmd.ErrOrStderr(), version)
+	noticeUpdates(cmd, client, version)
 	return client, nil
 }
 
