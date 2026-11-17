@@ -83,8 +83,10 @@ func newWhoamiCommand(serviceURL *string, version string) *cobra.Command {
 		Use:   "whoami",
 		Short: "Show the account and the workspace checks run in and bill",
 		Long: `Show the account behind this login, the workspace it is bound to (the one
-its checks and ignores run in, and bill), that workspace's plan, and the
-service URL. Run it before a check when it matters which workspace pays.`,
+its checks and ignores run in, and bill, unless the checkout is mapped to
+another), that workspace's plan, and the service URL. In a checkout this
+machine maps to a workspace, a Checkout line names that workspace. Run
+'slopcop status' before a check when it matters which workspace pays.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if err := checkFormat(format); err != nil {
@@ -102,14 +104,16 @@ service URL. Run it before a check when it matters which workspace pays.`,
 			// A configuration that cannot be read was already refused.
 			cfg, _ := config.Load()
 			services := storedServices(cfg)
+			checkout := whoamiCheckout(cfg, client.BaseURL, whoami)
 			if format == "json" {
 				return writeJSON(out, struct {
 					Service   string            `json:"service"`
 					Account   service.Account   `json:"account"`
 					Workspace service.Workspace `json:"workspace"`
 					Plan      string            `json:"plan"`
+					Checkout  *checkoutMapping  `json:"checkout,omitempty"`
 					Services  []storedService   `json:"services"`
-				}{client.BaseURL, whoami.Account, whoami.Workspace, whoami.Plan, services})
+				}{client.BaseURL, whoami.Account, whoami.Workspace, whoami.Plan, checkout, services})
 			}
 			account := whoami.Account.Username
 			if whoami.Account.Email != "" {
@@ -118,6 +122,9 @@ service URL. Run it before a check when it matters which workspace pays.`,
 			fmt.Fprintf(out, "Account:   %s\n", account)
 			fmt.Fprintf(out, "Workspace: %s (%s, %s)\n", whoami.Workspace.Name, whoami.Workspace.Kind, whoami.Workspace.Role)
 			fmt.Fprintf(out, "Plan:      %s\n", planName(whoami.Plan))
+			if checkout != nil {
+				fmt.Fprintf(out, "Checkout:  %s\n", checkout.text())
+			}
 			fmt.Fprintf(out, "Service:   %s\n", client.BaseURL)
 			if len(services) > 1 {
 				// Only worth saying once there is more than one to mix up.
@@ -136,18 +143,66 @@ service URL. Run it before a check when it matters which workspace pays.`,
 	return command
 }
 
+// checkoutMapping is whoami's word on the checkout it was run in, when this
+// machine maps its repository to a workspace: checks there do not run in
+// the login's workspace above.
+type checkoutMapping struct {
+	Repository    string `json:"repository"`
+	WorkspaceID   string `json:"workspaceId"`
+	WorkspaceName string `json:"workspaceName"`
+	// Usable is false when the account can no longer use that workspace,
+	// so checks of the checkout are refused until it is mapped again.
+	Usable bool `json:"usable"`
+}
+
+func (c checkoutMapping) text() string {
+	if !c.Usable {
+		return fmt.Sprintf("%s is mapped to %q, which this account cannot use; run `slopcop workspace map` or `slopcop workspace unmap`",
+			repositoryName(c.Repository), valueOr(c.WorkspaceName, c.WorkspaceID))
+	}
+	return fmt.Sprintf("%s checks in, and bills, %q instead (`slopcop workspace map`)", repositoryName(c.Repository), c.WorkspaceName)
+}
+
+// whoamiCheckout is the mapping of the checkout in the working directory,
+// or nil when there is none.
+func whoamiCheckout(cfg config.Config, serviceURL string, whoami service.Whoami) *checkoutMapping {
+	repoURL := checkoutRepoURL(".")
+	mapped, ok := cfg.WorkspaceFor(serviceURL, repoURL)
+	if repoURL == "" || !ok {
+		return nil
+	}
+	checkout := &checkoutMapping{Repository: repoURL, WorkspaceID: mapped.ID, WorkspaceName: mapped.Name}
+	for _, workspace := range whoami.Workspaces {
+		if strings.EqualFold(workspace.ID, mapped.ID) {
+			checkout.Usable, checkout.WorkspaceName = true, workspace.Name
+		}
+	}
+	return checkout
+}
+
 func newWorkspaceCommand(serviceURL *string, version string) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "workspace",
-		Short: "List workspaces, or choose the one this login checks in",
-		Long: `List your account's workspaces, or bind this login to another of them.
+		Short: "List workspaces, or choose the one a checkout or this login checks in",
+		Long: `List your account's workspaces, map a repository to one of them, or bind
+this login to another of them.
 
-A login runs its checks and ignores in, and bills, one workspace: the one
-active in the browser when the login was approved, until 'slopcop workspace
-use' moves it. Moving it changes this login only, never the browser.`,
+A command runs in, and bills, the first of: --workspace, $SLOPCOP_WORKSPACE,
+the workspace this machine maps the checkout's repository to ('slopcop
+workspace map', or 'slopcop enable'), and the workspace the login is bound
+to. The login's is the one active in the browser when the login was
+approved, until 'slopcop workspace use' moves it; moving it changes this
+login only, never the browser. 'slopcop status' shows which one a checkout
+gets and why.`,
 		Args: cobra.NoArgs,
 	}
-	command.AddCommand(newWorkspaceListCommand(serviceURL, version), newWorkspaceUseCommand(serviceURL, version))
+	command.AddCommand(
+		newWorkspaceListCommand(serviceURL, version),
+		newWorkspaceUseCommand(serviceURL, version),
+		newWorkspaceMapCommand(serviceURL, version),
+		newWorkspaceUnmapCommand(serviceURL),
+		newWorkspaceMappingsCommand(serviceURL, version),
+	)
 	return command
 }
 
@@ -235,6 +290,7 @@ another workspace once, pass --workspace to that command instead.`,
 			if err := client.UseWorkspace(cmd.Context(), workspace.ID); err != nil {
 				return serviceFailure(cmd, err)
 			}
+			forgetWorkspaceNotices()
 			workspace.Current = true
 			if format == "json" {
 				return writeJSON(cmd.OutOrStdout(), struct {
@@ -326,7 +382,7 @@ func newRepoListCommand(serviceURL, workspace *string, version string) *cobra.Co
 			if err != nil {
 				return err
 			}
-			if err := useWorkspace(cmd.Context(), client, *workspace); err != nil {
+			if err := useWorkspace(cmd.Context(), client, chooseWorkspaceAt(*workspace, client.BaseURL, ".")); err != nil {
 				return serviceFailure(cmd, err)
 			}
 			listed, err := client.Repositories(cmd.Context())
@@ -381,7 +437,7 @@ stdin is not a terminal.`,
 			if err != nil {
 				return err
 			}
-			if err := useWorkspace(cmd.Context(), client, *workspace); err != nil {
+			if err := useWorkspace(cmd.Context(), client, chooseWorkspaceAt(*workspace, client.BaseURL, ".")); err != nil {
 				return serviceFailure(cmd, err)
 			}
 			listed, err := client.Repositories(cmd.Context())

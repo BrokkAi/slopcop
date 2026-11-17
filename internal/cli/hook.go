@@ -139,7 +139,9 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 	}
 	path := hookStatePath(input.Harness, input.SessionID, repoRoot)
 	state, loaded := loadHookState(path)
-	state.inWorkspace(resolveWorkspaceName(""))
+	// The same choice prepareCheck makes, made early so a session that is
+	// off for this workspace costs nothing more.
+	state.inWorkspace(chooseWorkspace("", cfg, resolveServiceURL(cfg, serviceURL), checkoutRepoURL(repoRoot)).Value)
 	if state.Off {
 		return hookOutput{}
 	}
@@ -252,7 +254,7 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 	// The hook runs in the workspace a check by hand would. A workspace
 	// the account does not have will not appear later in the session; a
 	// failure to ask the service can pass.
-	if err := useWorkspace(ctx, prepared.client, ""); err != nil {
+	if err := useWorkspace(ctx, prepared.client, prepared.choice); err != nil {
 		var serviceError *service.Error
 		var transport *url.Error
 		if !errors.As(err, &serviceError) && !errors.As(err, &transport) && ctx.Err() == nil {

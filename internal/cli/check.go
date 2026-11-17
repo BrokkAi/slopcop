@@ -376,8 +376,11 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	client, request := prepared.client, prepared.request
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
-	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
+	if err := useWorkspace(cmd.Context(), client, prepared.choice); err != nil {
 		return failed(err)
+	}
+	if !opts.addRepository {
+		unmappedNotice(cmd, client, prepared.choice)
 	}
 	if opts.addRepository {
 		request.AddRepository = true
@@ -456,6 +459,11 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	if response.RepositoryAdded {
 		workspace, known := resolvedWorkspace(cmd.Context(), client)
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n", repositoryName(request.RepoURL), workspaceName(workspace, known))
+		if prepared.choice.Source == sourceFlag || prepared.choice.Source == sourceEnv {
+			// Only a person at a terminal maps a checkout, so an agent that
+			// carried the approval says how the person makes it stick.
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: to check this checkout there without --workspace, run `slopcop workspace map %s` at a terminal\n", prepared.choice.Value)
+		}
 	}
 	if !response.KnownStatus() {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n", response.Status)
@@ -692,8 +700,10 @@ type preparedCheck struct {
 	request      service.Request
 	repoRoot     string
 	// workspace is the workspace the check is asked to run in, by the name
-	// it was given.
+	// or id it was given or mapped to; empty for the login's own.
 	workspace string
+	// choice is that workspace with where it came from.
+	choice workspaceChoice
 	// fingerprint names the check without its attribution, in that
 	// workspace, so the Stop hook can tell a check it already has the
 	// result of.
@@ -810,10 +820,12 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if !selection.IsEmpty() {
 		request.Selection = &selection
 	}
-	workspace := resolveWorkspaceName(opts.workspace)
+	choice := chooseWorkspace(opts.workspace, cfg, target, repoURL)
+	workspace := choice.Value
 	prepared.client = client
 	prepared.request = request
 	prepared.workspace = workspace
+	prepared.choice = choice
 	prepared.fingerprint = fingerprintCheck(target, token, workspace, request)
 	return prepared, nil
 }

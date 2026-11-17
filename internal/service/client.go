@@ -48,7 +48,12 @@ type Client struct {
 	// and bills instead of the one the login is bound to (--workspace). The
 	// login stays bound where it was.
 	Workspace string
-	HTTP      *http.Client
+	// WorkspaceRefusal, when set, is what a workspace_not_found answer says
+	// instead of the service's own text. The caller that chose Workspace
+	// from something other than the command line sets it, so the refusal
+	// names where the choice came from and how to change it.
+	WorkspaceRefusal *ErrorBody
+	HTTP             *http.Client
 	// LatestVersion, when set, is called with the newest release the service
 	// reports on any response.
 	LatestVersion func(string)
@@ -330,7 +335,29 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 	if len(responseBody) > maxResponseBytes {
 		return 0, nil, nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)
 	}
-	return response.StatusCode, response.Header, responseBody, nil
+	return response.StatusCode, response.Header, c.workspaceRefusal(response.StatusCode, responseBody), nil
+}
+
+// workspaceNotFound is the service's answer for a workspace the account is
+// not a member of, an archived one included.
+const workspaceNotFound = "workspace_not_found"
+
+// workspaceRefusal is payload, or WorkspaceRefusal's text under the same code
+// when payload is the service's workspace_not_found.
+func (c *Client) workspaceRefusal(status int, payload []byte) []byte {
+	if c.WorkspaceRefusal == nil || c.Workspace == "" || status != http.StatusNotFound {
+		return payload
+	}
+	var body ErrorBody
+	if err := json.Unmarshal(payload, &body); err != nil || body.Code != workspaceNotFound {
+		return payload
+	}
+	body.Message, body.Remedy = c.WorkspaceRefusal.Message, c.WorkspaceRefusal.Remedy
+	replaced, err := json.Marshal(body)
+	if err != nil {
+		return payload
+	}
+	return replaced
 }
 
 // IgnoreRequest is the POST /v1/ignore and POST /v1/unignore body.

@@ -128,3 +128,42 @@ func TestForgetLeavesOtherLogins(t *testing.T) {
 		t.Fatalf("signed in = %v", got)
 	}
 }
+
+func TestRepositoryMappingsAreKeptPerServiceAndRepository(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home+"/config")
+	cfg := Config{}
+	cfg.SetToken(DefaultServiceURL, "kept")
+	cfg.MapRepository("https://slopcop.com/", "https://github.com/Acme/Widgets", RepositoryWorkspace{ID: "team", Name: "Acme"})
+	cfg.MapRepository("https://staging.slopcop.com", "https://github.com/acme/widgets", RepositoryWorkspace{ID: "staging-team"})
+	if _, err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Owner and name match whatever their case; another service's mapping
+	// and another repository's are not this one's.
+	if mapped, ok := got.WorkspaceFor(DefaultServiceURL, "https://github.com/acme/widgets/"); !ok || mapped.ID != "team" || mapped.Name != "Acme" {
+		t.Errorf("mapping = %+v, %v", mapped, ok)
+	}
+	if mapped, _ := got.WorkspaceFor("https://staging.slopcop.com", "https://github.com/Acme/widgets"); mapped.ID != "staging-team" {
+		t.Errorf("staging mapping = %+v", mapped)
+	}
+	if _, ok := got.WorkspaceFor(DefaultServiceURL, "https://github.com/acme/gadgets"); ok {
+		t.Error("an unmapped repository has a mapping")
+	}
+	// Signing out forgets the login, not where repositories check.
+	got.Forget(DefaultServiceURL)
+	if _, ok := got.WorkspaceFor(DefaultServiceURL, "https://github.com/acme/widgets"); !ok {
+		t.Error("signing out dropped the mapping")
+	}
+	if !got.UnmapRepository(DefaultServiceURL, "https://github.com/ACME/widgets") || got.UnmapRepository(DefaultServiceURL, "https://github.com/acme/widgets") {
+		t.Error("unmap did not report the one mapping it dropped")
+	}
+	if urls := got.MappedRepositories(DefaultServiceURL); len(urls) != 0 {
+		t.Errorf("mapped = %v, want none", urls)
+	}
+}

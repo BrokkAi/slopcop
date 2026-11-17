@@ -227,7 +227,7 @@ hosted API, but only when all of these hold:
   session's subagents included), or the working tree has a changed
   dependency manifest or lockfile (see below);
 - slopcop is signed in, and the workspace a check would use
-  (`$SLOPCOP_WORKSPACE`, or the login's) has the repository active
+  (`$SLOPCOP_WORKSPACE`, the one the checkout is mapped to, or the login's) has the repository active
   (`slopcop repo list`), so nothing is sent from other repositories;
 - the tree differs from the last check in the session, including a check the
   agent ran by hand.
@@ -329,18 +329,22 @@ Precedence:
 | --- | --- |
 | Service URL | `--service`, `$SLOPCOP_SERVICE`, the default stored by `slopcop login --default` or `slopcop service use`, `https://slopcop.com` |
 | Token | `$SLOPCOP_TOKEN`, the login stored for that service |
-| Workspace (`check`, `enable`, `status`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one the login is bound to |
+| Workspace (`check`, `enable`, `status`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `$SLOPCOP_WORKSPACE`, the one this machine maps the checkout's repository to, the one the login is bound to |
 
 ## Workspace and repositories
 
-A login runs its checks and ignores in, and bills, one workspace: the one
-active in the browser when the login was approved.
+A login is bound to one workspace: the one active in the browser when the
+login was approved. Its checks and ignores run in, and bill, that workspace,
+unless this machine maps the repository to another of your workspaces.
 
 ```console
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
 slopcop status                     # this checkout's repository, and whether the workspace checks it
 slopcop enable                     # add this checkout's repository to the workspace, at a terminal
 slopcop workspace list             # the account's workspaces; * marks this login's
+slopcop workspace map "Acme team"  # check this checkout's repository there from now on, at a terminal
+slopcop workspace unmap            # go back to the login's workspace for this repository
+slopcop workspace mappings         # the repositories this machine maps, and to which workspace
 slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
 slopcop check -w "Acme team"       # check in, and bill, another workspace this once
 slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
@@ -362,6 +366,21 @@ To check in another workspace without moving anyone, `check`, `status`,
 `ignore`, `unignore`, `ignored` and `repo` take `-w`/`--workspace <name|id>`
 (or `$SLOPCOP_WORKSPACE`) for that one command; the login stays where it was. Give agents that share a login their
 own `--workspace` instead of switching it.
+
+`workspace map <name|id>` makes every checkout of the repository `origin`
+names, on this machine, check in that workspace, so one login checks work
+repositories in a team workspace and your own in your personal one. `slopcop
+enable` maps the checkout to the workspace it adds the repository to. The
+mapping is kept in `config.json`, by service and repository URL; it decides
+which workspace pays, so `workspace map` and `workspace unmap` ask `[y/N]` and
+refuse when stdin is not a terminal. `--workspace` and `$SLOPCOP_WORKSPACE`
+still win for one command, and `slopcop status` prints the workspace a
+checkout gets and a `Chosen by` line saying why. A mapping to a workspace that
+was archived, or that your account left, stops the check with
+`workspace_not_found` instead of falling back to another workspace. The first
+check of a repository with no mapping, when your account has more than one
+workspace, notes once which workspace it runs in and any other of yours that
+has the repository; the check still runs.
 
 Names match without regard to case; when two workspaces share a name, or two
 providers a repository name, pass the id the listing prints.

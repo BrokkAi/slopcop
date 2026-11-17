@@ -64,11 +64,15 @@ named.
 
 ## Know which workspace pays
 
-A login runs its checks and ignores in, and bills, one workspace. When it
-matters which one, run `slopcop whoami` before a check: it prints the account,
-the workspace (name, kind, role), its plan (Pro or Free) and the service URL
-(`--format json` for `service`, `account`, `workspace`, `plan` and
-`services`). Each service has its own login, bound to its own workspace: with
+A check runs in, and bills, the first of: `--workspace`, `$SLOPCOP_WORKSPACE`,
+the workspace this machine maps the checkout's repository to, and the
+workspace the login is bound to. When it matters which one, run `slopcop
+status` in the checkout before a check: it prints the repository, the
+workspace and a `Chosen by` line (`--format json` for `workspace` and
+`workspaceSource`: `flag`, `env`, `mapping` or `login`). `slopcop whoami`
+prints the account, the login's own workspace (name, kind, role), its plan
+(Pro or Free) and the service URL (`--format json` for `service`, `account`,
+`workspace`, `plan` and `services`). Each service has its own login, bound to its own workspace: with
 more than one stored, `whoami` also lists them and marks the default.
 `slopcop status` shows the same for this checkout: the repository `origin`
 names, whether the workspace has it and whether it is active.
@@ -77,6 +81,16 @@ names, whether the workspace has it and whether it is active.
   login's. `slopcop workspace use <name|id>` moves this login to another one,
   and with it every agent using the login, so it asks the person at a
   terminal and refuses when stdin is not one. Do not try to answer it.
+- `slopcop workspace map <name|id>` makes this machine check the checkout's
+  repository in that workspace from now on, and `slopcop workspace unmap`
+  undoes it. Both decide which workspace pays, so they ask the person at a
+  terminal and refuse when stdin is not one. Do not try to answer them; when
+  a check says a checkout is not mapped, or that its repository is also in
+  another workspace, pass the note on to the user and carry on.
+- A check that fails with `workspace_not_found` and says the checkout "is
+  mapped to workspace" has a mapping the account can no longer use. Tell the
+  user to run `slopcop workspace map` or `slopcop workspace unmap` at a
+  terminal; do not retry with `--workspace` unless they name one.
 - To check, ignore or list repositories in another workspace, pass
   `-w`/`--workspace <name|id>` to that command (or set `$SLOPCOP_WORKSPACE`).
   It applies to that command only and moves no one.

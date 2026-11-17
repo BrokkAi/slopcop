@@ -79,6 +79,13 @@ func sendFinding(
 // workspace it names, after the notices every service command prints. A
 // service failure prints its message and remedy and exits incomplete.
 func workspaceClient(cmd *cobra.Command, serviceFlag, version, workspace string) (*service.Client, error) {
+	return workspaceClientAt(cmd, serviceFlag, version, workspace, ".")
+}
+
+// workspaceClientAt is workspaceClient for a command about the checkout at
+// root: with no workspace named, it runs in the one the checkout is mapped
+// to, so an ignore reaches the workspace whose check reported the finding.
+func workspaceClientAt(cmd *cobra.Command, serviceFlag, version, workspace, root string) (*service.Client, error) {
 	cfg, err := config.Load()
 	if err != nil {
 		return nil, err
@@ -90,7 +97,7 @@ func workspaceClient(cmd *cobra.Command, serviceFlag, version, workspace string)
 	}
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
-	if err := useWorkspace(cmd.Context(), client, workspace); err != nil {
+	if err := useWorkspace(cmd.Context(), client, chooseWorkspaceAt(workspace, client.BaseURL, root)); err != nil {
 		return nil, serviceFailure(cmd, err)
 	}
 	return client, nil

@@ -42,7 +42,7 @@ API, but only when all of these hold:
   session's subagents included), or the working tree has a changed dependency
   manifest or lockfile (below);
 - slopcop is signed in, and the workspace a check would use
-  (`SLOPCOP_WORKSPACE`, or the login's) has the repository active, so nothing is
+  (`SLOPCOP_WORKSPACE`, the one the checkout is mapped to, or the login's) has the repository active, so nothing is
   sent from other repositories and the hook never adds one;
 - the tree differs from the last check in the session, including a check the
   agent ran by hand. A check whose result the session already has is not sent

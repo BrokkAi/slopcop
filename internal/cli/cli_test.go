@@ -22,6 +22,8 @@ import (
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/review/reviewtest"
+	"github.com/spf13/cobra"
+
 	"github.com/BrokkAi/slopcop/internal/service"
 	"github.com/BrokkAi/slopcop/internal/update"
 )
@@ -35,7 +37,17 @@ func TestMain(m *testing.M) {
 	checkRepository = func(context.Context, *service.Client, string) (statusRepository, error) {
 		return statusRepository{State: statusActive, Enabled: true, Active: true}, nil
 	}
+	unmappedNotice = func(*cobra.Command, *service.Client, workspaceChoice) {}
 	os.Exit(m.Run())
+}
+
+// realUnmappedNotice makes a check consider the note about an unmapped
+// checkout, for tests about that note.
+func realUnmappedNotice(t *testing.T) {
+	t.Helper()
+	original := unmappedNotice
+	unmappedNotice = noticeUnmapped
+	t.Cleanup(func() { unmappedNotice = original })
 }
 
 // realRepositoryCheck makes a check use the real repository gate, for tests

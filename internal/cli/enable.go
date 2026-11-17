@@ -5,6 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -25,7 +26,9 @@ you, so adding a repository stays a step you take yourself. Once a person has
 confirmed it, 'check --add-repository --workspace <name|id>' carries the same
 approval without a terminal.
 
-Adding a repository through 'enable' also runs its first check.`,
+Adding a repository through 'enable' also runs its first check, and maps this
+machine's checkouts of it to that workspace, so later checks run there
+whatever workspace the login is bound to ('slopcop workspace map').`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runEnable(cmd, root, workspace, *serviceURL, version)
@@ -49,12 +52,11 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	if err != nil {
 		return serviceFailure(cmd, err)
 	}
-	target := whoami.Workspace
-	if wanted := resolveWorkspaceName(workspace); wanted != "" {
-		target, err = findWorkspace(whoami.Workspaces, wanted)
-		if err != nil {
-			return err
-		}
+	cfg, _ := config.Load()
+	repoURL := checkoutRepoURL(repoRoot)
+	target, err := chosenWorkspace(whoami, chooseWorkspace(workspace, cfg, client.BaseURL, repoURL))
+	if err != nil {
+		return serviceFailure(cmd, err)
 	}
 	client.Workspace = target.ID
 	repository, err := lookupRepositoryStatus(cmd.Context(), client, repoRoot)
@@ -65,13 +67,18 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	case statusActive:
 		fmt.Fprintf(cmd.OutOrStdout(), "slopcop: %s is already enabled in %s\n",
 			repository.FullName, workspaceName(target.Name, true))
-		return nil
+		return offerMapping(cmd, client.BaseURL, repoURL, target)
 	case statusUnsupported:
 		return fmt.Errorf("SlopCop checks repositories on github.com, gitlab.com and bitbucket.org, not %s", repository.URL)
 	case statusDisabled, statusOverLimit:
-		return enableExisting(cmd, client, repository, target)
+		if err := enableExisting(cmd, client, repository, target); err != nil {
+			return err
+		}
+		return recordMapping(cmd, client.BaseURL, repoURL, target)
 	case statusNotAdded:
-		return addRepository(cmd, repoRoot, repository, target, serviceFlag, version)
+		return addRepository(cmd, repoRoot, repository, target, serviceFlag, version, func() error {
+			return recordMapping(cmd, client.BaseURL, repoURL, target)
+		})
 	default:
 		return fmt.Errorf("this repository is %s, so it cannot be enabled", repository.State)
 	}
@@ -105,9 +112,14 @@ func enableExisting(cmd *cobra.Command, client *service.Client, repository statu
 // addRepository is the one path that adds a repository to a workspace: a
 // person confirms it at a terminal, then the first check carries that
 // approval to the service.
-func addRepository(cmd *cobra.Command, repoRoot string, repository statusRepository, target service.Workspace, serviceFlag, version string) error {
+func addRepository(cmd *cobra.Command, repoRoot string, repository statusRepository, target service.Workspace, serviceFlag, version string, confirmed func() error) error {
 	notifyCost(cmd, "adding", repository.FullName, target.Name)
 	if err := confirmChange(cmd, repository.FullName, "add"); err != nil {
+		return err
+	}
+	// The person chose this workspace for the checkout, so later checks
+	// run there whether or not this first one finds something.
+	if err := confirmed(); err != nil {
 		return err
 	}
 	// runCheck sends --add-repository with the workspace named here, so the

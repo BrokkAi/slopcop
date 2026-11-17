@@ -16,7 +16,7 @@ edited in the config file.
 | --- | --- |
 | Service URL | `--service`, `SLOPCOP_SERVICE`, the default stored by `slopcop login --default` or `slopcop service use`, `https://slopcop.com` |
 | Token | `SLOPCOP_TOKEN`, the login stored for that service |
-| Workspace (`check`, `ignore`, `unignore`, `ignored`, `repo`) | `-w`/`--workspace`, `SLOPCOP_WORKSPACE`, the one the login is bound to |
+| Workspace (`check`, `enable`, `status`, `ignore`, `unignore`, `ignored`, `dictionary`, `repo`) | `-w`/`--workspace`, `SLOPCOP_WORKSPACE`, the one this machine maps the checkout's repository to ([A workspace per repository](/account/workspaces/#a-workspace-per-repository)), the one the login is bound to |
 | Base commit (`check`) | `--base-exact`, `--base`, merge base with the upstream, merge base with `origin/HEAD`, `HEAD` |
 | Policy selection (`check`) | `--policy` files, plus `.slopcop/policies/**/*.rqlp` unless `--no-policy-discovery` |
 
@@ -28,7 +28,8 @@ Support/slopcop/` on macOS, `%AppData%\slopcop\` on Windows.
 
 | File | Purpose |
 | --- | --- |
-| `config.json` | default service URL, one login per service, mode (unset: `both` where reviewers are configured and not in CI, otherwise `static`), and review settings, written owner-only; logout forgets one service's login |
+| `config.json` | default service URL, one login per service, the workspace each mapped repository checks in (`repositoryWorkspaces`), mode (unset: `both` where reviewers are configured and not in CI, otherwise `static`), and review settings, written owner-only; logout forgets one service's login |
+| `workspace-notices.json` | the repositories the once-only note about an unmapped checkout was considered for |
 | `update-notice` | the time of the last [upgrade notice](/get-started/install/#upgrade-notices), so it prints at most once a day |
 | `skill-backups/<harness>-<time>/` | a copy of a skill with local edits that an update replaced; see [The agent skill](/agents/skill/) |
 
