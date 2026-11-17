@@ -41,10 +41,20 @@ const (
 	// without --workspace: the approval is for one workspace, so the flag
 	// names it rather than trusting wherever the login points.
 	addRepositoryNeedsWorkspace = "--add-repository needs --workspace <name|id>: name the workspace the user approved adding the repository to, so it cannot be added to another"
-	// repositoryNotEnabledCode is the CLI's refusal of a check of a repository
-	// the workspace has not added. The CLI refuses locally so a check never
-	// adds, and bills for, a repository by itself.
+	// repositoryNotEnabledCode is --if-enabled's skip of a repository the
+	// workspace does not have active, whatever its state.
 	repositoryNotEnabledCode = "repository_not_enabled"
+	// repositoryNotAddedCode is the CLI's refusal of a check of a repository
+	// the workspace has never added. The CLI refuses locally so a check never
+	// adds, and bills for, a repository by itself; an agent may add it once a
+	// person approves.
+	repositoryNotAddedCode = "repository_not_added"
+	// repositoryDisabledCode is the refusal of a check of a repository the
+	// workspace has disabled, which only a person may turn back on.
+	repositoryDisabledCode = "repository_disabled"
+	// activeLimitCode is the refusal of a check of a repository past the
+	// workspace's active-repository limit.
+	activeLimitCode = "active_repository_limit_reached"
 	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
 	// was sent: a service that received it keeps it, so asking again picks up
 	// its result.
@@ -165,6 +175,29 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	attr := attribution.Detect(prepared.repoRoot)
 	prepared.request.Attribution = attr
+	// Whether the workspace lets the check run at all is settled before the
+	// reviewers start, so a refused check neither spends reviewer time nor
+	// reports a review beside its refusal.
+	var static staticOutcome
+	gate := gateSend
+	if !prepared.onlyOmitted() && mode != modeAI {
+		static, gate = gateCheck(cmd, opts, &prepared, version)
+	}
+	if gate == gateInactive {
+		// The last review on record may be of this same tree. Its static
+		// half is now refused, so withdraw the tree's approval first, then
+		// record the refusal, or `slopcop override` would still trust the
+		// earlier static pass.
+		if err := review.Unmark(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
+			return err
+		}
+		// A store another check holds is not a reason to lose the refusal's
+		// own report, so failing to record it is only said.
+		if err := recordStaticRefusal(prepared.repoRoot, prepared.snapshot.Tree, static); err != nil {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record the refusal in the local review state, so check again before `slopcop override`: %v\n", err)
+		}
+		mode = modeStatic
+	}
 	var store *review.Store
 	var verdict review.Verdict
 	var reviewDone chan review.Verdict
@@ -198,13 +231,14 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			reviewDone <- v
 		}()
 	}
-	var static staticOutcome
-	if prepared.onlyOmitted() {
+	switch {
+	case gate != gateSend:
+	case prepared.onlyOmitted():
 		static = omittedOnlyOutcome(prepared)
 		fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+static.skipped.Message)
-	} else if mode != modeAI {
-		static = runStaticCheck(cmd, opts, prepared, failOn, version)
-	} else {
+	case mode != modeAI:
+		static = runStaticCheck(cmd, opts, prepared, failOn)
+	default:
 		static = staticOutcome{exit: 0, status: "clean"}
 	}
 	reviewRunning := false
@@ -277,9 +311,12 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if mode != modeAI && status != static.status {
 		reportOptions.StaticStatus = static.status
 	}
-	if mode != modeStatic {
+	switch {
+	case gate == gateInactive:
+		reportOptions.ReviewSkipped = report.ReviewSkippedRepositoryInactive
+	case mode != modeStatic:
 		reportOptions.Review = &verdict
-	} else {
+	default:
 		reportOptions.ReviewSkipped = reviewSkippedReason(fallback)
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
@@ -343,75 +380,139 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	return silentExit{exit}
 }
 
-// runStaticCheck runs only the hosted half and returns its outcome.
-func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedCheck, failOn, version string) staticOutcome {
-	if prepared.onlyOmitted() {
-		return omittedOnlyOutcome(prepared)
+// staticFailure prints a refused or locally failed static check's code,
+// message, and remedy on stderr and returns it as the static half's outcome.
+func staticFailure(cmd *cobra.Command, err error) staticOutcome {
+	var serviceError *service.Error
+	if !errors.As(err, &serviceError) {
+		serviceError = &service.Error{Body: service.ErrorBody{Message: err.Error()}}
 	}
-	failed := func(err error) staticOutcome {
-		var serviceError *service.Error
-		if !errors.As(err, &serviceError) {
-			serviceError = &service.Error{Body: service.ErrorBody{Message: err.Error()}}
+	text := remedyText(serviceError)
+	var withHint hinted
+	if errors.As(err, &withHint) {
+		if hint := withHint.hint(); hint != "" {
+			text += "\n" + hint
 		}
-		text := remedyText(serviceError)
-		var withHint hinted
-		if errors.As(err, &withHint) {
-			if hint := withHint.hint(); hint != "" {
-				text += "\n" + hint
-			}
-		}
-		if code := serviceError.Body.Code; code != "" {
-			text = "slopcop: " + code + ": " + text
-		}
-		fmt.Fprintln(cmd.ErrOrStderr(), text)
-		code := service.ExitIncomplete
-		if serviceError.NeedsPerson() {
-			code = service.ExitNeedsPerson
-		}
-		return staticOutcome{failure: serviceError, exit: code, status: "failed"}
 	}
+	if code := serviceError.Body.Code; code != "" {
+		text = "slopcop: " + code + ": " + text
+	}
+	fmt.Fprintln(cmd.ErrOrStderr(), text)
+	code := service.ExitIncomplete
+	if serviceError.NeedsPerson() {
+		code = service.ExitNeedsPerson
+	}
+	return staticOutcome{failure: serviceError, exit: code, status: "failed"}
+}
+
+// gateResult is what gateCheck decided about the hosted half.
+type gateResult int
+
+const (
+	// gateSend lets the check be sent.
+	gateSend gateResult = iota
+	// gateStatic stops only the hosted half: on a failure of its own, such
+	// as no login or an unreachable service, or on --if-enabled's skip of an
+	// inactive repository. The local review still runs: it needs neither the
+	// service nor an active repository.
+	gateStatic
+	// gateInactive refuses the whole check: the workspace has not added the
+	// repository, has disabled it, or has it past the active limit, so
+	// nothing is reviewed either.
+	gateInactive
+)
+
+// gateCheck decides, before anything is reviewed or sent, whether the check
+// may run: it picks the workspace and looks up the repository. It runs
+// before the local reviewers start, so a refused check of a repository the
+// workspace has not added or has disabled spends no reviewer time and
+// reports no review beside its refusal. Unless it returns gateSend, the
+// outcome is the static half's.
+func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, version string) (staticOutcome, gateResult) {
 	if prepared.staticErr != nil {
-		return failed(prepared.staticErr)
+		return staticFailure(cmd, prepared.staticErr), gateStatic
 	}
-	client, request := prepared.client, prepared.request
+	client := prepared.client
 	noticeService(cmd.ErrOrStderr(), client.BaseURL)
 	noticeUpdates(client, cmd.ErrOrStderr(), version)
 	if err := useWorkspace(cmd.Context(), client, opts.workspace); err != nil {
-		return failed(err)
+		return staticFailure(cmd, err), gateStatic
 	}
-	if opts.addRepository {
-		request.AddRepository = true
-	} else {
-		repository, err := checkRepository(cmd.Context(), client, prepared.repoRoot)
-		if err != nil {
-			return failed(err)
-		}
-		if !repository.Active {
-			if opts.ifEnabled {
-				name := repository.FullName
-				if name == "" {
-					name = repository.URL
-				}
-				why := "is not active in your SlopCop workspace"
-				switch repository.State {
-				case statusNotAdded:
-					why = "is not enabled in your SlopCop workspace"
-				case statusDisabled:
-					why = "is disabled in your SlopCop workspace"
-				case statusOverLimit:
-					why = "is over your SlopCop workspace's active-repository limit"
-				case statusUnsupported:
-					why = "is on a host SlopCop does not check"
-				}
-				message := fmt.Sprintf("%s %s, so nothing was checked.", name, why)
-				fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+message)
-				return staticOutcome{skipped: &report.Skipped{Code: repositoryNotEnabledCode, State: repository.State, Repository: name, Message: message}, status: "skipped"}
-			}
-			if repository.State == statusNotAdded {
-				return failed(repositoryNotEnabled(repository))
-			}
-		}
+	repository, err := checkRepository(cmd.Context(), client, prepared.repoRoot)
+	if err != nil {
+		return staticFailure(cmd, err), gateStatic
 	}
+	// --add-repository is approval to add a repository the workspace does
+	// not have, not to turn back on one it disabled. It changes nothing for
+	// one already in the workspace.
+	if opts.addRepository && (repository.Active || repository.State == statusNotAdded) {
+		prepared.request.AddRepository = true
+		return staticOutcome{}, gateSend
+	}
+	if repository.Active {
+		return staticOutcome{}, gateSend
+	}
+	if opts.ifEnabled {
+		name := repositoryDisplayName(repository)
+		message := fmt.Sprintf("%s %s, so nothing was checked.", name, inactiveReason(repository.State))
+		fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+message)
+		return staticOutcome{skipped: &report.Skipped{Code: repositoryNotEnabledCode, State: repository.State, Repository: name, Message: message}, status: "skipped"}, gateStatic
+	}
+	switch repository.State {
+	case statusNotAdded:
+		return staticFailure(cmd, repositoryNotAdded(repository)), gateInactive
+	case statusDisabled:
+		return staticFailure(cmd, repositoryDisabled(repository)), gateInactive
+	case statusOverLimit:
+		return staticFailure(cmd, repositoryOverLimit(repository)), gateInactive
+	}
+	// On an unsupported host: the service's refusal says what to do, so the
+	// check is sent for it.
+	return staticOutcome{}, gateSend
+}
+
+// refusalLockWait bounds how long recording a refusal waits for another
+// slopcop process to release the review store.
+const refusalLockWait = 5 * time.Second
+
+// recordStaticRefusal marks the last local review's static half as refused
+// and blocking when that review is of tree, so no override builds on a static
+// pass the workspace has since refused. A review of another tree keeps its
+// own static result.
+func recordStaticRefusal(root, tree string, static staticOutcome) error {
+	store, err := review.OpenStore(root)
+	// An override holds the store only briefly, so wait it out rather than
+	// leave it a passing static result to approve the tree with afterwards.
+	for deadline := time.Now().Add(refusalLockWait); errors.Is(err, review.ErrBusy) && time.Now().Before(deadline); {
+		time.Sleep(100 * time.Millisecond)
+		store, err = review.OpenStore(root)
+	}
+	if err != nil {
+		return err
+	}
+	last, err := store.Last()
+	if err == nil && last != nil && last.Capture.Tree == tree {
+		err = store.SetStatic(static.exit, static.status, true)
+	}
+	return errors.Join(err, store.Close())
+}
+
+// repositoryOverLimit is the local refusal of a check of a repository the
+// workspace has enabled but cannot keep active past its limit. It carries the
+// service's own code for that state.
+func repositoryOverLimit(repository statusRepository) *service.Error {
+	return &service.Error{Body: service.ErrorBody{
+		Code:      activeLimitCode,
+		Message:   fmt.Sprintf("%s is over your SlopCop workspace's active-repository limit, so the check did not run.", repositoryDisplayName(repository)),
+		Remedy:    "The workspace's owner chooses which repositories stay active on the Repositories page, or unlocks the workspace.",
+		Retryable: false,
+	}}
+}
+
+// runStaticCheck sends the hosted half, which gateCheck already let through,
+// and returns its outcome.
+func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedCheck, failOn string) staticOutcome {
+	client, request := prepared.client, prepared.request
 	if opts.verbose {
 		fmt.Fprintf(
 			cmd.ErrOrStderr(),
@@ -438,7 +539,7 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 	}
 	if errors.As(err, &rejected) && rejected.Body.Code == repositoryTooLarge {
 		breakdown := measureRepository(cmd, opts.verbose, prepared.repoRoot, request.BaseCommit, nil)
-		outcome := failed(&localRefusal{refusal: rejected, text: strings.TrimRight(report.SizeAdvice(nil, breakdown), "\n")})
+		outcome := staticFailure(cmd, &localRefusal{refusal: rejected, text: strings.TrimRight(report.SizeAdvice(nil, breakdown), "\n")})
 		outcome.sizeBreakdown = breakdown
 		return outcome
 	}
@@ -451,7 +552,7 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		if errors.Is(err, context.Canceled) {
 			return staticOutcome{exit: service.ExitInterrupted, status: "failed"}
 		}
-		return failed(err)
+		return staticFailure(cmd, err)
 	}
 	if response.RepositoryAdded {
 		workspace, known := resolvedWorkspace(cmd.Context(), client)
@@ -546,52 +647,54 @@ func checkFailure(cmd *cobra.Command, err error, format string, options report.O
 // for the service when a check only needs to be told the repository is active.
 var checkRepository = lookupRepositoryStatus
 
-// repositoryNotEnabled is the local refusal of a check of a repository the
-// workspace has not added. It is local so the check never sends the request
-// that would add, and bill for, the repository.
-func repositoryNotEnabled(repository statusRepository) *service.Error {
-	name := repository.FullName
-	if name == "" {
-		name = repository.URL
+// repositoryDisplayName is the repository's owner/name, or its URL when the
+// service did not name it.
+func repositoryDisplayName(repository statusRepository) string {
+	if repository.FullName != "" {
+		return repository.FullName
 	}
+	return repository.URL
+}
+
+// inactiveReason says why a repository in state is not checked.
+func inactiveReason(state string) string {
+	switch state {
+	case statusNotAdded:
+		return "has not been added to your SlopCop workspace"
+	case statusDisabled:
+		return "was disabled in your SlopCop workspace"
+	case statusOverLimit:
+		return "is over your SlopCop workspace's active-repository limit"
+	case statusUnsupported:
+		return "is on a host SlopCop does not check"
+	}
+	return "is not active in your SlopCop workspace"
+}
+
+// repositoryNotAdded is the local refusal of a check of a repository the
+// workspace has never added. It is local so the check never sends the request
+// that would add, and bill for, the repository. Adding it is a step a person
+// approves, after which --add-repository carries that approval.
+func repositoryNotAdded(repository statusRepository) *service.Error {
 	return &service.Error{Body: service.ErrorBody{
-		Code:      repositoryNotEnabledCode,
-		Message:   fmt.Sprintf("%s is not enabled in your SlopCop workspace, so the check did not run.", name),
-		Remedy:    "Run `slopcop enable` in the repository at a terminal to add it to the workspace, then check again.",
+		Code:      repositoryNotAddedCode,
+		Message:   fmt.Sprintf("%s has not been added to your SlopCop workspace, so the check did not run.", repositoryDisplayName(repository)),
+		Remedy:    service.RepositoryNotAddedRemedy,
 		Retryable: false,
 	}}
 }
 
-// skipInactiveCheck is --if-enabled's answer for a repository the workspace
-// does not have active: say on stderr why nothing ran, carry the skip in the
-// machine formats, and exit 0 so an automatic check is not a failure.
-func skipInactiveCheck(cmd *cobra.Command, repository statusRepository, format string, options report.Options) error {
-	name := repository.FullName
-	if name == "" {
-		name = repository.URL
-	}
-	why := "is not active in your SlopCop workspace"
-	switch repository.State {
-	case statusNotAdded:
-		why = "is not enabled in your SlopCop workspace"
-	case statusDisabled:
-		why = "is disabled in your SlopCop workspace"
-	case statusOverLimit:
-		why = "is over your SlopCop workspace's active-repository limit"
-	case statusUnsupported:
-		why = "is on a host SlopCop does not check"
-	}
-	message := fmt.Sprintf("%s %s, so nothing was checked.", name, why)
-	fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: "+message)
-	if err := report.WriteSkipped(cmd.OutOrStdout(), report.Skipped{
-		Code:       repositoryNotEnabledCode,
-		State:      repository.State,
-		Repository: name,
-		Message:    message,
-	}, format, options); err != nil {
-		return err
-	}
-	return silentExit{service.ExitClean}
+// repositoryDisabled is the local refusal of a check of a repository the
+// workspace has disabled, by a person or past its active limit. Turning it
+// back on is the workspace's decision, so the remedy names no command an
+// agent could run.
+func repositoryDisabled(repository statusRepository) *service.Error {
+	return &service.Error{Body: service.ErrorBody{
+		Code:      repositoryDisabledCode,
+		Message:   fmt.Sprintf("%s was disabled in your SlopCop workspace, so the check did not run.", repositoryDisplayName(repository)),
+		Remedy:    service.RepositoryDisabledRemedy,
+		Retryable: false,
+	}}
 }
 
 // hinted is a service refusal the CLI adds a line of its own to, after the

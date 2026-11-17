@@ -178,8 +178,10 @@ its result.
 ## A check of a repository that is not enabled
 
 A check never adds a repository. A check of one the workspace has not added
-exits `4` with `repository_not_enabled` and sends nothing. Run `slopcop
-enable` in the checkout, at a terminal, to add it and run its first check.
+exits `4` with `repository_not_added` and sends nothing, without starting the
+local reviewers. Run `slopcop enable` in the checkout, at a terminal, to add
+it and run its first check. A repository the workspace disabled exits `4` with
+`repository_disabled`; only a person turns it back on.
 An automatic check can pass `--if-enabled` to exit `0` and send nothing
 instead. [Repositories](/account/repositories/) explains adding, the
 `--add-repository` flag for after a person approved it, and the active limit.

@@ -86,9 +86,10 @@ refusal: signing in (`auth_required`, `auth_expired`), access to the repository
 workspace checks (`repository_disabled`, `repository_add_unconfirmed`,
 `workspace_repository_limit_reached`, `active_repository_limit_reached`,
 `owner_required`), or something only the browser can do (`browser_required`).
-The CLI also exits `4` with `repository_not_enabled` when the workspace has not
-added the repository: it refuses locally, before sending anything, so a check
-never adds one. Scripts stop instead of retrying.
+The CLI also exits `4` with `repository_not_added` when the workspace has not
+added the repository, and with `repository_disabled` when it has disabled it:
+it refuses locally, before sending anything or starting the local reviewers,
+so a check never adds one. Scripts stop instead of retrying.
 [Error codes](/reference/error-codes/) lists the remedies.
 
 ## An empty change
@@ -105,4 +106,4 @@ work passes `--base`; an agent reads the flag and does the same. See
 active in the workspace. The machine formats carry `"status": "skipped"` and
 the reason, so it cannot be mistaken for a clean check. A plain check of a
 repository the workspace has not added exits `4` with
-`repository_not_enabled` instead.
+`repository_not_added` instead.

@@ -376,7 +376,10 @@ the service cannot tell it from you, so adding a repository stays a step you
 take yourself.
 
 The static half never adds a repository. A check of one the workspace has not
-added exits `4` with `repository_not_enabled` and sends nothing; `status` shows
+added exits `4` with `repository_not_added` and sends nothing, and one it has
+disabled exits `4` with `repository_disabled` (or
+`active_repository_limit_reached` when it is past the active limit); these stop
+before the local reviewers start, so the report has no review. `status` shows
 the same state, and a check that is not at a terminal asks nothing. Once a
 person has approved adding one, `check --add-repository --workspace <name|id>`
 carries that approval without a terminal; the flag needs `--workspace` (the flag
@@ -726,13 +729,14 @@ disabled it is the one this login is bound to, and `--workspace` after
 refusal (`auth_required`, `auth_expired`, `account_required`,
 `repo_not_indexed`, `app_not_installed`, `app_no_repo_access`,
 `gitlab_not_connected`, `no_access`, `insufficient_credits`,
-`repository_disabled`, `repository_not_enabled`,
+`repository_disabled`, `repository_not_added`,
 `repository_add_unconfirmed`, `workspace_repository_limit_reached`,
 `active_repository_limit_reached`, `owner_required`, and `browser_required`),
 so a script can stop instead of retrying, and `2` otherwise. The CLI refuses a
 check of a repository the workspace has not added locally, as
-`repository_not_enabled`, before sending anything. Stderr starts with the
-code, as in `slopcop: repository_not_enabled: …`. `human` prints nothing on
+`repository_not_added`, and one it has disabled as `repository_disabled`,
+before sending anything or starting the local reviewers. Stderr starts with
+the code, as in `slopcop: repository_not_added: …`. `human` prints nothing on
 stdout; `json` prints `{"status": "failed", "code": …, "message": …,
 "remedy": …, "retryable": …}`, plus `installUrl` or `topUpUrl` when the
 service sent one; `sarif` prints a run with `slopcop.status` `failed`, whose

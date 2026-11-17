@@ -37,7 +37,9 @@ already active is left alone. `slopcop status` shows which of these a checkout
 is in.
 
 A check never adds a repository by itself. A check of one the workspace has
-not added exits `4` with `repository_not_enabled` and sends nothing. An
+not added exits `4` with `repository_not_added` and sends nothing, and one it
+has disabled exits `4` with `repository_disabled`. Neither starts the local
+reviewers. An
 automatic check can pass `--if-enabled` to exit `0` and send nothing instead.
 The agent skill uses it, and the Stop hook makes the same check before it
 sends anything.
@@ -48,9 +50,12 @@ Once a person has approved adding a repository, `check --add-repository
 for one workspace cannot add the repository to the one the login happens to
 point at. The flag changes nothing for a repository already in that workspace.
 
-An agent following the skill never adds a repository. When a check reports
-`repository_not_enabled`, it tells you the repository is not enabled and that
-`slopcop enable` is the step only you can take.
+An agent following the skill never adds a repository by itself. When a check
+reports `repository_not_added`, it asks you before it adds the repository with
+`--add-repository`, or tells you to run `slopcop enable`. When a check reports
+`repository_disabled`, the workspace has the repository switched off, by a
+person or because it was added past the active limit, so the agent stops and
+tells you: only a person turns it back on.
 
 ## Active and disabled
 

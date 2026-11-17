@@ -47,7 +47,8 @@ slopcop enable   # add this checkout to the workspace and run its first check
 ```
 
 After that the agent can check the repository by itself. A static check of one
-that is not enabled exits `4` with `repository_not_enabled`; an automatic check
+the workspace has not added exits `4` with `repository_not_added`, and one it
+has disabled with `repository_disabled`; an automatic check
 can use `--if-enabled` to skip its static half. Local review still runs in
 default `both` mode. `slopcop status` shows where a checkout stands.
 

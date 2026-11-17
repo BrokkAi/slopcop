@@ -627,7 +627,7 @@ func TestACheckByHandInAnotherWorkspaceDoesNotOpenTheGate(t *testing.T) {
 
 	const other = "6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b"
 	code, _, stderr := runCLI(t, "check", "--root", repo, "-w", other, "--service", server.URL)
-	if code != service.ExitNeedsPerson || !strings.Contains(stderr, repositoryNotEnabledCode) {
+	if code != service.ExitNeedsPerson || !strings.Contains(stderr, repositoryNotAddedCode) {
 		t.Fatalf("check exit = %d, stderr = %s", code, stderr)
 	}
 	// The login's own workspace does not have the repository either, so the
