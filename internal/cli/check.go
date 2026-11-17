@@ -103,7 +103,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	response, err := sendCheck(ctx, client, &request, verbose)
 	var rejected *service.Error
 	if errors.As(err, &rejected) && rejected.Body.Code == repositoryAddUnconfirmed {
-		response, err = addRepository(cmd, client, request)
+		response, err = addRepository(ctx, cmd, client, &request, verbose)
 	}
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -165,22 +165,19 @@ func checkFailure(cmd *cobra.Command, err error, format string) error {
 // addRepository sends the check again, confirmed, when the service holds it
 // back as one that would add the repository to the workspace, which then
 // pays for it. Running the check is the request to check this repository in
-// that workspace, so it is added and checked in the one run, with a line on
-// stderr naming both; nothing is asked and no second command is needed.
-func addRepository(cmd *cobra.Command, client *service.Client, request service.Request) (service.Response, error) {
+// that workspace, so it is added and checked in the one run; nothing is asked
+// and no second command is needed. The line naming both goes to stderr
+// before the send, so it is said even when the result does not come back in
+// time. ctx is the check's own, so --timeout still bounds the whole wait.
+func addRepository(ctx context.Context, cmd *cobra.Command, client *service.Client, request *service.Request, verbose io.Writer) (service.Response, error) {
+	workspace, known := resolvedWorkspace(ctx, client)
+	fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: adding %s to %s\n", repositoryName(request.RepoURL), workspaceName(workspace, known))
 	request.AddRepository = true
-	ctx, cancel := context.WithTimeout(cmd.Context(), client.Timeout())
-	defer cancel()
-	response, err := client.Check(ctx, request)
-	if err == nil {
-		workspace, known := resolvedWorkspace(cmd.Context(), client)
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: added %s to %s\n", repositoryName(request.RepoURL), workspaceName(workspace, known))
-	}
-	return response, err
+	return sendCheck(ctx, client, request, verbose)
 }
 
 // repositoryName is owner/name of a canonical repository URL, for a
-// question about it.
+// notice about it.
 func repositoryName(repoURL string) string {
 	parsed, err := url.Parse(repoURL)
 	if err != nil || parsed.Path == "" {

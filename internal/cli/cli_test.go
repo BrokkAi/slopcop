@@ -1088,7 +1088,7 @@ func TestCheckAddsARepositoryTheWorkspacePaysForInTheSameRun(t *testing.T) {
 			if err := json.Unmarshal([]byte(stdout), &document); err != nil {
 				t.Fatalf("stdout is not JSON: %v (%q), stderr = %q", err, stdout, stderr)
 			}
-			if code != 0 || document["status"] != "clean" || !strings.HasPrefix(stderr, "slopcop: added BrokkAi/slopcop to \"Dave\"\n") ||
+			if code != 0 || document["status"] != "clean" || !strings.HasPrefix(stderr, "slopcop: adding BrokkAi/slopcop to \"Dave\"\n") ||
 				strings.Contains(stderr, "[y/N]") || strings.Contains(stderr, "repository_add_unconfirmed") {
 				t.Errorf("exit = %d, stdout = %v, stderr = %q", code, document, stderr)
 			}
@@ -1106,7 +1106,7 @@ func TestCheckAddsARepositoryTheWorkspacePaysForInTheSameRun(t *testing.T) {
 		server, checks := addService(t, base)
 		pipedStdin(t, "")
 		code, _, stderr := runCLI(t, "check", "--root", repo, "-w", "Acme team", "--service", server.URL)
-		if code != 0 || !strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Acme team\"\n") {
+		if code != 0 || !strings.Contains(stderr, "slopcop: adding BrokkAi/slopcop to \"Acme team\"\n") {
 			t.Fatalf("exit = %d, stderr = %s", code, stderr)
 		}
 		want := []map[string]any{
@@ -1118,11 +1118,35 @@ func TestCheckAddsARepositoryTheWorkspacePaysForInTheSameRun(t *testing.T) {
 		}
 	})
 
+	t.Run("a refusal of the confirmed check is reported as any other", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			if r.URL.Path == "/v1/whoami" {
+				_, _ = w.Write([]byte(whoamiBody))
+				return
+			}
+			var body map[string]any
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			w.WriteHeader(http.StatusConflict)
+			code := "repository_add_unconfirmed"
+			if body["addRepository"] == true {
+				code = "active_repository_limit_reached"
+			}
+			_, _ = w.Write([]byte(`{"code": "` + code + `", "message": "No.", "remedy": "Ask.", "retryable": false}`))
+		}))
+		t.Cleanup(server.Close)
+		pipedStdin(t, "")
+		code, _, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL)
+		if code != service.ExitNeedsPerson || !strings.Contains(stderr, "slopcop: active_repository_limit_reached: No.") {
+			t.Errorf("exit = %d, stderr = %q", code, stderr)
+		}
+	})
+
 	t.Run("the old --add-repository is accepted and changes nothing", func(t *testing.T) {
 		server, checks := addService(t, base)
 		pipedStdin(t, "")
 		code, _, stderr := runCLI(t, "check", "--root", repo, "--add-repository", "--service", server.URL)
-		if code != 0 || !strings.Contains(stderr, "slopcop: added BrokkAi/slopcop to \"Dave\"\n") {
+		if code != 0 || !strings.Contains(stderr, "slopcop: adding BrokkAi/slopcop to \"Dave\"\n") {
 			t.Fatalf("exit = %d, stderr = %s", code, stderr)
 		}
 		if len(*checks) != 2 {

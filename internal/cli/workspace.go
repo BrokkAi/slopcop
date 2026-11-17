@@ -95,8 +95,8 @@ var errNotATerminal = errors.New("stdin is not a terminal")
 
 // confirmYes asks the person at the terminal a yes-or-no question, on
 // stderr, and reports whether they answered yes. Anything but y or yes is
-// no. Agents and CI run with the person's own login, so a step that changes
-// what a workspace pays, or where every agent's checks go, waits for the
+// no. Agents and CI run with the person's own login, so a step that switches
+// a repository on or off, or moves every agent's checks, waits for the
 // person; when stdin is not a terminal it answers errNotATerminal.
 func confirmYes(cmd *cobra.Command, question string) (bool, error) {
 	input, ok := confirmInput(cmd)

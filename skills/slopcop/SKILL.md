@@ -42,7 +42,7 @@ the workspace (name, kind, role), its plan (Pro or Free) and the service URL
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
 - A check adds its repository to the workspace in the same run, including
-  when the workspace then pays for it; stderr then says `added owner/name to
+  when the workspace then pays for it; stderr then says `adding owner/name to
   "Workspace"`. There is nothing to confirm and no second command. Tell the
   user when a check added a repository.
 
@@ -142,6 +142,7 @@ the usual codes mean:
 | `insufficient_credits` | The workspace is out of credits, so no new check runs. Tell the user; they add credits at the printed link. |
 | `repository_disabled` | The workspace's owner disabled the repository. Run `slopcop whoami` to name that workspace, and tell the user. |
 | `workspace_not_found` | Pick a name from `slopcop workspace list`. |
+| `repository_add_unconfirmed` | The service would not add the repository even when asked. Tell the user; they add it on the Repositories page. |
 | `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
 

@@ -233,8 +233,8 @@ repository after a workspace's first costs credits every 30 days; a disabled
 one is not checked or charged and keeps its reports, findings and settings.
 `repo enable` and `repo disable` ask you to type the repository's `owner/name`
 and refuse when stdin is not a terminal: an agent or CI job runs with your
-login, and the service cannot tell it from you, so changing what the workspace
-pays stays a step you take yourself.
+login, and the service cannot tell it from you, so switching a repository on or
+off stays a step you take yourself.
 `workspace use` moves every agent and script using this login, not only the
 one that runs it, so it asks `[y/N]` and refuses when stdin is not a terminal.
 To check in another workspace without moving anyone, `check`, `ignore` and
@@ -246,7 +246,7 @@ Names match without regard to case; when two workspaces share a name, or two
 providers a repository name, pass the id the listing prints. There is no `repo
 add`: a check adds its repository, in the same run. When the workspace would
 then pay for it (it already has an active repository and is charged), `check`
-still adds it and runs, and says `added owner/name to "Workspace"` on stderr;
+still adds it and runs, and says `adding owner/name to "Workspace"` on stderr;
 nothing is asked, at a terminal or without one, and there is no second
 command to run. To stop paying for it, `repo disable` it. Deleting repositories,
 archiving workspaces, members, credits and repository settings stay in the web
@@ -426,7 +426,7 @@ disabled it is the one this login is bound to, and `--workspace` after
 clear the refusal (`auth_required`, `auth_expired`, `account_required`,
 `repo_not_indexed`, `app_not_installed`, `app_no_repo_access`,
 `gitlab_not_connected`, `no_access`, `insufficient_credits`,
-`repository_disabled`,
+`repository_disabled`, `repository_add_unconfirmed`,
 `workspace_repository_limit_reached`, `active_repository_limit_reached`,
 `owner_required`, and `browser_required`), so a script can stop instead of
 retrying, and `2` otherwise. Stderr starts with the code, as in `slopcop:
