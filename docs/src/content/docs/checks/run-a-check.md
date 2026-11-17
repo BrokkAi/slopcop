@@ -46,8 +46,21 @@ configuration files and other text/source files remain in scope. The check uses
 the captured Git blobs, including the old version for deletions and both sides
 of a rename, and leaves your files and index unchanged.
 
+Changed files that `.bifrostignore` or `[check] exclude` in
+`.slopcop/config.toml` keep out of every check stay out of the upload and the
+local review too, whatever their size: the service would not check them
+anyway. `--include` does not bring them back. The service then analyzes the
+rest of the change against the base versions of those files, so keep files
+the analysis reads, such as a `Cargo.toml` or `package.json`, out of
+`[check] exclude`. The selected `.slopcop/policies`
+rules, `.slopcop/config.toml` and the `.bifrostignore` files themselves are
+always sent. A deleted file carries no content: the patch names the blob it
+deletes, so removing a large folder costs a few lines per file, and the
+service still deletes a file only when its content matches.
+
 Omitted files are unreviewed. Human output names each path with its size and
-reason, plus the total count and size. JSON always lists `omittedFiles` and
+reason, plus the total count and size; for excluded files it gives the count
+and size and names the first ten. JSON always lists `omittedFiles` and
 SARIF carries `slopcop.omittedFiles`. A passing check covers the retained scope;
 the full snapshot remains the push identity. If every change is omitted, the
 check is `skipped`: nothing is sent or analyzed and no push approval is recorded.
@@ -66,7 +79,9 @@ the complete rename.
 
 A genuinely unchanged tree is still sent as an empty patch. The service's
 overall payload and file-count limits still apply; its `payload_too_large`
-response is printed verbatim if the remaining patch exceeds them.
+response is printed verbatim if the remaining patch exceeds them. An upload
+refused with HTTP 413 before the service could answer is reported as
+`payload_too_large` too, with the request's size.
 
 With the patch go the repository's URL (canonicalized from the `origin`
 remote), the base commit's full hash, the policy selection, and the `--fail-on`

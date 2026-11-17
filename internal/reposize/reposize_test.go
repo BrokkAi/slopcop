@@ -220,3 +220,61 @@ func TestPatternEscapesGitignoreSyntax(t *testing.T) {
 		}
 	}
 }
+
+func TestExcludedPathsReadsTheExclusionsFromTheTree(t *testing.T) {
+	root, _ := repository(t, map[string]int{"data/a.json": 10, "src/main.go": 10})
+	writeText(t, root, ".slopcop/config.toml", "[check]\nexclude = [\"data/\", \".slopcop/\", \"*.json\", \"*.rqlp\"]\n")
+	writeText(t, root, "data/.bifrostignore", "*\n")
+	writeText(t, root, ".bifrostignore", "*.tmp\n")
+	git(t, root, "add", "-A")
+	tree := git(t, root, "write-tree")
+	// What the disk says but the tree does not, such as an ignored or
+	// skip-worktree edit, is not what the service checks.
+	writeText(t, root, ".slopcop/config.toml", "[check]\nexclude = [\"src/\"]\n")
+	writeText(t, root, "src/.bifrostignore", "*\n")
+	got, err := ExcludedPaths(context.Background(), root, tree, []string{
+		"data/a.json", "Data/b.txt", "data/.bifrostignore", ".slopcop/config.toml", ".slopcop/policies/x.rqlp",
+		".bifrost/suppressions.json", "src/main.go", "src/scratch.tmp",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The runner matches case-sensitively, so Data/ is not data/ even where
+	// the disk does not tell them apart.
+	if want := map[string]bool{"data/a.json": true, "src/scratch.tmp": true}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("excluded = %v; want %v", got, want)
+	}
+}
+
+func TestExcludedPathsExcludesNothingWhenIgnoreDirectoriesDifferOnlyInCase(t *testing.T) {
+	got, err := excludedPaths(context.Background(), []string{"data/a", "Data/b", "src/c", "src/keep"}, nil, map[string][]byte{
+		"data": []byte("*\n"),
+		"Data": []byte("*\n"),
+		"src":  []byte("*\n!keep\n"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One file cannot stand for both directories, and leaving one out could
+	// drop a negation, so the ignore files exclude nothing.
+	if len(got) != 0 {
+		t.Fatalf("excluded = %v; want nothing", got)
+	}
+}
+
+func TestStrictExcludeReadsOnlyWhatTheServiceReads(t *testing.T) {
+	for config, want := range map[string][]string{
+		"[check]\nexclude = [\"a/**\"]\n":                                           {"a/**"},
+		"[check]\nexclude = [\"a/**\"]\n[[check.exclude_rules]]\npaths = [\"b\"]\n": {"a/**"},
+		"[Check]\nexclude = [\"a/**\"]\n":                                           nil,
+		"[check]\nExclude = [\"a/**\"]\n":                                           nil,
+		"[check]\nexclude = [\"a/**\"]\nunknown = 1\n":                              nil,
+		"[check]\nexclude = \"a/**\"\n":                                             nil,
+		"[check]\nexclude = [1]\n":                                                  nil,
+		"[check\n":                                                                  nil,
+	} {
+		if got := strictExclude([]byte(config)); !reflect.DeepEqual(got, want) {
+			t.Errorf("strictExclude(%q) = %q; want %q", config, got, want)
+		}
+	}
+}

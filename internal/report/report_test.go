@@ -3,12 +3,14 @@ package report
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"reflect"
 	"sort"
 	"strings"
 	"testing"
 
+	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
@@ -2184,5 +2186,27 @@ func TestChosenStaticModeHasNoHumanReviewLine(t *testing.T) {
 		if strings.Contains(out.String(), "Review:") {
 			t.Fatalf("%s: human: %q", reason, out.String())
 		}
+	}
+}
+
+func TestHumanReportCountsExcludedFilesAndNamesOnlyAFew(t *testing.T) {
+	omitted := []OmittedFile{{Path: "big.json", Bytes: 600000, Reason: "large-json"}}
+	for i := range listedExcluded + 3 {
+		omitted = append(omitted, OmittedFile{Path: fmt.Sprintf("records/%02d.json", i), Bytes: 2, Reason: gitx.OmittedExcluded})
+	}
+	got := omittedFilesHuman(Options{OmittedFiles: omitted})
+	for _, want := range []string{
+		"due to size: 1 file(s), 600000 bytes total.",
+		"  big.json (600000 bytes): large-json\n",
+		"[check] exclude keeps them out of checks: 13 file(s), 26 bytes total.",
+		"  records/09.json (2 bytes)\n",
+		"  ... and 3 more; --format json lists them all.\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("human report missing %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "records/10.json") {
+		t.Errorf("human report names more than %d excluded files:\n%s", listedExcluded, got)
 	}
 }

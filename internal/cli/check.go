@@ -744,9 +744,10 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		}
 	}
 	patchTree, reviewTree := snapshot.PatchTree, snapshot.Tree
+	exclude := excludeOutsideSelection(repoRoot, snapshot.PatchTree, selection.Files)
 	var omitted []report.OmittedFile
 	{
-		filtered, err := gitx.FilterCheckTree(repoRoot, base, patchTree, opts.include...)
+		filtered, err := gitx.FilterCheckTree(repoRoot, base, patchTree, exclude, opts.include...)
 		if err != nil {
 			return prepared, err
 		}
@@ -757,7 +758,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		if snapshot.Tree == snapshot.PatchTree {
 			reviewTree = patchTree
 		} else {
-			filteredReview, err := gitx.FilterCheckTree(repoRoot, base, snapshot.Tree, opts.include...)
+			filteredReview, err := gitx.FilterCheckTree(repoRoot, base, snapshot.Tree, exclude, opts.include...)
 			if err != nil {
 				return prepared, err
 			}
@@ -818,19 +819,58 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	return prepared, nil
 }
 
-func omittedFilesNotice(files []report.OmittedFile) string {
-	if len(files) == 0 {
-		return ""
+// excludeOutsideSelection is the gitx.Excluder for a check: the paths the
+// .bifrostignore files and [check] exclude of patchTree, the tree the service
+// receives, keep out of every check, except the selected policy files, which
+// the service must receive.
+func excludeOutsideSelection(repoRoot, patchTree string, selected []string) gitx.Excluder {
+	return func(paths []string) (map[string]bool, error) {
+		excluded, err := reposize.ExcludedPaths(context.Background(), repoRoot, patchTree, paths)
+		if err != nil {
+			return nil, err
+		}
+		for _, file := range selected {
+			delete(excluded, file)
+		}
+		return excluded, nil
 	}
-	var total int64
-	for _, file := range files {
-		total += file.Bytes
-	}
-	return fmt.Sprintf("slopcop: omitted %d large JSON/binary file(s) (%d bytes) from upload and local review; their contents were not analyzed. The report lists paths, sizes and reasons. Use --include <path-or-glob> to check selected files.", len(files), total)
 }
 
+func omittedFilesNotice(files []report.OmittedFile) string {
+	var notices []string
+	var excludedFiles, largeFiles int
+	var excludedBytes, largeBytes int64
+	for _, file := range files {
+		if file.Reason == gitx.OmittedExcluded {
+			excludedFiles++
+			excludedBytes += file.Bytes
+		} else {
+			largeFiles++
+			largeBytes += file.Bytes
+		}
+	}
+	if excludedFiles > 0 {
+		notices = append(notices, fmt.Sprintf("slopcop: left %d changed file(s) (%d bytes) that .bifrostignore or [check] exclude keeps out of checks out of the upload and local review.", excludedFiles, excludedBytes))
+	}
+	if largeFiles > 0 {
+		notices = append(notices, fmt.Sprintf("slopcop: omitted %d large JSON/binary file(s) (%d bytes) from upload and local review; their contents were not analyzed. The report lists paths, sizes and reasons. Use --include <path-or-glob> to check selected files.", largeFiles, largeBytes))
+	}
+	return strings.Join(notices, "\n")
+}
+
+// onlyOmitted reports a check the size filter emptied. One the exclusions
+// helped empty is still sent, so the service can say what its [check]
+// leaves out, or that it cannot read it.
 func (p preparedCheck) onlyOmitted() bool {
-	return p.bytes == 0 && len(p.omittedFiles) > 0
+	if p.bytes != 0 || len(p.omittedFiles) == 0 {
+		return false
+	}
+	for _, file := range p.omittedFiles {
+		if file.Reason == gitx.OmittedExcluded {
+			return false
+		}
+	}
+	return true
 }
 
 func omittedOnlyOutcome(prepared preparedCheck) staticOutcome {
