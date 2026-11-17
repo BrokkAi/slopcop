@@ -149,6 +149,25 @@ runs with `$SLOPCOP_NO_UPDATE_NOTICE` set to any non-empty value never print
 it. A service that no longer accepts a version answers `client_outdated`
 (HTTP 426), which exits `2`.
 
+### Automatic updates
+
+A slopcop installed by the install script, or by hand from a release archive,
+updates itself. When the service reports a newer release, the command first
+finishes its own work, then downloads that release, checks the archive against
+its `checksums.txt`, and replaces its own binary:
+
+```text
+slopcop: updated from v0.0.7 to v0.0.9; the next run uses it.
+```
+
+The line goes to stderr. An update that fails never fails the command: it
+prints the upgrade notice with the reason, and is tried again a day later.
+`slopcop update` does the same on request. A slopcop installed through npm,
+pip, pipx or uv is not replaced, because that tool owns the file; it gets the
+notice above, and `slopcop update` names the command to run. Nothing updates
+itself when `$SLOPCOP_NO_AUTO_UPDATE` or `$CI` is set, so a job keeps the
+version it installed, or in a `dev` build or a `Stop` hook run.
+
 ### Go
 
 ```console

@@ -67,7 +67,10 @@ func execute(ctx context.Context, args []string, version string, stdout, stderr 
 	root.SetArgs(args)
 	root.SetOut(stdout)
 	root.SetErr(stderr)
+	ctx, updates := withUpdaters(ctx)
 	err := root.ExecuteContext(ctx)
+	// The report is written; a newer release replaces the binary now.
+	updates.finish(ctx)
 	if err == nil {
 		return 0
 	}
@@ -118,6 +121,7 @@ Running slopcop with no subcommand runs the check.`,
 		newLogoutCommand(&serviceURL),
 		newServiceCommand(),
 		newVersionCommand(version),
+		newUpdateCommand(version),
 		newWhoamiCommand(&serviceURL, version),
 		newWorkspaceCommand(&serviceURL, version),
 		newRepoCommand(&serviceURL, version),
