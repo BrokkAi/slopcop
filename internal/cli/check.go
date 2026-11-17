@@ -408,7 +408,11 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 				return staticOutcome{skipped: &report.Skipped{Code: repositoryNotEnabledCode, State: repository.State, Repository: name, Message: message}, status: "skipped"}
 			}
 			if repository.State == statusNotAdded {
-				workspace, known := resolvedWorkspace(cmd.Context(), client)
+				// The name only improves a refusal already decided, so it
+				// does not get to hold the refusal up.
+				naming, cancel := context.WithTimeout(cmd.Context(), 5*time.Second)
+				workspace, known := resolvedWorkspace(naming, client)
+				cancel()
 				return failed(repositoryNotEnabled(repository, workspace, known))
 			}
 		}

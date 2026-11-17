@@ -116,7 +116,9 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	default:
 		return fmt.Errorf("this repository is %s, so it cannot be enabled", repository.State)
 	}
-	if enabledIn(err) && target.ID != whoami.Workspace.ID {
+	// With $SLOPCOP_WORKSPACE naming the workspace, a plain check already runs there.
+	fromEnvironment := strings.TrimSpace(workspace) == "" && named
+	if enabledIn(err) && target.ID != whoami.Workspace.ID && !fromEnvironment {
 		// The login still checks in its own workspace, where a plain check of
 		// this repository would be refused.
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: this login checks in %s. To check this repository in %s, pass --workspace %q, or set SLOPCOP_WORKSPACE.\n",
