@@ -117,12 +117,12 @@ slopcop check --format json
 | --- | --- |
 | `checkId` | the check that answered; absent from an older service |
 | `staticStatus` | the static half's status when it differs from merged `status` |
-| `review` | `status`, `reviewers`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused` |
+| `review` | `status`, `reviewers`, `findings`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused`. `findings` is what the reviewers reported, parsed from each one's reply: `reviewer`, `priority` (`P0` to `P3`, absent when untagged), `path`, `startLine` and `endLine` when the reviewer named a location, `title`, and `message`. A reply without a tagged finding is one finding holding the whole reply. Review findings have no `id`, so `slopcop ignore` does not take them; use `slopcop override` for wrong ones |
 | `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), or `staticMode` (static mode chosen by flag or config). A static-only `clean` is not a reviewed change |
 | `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
 | `baseCommit` | the commit the patch was applied to |
-| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`; `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it; and, when the check met a `slopcop: ignore` comment, `inlineSuppressed` and `directiveWarnings` |
+| `summary` | `newFindings`, `existingFindings`, `omittedFindings`, `lessCertainFindings`, `incompletePolicies`, `incompletePolicyIds`, `inconclusive`, `remappedIgnores`, and `reviewFindings` when a review ran, which counts `review.findings` (the static counts never include them); `lessCertainFindings` counts the new `possible` and `heuristic` findings left out because `--certainty` was not `all`, is `0` under `--certainty all`, and is absent only when an older service did not send it; and, when the check met a `slopcop: ignore` comment, `inlineSuppressed` and `directiveWarnings` |
 | `findings` | each new finding with its `id`, `new`, `policyId`, `severity`, `certainty`, `path`, `startLine` and `endLine`, and `title`, the rule's sentence. `startColumn` and `endColumn` are the analyzer's span when it gave one: 1-based, with `endColumn` the column just past it on `endLine`. `message` is what the analyzer observed beyond the title, such as a score and its threshold or the protocol step a typestate rule found broken: one line of at most 500 characters, absent when it would repeat the title. `previouslyIgnored` is the id of an ignored finding it matches, and a finding with it is listed even when it is not new; `suggestedWord` is a misspelled-identifier finding's flagged word. A possible credential carries no columns or message |
 | `incomplete` | rules that did not complete, each with `policyId`, `reason`, `detail` when the service sent one, `diagnostic` (`message`, and `line` and `column` when known) for a repository rule file that did not load, compile or run, and `scope: "run"` when the whole analyzer run shared the cause; at most fifty |
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
@@ -164,7 +164,11 @@ slopcop check --format sarif > slopcop.sarif
 ```
 
 A SARIF 2.1.0 log with a second run, `slopcop-review`, containing
-reviewer findings as location-free results and failures as notifications.
+one result per reviewer finding and failures as notifications. Each review
+result's `ruleId` is the reviewer, its `level` follows the priority (`error`
+for `P0` and `P1`, `note` for `P3`, otherwise `warning`), its
+`properties["slopcop.priority"]` is the priority, and it has a location when
+the reviewer named one.
 Each static result's `message.text` is the finding's title, then its
 `message` on a second line when it has one, and its region carries
 `startColumn` and `endColumn` when the service sent the span.

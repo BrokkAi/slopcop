@@ -246,6 +246,14 @@ Each finding also carries its
 `id`: an `ID:` line in `human`, `id` in `json`, and
 `properties["slopcop.findingId"]` in `sarif`.
 
+Review findings are not in `findings` or `summary.newFindings`. In `json`,
+`review.findings` lists them, parsed from each reviewer's reply, with
+`reviewer`, `priority` (`P0` to `P3`), `path`, `startLine`, `endLine`,
+`title` and `message`; `summary.reviewFindings` counts them. In `sarif` they
+are results of the `slopcop-review` run. They have no `id`, so `slopcop
+ignore` does not take them: fix the real ones and use `slopcop override` for
+wrong ones.
+
 ## Read the exit code
 
 | Exit | Meaning |
