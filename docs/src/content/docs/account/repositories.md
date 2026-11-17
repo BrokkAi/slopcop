@@ -36,21 +36,23 @@ A repository that is already added but disabled is enabled again. One that is
 already active is left alone. `slopcop status` shows which of these a checkout
 is in.
 
-A check never adds a repository by itself. A check of one the workspace has
-not added exits `4` with `repository_not_enabled` and sends nothing. An
-automatic check can pass `--if-enabled` to exit `0` and send nothing instead.
-The agent skill uses it, and the Stop hook makes the same check before it
-sends anything.
+You do not have to run `slopcop enable` first. A check of a repository the
+workspace has never added adds it to the workspace the check runs in (the
+login's, or the one `--workspace` names), which then pays for its checks, and
+says `added owner/name to "Workspace"` on stderr. An agent's checks and the Stop
+hook add a repository the same way, so an agent is not stopped to ask.
 
-Once a person has approved adding a repository, `check --add-repository
---workspace <name|id>` carries that approval without a terminal. The flag needs
-`--workspace` (the flag itself, not `SLOPCOP_WORKSPACE`), so an approval given
-for one workspace cannot add the repository to the one the login happens to
-point at. The flag changes nothing for a repository already in that workspace.
+A check does not turn a repository back on. One the workspace has disabled
+exits `4` with `repository_disabled`, and one past the active limit with
+`active_repository_limit_reached`; neither sends anything or starts the local
+reviewers. An automatic check can pass `--if-enabled` to exit `0` and send
+nothing instead. The agent skill uses it, and the Stop hook makes the same
+check before it sends anything. When a check reports `repository_disabled`, the
+workspace has the repository switched off, by a person or because it was added
+past the active limit, so an agent following the skill stops and tells you:
+only a person turns it back on.
 
-An agent following the skill never adds a repository. When a check reports
-`repository_not_enabled`, it tells you the repository is not enabled and that
-`slopcop enable` is the step only you can take.
+`--add-repository` is no longer needed; a check still accepts it.
 
 ## Active and disabled
 

@@ -105,6 +105,20 @@ func sameOrigin(request *http.Request, via []*http.Request) error {
 	return nil
 }
 
+// noAnswer reports whether a request failed in the network, such as a name
+// that does not resolve, a refused or dropped connection, or a timeout, rather
+// than on a redirect the client refused.
+func noAnswer(err error) bool {
+	var netError net.Error
+	if errors.As(err, &netError) && netError.Timeout() {
+		return true
+	}
+	var opError *net.OpError
+	var dnsError *net.DNSError
+	return errors.As(err, &opError) || errors.As(err, &dnsError) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
+}
+
 // Timeout is the longest a check waits for its result.
 func (c *Client) Timeout() time.Duration {
 	if c.HTTP != nil && c.HTTP.Timeout > 0 {
@@ -192,11 +206,32 @@ func (c *Client) Check(ctx context.Context, request Request) (Response, error) {
 // checkOnce posts the change once. It returns the service's Retry-After wait
 // alongside a failure.
 func (c *Client) checkOnce(ctx context.Context, request Request) (Response, time.Duration, error) {
-	status, header, payload, err := c.postJSON(ctx, checkPath, request)
+	body, err := json.Marshal(request)
+	if err != nil {
+		return Response{}, 0, fmt.Errorf("encode request: %w", err)
+	}
+	status, header, payload, err := c.send(ctx, http.MethodPost, checkPath, body)
 	if err != nil {
 		return Response{}, 0, err
 	}
-	return checkAnswer(status, header, payload)
+	response, wait, err := checkAnswer(status, header, payload)
+	var failure *Error
+	if status == http.StatusRequestEntityTooLarge && errors.As(err, &failure) && failure.Body.Code == "" {
+		failure.Body = uploadTooLarge(len(body))
+	}
+	return response, wait, err
+}
+
+// uploadTooLarge is the failure for a check whose upload something in front
+// of the service, such as a proxy, refused with HTTP 413 before the service
+// could answer with its own payload_too_large.
+func uploadTooLarge(bytes int) ErrorBody {
+	return ErrorBody{
+		Code:    "payload_too_large",
+		Message: fmt.Sprintf("The change is too large to upload: the check request was %d bytes, and the check service refused it (HTTP 413).", bytes),
+		Remedy: "Keep generated or data paths out of checks with a [check] exclude in .slopcop/config.toml, which also keeps them out of the upload, " +
+			"or check a smaller change, such as the pushed commit by headCommit through the MCP check tool.",
+	}
 }
 
 // pollOnce asks for a running check by its id once, without the change. The
@@ -316,7 +351,11 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 	}
 	response, err := client.Do(httpRequest)
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("reach %s: %w", c.BaseURL, err)
+		err = fmt.Errorf("reach %s: %w", c.BaseURL, err)
+		if ctx.Err() != nil || !noAnswer(err) {
+			return 0, nil, nil, err
+		}
+		return 0, nil, nil, unreachable(err)
 	}
 	defer response.Body.Close()
 	if latest := strings.TrimSpace(response.Header.Get(latestVersionHeader)); latest != "" && c.LatestVersion != nil {
@@ -325,7 +364,11 @@ func (c *Client) send(ctx context.Context, method, path string, payload []byte) 
 
 	responseBody, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
-		return 0, nil, nil, fmt.Errorf("read response: %w", err)
+		err = fmt.Errorf("read response: %w", err)
+		if ctx.Err() != nil || !noAnswer(err) {
+			return 0, nil, nil, err
+		}
+		return 0, nil, nil, unreachable(err)
 	}
 	if len(responseBody) > maxResponseBytes {
 		return 0, nil, nil, fmt.Errorf("response exceeds %d bytes", maxResponseBytes)

@@ -15,8 +15,10 @@ plus `installUrl` or `topUpUrl` when the service sent one. Retry only when
 A check exits `4` when only a person can clear the refusal, and `2` otherwise.
 The remedies name no client, so the CLI adds its own command after some, such
 as `slopcop login` when the remedy is to sign in. The CLI itself answers
-`repository_not_enabled` before sending a check of a repository the workspace
-has not added, so a check never adds one.
+`repository_disabled` before sending a check of a repository the workspace has
+disabled, and `active_repository_limit_reached` for one past the active limit.
+Neither starts the local reviewers. A repository the workspace has never added
+is added by the check.
 
 ## Sign-in
 
@@ -37,7 +39,7 @@ has not added, so a check never adds one.
 | `gitlab_not_connected` | 4 | The workspace has no GitLab connection, or it needs reconnecting, in the web app. |
 | `no_access` | 4 | Your account cannot read the repository, or has not authorized SlopCop with the provider. |
 | `base_not_found` | 2 | The service's clone lacks the base commit; pass one origin has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. |
-| `payload_too_large` | 2 | The change is over the service's limit; check a smaller change. |
+| `payload_too_large` | 2 | The change is over the service's limit, or the upload was refused with HTTP 413 before the service answered; the message gives the request's size. Keep generated or data paths out with `[check] exclude`, which also keeps them out of the upload, or check a smaller change. |
 | `repository_too_large` | 2 | The repository itself is over the size limit: at most 50,000 files and 512 MiB, the same on every plan. Every file counts, not only source, so large generated or data files committed to the repository can push it over, except paths `.bifrostignore` or `[check] exclude` keep out of checks. After the remedy the CLI lists the base commit's largest paths, measured locally, and a `[check] exclude` snippet that leaves out the largest; see [Repository size](/checks/read-a-report/#repository-size). Or talk to us about an enterprise agreement for higher limits. |
 
 ## Workspace and billing
@@ -45,9 +47,8 @@ has not added, so a check never adds one.
 | Code | Exit | What to do |
 | --- | --- | --- |
 | `insufficient_credits` | 4 | The workspace is out of credits, so no new check runs. Add credits at the printed `topUpUrl`. See [Credits](/account/credits/). |
-| `repository_disabled` | 4 | The workspace's owner disabled the repository. `slopcop whoami` names the workspace. |
-| `repository_not_enabled` | 4 | The workspace has not added the repository, so the CLI sent nothing. Run `slopcop enable` from the checkout at a terminal. `--if-enabled` skips this refusal for automatic checks. See [Repositories](/account/repositories/). |
-| `repository_add_unconfirmed` | 4 | The check tried to add a repository to a workspace, which then pays for its checks. Once a person approves it, run the check again with `--add-repository --workspace <name\|id>`, or run `slopcop enable`. See [Repositories](/account/repositories/). |
+| `repository_disabled` | 4 | The workspace has the repository disabled, switched off by a person or added past the active limit. Only a person turns it back on, on the Repositories page; an agent stops and reports it. `slopcop whoami` names the workspace. |
+| `repository_add_unconfirmed` | 4 | The check reached a repository the workspace does not have without asking to add it, as a slopcop from before checks added repositories does. Update slopcop and check again; it adds the repository. See [Repositories](/account/repositories/). |
 | `workspace_repository_limit_reached`, `active_repository_limit_reached` | 4 | The workspace is at its limit of repositories or active repositories. The owner chooses which stay active on the Repositories page, or unlocks the workspace. |
 | `workspace_not_found` | 2 | Pick a name from `slopcop workspace list`, or pass the id. |
 | `workspace_repository_not_found` | 2 | The repository is not in that workspace; `slopcop repo list` shows what is. |
@@ -69,6 +70,7 @@ has not added, so a check never adds one.
 | `client_outdated` | 2 | This slopcop is older than the service accepts. [Upgrade](/get-started/install/#upgrade) and run the check again. |
 | `rate_limited` | 2, retryable | Too many requests; wait the `Retry-After`. |
 | `service_unavailable` | 2, retryable | Retry; the service is unavailable. |
+| `service_unreachable` | 2, retryable | The CLI answers this itself when a request gets no answer, such as when the network is down or the service's host does not resolve. The service may still have received the request. Check the connection and any proxy, VPN, or firewall, then run the same command again. |
 
 ## Login polling
 

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/reposize"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
@@ -33,6 +34,9 @@ const (
 	ReviewSkippedCI = "ci"
 	// ReviewSkippedStaticMode is static mode chosen by flag or config file.
 	ReviewSkippedStaticMode = "staticMode"
+	// ReviewSkippedRepositoryInactive is a check of a repository the
+	// workspace has not added or has disabled, stopped before the review.
+	ReviewSkippedRepositoryInactive = "repositoryInactive"
 )
 
 const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/schemas/sarif-schema-2.1.0.json"
@@ -60,7 +64,7 @@ type Options struct {
 	// the new ones. They are counted either way.
 	ShowExisting bool
 	// EmptyChange marks a check whose patch had no in-scope changes. With
-	// OmittedFiles, the size filter removed them all; otherwise the snapshot
+	// OmittedFiles, the size filter or the exclusions removed them all; otherwise the snapshot
 	// matched the base. The human format leaves it to the CLI's stderr note.
 	EmptyChange bool
 	// Verbose lists the inconclusive checks in the human format, which
@@ -239,25 +243,49 @@ func human(response service.Response, options Options) string {
 
 // omittedFilesHuman always names files left out of analysis, with their sizes
 // and reasons. Scope changes must be visible without an extra verbosity flag.
+// Files the repository's exclusions cover are counted and named only up to
+// listedExcluded, since removing an excluded folder can touch thousands.
 func omittedFilesHuman(options Options) string {
-	if len(options.OmittedFiles) == 0 {
-		return ""
-	}
-	totalBytes := int64(0)
+	var large, excluded []OmittedFile
+	var largeBytes, excludedBytes int64
 	for _, file := range options.OmittedFiles {
-		totalBytes += file.Bytes
+		if file.Reason == gitx.OmittedExcluded {
+			excluded = append(excluded, file)
+			excludedBytes += file.Bytes
+		} else {
+			large = append(large, file)
+			largeBytes += file.Bytes
+		}
 	}
 
 	var out strings.Builder
-	fmt.Fprintf(&out,
-		"Files omitted from both hosted upload and local review due to size: %d file(s), %d bytes total. Their contents were not analyzed.\n",
-		len(options.OmittedFiles), totalBytes,
-	)
-	for _, file := range options.OmittedFiles {
-		fmt.Fprintf(&out, "  %s (%d bytes): %s\n", printable(file.Path), file.Bytes, printable(file.Reason))
+	if len(large) > 0 {
+		fmt.Fprintf(&out,
+			"Files omitted from both hosted upload and local review due to size: %d file(s), %d bytes total. Their contents were not analyzed.\n",
+			len(large), largeBytes,
+		)
+		for _, file := range large {
+			fmt.Fprintf(&out, "  %s (%d bytes): %s\n", printable(file.Path), file.Bytes, printable(file.Reason))
+		}
+	}
+	if len(excluded) > 0 {
+		fmt.Fprintf(&out,
+			"Files left out of both hosted upload and local review because .bifrostignore or [check] exclude keeps them out of checks: %d file(s), %d bytes total.\n",
+			len(excluded), excludedBytes,
+		)
+		for i, file := range excluded {
+			if i == listedExcluded {
+				fmt.Fprintf(&out, "  ... and %d more; --format json lists them all.\n", len(excluded)-i)
+				break
+			}
+			fmt.Fprintf(&out, "  %s (%d bytes)\n", printable(file.Path), file.Bytes)
+		}
 	}
 	return out.String()
 }
+
+// listedExcluded is how many excluded files the human report names.
+const listedExcluded = 10
 
 // writeHumanOmittedAndReview preserves the usual review output while making
 // omitted analysis scope visible for result shapes with no static summary.
@@ -952,7 +980,7 @@ type jsonReport struct {
 	// when it did not.
 	ReviewSkipped string                     `json:"reviewSkipped,omitempty"`
 	BaseCommit    string                     `json:"baseCommit"`
-	Summary       service.Summary            `json:"summary"`
+	Summary       summaryJSON                `json:"summary"`
 	Findings      []service.Finding          `json:"findings"`
 	Incomplete    []service.IncompletePolicy `json:"incomplete"`
 	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
@@ -1013,7 +1041,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Review:               reviewValue(options.Review),
 		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
-		Summary:              response.Summary,
+		Summary:              summaryValue(response.Summary, options.Review),
 		Findings:             listed(response, options),
 		Incomplete:           response.Incomplete,
 		IncompleteUnlisted:   incompleteUnlisted(response),
@@ -1805,6 +1833,26 @@ type aiReport struct {
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 }
 
+// summaryJSON is the service's summary plus the count of findings the local
+// reviewers reported, which the service never sees.
+type summaryJSON struct {
+	service.Summary
+	// ReviewFindings counts review.findings: every finding a reviewer
+	// reported, one per reviewer that reported it. Absent when no review
+	// ran.
+	ReviewFindings *int `json:"reviewFindings,omitempty"`
+}
+
+// summaryValue adds the review's finding count to the service's summary.
+func summaryValue(summary service.Summary, v *review.Verdict) summaryJSON {
+	result := summaryJSON{Summary: summary}
+	if v != nil {
+		count := len(v.Findings())
+		result.ReviewFindings = &count
+	}
+	return result
+}
+
 // reviewJSON gives the local verdict its public JSON field names.
 type reviewJSON struct {
 	// Status is the local review's Status field.
@@ -1821,6 +1869,8 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
+	// Findings is what the reviewers reported, parsed from their replies.
+	Findings []review.Finding `json:"findings"`
 	// Incomplete is set when fewer reviewers finished than review.minCompleted.
 	Incomplete bool `json:"incomplete,omitempty"`
 	// Error is the local review's Error field.
@@ -1842,7 +1892,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Findings: v.Findings(), Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -1868,10 +1918,10 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
 	}
 	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed && !v.Incomplete}}, Properties: properties}
+	for _, finding := range v.Findings() {
+		run.Results = append(run.Results, reviewSARIFResult(finding))
+	}
 	for _, r := range v.Reviewers {
-		if r.Status == review.StatusFindings {
-			run.Results = append(run.Results, sarifResult{RuleID: r.Name, Level: "warning", Message: sarifMessage{Text: r.Text}})
-		}
 		if r.Status == review.StatusFailed {
 			run.Invocations[0].ToolExecutionNotifications = append(run.Invocations[0].ToolExecutionNotifications, sarifNotification{Level: "error", Message: sarifMessage{Text: r.Error}})
 		}
@@ -1881,6 +1931,42 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	}
 	log.Runs = append(log.Runs, run)
 	return log
+}
+
+// reviewSARIFResult is one reviewer finding as a SARIF result: the rule is
+// the reviewer, and the location is set when the reviewer gave one.
+func reviewSARIFResult(finding review.Finding) sarifResult {
+	text := finding.Title
+	if finding.Message != "" {
+		text = strings.TrimSpace(text + "\n\n" + finding.Message)
+	}
+	// The rubric asks reviewers to flag only what the change introduced.
+	result := sarifResult{RuleID: finding.Reviewer, Level: reviewSARIFLevel(finding.Priority), Message: sarifMessage{Text: text}, Locations: []sarifLocation{}, BaselineState: "new"}
+	if finding.Priority != "" {
+		result.Properties = map[string]any{"slopcop.priority": finding.Priority}
+	}
+	if finding.Path != "" {
+		location := sarifLocation{PhysicalLocation: sarifPhysicalLocation{
+			ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.Path), URIBaseID: "SRCROOT"},
+		}}
+		if start := finding.StartLine; start != nil && *start >= 1 {
+			location.PhysicalLocation.Region = &sarifRegion{StartLine: *start, EndLine: finding.EndLine}
+		}
+		result.Locations = append(result.Locations, location)
+	}
+	return result
+}
+
+// reviewSARIFLevel maps a reviewer's priority tag to a SARIF level.
+func reviewSARIFLevel(priority string) string {
+	switch priority {
+	case "P0", "P1":
+		return "error"
+	case "P3":
+		return "note"
+	default:
+		return "warning"
+	}
 }
 
 // writeReview renders the review section when a verdict exists.
@@ -1906,6 +1992,13 @@ func failedReviewers(v review.Verdict) int {
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
+	switch count := len(v.Findings()); count {
+	case 0:
+	case 1:
+		fmt.Fprintln(w, "  1 finding reported")
+	default:
+		fmt.Fprintf(w, "  %d findings reported\n", count)
+	}
 	for _, r := range v.Reviewers {
 		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)
 		if r.StandsInFor != "" {

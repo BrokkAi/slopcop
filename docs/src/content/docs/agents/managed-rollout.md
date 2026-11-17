@@ -26,10 +26,10 @@ Managed configuration delivers the hook, not slopcop:
   [Install the CLI](/get-started/install/).
 - **A login.** The hook checks with the user's own credential: `slopcop login`,
   or `SLOPCOP_TOKEN` in the agent's environment. See [Sign in](/account/sign-in/).
-- **An enabled repository.** The hook sends nothing for a repository the
-  workspace does not have active, and never adds one. It stays dormant in a
-  repository until someone runs `slopcop enable` there. See
-  [Repositories](/account/repositories/).
+- **A repository the workspace does not refuse.** The hook's first check of a
+  repository the workspace has never added adds it, which the workspace then
+  pays for. It sends nothing for one the workspace has disabled or has past its
+  active limit. See [Repositories](/account/repositories/).
 
 To check that the `slopcop` a user's agent will find can run the hook, run it
 as that user with no input. It answers with a JSON `systemMessage` and exits

@@ -7,7 +7,7 @@ sidebar:
 
 ```console
 slopcop                          # check the change in the current checkout
-slopcop check --if-enabled       # automatic check: skip a repository not enabled here
+slopcop check --if-enabled       # automatic check: skip a repository disabled here
 slopcop check --format json      # same, machine-readable
 slopcop --root ../repo --base origin/main
 ```
@@ -15,7 +15,7 @@ slopcop --root ../repo --base origin/main
 Running `slopcop` with no subcommand runs the check; `slopcop check` is the same
 command. The static half sends one request and its result comes from the
 service. The local review has a separate result. `--if-enabled` can skip a
-repository the workspace has not enabled; that is a `skipped` result, never a
+repository the workspace has disabled; that is a `skipped` result, never a
 clean one.
 
 ## Local review
@@ -46,8 +46,21 @@ configuration files and other text/source files remain in scope. The check uses
 the captured Git blobs, including the old version for deletions and both sides
 of a rename, and leaves your files and index unchanged.
 
+Changed files that `.bifrostignore` or `[check] exclude` in
+`.slopcop/config.toml` keep out of every check stay out of the upload and the
+local review too, whatever their size: the service would not check them
+anyway. `--include` does not bring them back. The service then analyzes the
+rest of the change against the base versions of those files, so keep files
+the analysis reads, such as a `Cargo.toml` or `package.json`, out of
+`[check] exclude`. The selected `.slopcop/policies`
+rules, `.slopcop/config.toml` and the `.bifrostignore` files themselves are
+always sent. A deleted file carries no content: the patch names the blob it
+deletes, so removing a large folder costs a few lines per file, and the
+service still deletes a file only when its content matches.
+
 Omitted files are unreviewed. Human output names each path with its size and
-reason, plus the total count and size. JSON always lists `omittedFiles` and
+reason, plus the total count and size; for excluded files it gives the count
+and size and names the first ten. JSON always lists `omittedFiles` and
 SARIF carries `slopcop.omittedFiles`. A passing check covers the retained scope;
 the full snapshot remains the push identity. If every change is omitted, the
 check is `skipped`: nothing is sent or analyzed and no push approval is recorded.
@@ -66,7 +79,9 @@ the complete rename.
 
 A genuinely unchanged tree is still sent as an empty patch. The service's
 overall payload and file-count limits still apply; its `payload_too_large`
-response is printed verbatim if the remaining patch exceeds them.
+response is printed verbatim if the remaining patch exceeds them. An upload
+refused with HTTP 413 before the service could answer is reported as
+`payload_too_large` too, with the request's size.
 
 With the patch go the repository's URL (canonicalized from the `origin`
 remote), the base commit's full hash, the policy selection, and the `--fail-on`
@@ -133,8 +148,7 @@ work passed.
 | `--policy-id ID`, `--policy-pack PACK`, `--policy-category CATEGORY` | run only these built-ins instead of the default catalog (each repeatable); see [Repository rules](/checks/repository-rules/#select-rules-by-hand) |
 | `--timeout DURATION` | how long to wait for the result (default `10m`); a check still running then exits `3` |
 | `-w`, `--workspace NAME\|ID` | check in, and bill, this workspace of the account instead of the login's; see [Workspaces](/account/workspaces/) |
-| `--if-enabled` | check only when the repository is active in the workspace; otherwise exit `0` and send nothing. For automatic checks; see [Repositories](/account/repositories/) |
-| `--add-repository` | add the repository to the workspace `--workspace` names, which then pays for its checks, without asking at a terminal; for after the user approved it. A check without it never adds a repository. See [Repositories](/account/repositories/) |
+| `--if-enabled` | skip a repository the workspace has disabled or has past its active limit: exit `0` and send nothing. One it has never added is added. For automatic checks; see [Repositories](/account/repositories/) |
 | `--service URL` | the check service (also `SLOPCOP_SERVICE`) |
 | `--verbose` | print the resolved request to stderr, and in `human` name each inconclusive check and the files and rules each [`.slopcop/config.toml` exclusion](/checks/false-positives/#exclude-paths-from-checks) resolved to |
 
@@ -177,12 +191,13 @@ its result.
 
 ## A check of a repository that is not enabled
 
-A check never adds a repository. A check of one the workspace has not added
-exits `4` with `repository_not_enabled` and sends nothing. Run `slopcop
-enable` in the checkout, at a terminal, to add it and run its first check.
-An automatic check can pass `--if-enabled` to exit `0` and send nothing
-instead. [Repositories](/account/repositories/) explains adding, the
-`--add-repository` flag for after a person approved it, and the active limit.
+A check of a repository the workspace has never added adds it to the workspace
+the check runs in, which then pays for its checks, and says so on stderr. A
+repository the workspace disabled exits `4` with `repository_disabled`, and one
+past the active limit with `active_repository_limit_reached`, without sending
+anything or starting the local reviewers; only a person turns it back on. An
+automatic check can pass `--if-enabled` to exit `0` and send nothing instead.
+[Repositories](/account/repositories/) explains adding and the active limit.
 A private repository needs the workspace's
 [GitHub App, GitLab, or Bitbucket connection](/account/private-repositories/)
 first.

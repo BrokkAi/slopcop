@@ -34,11 +34,18 @@ var knownErrors = map[string]ErrorBody{
 		Message: "SlopCop has no such finding for this login.",
 		Remedy:  "Use a finding id from a check you ran with this login.",
 	},
-	"repository_not_enabled": {
-		Message: "This repository is not enabled in your SlopCop workspace, so the check did not run.",
-		Remedy:  "Run `slopcop enable` in the repository at a terminal to add it to the workspace, then check again.",
+	"repository_disabled": {
+		Message: "This repository was disabled in your SlopCop workspace, so the check did not run.",
+		Remedy:  RepositoryDisabledRemedy,
 	},
 }
+
+// RepositoryDisabledRemedy is what to do about a repository the workspace has
+// disabled, whether a person switched it off or it was added past the active
+// limit. It names no command, so an agent does not override the workspace's
+// choice of what it checks.
+const RepositoryDisabledRemedy = "Only a person can turn it back on, on the workspace's Repositories page, " +
+	"where they choose which repositories stay active. Do not re-enable or re-add it on their behalf."
 
 // personCodes are the refusals only a person can clear: signing in, paying,
 // installing or granting access, or choosing what the workspace checks. An
@@ -62,10 +69,32 @@ var personCodes = map[string]bool{
 	"browser_required":                   true,
 }
 
-// Error is a non-2xx response from the check API.
+// ServiceUnreachable is the local code for a request that never reached the
+// service, such as when the network is down.
+const ServiceUnreachable = "service_unreachable"
+
+// Error is a non-2xx response from the check API, or a request that could
+// not reach it.
 type Error struct {
 	StatusCode int
 	Body       ErrorBody
+	// cause is the transport error of a request that got no answer.
+	cause error
+}
+
+// Unwrap returns the transport error of a request that got no answer.
+func (e *Error) Unwrap() error { return e.cause }
+
+// unreachable says a request got no answer and that sending it again may
+// work once the connection is back. It does not say whether the service
+// acted on the request: the connection may have dropped after it did.
+func unreachable(err error) *Error {
+	return &Error{cause: err, Body: ErrorBody{
+		Code:      ServiceUnreachable,
+		Message:   "SlopCop got no answer from the service: " + err.Error(),
+		Remedy:    "Check the network connection and any proxy, VPN or firewall, then run the same command again.",
+		Retryable: true,
+	}}
 }
 
 // Error returns the service's message when the response carried the contract.

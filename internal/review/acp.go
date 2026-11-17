@@ -408,6 +408,11 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 	}
 	s.client.mu.Lock()
 	s.result.Text = strings.TrimSpace(s.client.text.String())
+	// Some adapters end the turn normally with their own connection error
+	// as the reply. That is a failed reviewer, not a finding.
+	if err == nil && connectionReply(s.result.Text) {
+		err = fmt.Errorf("the adapter could not reach its provider and replied with its error instead of a review: %s", s.result.Text)
+	}
 	if s.client.permissionError != nil {
 		err = s.client.permissionError
 	}

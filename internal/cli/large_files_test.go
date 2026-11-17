@@ -231,3 +231,86 @@ func TestHookOmissionNoticeIsBoundedAndDisclosesRemainder(t *testing.T) {
 		t.Fatalf("unbounded or silent omission list: %d runes, %.1000s", utf8.RuneCountInString(notice), notice)
 	}
 }
+
+func TestExcludedPathsStayOutOfTheUpload(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, ".slopcop/config.toml", "[check]\nexclude = [\"records/**\"]\n")
+	writeFile(t, repo, "generated/.bifrostignore", "*.txt\n")
+	for i := range 3 {
+		writeFile(t, repo, "records/"+strconv.Itoa(i)+".json", `{"record":"`+strings.Repeat("r", 100)+`"}`)
+	}
+	writeFile(t, repo, "main.go", "package main\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "records")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	if err := os.RemoveAll(filepath.Join(repo, "records")); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, repo, "generated/out.txt", "generated\n")
+	writeFile(t, repo, "main.go", "package main\n\nfunc main() {}\n")
+	var patch []byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var request struct {
+			Change string `json:"change"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		patch, _ = base64.StdEncoding.DecodeString(request.Change)
+		_, _ = w.Write([]byte(`{"status":"clean","applied":true,"baseCommit":"` + base + `","summary":{"files":1,"findings":0},"findings":[],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--base", base, "--service", server.URL, "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d: %s\n%s", code, out, stderr)
+	}
+	if strings.Contains(string(patch), "records/") || strings.Contains(string(patch), "generated/out.txt") || !strings.Contains(string(patch), "b/main.go") {
+		t.Fatalf("upload = %s", patch)
+	}
+	var doc struct {
+		Omitted []report.OmittedFile `json:"omittedFiles"`
+	}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Omitted) != 4 {
+		t.Fatalf("omittedFiles = %+v", doc.Omitted)
+	}
+	for _, file := range doc.Omitted {
+		if file.Reason != gitx.OmittedExcluded {
+			t.Errorf("omitted %+v; want reason %q", file, gitx.OmittedExcluded)
+		}
+	}
+	if !strings.Contains(stderr, "left 4 changed file(s)") || strings.Contains(stderr, "large JSON/binary") {
+		t.Fatalf("scope notice: %s", stderr)
+	}
+}
+
+func TestOnlyExcludedChangesAreStillSent(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, ".slopcop/config.toml", "[check]\nexclude = [\"records/**\"]\n")
+	runGit(t, repo, "add", "-A")
+	runGit(t, repo, "commit", "-qm", "config")
+	base := runGit(t, repo, "rev-parse", "HEAD")
+	writeFile(t, repo, "records/a.json", "{}\n")
+	var patch []byte
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		var request struct {
+			Change string `json:"change"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Error(err)
+		}
+		patch, _ = base64.StdEncoding.DecodeString(request.Change)
+		_, _ = w.Write([]byte(`{"status":"clean","applied":true,"baseCommit":"` + base + `","summary":{"files":0,"findings":0},"findings":[],"incomplete":[]}`))
+	}))
+	defer server.Close()
+	code, out, stderr := runCLI(t, "check", "--root", repo, "--base", base, "--service", server.URL, "--format", "json")
+	if code != 0 || !called || len(patch) != 0 {
+		t.Fatalf("exit=%d called=%v patch=%q: %s\n%s", code, called, patch, out, stderr)
+	}
+}
