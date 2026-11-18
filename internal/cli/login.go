@@ -26,8 +26,10 @@ opens the approval page with the code filled in, then waits for approval. Pass -
 which is what CI and agent harnesses use.
 
 Each service keeps its own login. --service or $SLOPCOP_SERVICE signs in to
-another deployment and leaves the other logins, and the default service, as
-they are; pass --default to also make it the default for every command,
+another deployment and leaves the other logins as they are. When the default
+service has no login, as on a machine's first login, that service also
+becomes the default, since no command could use the default; otherwise the
+default stays, and --default also makes it the default for every command,
 which asks at a terminal like service use does.
 
 Run slopcop init once to install the agent skills and user-level hooks.`,
@@ -70,8 +72,15 @@ Run slopcop init once to install the agent skills and user-level hooks.`,
 					return remedyError(err)
 				}
 			}
+			previous := config.Origin(cfg.DefaultService())
+			// A login moves a default that has no login of its own, such as
+			// slopcop.com on a machine whose first login is the install
+			// command of a staging or local deployment: every command would
+			// otherwise go to a service it cannot use. The question service
+			// use asks guards a default that works, and this one does not.
+			unusableDefault := config.Origin(target) != previous && cfg.TokenFor(previous) == ""
 			cfg.SetToken(target, credential)
-			if makeDefault {
+			if makeDefault || unusableDefault {
 				cfg.ServiceURL = target
 			}
 			path, err := config.Save(cfg)
@@ -79,7 +88,11 @@ Run slopcop init once to install the agent skills and user-level hooks.`,
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: logged in to %s (%s)\n", target, path)
-			if current := config.Origin(cfg.DefaultService()); current != config.Origin(target) {
+			if current := config.Origin(cfg.DefaultService()); current != previous && !makeDefault {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"slopcop: %s is now the default service, as %s has no login here; `slopcop service use %s` moves it back\n",
+					current, previous, previous)
+			} else if current != config.Origin(target) {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"slopcop: the default service is still %s; pass --service %s to use this login, or make it the default with `slopcop service use %s`\n",
 					current, target, target)

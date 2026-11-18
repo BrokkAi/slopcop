@@ -75,7 +75,12 @@ port). Signing in to one leaves the others signed in, and a login is only ever
 sent to the service that issued it: a command against a service with no stored
 login runs signed out and answers `auth_required`.
 
-Signing in to another service does not change the default. To change it:
+Signing in to another service does not change the default, unless the default
+has no login, as on a machine's first login: then the service you sign in to
+becomes the default, and login says so. This is how an install
+command from a staging or local deployment leaves the CLI pointed at that
+deployment. `slopcop service use https://slopcop.com` moves it back. To change
+the default otherwise:
 
 ```console
 slopcop --service https://staging.slopcop.com login --default

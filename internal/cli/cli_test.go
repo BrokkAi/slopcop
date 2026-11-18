@@ -875,13 +875,13 @@ func TestTokenLoginAndLogout(t *testing.T) {
 	if cfg.TokenFor("http://127.0.0.1:9999") != "secret" {
 		t.Fatalf("config = %+v", cfg)
 	}
-	// Signing in to another service does not move the default, and says so.
-	if cfg.ServiceURL != "" || !strings.Contains(stderr, "the default service is still https://slopcop.com") {
+	// The first login on a machine makes its service the default, and says so.
+	if cfg.DefaultService() != "http://127.0.0.1:9999" || !strings.Contains(stderr, "http://127.0.0.1:9999 is now the default service") {
 		t.Fatalf("default = %q, stderr = %q", cfg.ServiceURL, stderr)
 	}
 
 	// Without --service, logout is about the default service.
-	code, stdout, stderr = runCLI(t, "logout")
+	code, stdout, stderr = runCLI(t, "logout", "--service", config.DefaultServiceURL)
 	if code != 0 || !strings.Contains(stdout, "no stored credential for https://slopcop.com") {
 		t.Fatalf("logout exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
 	}
@@ -899,6 +899,98 @@ func TestTokenLoginAndLogout(t *testing.T) {
 	if len(cfg.Logins) != 0 {
 		t.Fatalf("token was not cleared: %+v", cfg)
 	}
+}
+
+// TestFirstLoginMovesTheDefault covers the install command from a service
+// other than slopcop.com: the default has no login, so the new service
+// becomes the default, while a default that is signed in stays.
+func TestFirstLoginMovesTheDefault(t *testing.T) {
+	const local = "http://127.0.0.1:3610"
+	const staging = "https://staging.example.test"
+	t.Run("first login", func(t *testing.T) {
+		isolateUserConfig(t)
+		code, _, stderr := runCLI(t, "--service", local, "login", "--token", "local-token")
+		if code != 0 {
+			t.Fatalf("login: exit = %d, stderr = %s", code, stderr)
+		}
+		want := "slopcop: " + local + " is now the default service, as https://slopcop.com has no login here; `slopcop service use https://slopcop.com` moves it back\n"
+		if stderr != want {
+			t.Fatalf("stderr = %q", stderr)
+		}
+		cfg, err := config.Load()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.DefaultService() != local || resolveToken(cfg, resolveServiceURL(cfg, "")) != "local-token" {
+			t.Fatalf("config = %+v", cfg)
+		}
+		// Running the install command again stores the new token and says
+		// nothing more about the default.
+		code, _, stderr = runCLI(t, "--service", local, "login", "--token", "local-2")
+		if code != 0 || stderr != "" {
+			t.Fatalf("second login: exit = %d, stderr = %q", code, stderr)
+		}
+		if cfg, err = config.Load(); err != nil || cfg.DefaultService() != local || cfg.TokenFor(local) != "local-2" {
+			t.Fatalf("config = %+v, err = %v", cfg, err)
+		}
+	})
+	t.Run("first login to the hosted service", func(t *testing.T) {
+		isolateUserConfig(t)
+		code, _, stderr := runCLI(t, "login", "--token", "prod-token")
+		if code != 0 || stderr != "" {
+			t.Fatalf("login: exit = %d, stderr = %q", code, stderr)
+		}
+		if cfg, err := config.Load(); err != nil || cfg.ServiceURL != "" {
+			t.Fatalf("config = %+v, err = %v", cfg, err)
+		}
+	})
+	t.Run("default signed out, another service signed in", func(t *testing.T) {
+		isolateUserConfig(t)
+		for _, args := range [][]string{
+			{"login", "--token", "prod-token"},
+			{"--service", staging, "login", "--token", "staging-token"},
+			{"logout"},
+		} {
+			if code, _, stderr := runCLI(t, args...); code != 0 {
+				t.Fatalf("%v: exit = %d, stderr = %s", args, code, stderr)
+			}
+		}
+		code, _, stderr := runCLI(t, "--service", local, "login", "--token", "local-token")
+		if code != 0 || !strings.Contains(stderr, local+" is now the default service") {
+			t.Fatalf("login: exit = %d, stderr = %q", code, stderr)
+		}
+		if cfg, err := config.Load(); err != nil || cfg.DefaultService() != local || cfg.TokenFor(staging) != "staging-token" {
+			t.Fatalf("config = %+v, err = %v", cfg, err)
+		}
+	})
+	t.Run("default signed in", func(t *testing.T) {
+		for name, first := range map[string][]string{
+			"to the default": {"login", "--token", "prod-token"},
+			"to another":     {"--service", staging, "login", "--token", "staging-token"},
+		} {
+			t.Run(name, func(t *testing.T) {
+				isolateUserConfig(t)
+				if code, _, stderr := runCLI(t, first...); code != 0 {
+					t.Fatalf("%v: exit = %d, stderr = %s", first, code, stderr)
+				}
+				before, err := config.Load()
+				if err != nil {
+					t.Fatal(err)
+				}
+				code, _, stderr := runCLI(t, "--service", local, "login", "--token", "local-token")
+				if code != 0 || !strings.Contains(stderr, "the default service is still "+config.Origin(before.DefaultService())) {
+					t.Fatalf("login: exit = %d, stderr = %q", code, stderr)
+				}
+				after, err := config.Load()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if after.DefaultService() != before.DefaultService() {
+					t.Fatalf("default moved from %q to %q", before.DefaultService(), after.DefaultService())
+				}
+			})
+		}
+	})
 }
 
 func TestLoginsAreKeptPerService(t *testing.T) {

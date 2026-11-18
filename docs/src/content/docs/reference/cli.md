@@ -112,7 +112,10 @@ waits for approval. Login does not install the agent skill. See
 
 Each service keeps its own login. With `--service`, login signs in to that
 service, leaves the other logins as they are, and does not change the default
-unless `--default` is passed.
+unless `--default` is passed. The one exception is a default with no login,
+as on a machine's first login: then the service you sign in to becomes the
+default and login says so, so an install command from a staging or local
+deployment signs in the commands that follow it.
 
 ## `slopcop logout`
 
