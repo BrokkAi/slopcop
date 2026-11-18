@@ -141,8 +141,8 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 }
 
 // codexMayBeLoggedIn reports whether Codex has an API key or the adapter's
-// automatic login request in the environment, a saved login, or a config that may keep the login in the
-// system keyring.
+// automatic login request in the environment, a saved login, or a config
+// that may keep the login in the system keyring or name another provider.
 func codexMayBeLoggedIn() bool {
 	if anyEnv("OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST") {
 		return true
@@ -158,17 +158,28 @@ func codexMayBeLoggedIn() bool {
 	if exists(filepath.Join(home, "auth.json")) {
 		return true
 	}
+	// The login may sit in the keyring, or a custom provider may bring
+	// its own key.
 	config, err := os.ReadFile(filepath.Join(home, "config.toml"))
-	return err == nil && strings.Contains(string(config), "cli_auth_credentials_store")
+	if err != nil {
+		return false
+	}
+	for _, key := range []string{"cli_auth_credentials_store", "model_provider"} {
+		if strings.Contains(string(config), key) {
+			return true
+		}
+	}
+	return false
 }
 
 // claudeEnv names the environment variables that give Claude Code a key or
 // another provider, in the process environment or a settings file's env.
 var claudeEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
 
-// claudeManagedSettings are the system-wide settings files, and their
-// drop-in directories, that Claude Code reads on each platform.
-var claudeManagedSettings = []string{
+// ClaudeManagedSettings are the system-wide settings files, and their
+// drop-in directories, that Claude Code reads on each platform. Tests blank
+// it to see a fresh machine.
+var ClaudeManagedSettings = []string{
 	"/Library/Application Support/ClaudeCode/managed-settings.json",
 	"/Library/Application Support/ClaudeCode/managed-settings.d",
 	"/etc/claude-code/managed-settings.json",
@@ -199,7 +210,7 @@ func claudeMayBeLoggedIn(root string) bool {
 	}
 	// An administrator's managed settings may hold a key or provider; any
 	// such file is reason enough to probe.
-	paths := append([]string{filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"), filepath.Join(user, ".claude.json")}, claudeManagedSettings...)
+	paths := append([]string{filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"), filepath.Join(user, ".claude.json")}, ClaudeManagedSettings...)
 	for _, p := range paths {
 		if exists(p) {
 			return true

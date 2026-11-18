@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/review"
 	"os"
 	"strings"
 	"testing"
@@ -54,6 +55,9 @@ func TestInitPicksReviewers(t *testing.T) {
 // the tests has, so init sees a fresh machine.
 func clearReviewerLogins(t *testing.T) {
 	t.Helper()
+	managed := review.ClaudeManagedSettings
+	t.Cleanup(func() { review.ClaudeManagedSettings = managed })
+	review.ClaudeManagedSettings = nil
 	for _, name := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
 		t.Setenv(name, "")
 	}

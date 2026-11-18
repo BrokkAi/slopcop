@@ -92,9 +92,9 @@ func TestProbeSkipsFlashWithoutDeepSeekKey(t *testing.T) {
 // harness has never been logged in here, and probes it once any sign of a
 // login appears.
 func TestMissingPrerequisite(t *testing.T) {
-	defer func(old []string) { claudeManagedSettings = old }(claudeManagedSettings)
+	defer func(old []string) { ClaudeManagedSettings = old }(ClaudeManagedSettings)
 	managed := filepath.Join(t.TempDir(), "managed-settings.json")
-	claudeManagedSettings = []string{managed}
+	ClaudeManagedSettings = []string{managed}
 	home, root := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -141,6 +141,13 @@ func TestMissingPrerequisite(t *testing.T) {
 	write(filepath.Join(home, ".claude", "settings.json"), `{"apiKeyHelper":"key"}`)
 	if got := MissingPrerequisite(Haiku, root, Settings{}); got != "" {
 		t.Fatalf("an apiKeyHelper still lacks %q", got)
+	}
+	write(filepath.Join(home, ".codex", "config.toml"), "model_provider = \"local\"\n")
+	if got := MissingPrerequisite(Terra, root, Settings{}); got != "" {
+		t.Fatalf("a custom Codex provider still lacks %q", got)
+	}
+	if err := os.Remove(filepath.Join(home, ".codex", "config.toml")); err != nil {
+		t.Fatal(err)
 	}
 	write(filepath.Join(home, ".codex", "auth.json"), "{}")
 	t.Setenv("DEEPSEEK_API_KEY", "key")
