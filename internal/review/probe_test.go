@@ -92,6 +92,9 @@ func TestProbeSkipsFlashWithoutDeepSeekKey(t *testing.T) {
 // harness has never been logged in here, and probes it once any sign of a
 // login appears.
 func TestMissingPrerequisite(t *testing.T) {
+	defer func(old []string) { claudeManagedSettings = old }(claudeManagedSettings)
+	managed := filepath.Join(t.TempDir(), "managed-settings.json")
+	claudeManagedSettings = []string{managed}
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -120,6 +123,13 @@ func TestMissingPrerequisite(t *testing.T) {
 	write(filepath.Join(home, ".claude", "settings.json"), `{"hooks":{}}`)
 	if MissingPrerequisite(Haiku, Settings{}) == "" {
 		t.Fatal("settings.json with hooks only counted as a Claude login")
+	}
+	write(managed, "{}")
+	if got := MissingPrerequisite(Haiku, Settings{}); got != "" {
+		t.Fatalf("managed settings still lack %q", got)
+	}
+	if err := os.Remove(managed); err != nil {
+		t.Fatal(err)
 	}
 	write(filepath.Join(home, ".claude", "settings.json"), `{"apiKeyHelper":"key"}`)
 	if got := MissingPrerequisite(Haiku, Settings{}); got != "" {

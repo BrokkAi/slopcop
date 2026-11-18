@@ -166,6 +166,15 @@ func codexMayBeLoggedIn() bool {
 // another provider, in the process environment or a settings file's env.
 var claudeEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
 
+// claudeManagedSettings are the system-wide settings files Claude Code reads
+// on each platform.
+var claudeManagedSettings = []string{
+	"/Library/Application Support/ClaudeCode/managed-settings.json",
+	"/etc/claude-code/managed-settings.json",
+	`C:\Program Files\ClaudeCode\managed-settings.json`,
+	`C:\ProgramData\ClaudeCode\managed-settings.json`,
+}
+
 // claudeMayBeLoggedIn reports whether Claude Code has a key or provider in
 // the environment or its settings, or has ever run here: it writes
 // .claude.json on first run, and keeps the login there, in
@@ -183,7 +192,10 @@ func claudeMayBeLoggedIn() bool {
 	if dir == "" {
 		dir = filepath.Join(user, ".claude")
 	}
-	for _, p := range []string{filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"), filepath.Join(user, ".claude.json")} {
+	// An administrator's managed settings may hold a key or provider; any
+	// such file is reason enough to probe.
+	paths := append([]string{filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"), filepath.Join(user, ".claude.json")}, claudeManagedSettings...)
+	for _, p := range paths {
 		if exists(p) {
 			return true
 		}
