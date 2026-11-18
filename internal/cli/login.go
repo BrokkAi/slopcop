@@ -26,9 +26,11 @@ opens the approval page with the code filled in, then waits for approval. Pass -
 which is what CI and agent harnesses use.
 
 Each service keeps its own login. --service or $SLOPCOP_SERVICE signs in to
-another deployment and leaves the other logins, and the default service, as
-they are; pass --default to also make it the default for every command,
-which asks at a terminal like service use does.
+another deployment and leaves the other logins as they are. When it is the
+first login on this machine, that service also becomes the default, since no
+command could use the default's missing login; otherwise the default stays,
+and --default also makes it the default for every command, which asks at a
+terminal like service use does.
 
 Run slopcop init once to install the agent skills and user-level hooks.`,
 		Args: cobra.NoArgs,
@@ -70,8 +72,14 @@ Run slopcop init once to install the agent skills and user-level hooks.`,
 					return remedyError(err)
 				}
 			}
+			previous := config.Origin(cfg.DefaultService())
+			// A first login moves the default to its service: every other
+			// command would otherwise go to a service with no login. The
+			// question service use asks guards logins the machine already
+			// has, and there are none.
+			firstLogin := config.Origin(target) != previous && onlyLoginWouldBe(cfg, target)
 			cfg.SetToken(target, credential)
-			if makeDefault {
+			if makeDefault || firstLogin {
 				cfg.ServiceURL = target
 			}
 			path, err := config.Save(cfg)
@@ -79,7 +87,11 @@ Run slopcop init once to install the agent skills and user-level hooks.`,
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: logged in to %s (%s)\n", target, path)
-			if current := config.Origin(cfg.DefaultService()); current != config.Origin(target) {
+			if current := config.Origin(cfg.DefaultService()); current != previous && !makeDefault {
+				fmt.Fprintf(cmd.ErrOrStderr(),
+					"slopcop: %s is now the default service, as this machine has no other login; `slopcop service use %s` moves it back\n",
+					current, previous)
+			} else if current != config.Origin(target) {
 				fmt.Fprintf(cmd.ErrOrStderr(),
 					"slopcop: the default service is still %s; pass --service %s to use this login, or make it the default with `slopcop service use %s`\n",
 					current, target, target)
@@ -90,6 +102,18 @@ Run slopcop init once to install the agent skills and user-level hooks.`,
 	command.Flags().StringVar(&token, "token", "", "store an existing token instead of starting the browser flow")
 	command.Flags().BoolVar(&makeDefault, "default", false, "also make this service the default for every command; asks at a terminal")
 	return command
+}
+
+// onlyLoginWouldBe reports whether a login for target would be the only one
+// the configuration holds: none is stored for any other service.
+func onlyLoginWouldBe(cfg config.Config, target string) bool {
+	origin := config.Origin(target)
+	for _, signedIn := range cfg.SignedIn() {
+		if signedIn != origin {
+			return false
+		}
+	}
+	return true
 }
 
 // remedyError prints a service failure the way a check does: the closed
