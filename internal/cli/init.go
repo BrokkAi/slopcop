@@ -652,7 +652,7 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 	families := review.Families
 	var probed []review.Family
 	for _, f := range families {
-		if review.MissingPrerequisite(f, settings) == "" {
+		if review.MissingPrerequisite(f, probeRoot, settings) == "" {
 			probed = append(probed, f)
 		}
 	}
@@ -710,9 +710,13 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 			}
 		}
 		if len(missing) > 0 {
-			// A rerun keeps the reviewers just saved, so it must unset
-			// them to probe again.
-			fmt.Fprintf(out, "slopcop: %s not available here; to see why, run `slopcop config unset review.reviewers` and then `slopcop init --verbose`\n", joinFamilies(missing))
+			// A rerun keeps the reviewers just saved, so the reasons go
+			// to a file rather than behind --verbose.
+			why := filepath.Join(logDir, probeResultsFile)
+			if err := writeProbeResults(why, results); err != nil {
+				why = "`slopcop config unset review.reviewers`, then `slopcop init --verbose`"
+			}
+			fmt.Fprintf(out, "slopcop: %s not available here; why: %s\n", joinFamilies(missing), why)
 		}
 	}
 	if len(fallbacks) > 0 {
@@ -727,4 +731,19 @@ func joinFamilies(families []review.Family) string {
 		names[i] = string(f)
 	}
 	return strings.Join(names, ", ")
+}
+
+// probeResultsFile, in a probe's log directory, says how each reviewer fared.
+const probeResultsFile = "results.txt"
+
+func writeProbeResults(path string, results []review.ProbeResult) error {
+	var b strings.Builder
+	for _, r := range results {
+		if r.Available {
+			fmt.Fprintf(&b, "%s available (%s)\n", r.Family, r.Model)
+		} else {
+			fmt.Fprintf(&b, "%s unavailable: %s\n", r.Family, r.Reason)
+		}
+	}
+	return os.WriteFile(path, []byte(b.String()), 0600)
 }

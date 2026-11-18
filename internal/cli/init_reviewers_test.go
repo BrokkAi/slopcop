@@ -38,8 +38,13 @@ func TestInitPicksReviewers(t *testing.T) {
 			}
 			// Reviewers that do not work are named once, without their
 			// raw errors, which --verbose prints.
-			if strings.Contains(out, "unavailable:") || !strings.Contains(out, "not available here; to see why, run `slopcop config unset review.reviewers` and then `slopcop init --verbose`") {
+			_, why, ok := strings.Cut(out, "not available here; why: ")
+			if strings.Contains(out, "unavailable:") || !ok {
 				t.Fatal(out)
+			}
+			why, _, _ = strings.Cut(why, "\n")
+			if saved, err := os.ReadFile(why); err != nil || !strings.Contains(string(saved), "unavailable: ") {
+				t.Fatalf("%s: %q %v", why, saved, err)
 			}
 		})
 	}

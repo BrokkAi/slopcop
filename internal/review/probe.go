@@ -52,7 +52,7 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 	byCommand := map[string]int{}
 	commands := make([][]string, len(families))
 	for i, f := range families {
-		if reason := MissingPrerequisite(f, settings); reason != "" {
+		if reason := MissingPrerequisite(f, root, settings); reason != "" {
 			report(i, ProbeResult{Family: f, Reason: reason, Skipped: true})
 			continue
 		}
@@ -112,14 +112,14 @@ func probeOne(ctx context.Context, root, logDir string, argv []string, f Family,
 	return r
 }
 
-// MissingPrerequisite names what a family's default adapter needs and this
-// machine plainly lacks: an API key, or any sign that its harness was ever
+// MissingPrerequisite names what a family's default adapter, run in root,
+// needs and this machine plainly lacks: an API key, or any sign that its harness was ever
 // logged in. The probe skips such a family instead of downloading an adapter
 // that cannot work. A configured adapter command may carry its own
 // credentials, so it never lacks anything here. The checks look only for
 // what is certainly absent; a harness that keeps its login somewhere they
 // do not look is still probed.
-func MissingPrerequisite(f Family, settings Settings) string {
+func MissingPrerequisite(f Family, root string, settings Settings) string {
 	if len(settings.Adapters[AdapterName(f)]) > 0 {
 		return ""
 	}
@@ -133,7 +133,7 @@ func MissingPrerequisite(f Family, settings Settings) string {
 			return "Codex is not logged in"
 		}
 	case "claude":
-		if !claudeMayBeLoggedIn() {
+		if !claudeMayBeLoggedIn(root) {
 			return "Claude Code is not logged in"
 		}
 	}
@@ -182,9 +182,10 @@ var claudeManagedSettings = []string{
 // claudeMayBeLoggedIn reports whether Claude Code has a key or provider in
 // the environment or its settings, or has ever run here: it writes
 // .claude.json on first run, and keeps the login there, in
-// .credentials.json, or in the macOS keychain. Init itself writes
-// settings.json for its hooks, so only a key in it counts, not the file.
-func claudeMayBeLoggedIn() bool {
+// .credentials.json, or in the macOS keychain. A key may also sit in the
+// user's or root's project settings. Init itself writes settings.json for its
+// hooks, so only a key in it counts, not the file.
+func claudeMayBeLoggedIn(root string) bool {
 	if anyEnv(claudeEnv...) {
 		return true
 	}
@@ -204,8 +205,12 @@ func claudeMayBeLoggedIn() bool {
 			return true
 		}
 	}
-	for _, name := range []string{"settings.json", "settings.local.json"} {
-		settings, err := os.ReadFile(filepath.Join(dir, name))
+	var settingsFiles []string
+	for _, d := range []string{dir, filepath.Join(root, ".claude")} {
+		settingsFiles = append(settingsFiles, filepath.Join(d, "settings.json"), filepath.Join(d, "settings.local.json"))
+	}
+	for _, path := range settingsFiles {
+		settings, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
