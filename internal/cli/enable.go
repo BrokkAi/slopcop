@@ -22,15 +22,16 @@ func newEnableCommand(serviceURL *string, version string) *cobra.Command {
 	command := &cobra.Command{
 		Use:   "enable",
 		Short: "Add this checkout's repository to the workspace that checks it",
-		Long: `Add the repository the origin remote names to the workspace that checks and
-bills it, so later checks can run. A repository that is already added but
-disabled is enabled again.
+		Long: `Add the repository the origin remote names to the workspace that checks it,
+so later checks can run. A repository that is already added but disabled is
+enabled again.
 
-This changes what the workspace checks, and may cost credits every 30 days, so
-it asks for the repository's owner/name at a terminal and refuses when stdin is
-not one. A check adds a repository the workspace has never added by itself, so
-'enable' is optional for that; turning a disabled repository back on stays a
-step you take here.
+Repositories are free; a check uses one of the workspace's free checks for the
+month, then credits. This changes what the workspace checks, so it asks for
+the repository's owner/name at a terminal and refuses when stdin is not one. A
+check adds a repository the workspace has never added by itself, so 'enable' is
+optional for that; turning a disabled repository back on stays a step you take
+here.
 
 An account with more than one workspace is asked which one checks the
 repository, unless --workspace names it, and is told when another of its
@@ -278,7 +279,7 @@ func holdsRepository(holders []service.Workspace, workspace service.Workspace) b
 // past the active limit stays enabled but not active until the workspace makes
 // room for it.
 func enableExisting(cmd *cobra.Command, client *service.Client, repository statusRepository, target service.Workspace) error {
-	notifyCost(cmd, "enabling", repository.FullName, target.Name)
+	notifyChange(cmd, "enabling", repository.FullName, target.Name)
 	if err := confirmChange(cmd, repository.FullName, "enable"); err != nil {
 		return err
 	}
@@ -303,7 +304,7 @@ func enableExisting(cmd *cobra.Command, client *service.Client, repository statu
 // person confirms it at a terminal, then the first check carries that
 // approval to the service.
 func addRepository(cmd *cobra.Command, repoRoot string, repository statusRepository, target service.Workspace, serviceFlag, version string) error {
-	notifyCost(cmd, "adding", repository.FullName, target.Name)
+	notifyChange(cmd, "adding", repository.FullName, target.Name)
 	if err := confirmChange(cmd, repository.FullName, "add"); err != nil {
 		return err
 	}
@@ -316,8 +317,10 @@ func addRepository(cmd *cobra.Command, repoRoot string, repository statusReposit
 	}, serviceFlag, version)
 }
 
-func notifyCost(cmd *cobra.Command, action, repository, workspace string) {
-	fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %s %s in %s lets that workspace check and bill it.\n",
+// notifyChange says what adding or enabling a repository changes before the
+// person confirms it.
+func notifyChange(cmd *cobra.Command, action, repository, workspace string) {
+	fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %s %s in %s lets that workspace check it.\n",
 		action, repository, workspaceName(workspace, true))
-	fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: every active repository after the workspace's first costs credits every 30 days.")
+	fmt.Fprintln(cmd.ErrOrStderr(), "slopcop: the repository is free; each check uses one of the workspace's free checks for the month, then credits.")
 }

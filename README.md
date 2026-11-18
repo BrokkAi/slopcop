@@ -369,18 +369,18 @@ slopcop workspace mappings         # the repositories this machine maps, and to 
 slopcop workspace use "Acme team"  # move this login (not the browser) to another, by name or id
 slopcop check -w "Acme team"       # check in, and bill, another workspace this once
 slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
-slopcop repo disable acme/widgets  # stop checking and charging for one (owner only)
+slopcop repo disable acme/widgets  # stop checking one (owner only)
 slopcop repo enable acme/widgets   # turn it back on, within the workspace's active limit
 ```
 
 `status`, `whoami`, `workspace list` and `repo list` take `--format human|json`,
-as do `workspace use` and `repo enable|disable` for their answer. Every active
-repository after a workspace's first costs credits every 30 days; a disabled
-one is not checked or charged and keeps its reports, findings and settings.
+as do `workspace use` and `repo enable|disable` for their answer. Repositories
+are free; checks use the workspace's free checks for the month, then credits. A
+disabled repository is not checked and keeps its reports, findings and settings.
 `repo enable` and `repo disable` ask you to type the repository's `owner/name`
 and refuse when stdin is not a terminal: an agent or CI job runs with your
 login, and the service cannot tell it from you, so changing what the workspace
-pays stays a step you take yourself.
+checks stays a step you take yourself.
 `workspace use` moves every agent and script using this login, not only the
 one that runs it, so it asks `[y/N]` and refuses when stdin is not a terminal.
 To check in another workspace without moving anyone, `check`, `status`,

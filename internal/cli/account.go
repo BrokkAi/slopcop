@@ -347,9 +347,9 @@ func newRepoCommand(serviceURL *string, version string) *cobra.Command {
 		Long: `List the repositories of this login's workspace, or of the one --workspace
 names, or enable or disable one.
 
-Each active repository after a workspace's first costs credits every 30 days;
-a disabled one is not checked or charged, and keeps its reports, findings and
-settings. Only the workspace's owner enables or disables. A check adds a
+Repositories are free; checks use the workspace's free checks for the month,
+then credits. A disabled repository is not checked, and keeps its reports,
+findings and settings. Only the workspace's owner enables or disables. A check adds a
 repository the workspace has never added; 'slopcop enable' turns a disabled
 one back on.`,
 		Args: cobra.NoArgs,
@@ -425,7 +425,7 @@ func newRepoListCommand(serviceURL, workspace *string, version string) *cobra.Co
 
 func newRepoStateCommand(serviceURL, workspace *string, version string, enable bool) *cobra.Command {
 	format := ""
-	use, short, done := "disable", "Disable a repository: it is not checked or charged", "disabled"
+	use, short, done := "disable", "Disable a repository: it is not checked", "disabled"
 	if enable {
 		use, short, done = "enable", "Enable a repository, within the workspace's active limit", "enabled"
 	}
@@ -525,7 +525,7 @@ var confirmInput = func(cmd *cobra.Command) (io.Reader, bool) {
 // confirmChange asks the person at the terminal to type the repository's
 // name before its state changes. Agents and CI run with the person's own
 // login, so this keeps enabling and disabling, which change what the
-// workspace pays, a step the person takes.
+// workspace checks, a step the person takes.
 func confirmChange(cmd *cobra.Command, name, action string) error {
 	input, ok := confirmInput(cmd)
 	if !ok {

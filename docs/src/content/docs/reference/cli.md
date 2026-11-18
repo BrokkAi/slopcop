@@ -167,7 +167,7 @@ names, or enable or disable one. See [Repositories](/account/repositories/).
 | --- | --- |
 | `repo list [--format human\|json]` | the workspace's repositories and whether each is active, disabled, or enabled over the limit |
 | `repo enable <owner/name\|id>` | enable a repository, within the workspace's active limit (owner only; asks you to type the name) |
-| `repo disable <owner/name\|id>` | disable a repository: it is not checked or charged (owner only; asks you to type the name) |
+| `repo disable <owner/name\|id>` | disable a repository: it is not checked (owner only; asks you to type the name) |
 
 All take `-w`/`--workspace`. `enable` and `disable` take `--format` for their
 answer, and refuse when stdin is not a terminal.
