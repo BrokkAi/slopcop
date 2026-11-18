@@ -685,7 +685,13 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 		if !verbose && len(probed) > 0 {
 			why = "; `slopcop init --verbose` says why each failed"
 		}
-		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code or Codex, or set DEEPSEEK_API_KEY, then run `slopcop init`%s). Hosted checks work now.\n", why)
+		// With no mode set, a check without reviewers runs the hosted half
+		// alone; a mode set to ai or both needs a reviewer.
+		after := "Hosted checks work now."
+		if cfg.Mode != "" {
+			after = fmt.Sprintf("Until then, mode %s needs a reviewer, so run checks with --static.", cfg.Mode)
+		}
+		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code or Codex, or set DEEPSEEK_API_KEY, then run `slopcop init`%s). %s\n", why, after)
 		return nil
 	}
 	if cfg.Review == nil {

@@ -54,7 +54,7 @@ func TestInitPicksReviewers(t *testing.T) {
 // the tests has, so init sees a fresh machine.
 func clearReviewerLogins(t *testing.T) {
 	t.Helper()
-	for _, name := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+	for _, name := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
 		t.Setenv(name, "")
 	}
 }
@@ -78,8 +78,12 @@ func TestInitOnFreshMachine(t *testing.T) {
 	if !strings.HasSuffix(out, want) {
 		t.Fatalf("got %q", out)
 	}
+	// A mode set to both cannot fall back to the hosted check alone.
+	if _, err := config.Save(config.Config{Mode: "both"}); err != nil {
+		t.Fatal(err)
+	}
 	code, out, _ = runCLI(t, "init", "--root", repo, "--no-skill", "--no-hooks", "--verbose")
-	if code != 0 || !strings.Contains(out, "haiku unavailable: Claude Code is not logged in") || !strings.Contains(out, "terra unavailable: Codex is not logged in") {
+	if code != 0 || !strings.Contains(out, "Until then, mode both needs a reviewer, so run checks with --static.") || !strings.Contains(out, "haiku unavailable: Claude Code is not logged in") || !strings.Contains(out, "terra unavailable: Codex is not logged in") {
 		t.Fatal(out)
 	}
 }

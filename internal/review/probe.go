@@ -140,11 +140,11 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 	return ""
 }
 
-// codexMayBeLoggedIn reports whether Codex has an API key in the
-// environment, a saved login, or a config that may keep the login in the
+// codexMayBeLoggedIn reports whether Codex has an API key or the adapter's
+// automatic login request in the environment, a saved login, or a config that may keep the login in the
 // system keyring.
 func codexMayBeLoggedIn() bool {
-	if anyEnv("OPENAI_API_KEY", "CODEX_API_KEY") {
+	if anyEnv("OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST") {
 		return true
 	}
 	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))

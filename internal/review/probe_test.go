@@ -98,7 +98,7 @@ func TestMissingPrerequisite(t *testing.T) {
 	home, root := t.TempDir(), t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, name := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+	for _, name := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
 		t.Setenv(name, "")
 	}
 	for _, f := range Families {
