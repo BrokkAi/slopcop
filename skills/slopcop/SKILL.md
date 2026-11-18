@@ -58,8 +58,8 @@ a person at a terminal runs it.
   session that `the automatic check uses service <url>`. If the user did not
   ask for that service, tell them before you go on.
 - `slopcop login --default` and `slopcop service use <url>` change the default
-  service for every command and agent on the machine. A machine's first login
-  (no other service signed in) also makes its service the default, and says so. Both ask the person at
+  service for every command and agent on the machine. A login also makes its
+  service the default when the default has no login, and says so. Both ask the person at
   a terminal and refuse when stdin is not one; do not try to answer, and
   leave either to the user.
 - A service that redirects a request to another host is refused, not

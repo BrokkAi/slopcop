@@ -902,8 +902,8 @@ func TestTokenLoginAndLogout(t *testing.T) {
 }
 
 // TestFirstLoginMovesTheDefault covers the install command from a service
-// other than slopcop.com: its login is the machine's first, so it becomes the
-// default, while a machine that is already signed in keeps its default.
+// other than slopcop.com: the default has no login, so the new service
+// becomes the default, while a default that is signed in stays.
 func TestFirstLoginMovesTheDefault(t *testing.T) {
 	const local = "http://127.0.0.1:3610"
 	const staging = "https://staging.example.test"
@@ -913,7 +913,7 @@ func TestFirstLoginMovesTheDefault(t *testing.T) {
 		if code != 0 {
 			t.Fatalf("login: exit = %d, stderr = %s", code, stderr)
 		}
-		want := "slopcop: " + local + " is now the default service, as this machine has no other login; `slopcop service use https://slopcop.com` moves it back\n"
+		want := "slopcop: " + local + " is now the default service, as https://slopcop.com has no login here; `slopcop service use https://slopcop.com` moves it back\n"
 		if stderr != want {
 			t.Fatalf("stderr = %q", stderr)
 		}
@@ -944,7 +944,26 @@ func TestFirstLoginMovesTheDefault(t *testing.T) {
 			t.Fatalf("config = %+v, err = %v", cfg, err)
 		}
 	})
-	t.Run("signed in elsewhere", func(t *testing.T) {
+	t.Run("default signed out, another service signed in", func(t *testing.T) {
+		isolateUserConfig(t)
+		for _, args := range [][]string{
+			{"login", "--token", "prod-token"},
+			{"--service", staging, "login", "--token", "staging-token"},
+			{"logout"},
+		} {
+			if code, _, stderr := runCLI(t, args...); code != 0 {
+				t.Fatalf("%v: exit = %d, stderr = %s", args, code, stderr)
+			}
+		}
+		code, _, stderr := runCLI(t, "--service", local, "login", "--token", "local-token")
+		if code != 0 || !strings.Contains(stderr, local+" is now the default service") {
+			t.Fatalf("login: exit = %d, stderr = %q", code, stderr)
+		}
+		if cfg, err := config.Load(); err != nil || cfg.DefaultService() != local || cfg.TokenFor(staging) != "staging-token" {
+			t.Fatalf("config = %+v, err = %v", cfg, err)
+		}
+	})
+	t.Run("default signed in", func(t *testing.T) {
 		for name, first := range map[string][]string{
 			"to the default": {"login", "--token", "prod-token"},
 			"to another":     {"--service", staging, "login", "--token", "staging-token"},

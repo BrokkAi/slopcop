@@ -335,8 +335,8 @@ printed.
 The service URL defaults to `https://slopcop.com`; `--service` or
 `$SLOPCOP_SERVICE` names another for one command. Each service keeps its own
 login: `slopcop --service <url> login` leaves the others signed in and the
-default as it is, unless it is the machine's first login, which makes that
-service the default and says so. A login is only sent to the service that
+default as it is, unless the default has no login (as on a machine's first
+login), in which case that service becomes the default and login says so. A login is only sent to the service that
 issued it.
 `slopcop login --default` or `slopcop service use <url>` changes the default,
 after asking at a terminal, and `slopcop service list` shows the stored logins. A command that talks to
