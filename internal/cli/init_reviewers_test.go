@@ -38,7 +38,7 @@ func TestInitPicksReviewers(t *testing.T) {
 			}
 			// Reviewers that do not work are named once, without their
 			// raw errors, which --verbose prints.
-			if strings.Contains(out, "unavailable:") || !strings.Contains(out, "not available here; `slopcop init --verbose` says why") {
+			if strings.Contains(out, "unavailable:") || !strings.Contains(out, "not available here; to see why, run `slopcop config unset review.reviewers` and then `slopcop init --verbose`") {
 				t.Fatal(out)
 			}
 		})

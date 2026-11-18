@@ -710,7 +710,9 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 			}
 		}
 		if len(missing) > 0 {
-			fmt.Fprintf(out, "slopcop: %s not available here; `slopcop init --verbose` says why\n", joinFamilies(missing))
+			// A rerun keeps the reviewers just saved, so it must unset
+			// them to probe again.
+			fmt.Fprintf(out, "slopcop: %s not available here; to see why, run `slopcop config unset review.reviewers` and then `slopcop init --verbose`\n", joinFamilies(missing))
 		}
 	}
 	if len(fallbacks) > 0 {
