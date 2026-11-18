@@ -154,7 +154,9 @@ init` probes each family once when reviewers are not configured and the mode is
 not static, then saves the first two that work (or one) as reviewers and the
 rest that work as `review.fallbacks`. Probe prompts use your logins. Already
 configured reviewers are left alone; unset `review.reviewers` and run init to
-pick again. `slopcop init --no-reviewers` skips probing.
+pick again. The probe skips a family whose login or API key is plainly
+missing, and `slopcop init --verbose` says why each one is unavailable.
+`slopcop init --no-reviewers` skips probing.
 A check starts the configured reviewers; one that cannot start does not stop
 the others. A reviewer that ends without a verdict (it could not start, its
 turn was cut short, it replied empty) runs once more in a fresh session, told

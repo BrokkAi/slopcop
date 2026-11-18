@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,7 +83,44 @@ func TestProbeSkipsFlashWithoutDeepSeekKey(t *testing.T) {
 	root, _, _ := reviewRepo(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	got := Probe(context.Background(), root, filepath.Join(t.TempDir(), "probe"), []Family{Flash}, Settings{}, nil)
-	if len(got) != 1 || got[0].Available || !strings.Contains(got[0].Reason, "DEEPSEEK_API_KEY") {
+	if len(got) != 1 || got[0].Available || !got[0].Skipped || !strings.Contains(got[0].Reason, "DEEPSEEK_API_KEY") {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// TestMissingPrerequisite checks that the probe skips a default adapter whose
+// harness has never been logged in here, and probes it once any sign of a
+// login appears.
+func TestMissingPrerequisite(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, name := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+		t.Setenv(name, "")
+	}
+	for _, f := range Families {
+		if MissingPrerequisite(f, Settings{}) == "" {
+			t.Fatalf("%s: nothing missing on a fresh machine", f)
+		}
+		if got := MissingPrerequisite(f, Settings{Adapters: map[string][]string{AdapterName(f): {"adapter"}}}); got != "" {
+			t.Fatalf("%s: a configured adapter lacks %q", f, got)
+		}
+	}
+	write := func(path string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(filepath.Join(home, ".codex", "auth.json"))
+	write(filepath.Join(home, ".claude.json"))
+	t.Setenv("DEEPSEEK_API_KEY", "key")
+	for _, f := range Families {
+		if got := MissingPrerequisite(f, Settings{}); got != "" {
+			t.Fatalf("%s: still lacks %q", f, got)
+		}
 	}
 }
