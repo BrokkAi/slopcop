@@ -162,26 +162,41 @@ func codexMayBeLoggedIn() bool {
 	return err == nil && strings.Contains(string(config), "cli_auth_credentials_store")
 }
 
+// claudeEnv names the environment variables that give Claude Code a key or
+// another provider, in the process environment or a settings file's env.
+var claudeEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
+
 // claudeMayBeLoggedIn reports whether Claude Code has a key or provider in
-// the environment, or has ever run here: it writes .claude.json on first
-// run, and keeps the login there, in .credentials.json, or in the macOS
-// keychain.
+// the environment or its settings, or has ever run here: it writes
+// .claude.json on first run, and keeps the login there, in
+// .credentials.json, or in the macOS keychain. Init itself writes
+// settings.json for its hooks, so only a key in it counts, not the file.
 func claudeMayBeLoggedIn() bool {
-	if anyEnv("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY") {
+	if anyEnv(claudeEnv...) {
 		return true
-	}
-	var paths []string
-	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
-		paths = append(paths, filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"))
 	}
 	user, err := os.UserHomeDir()
 	if err != nil {
 		return true
 	}
-	paths = append(paths, filepath.Join(user, ".claude.json"), filepath.Join(user, ".claude", ".credentials.json"))
-	for _, p := range paths {
+	dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
+	if dir == "" {
+		dir = filepath.Join(user, ".claude")
+	}
+	for _, p := range []string{filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"), filepath.Join(user, ".claude.json")} {
 		if exists(p) {
 			return true
+		}
+	}
+	for _, name := range []string{"settings.json", "settings.local.json"} {
+		settings, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			continue
+		}
+		for _, key := range append([]string{"apiKeyHelper"}, claudeEnv...) {
+			if strings.Contains(string(settings), `"`+key+`"`) {
+				return true
+			}
 		}
 	}
 	return false

@@ -106,17 +106,26 @@ func TestMissingPrerequisite(t *testing.T) {
 			t.Fatalf("%s: a configured adapter lacks %q", f, got)
 		}
 	}
-	write := func(path string) {
+	write := func(path, content string) {
 		t.Helper()
 		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(path, []byte("{}"), 0600); err != nil {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	write(filepath.Join(home, ".codex", "auth.json"))
-	write(filepath.Join(home, ".claude.json"))
+	// Init writes Claude Code's settings.json for its hooks, so the file
+	// alone is no sign of a login; a key helper in it is.
+	write(filepath.Join(home, ".claude", "settings.json"), `{"hooks":{}}`)
+	if MissingPrerequisite(Haiku, Settings{}) == "" {
+		t.Fatal("settings.json with hooks only counted as a Claude login")
+	}
+	write(filepath.Join(home, ".claude", "settings.json"), `{"apiKeyHelper":"key"}`)
+	if got := MissingPrerequisite(Haiku, Settings{}); got != "" {
+		t.Fatalf("an apiKeyHelper still lacks %q", got)
+	}
+	write(filepath.Join(home, ".codex", "auth.json"), "{}")
 	t.Setenv("DEEPSEEK_API_KEY", "key")
 	for _, f := range Families {
 		if got := MissingPrerequisite(f, Settings{}); got != "" {
