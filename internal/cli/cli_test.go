@@ -1669,7 +1669,8 @@ func TestEnableAddsARepositoryAfterConfirmation(t *testing.T) {
 	for _, want := range []string{
 		"slopcop: your account has 2 workspaces. Which one should check, and bill, BrokkAi/slopcop?",
 		"  1  Dave (personal, this login's)\n  2  Acme team (team)\nNumber: ",
-		"lets that workspace check and bill it",
+		"lets that workspace check it.\n",
+		"slopcop: the repository is free; each check uses one of the workspace's free checks for the month, then credits.",
 		"Type BrokkAi/slopcop to add it:",
 		"slopcop: added BrokkAi/slopcop to \"Dave\"",
 	} {

@@ -9,7 +9,7 @@ sidebar:
 slopcop status                     # this checkout's repository, and whether the workspace checks it
 slopcop enable                     # add this checkout's repository to the workspace, at a terminal
 slopcop repo list                  # the workspace's repositories: active, disabled, or over the limit
-slopcop repo disable acme/widgets  # stop checking and charging for one (owner only)
+slopcop repo disable acme/widgets  # stop checking one (owner only)
 slopcop repo enable acme/widgets   # turn it back on, within the workspace's active limit
 ```
 
@@ -65,7 +65,7 @@ disabled it.
 Only the workspace's owner enables or disables, and `repo enable` and
 `repo disable` ask you to type the repository's `owner/name` and refuse when
 stdin is not a terminal. An agent or CI job runs with your login, and the
-service cannot tell it from you, so changing what the workspace pays stays a
+service cannot tell it from you, so changing what the workspace checks stays a
 step you take yourself.
 
 Names match without regard to case; when two providers have a repository of
