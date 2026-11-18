@@ -99,7 +99,10 @@ those.
 By default, a check also runs local review. It needs Node.js with `npx`
 and your existing harness logins. `slopcop init` probes reviewer families when
 none are configured and saves the first two that work (or one). Probe prompts
-use your own logins. Use `slopcop init --no-reviewers` to skip probing.
+use your own logins. A harness you have not logged in to is skipped; when none
+work yet, init says so in one line and hosted checks still run. Add `--verbose`
+to see why each reviewer is unavailable. Use `slopcop init --no-reviewers` to
+skip probing.
 Use `--mode ai` for review without SlopCop login or repository enablement.
 The Claude Code and Codex push gates installed by init require HEAD's tree to
 match a passing check or valid override.

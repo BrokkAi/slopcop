@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,7 +83,77 @@ func TestProbeSkipsFlashWithoutDeepSeekKey(t *testing.T) {
 	root, _, _ := reviewRepo(t)
 	t.Setenv("DEEPSEEK_API_KEY", "")
 	got := Probe(context.Background(), root, filepath.Join(t.TempDir(), "probe"), []Family{Flash}, Settings{}, nil)
-	if len(got) != 1 || got[0].Available || !strings.Contains(got[0].Reason, "DEEPSEEK_API_KEY") {
+	if len(got) != 1 || got[0].Available || !got[0].Skipped || !strings.Contains(got[0].Reason, "DEEPSEEK_API_KEY") {
 		t.Fatalf("%+v", got)
+	}
+}
+
+// TestMissingPrerequisite checks that the probe skips a default adapter whose
+// harness has never been logged in here, and probes it once any sign of a
+// login appears.
+func TestMissingPrerequisite(t *testing.T) {
+	defer func(old []string) { ClaudeManagedSettings = old }(ClaudeManagedSettings)
+	managed := filepath.Join(t.TempDir(), "managed-settings.json")
+	ClaudeManagedSettings = []string{managed}
+	home, root := t.TempDir(), t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	for _, name := range []string{"CODEX_HOME", "CLAUDE_CONFIG_DIR", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+		t.Setenv(name, "")
+	}
+	for _, f := range Families {
+		if MissingPrerequisite(f, root, Settings{}) == "" {
+			t.Fatalf("%s: nothing missing on a fresh machine", f)
+		}
+		if got := MissingPrerequisite(f, root, Settings{Adapters: map[string][]string{AdapterName(f): {"adapter"}}}); got != "" {
+			t.Fatalf("%s: a configured adapter lacks %q", f, got)
+		}
+	}
+	write := func(path, content string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Init writes Claude Code's settings.json for its hooks, so the file
+	// alone is no sign of a login; a key helper in it is.
+	write(filepath.Join(home, ".claude", "settings.json"), `{"hooks":{}}`)
+	if MissingPrerequisite(Haiku, root, Settings{}) == "" {
+		t.Fatal("settings.json with hooks only counted as a Claude login")
+	}
+	write(managed, "{}")
+	if got := MissingPrerequisite(Haiku, root, Settings{}); got != "" {
+		t.Fatalf("managed settings still lack %q", got)
+	}
+	if err := os.Remove(managed); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(root, ".claude", "settings.local.json"), `{"env":{"ANTHROPIC_API_KEY":"key"}}`)
+	if got := MissingPrerequisite(Haiku, root, Settings{}); got != "" {
+		t.Fatalf("a key in project settings still lacks %q", got)
+	}
+	if err := os.Remove(filepath.Join(root, ".claude", "settings.local.json")); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(home, ".claude", "settings.json"), `{"apiKeyHelper":"key"}`)
+	if got := MissingPrerequisite(Haiku, root, Settings{}); got != "" {
+		t.Fatalf("an apiKeyHelper still lacks %q", got)
+	}
+	write(filepath.Join(home, ".codex", "config.toml"), "model_provider = \"local\"\n")
+	if got := MissingPrerequisite(Terra, root, Settings{}); got != "" {
+		t.Fatalf("a custom Codex provider still lacks %q", got)
+	}
+	if err := os.Remove(filepath.Join(home, ".codex", "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	write(filepath.Join(home, ".codex", "auth.json"), "{}")
+	t.Setenv("DEEPSEEK_API_KEY", "key")
+	for _, f := range Families {
+		if got := MissingPrerequisite(f, root, Settings{}); got != "" {
+			t.Fatalf("%s: still lacks %q", f, got)
+		}
 	}
 }

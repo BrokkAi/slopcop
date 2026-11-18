@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +16,9 @@ type ProbeResult struct {
 	Model     string
 	Available bool
 	Reason    string
+	// Skipped is set when the probe never started the adapter, because
+	// what the family needs is plainly missing; Reason then says what.
+	Skipped bool
 }
 
 // probeTimeout bounds one reviewer's probe, from adapter launch to its reply.
@@ -48,12 +52,12 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 	byCommand := map[string]int{}
 	commands := make([][]string, len(families))
 	for i, f := range families {
+		if reason := MissingPrerequisite(f, root, settings); reason != "" {
+			report(i, ProbeResult{Family: f, Reason: reason, Skipped: true})
+			continue
+		}
 		argv := settings.Adapters[AdapterName(f)]
 		if len(argv) == 0 {
-			if reason := missingCredential(f); reason != "" {
-				report(i, ProbeResult{Family: f, Reason: reason})
-				continue
-			}
 			argv = DefaultCommand(f)
 		}
 		commands[i] = argv
@@ -108,13 +112,138 @@ func probeOne(ctx context.Context, root, logDir string, argv []string, f Family,
 	return r
 }
 
-// missingCredential names what a family's default adapter needs and lacks,
-// so the probe skips it instead of downloading an adapter that cannot work.
-// A configured adapter command may carry its own credentials, so it is always
-// probed.
-func missingCredential(f Family) string {
-	if f == Flash && os.Getenv("DEEPSEEK_API_KEY") == "" {
-		return "DEEPSEEK_API_KEY is not set"
+// MissingPrerequisite names what a family's default adapter, run in root,
+// needs and this machine plainly lacks: an API key, or any sign that its harness was ever
+// logged in. The probe skips such a family instead of downloading an adapter
+// that cannot work. A configured adapter command may carry its own
+// credentials, so it never lacks anything here. The checks look only for
+// what is certainly absent; a harness that keeps its login somewhere they
+// do not look is still probed.
+func MissingPrerequisite(f Family, root string, settings Settings) string {
+	if len(settings.Adapters[AdapterName(f)]) > 0 {
+		return ""
+	}
+	switch AdapterName(f) {
+	case "dsh":
+		if os.Getenv("DEEPSEEK_API_KEY") == "" {
+			return "DEEPSEEK_API_KEY is not set"
+		}
+	case "codex":
+		if !codexMayBeLoggedIn() {
+			return "Codex is not logged in"
+		}
+	case "claude":
+		if !claudeMayBeLoggedIn(root) {
+			return "Claude Code is not logged in"
+		}
 	}
 	return ""
+}
+
+// codexMayBeLoggedIn reports whether Codex has an API key or the adapter's
+// automatic login request in the environment, a saved login, or a config
+// that may keep the login in the system keyring or name another provider.
+func codexMayBeLoggedIn() bool {
+	if anyEnv("OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST") {
+		return true
+	}
+	home := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+	if home == "" {
+		user, err := os.UserHomeDir()
+		if err != nil {
+			return true
+		}
+		home = filepath.Join(user, ".codex")
+	}
+	if exists(filepath.Join(home, "auth.json")) {
+		return true
+	}
+	// The login may sit in the keyring, or a custom provider may bring
+	// its own key.
+	config, err := os.ReadFile(filepath.Join(home, "config.toml"))
+	if err != nil {
+		return false
+	}
+	for _, key := range []string{"cli_auth_credentials_store", "model_provider"} {
+		if strings.Contains(string(config), key) {
+			return true
+		}
+	}
+	return false
+}
+
+// claudeEnv names the environment variables that give Claude Code a key or
+// another provider, in the process environment or a settings file's env.
+var claudeEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
+
+// ClaudeManagedSettings are the system-wide settings files, and their
+// drop-in directories, that Claude Code reads on each platform. Tests blank
+// it to see a fresh machine.
+var ClaudeManagedSettings = []string{
+	"/Library/Application Support/ClaudeCode/managed-settings.json",
+	"/Library/Application Support/ClaudeCode/managed-settings.d",
+	"/etc/claude-code/managed-settings.json",
+	"/etc/claude-code/managed-settings.d",
+	`C:\Program Files\ClaudeCode\managed-settings.json`,
+	`C:\Program Files\ClaudeCode\managed-settings.d`,
+	`C:\ProgramData\ClaudeCode\managed-settings.json`,
+	`C:\ProgramData\ClaudeCode\managed-settings.d`,
+}
+
+// claudeMayBeLoggedIn reports whether Claude Code has a key or provider in
+// the environment or its settings, or has ever run here: it writes
+// .claude.json on first run, and keeps the login there, in
+// .credentials.json, or in the macOS keychain. A key may also sit in the
+// user's or root's project settings. Init itself writes settings.json for its
+// hooks, so only a key in it counts, not the file.
+func claudeMayBeLoggedIn(root string) bool {
+	if anyEnv(claudeEnv...) {
+		return true
+	}
+	user, err := os.UserHomeDir()
+	if err != nil {
+		return true
+	}
+	dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR"))
+	if dir == "" {
+		dir = filepath.Join(user, ".claude")
+	}
+	// An administrator's managed settings may hold a key or provider; any
+	// such file is reason enough to probe.
+	paths := append([]string{filepath.Join(dir, ".claude.json"), filepath.Join(dir, ".credentials.json"), filepath.Join(user, ".claude.json")}, ClaudeManagedSettings...)
+	for _, p := range paths {
+		if exists(p) {
+			return true
+		}
+	}
+	var settingsFiles []string
+	for _, d := range []string{dir, filepath.Join(root, ".claude")} {
+		settingsFiles = append(settingsFiles, filepath.Join(d, "settings.json"), filepath.Join(d, "settings.local.json"))
+	}
+	for _, path := range settingsFiles {
+		settings, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		for _, key := range append([]string{"apiKeyHelper"}, claudeEnv...) {
+			if strings.Contains(string(settings), `"`+key+`"`) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func anyEnv(names ...string) bool {
+	for _, n := range names {
+		if strings.TrimSpace(os.Getenv(n)) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

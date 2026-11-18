@@ -489,7 +489,7 @@ func skillNamed(data []byte, name string) bool {
 }
 
 func newInitCommand(version string) *cobra.Command {
-	var noSkill, noHooks, removeHooks, noReviewers bool
+	var noSkill, noHooks, removeHooks, noReviewers, verbose bool
 	var root string
 	command := &cobra.Command{Use: "init", Short: "Install user-level skills and hooks", Long: `Install SlopCop's agent skills, Stop hooks and push gates once for the
 machine. The skills go into the user-level directories each installed harness
@@ -502,7 +502,8 @@ HEAD's tree passed a check. Repositories that have never run SlopCop are left
 alone. Init also removes clone-local hooks and skills written by the earlier
 per-repository releases when run inside that checkout; other checkouts clean
 themselves the next time their old hook runs SlopCop. Init probes available
-reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
+reviewers unless --no-reviewers is set: it skips a reviewer whose login or
+API key is plainly missing, and prints why the others failed with --verbose.`, Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error {
 		out := cmd.OutOrStdout()
 		if removeHooks {
 			result, err := agenthooks.Remove()
@@ -566,13 +567,14 @@ reviewers unless --no-reviewers is set.`, Args: cobra.NoArgs, RunE: func(cmd *co
 			}
 		}
 		if !noReviewers {
-			return initReviewers(cmd.Context(), out, root)
+			return initReviewers(cmd.Context(), out, root, verbose)
 		}
 		return nil
 	}}
 	command.Flags().StringVar(&root, "root", "", "deprecated repository path to clean up")
 	_ = command.Flags().MarkHidden("root")
 	command.Flags().BoolVar(&noReviewers, "no-reviewers", false, "skip reviewer probing")
+	command.Flags().BoolVar(&verbose, "verbose", false, "say why each reviewer that does not work here failed")
 	command.Flags().BoolVar(&noSkill, "no-skill", false, "do not install the agent skills")
 	command.Flags().BoolVar(&noHooks, "no-hooks", false, "do not install the user-level hooks")
 	command.Flags().BoolVar(&removeHooks, "remove-hooks", false, "remove user-level and legacy repository SlopCop hooks")
@@ -601,12 +603,16 @@ func cleanupInstalledLegacyRepository(repo string) error {
 	return cleanupLegacyRepository(repo, true, true, nil)
 }
 
-func initReviewers(ctx context.Context, out io.Writer, workDir string) error {
+// initReviewers picks the local reviewers that work here. On a machine with
+// no reviewer logged in, which is the usual first install, it prints one line
+// rather than one failure per reviewer; --verbose prints each reason.
+func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose bool) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
 	if cfg.Mode == modeStatic {
+		fmt.Fprintln(out, "slopcop: mode is static, so init did not look for local reviewers")
 		return nil
 	}
 	path, err := config.Path()
@@ -643,11 +649,21 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string) error {
 		return err
 	}
 	review.TrimLogs(probeParent)
-	fmt.Fprintln(out, "slopcop: checking which reviewers work here; this sends each one a short prompt and can take a few minutes the first time, while npx downloads each adapter")
-	results := review.Probe(ctx, probeRoot, logDir, review.Families, settings, func(r review.ProbeResult) {
-		if r.Available {
+	families := review.Families
+	var probed []review.Family
+	for _, f := range families {
+		if review.MissingPrerequisite(f, probeRoot, settings) == "" {
+			probed = append(probed, f)
+		}
+	}
+	if len(probed) > 0 {
+		fmt.Fprintf(out, "slopcop: checking which local reviewers work here (%s); this sends each a short prompt and can take a few minutes the first time, while npx downloads each adapter\n", joinFamilies(probed))
+	}
+	results := review.Probe(ctx, probeRoot, logDir, families, settings, func(r review.ProbeResult) {
+		switch {
+		case r.Available:
 			fmt.Fprintf(out, "slopcop: %s available (%s)\n", r.Family, r.Model)
-		} else {
+		case verbose:
 			fmt.Fprintf(out, "slopcop: %s unavailable: %s\n", r.Family, r.Reason)
 		}
 	})
@@ -665,7 +681,17 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string) error {
 		}
 	}
 	if len(names) == 0 {
-		fmt.Fprintln(out, "slopcop: no reviewers available; log in to Codex or Claude Code, set DEEPSEEK_API_KEY or configure the dsh adapter with --api-key-file, then rerun init; or set review.reviewers by hand, or use mode static")
+		why := ""
+		if !verbose && len(probed) > 0 {
+			why = "; `slopcop init --verbose` says why each failed"
+		}
+		// With no mode set, a check without reviewers runs the hosted half
+		// alone; a mode set to ai or both needs a reviewer.
+		after := "Hosted checks work now."
+		if cfg.Mode != "" {
+			after = fmt.Sprintf("Until then, mode %s needs a reviewer, so run checks with --static.", cfg.Mode)
+		}
+		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code or Codex, or set DEEPSEEK_API_KEY, then run `slopcop init`%s). %s\n", why, after)
 		return nil
 	}
 	if cfg.Review == nil {
@@ -682,8 +708,48 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string) error {
 		return err
 	}
 	fmt.Fprintf(out, "slopcop: reviewers set to %s in %s\n", strings.Join(names, ", "), path)
+	if !verbose {
+		var missing []review.Family
+		for _, r := range results {
+			if !r.Available {
+				missing = append(missing, r.Family)
+			}
+		}
+		if len(missing) > 0 {
+			// A rerun keeps the reviewers just saved, so the reasons go
+			// to a file rather than behind --verbose.
+			why := filepath.Join(logDir, probeResultsFile)
+			if err := writeProbeResults(why, results); err != nil {
+				why = "`slopcop config unset review.reviewers`, then `slopcop init --verbose`"
+			}
+			fmt.Fprintf(out, "slopcop: %s not available here; why: %s\n", joinFamilies(missing), why)
+		}
+	}
 	if len(fallbacks) > 0 {
 		fmt.Fprintf(out, "slopcop: fallbacks set to %s\n", strings.Join(fallbacks, ", "))
 	}
 	return nil
+}
+
+func joinFamilies(families []review.Family) string {
+	names := make([]string, len(families))
+	for i, f := range families {
+		names[i] = string(f)
+	}
+	return strings.Join(names, ", ")
+}
+
+// probeResultsFile, in a probe's log directory, says how each reviewer fared.
+const probeResultsFile = "results.txt"
+
+func writeProbeResults(path string, results []review.ProbeResult) error {
+	var b strings.Builder
+	for _, r := range results {
+		if r.Available {
+			fmt.Fprintf(&b, "%s available (%s)\n", r.Family, r.Model)
+		} else {
+			fmt.Fprintf(&b, "%s unavailable: %s\n", r.Family, r.Reason)
+		}
+	}
+	return os.WriteFile(path, []byte(b.String()), 0600)
 }
