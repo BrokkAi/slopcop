@@ -134,11 +134,13 @@ gap, and it never changes the status or the exit code.
 
 Each report still says where they are, so a reviewer can judge what a `clean`
 result is worth. `human` prints one `Inconclusive:` line with the count and how
-many concern only files the change does not write; `--verbose` names each rule.
-`json` lists them in `inconclusive`, each with `policyId`, `reason`, `detail`
-when the service sent one, and `elsewhere` (`true` when it concerns only files
-the change does not write), beside the `summary.inconclusive` count. `sarif`
-adds a `note` notification per rule. The service names at most fifty; the
+many concern only files the change does not write; `--verbose` names each rule
+and the files it concerns. `json` lists them in `inconclusive`, each with
+`policyId`, `reason`, `detail` when the service sent one, `files` (the
+repository paths the rule could not finish proving, when the analyzer named
+them all), and `elsewhere` (`true` when it concerns only files the change does
+not write), beside the `summary.inconclusive` count. `sarif` adds a `note`
+notification per rule, with one location per file. The service names at most fifty; the
 counts cover the rest, and `json`'s `inconclusiveUnlisted` says how many it
 left out when it cut the list.
 

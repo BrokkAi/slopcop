@@ -44,7 +44,7 @@ CLI prints them with control characters replaced.
 
 A static-only failed check prints nothing on stdout; stderr starts with
 `slopcop: <code>:` followed by the service's message and remedy, verbatim, and
-any install or top-up link. `--verbose` names each inconclusive rule.
+any install or top-up link. `--verbose` names each inconclusive rule and up to five files it concerns.
 
 After the static report, human output includes a Review section with each
 reviewer's verdict, text, log path, and intent source.
@@ -108,7 +108,7 @@ slopcop check --format json
   ],
   "incomplete": [],
   "inconclusive": [
-    { "policyId": "bifrost.correctness.resource-lifecycle", "reason": "library boundary", "elsewhere": true }
+    { "policyId": "bifrost.correctness.resource-lifecycle", "reason": "inconclusive", "detail": "type=inconclusive reasons=partial_discovery", "files": ["src/pool.rs"], "elsewhere": true }
   ]
 }
 ```
@@ -128,7 +128,7 @@ slopcop check --format json
 | `runFailures` | present when an analyzer run as a whole failed: each cause once, with `reason`, `detail`, and `policies`, the number of rules it left incomplete |
 | `incompleteUnlisted` | present when the service cut `incomplete`: how many of `summary.incompletePolicies` it does not name |
 | `incompleteReasons` | present when a rule did not complete: the named rules grouped by `reason` and `detail`, each with a `policies` count, most common first |
-| `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `detail` when sent, `elsewhere` |
+| `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `detail` when sent, `files` (the repository paths the check concerns) when the analyzer named them all, `elsewhere` |
 | `inconclusiveUnlisted` | present when the service cut `inconclusive`: how many of `summary.inconclusive` it does not name |
 | `inlineSuppressed` | present when a [`slopcop: ignore` comment](/checks/false-positives/#ignore-in-the-code) ignored a finding: each one with the fields of a finding except `id`, and `directive` with the comment's `line`, `blanket`, `policies` and `reason`; at most 300 |
 | `directiveWarnings` | present when a `slopcop: ignore` comment ignored nothing: each with `kind` (`unused`, `missing_reason`, `malformed`), `path`, `line`, `policies`, `detail` for a malformed one, and `new`; at most 300 |
@@ -187,7 +187,8 @@ the list, one more `warning` notification counts the rest in
 `slopcop.runFailure`, `slopcop.reason`, `slopcop.detail`, and
 `slopcop.policies`, and the run carries `slopcop.runFailures`. Inconclusive rules appear as `note`
 notifications with `slopcop.inconclusive`, `slopcop.elsewhere`, and, when sent,
-`slopcop.detail` properties, and the run carries `slopcop.inconclusiveUnlisted`
+`slopcop.detail` properties, and one location per file the check concerns
+when the service named them, and the run carries `slopcop.inconclusiveUnlisted`
 when that list was cut;
 a finding a `slopcop: ignore` comment ignored is a result with an `inSource`
 suppression whose `justification` is the comment's reason, and each comment

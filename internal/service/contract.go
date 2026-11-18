@@ -342,6 +342,11 @@ type IncompletePolicy struct {
 	// BrokkAi/bifrost-service#993 omits it, and one from before run failures
 	// omits it for unreliable.
 	Detail string `json:"detail,omitempty"`
+	// Files names, for an inconclusive check, the repository paths Bifrost
+	// says the verdict concerns, spelled as findings spell them. The service
+	// sends them only when Bifrost named every one, and one from before
+	// BrokkAi/slopcop#141 never does.
+	Files []string `json:"files,omitempty"`
 	// Diagnostic is what the analyzer said about one of the repository's own
 	// rule files that did not load, compile or run. The service never sends
 	// it for a catalog rule, nor does one from before

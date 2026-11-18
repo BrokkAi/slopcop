@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -97,7 +98,7 @@ func TestCheckDecodesAnIncompleteResponse(t *testing.T) {
 	if response.ExitCode() != 2 || response.Failure != "The analysis could not be completed." {
 		t.Fatalf("response = %+v", response)
 	}
-	if len(response.Incomplete) != 1 || response.Incomplete[0] != (IncompletePolicy{PolicyID: "acme.slow", Reason: "timed_out"}) {
+	if !reflect.DeepEqual(response.Incomplete, []IncompletePolicy{{PolicyID: "acme.slow", Reason: "timed_out"}}) {
 		t.Fatalf("incomplete = %+v", response.Incomplete)
 	}
 	summary := response.Summary
@@ -130,7 +131,7 @@ func TestCheckDecodesRunFailures(t *testing.T) {
 		t.Fatalf("Check: %v", err)
 	}
 	const detail = "type=incomplete reasons=analyzer_process_failed exit_code=137"
-	if want := (IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable", Detail: detail, Scope: ScopeRun}); len(response.Incomplete) != 1 || response.Incomplete[0] != want {
+	if want := (IncompletePolicy{PolicyID: "acme.a", Reason: "unreliable", Detail: detail, Scope: ScopeRun}); !reflect.DeepEqual(response.Incomplete, []IncompletePolicy{want}) {
 		t.Fatalf("incomplete = %+v", response.Incomplete)
 	}
 	if want := (RunFailure{Reason: "unreliable", Detail: detail, Policies: 207}); len(response.RunFailures) != 1 || response.RunFailures[0] != want {

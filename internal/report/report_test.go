@@ -1605,6 +1605,55 @@ func TestEveryFormatCarriesAnInconclusiveDetailAndTheCut(t *testing.T) {
 	}
 }
 
+// BrokkAi/slopcop#141: an inconclusive check that names its files says where
+// in every format, and the human report bounds the list.
+func TestEveryFormatNamesTheFilesAnInconclusiveCheckConcerns(t *testing.T) {
+	placed := unproven()
+	placed.Inconclusive[0].Files = []string{"src/a.rs", "src/b.rs"}
+	placed.Inconclusive[1].Files = []string{"f1", "f2", "f3", "f4", "f5", "f6", "f7\x1b[2J"}
+
+	got := renderWith(t, placed, FormatHuman, Options{Verbose: true})
+	for _, want := range []string{
+		"  acme.a in src/a.rs, src/b.rs\n",
+		"  acme.b in f1, f2, f3, f4, f5, and 2 more file(s) (only files the change does not write)\n",
+		"  acme.c\n",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("verbose human = %q, want %q", got, want)
+		}
+	}
+
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, placed, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	checks := document["inconclusive"].([]any)
+	if files := checks[0].(map[string]any)["files"]; !reflect.DeepEqual(files, []any{"src/a.rs", "src/b.rs"}) {
+		t.Errorf("json files = %v", files)
+	}
+	if _, ok := checks[2].(map[string]any)["files"]; ok {
+		t.Errorf("a check without files has a files key: %v", checks[2])
+	}
+
+	var log map[string]any
+	if err := json.Unmarshal([]byte(render(t, placed, FormatSARIF)), &log); err != nil {
+		t.Fatalf("sarif: %v", err)
+	}
+	run := log["runs"].([]any)[0].(map[string]any)
+	notes := run["invocations"].([]any)[0].(map[string]any)["toolExecutionNotifications"].([]any)
+	locations := notes[0].(map[string]any)["locations"].([]any)
+	if len(locations) != 2 {
+		t.Fatalf("sarif locations = %v", locations)
+	}
+	artifact := locations[1].(map[string]any)["physicalLocation"].(map[string]any)["artifactLocation"].(map[string]any)
+	if artifact["uri"] != "src/b.rs" || artifact["uriBaseId"] != "SRCROOT" {
+		t.Errorf("sarif artifact = %v", artifact)
+	}
+	if _, ok := notes[2].(map[string]any)["locations"]; ok {
+		t.Errorf("a check without files has locations: %v", notes[2])
+	}
+}
+
 // crashed is a check whose analyzer run failed: the service counted 207
 // incomplete checks, named 3, and named the run's cause once.
 func crashed() service.Response {
