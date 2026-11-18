@@ -741,13 +741,14 @@ rare in static analysis, typically at a library boundary, so this is the norm
 rather than a gap. Each report still says where they are, so a reviewer can
 judge what a `clean` result is worth: `human` prints one `Inconclusive:` line
 with the count and how many concern only files the change does not write, and
-`--verbose` names each check. `json` lists them in `inconclusive`, each with
-`policyId`, `reason` and `elsewhere` (true when it concerns only files the
-change does not write), beside the `summary.inconclusive` count. `sarif` adds
-a `note` notification per check with `slopcop.inconclusive` and
-`slopcop.elsewhere` properties. The service names at most 50; the counts
-cover the rest. It does not yet say which files or lines each one concerns,
-or what evidence was missing. A check that timed out or
+`--verbose` names each check and the files it concerns. `json` lists them in
+`inconclusive`, each with `policyId`, `reason`, `detail`, `files` (when the
+analyzer named every file the check concerns) and `elsewhere` (true when it
+concerns only files the change does not write), beside the
+`summary.inconclusive` count. `sarif` adds a `note` notification per check
+with `slopcop.inconclusive` and `slopcop.elsewhere` properties and one
+location per file. The service names at most 50; the counts cover the rest.
+It does not yet say which functions or lines each one concerns. A check that timed out or
 that Bifrost judged unreliable is incomplete and counts wherever it is.
 
 The service applies `--fail-on` and sets the status; the exit code follows it.

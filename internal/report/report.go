@@ -870,6 +870,9 @@ type inconclusiveCheck struct {
 	Reason   string `json:"reason"`
 	// Detail is the service's detail for the check, when it sent one.
 	Detail string `json:"detail,omitempty"`
+	// Files are the repository paths the verdict concerns, when the service
+	// named them all.
+	Files []string `json:"files,omitempty"`
 	// Elsewhere says the check concerns only files the change does not
 	// write. Without it, it may concern the change itself.
 	Elsewhere bool `json:"elsewhere"`
@@ -896,6 +899,7 @@ func inconclusiveChecks(response service.Response) []inconclusiveCheck {
 				PolicyID:  policy.PolicyID,
 				Reason:    policy.Reason,
 				Detail:    policy.Detail,
+				Files:     policy.Files,
 				Elsewhere: elsewhere[policy.PolicyID],
 			})
 		}
@@ -954,11 +958,33 @@ func writeInconclusive(out *strings.Builder, response service.Response) {
 		if check.Detail != "" {
 			detail = " (" + printable(check.Detail) + ")"
 		}
-		fmt.Fprintf(out, "  %s%s%s\n", printable(check.PolicyID), detail, where)
+		fmt.Fprintf(out, "  %s%s%s%s\n", printable(check.PolicyID), detail, inconclusiveFiles(check.Files), where)
 	}
 	if unnamed := inconclusiveUnlisted(response, checks); unnamed > 0 {
 		fmt.Fprintf(out, "  and %d more\n", unnamed)
 	}
+}
+
+// maxInconclusiveFiles is how many of an inconclusive check's files the
+// human report names before it counts the rest.
+const maxInconclusiveFiles = 5
+
+// inconclusiveFiles says which files an inconclusive check concerns, such
+// as ` in src/a.rs, src/b.rs`, or nothing when the service did not name them.
+func inconclusiveFiles(files []string) string {
+	if len(files) == 0 {
+		return ""
+	}
+	named := files[:min(len(files), maxInconclusiveFiles)]
+	printed := make([]string, len(named))
+	for i, file := range named {
+		printed[i] = printable(file)
+	}
+	text := " in " + strings.Join(printed, ", ")
+	if rest := len(files) - len(named); rest > 0 {
+		text += fmt.Sprintf(", and %d more file(s)", rest)
+	}
+	return text
 }
 
 // Printable keeps control and bidirectional-override characters from hostile
@@ -1389,6 +1415,7 @@ type sarifInvocation struct {
 type sarifNotification struct {
 	Level      string           `json:"level"`
 	Message    sarifMessage     `json:"message"`
+	Locations  []sarifLocation  `json:"locations,omitempty"`
 	Descriptor *sarifDescriptor `json:"descriptor,omitempty"`
 	Properties map[string]any   `json:"properties,omitempty"`
 }
@@ -1621,11 +1648,18 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 		if check.Detail != "" {
 			checkProperties["slopcop.detail"] = check.Detail
 		}
+		var locations []sarifLocation
+		for _, file := range check.Files {
+			locations = append(locations, sarifLocation{PhysicalLocation: sarifPhysicalLocation{
+				ArtifactLocation: sarifArtifactLocation{URI: sarifURI(file), URIBaseID: "SRCROOT"},
+			}})
+		}
 		notifications = append(notifications, sarifNotification{
 			Level: "note",
 			Message: sarifMessage{Text: fmt.Sprintf(
 				"%s could not prove there is nothing more to find (%s)", check.PolicyID, why(check.Reason, check.Detail),
 			)},
+			Locations:  locations,
 			Descriptor: &sarifDescriptor{ID: check.PolicyID},
 			Properties: checkProperties,
 		})
