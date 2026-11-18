@@ -166,13 +166,17 @@ func codexMayBeLoggedIn() bool {
 // another provider, in the process environment or a settings file's env.
 var claudeEnv = []string{"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"}
 
-// claudeManagedSettings are the system-wide settings files Claude Code reads
-// on each platform.
+// claudeManagedSettings are the system-wide settings files, and their
+// drop-in directories, that Claude Code reads on each platform.
 var claudeManagedSettings = []string{
 	"/Library/Application Support/ClaudeCode/managed-settings.json",
+	"/Library/Application Support/ClaudeCode/managed-settings.d",
 	"/etc/claude-code/managed-settings.json",
+	"/etc/claude-code/managed-settings.d",
 	`C:\Program Files\ClaudeCode\managed-settings.json`,
+	`C:\Program Files\ClaudeCode\managed-settings.d`,
 	`C:\ProgramData\ClaudeCode\managed-settings.json`,
+	`C:\ProgramData\ClaudeCode\managed-settings.d`,
 }
 
 // claudeMayBeLoggedIn reports whether Claude Code has a key or provider in
