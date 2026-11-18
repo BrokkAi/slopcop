@@ -52,6 +52,14 @@ Windows) and is written owner-only. It holds one login per service.
 CLI keeps the time of the last [upgrade notice](/get-started/install/#upgrade-notices)
 and any [skill backups](/agents/skill/#local-edits-are-kept).
 
+On Windows, a login does not always carry over between shells: PowerShell,
+cmd, Git Bash and WSL can each resolve a different config directory, so an
+agent's terminal may not see the login you made in your own, or may hold one
+made before you installed the GitHub App. A check from that terminal then
+reports the repository as not added. When a login or repository-access refusal
+happens on Windows or in WSL, the CLI names the config file the shell read; run
+`slopcop login` in the terminal the agent uses.
+
 ## The service URL
 
 The service defaults to `https://slopcop.com`. `--service` or

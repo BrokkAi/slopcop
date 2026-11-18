@@ -39,6 +39,9 @@ func TestMain(m *testing.M) {
 		return statusRepository{State: statusActive, Enabled: true, Active: true}, nil
 	}
 	unmappedNotice = func(*cobra.Command, *service.Client, workspaceChoice) {}
+	// Tests print the same remedies on every OS; the Windows shell note has
+	// its own test.
+	separateShellLogins = func() bool { return false }
 	os.Exit(m.Run())
 }
 

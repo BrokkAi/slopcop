@@ -3,6 +3,8 @@ package cli
 import (
 	"errors"
 	"fmt"
+	"os"
+	"runtime"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -129,5 +131,45 @@ func remedyText(serviceError *service.Error) string {
 	if hint := loginHints[serviceError.Body.Code]; hint != "" {
 		text += "\n" + hint
 	}
+	if separateShellLogins() && shellLoginCodes[serviceError.Body.Code] {
+		text += "\n" + windowsShellHint()
+	}
 	return text
+}
+
+// separateShellLogins reports whether this machine is Windows, where shells
+// can each keep their own login: a Windows binary, or the Linux one in WSL,
+// which has a home of its own apart from the Windows user's. It is a
+// variable so tests can stand in for either.
+var separateShellLogins = func() bool {
+	return runtime.GOOS == "windows" || os.Getenv("WSL_DISTRO_NAME") != ""
+}
+
+// shellLoginCodes are the refusals a login made in another shell explains:
+// no login reached the service, or one that cannot see a repository the
+// person already added, such as a login made before the App was installed.
+var shellLoginCodes = map[string]bool{
+	"auth_required":      true,
+	"auth_expired":       true,
+	"account_required":   true,
+	"repo_not_indexed":   true,
+	"app_not_installed":  true,
+	"app_no_repo_access": true,
+	"no_access":          true,
+}
+
+// windowsShellHint says that on Windows a login does not carry over between
+// shells. PowerShell, cmd, Git Bash and WSL can each resolve a different
+// config directory, so an agent's terminal may not see the login the person
+// made in their own, or may hold an older one, and the refusal then reads as
+// a repository that was never added. It names the file this shell reads so
+// the person can compare it with their own terminal's.
+func windowsShellHint() string {
+	where := "its own config file"
+	if path, err := config.Path(); err == nil {
+		where = path
+	}
+	return "On Windows, each shell (PowerShell, cmd, Git Bash, WSL) can keep its own slopcop login; this one reads " +
+		where + ". If you signed in or installed the SlopCop App from another terminal, run `slopcop login` " +
+		"in the terminal the agent uses, then check again."
 }
