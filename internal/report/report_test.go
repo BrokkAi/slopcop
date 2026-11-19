@@ -2362,3 +2362,28 @@ func TestHumanReportCountsExcludedFilesAndNamesOnlyAFew(t *testing.T) {
 		t.Errorf("human report names more than %d excluded files:\n%s", listedExcluded, got)
 	}
 }
+
+// TestReviewMarksUnparsedReply checks that a reply with no `- [Pn]` finding
+// is reported as malformed in every format, not as a finding that only lacks
+// a location (issue 177).
+func TestReviewMarksUnparsedReply(t *testing.T) {
+	verdict := review.Verdict{Status: review.StatusFindings, Reviewers: []review.Reviewer{
+		{Name: "2-sol", Status: review.StatusFindings, Text: "cancellation contract in [AGENTS.md:155](AGENTS.md#L155)."},
+	}}
+	data, err := json.Marshal(reviewValue(&verdict))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"malformed":true`) {
+		t.Fatalf("json: %s", data)
+	}
+	run := sarifLogWithReview(Options{Review: &verdict}, sarifRun{}).Runs[1]
+	if run.Results[0].Properties["slopcop.malformed"] != true {
+		t.Fatalf("sarif: %+v", run.Results[0])
+	}
+	var out bytes.Buffer
+	writeReviewHuman(&out, verdict)
+	if !strings.Contains(out.String(), "    Not parsed: the reply has no `- [Pn]` finding") {
+		t.Fatalf("human: %q", out.String())
+	}
+}

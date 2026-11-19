@@ -267,6 +267,15 @@ Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr cre
 open a pull request until HEAD's tree has a passing check or valid override. It also
 blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
 
+## `slopcop review show`
+
+Print the latest local review of this checkout again, in `--format human`,
+`json` or `sarif`, without running a reviewer or spending a check. Each
+reviewer's reply is rebuilt from its log under `<git-dir>/slopcop/` and its
+findings are parsed again, so the reply is shown in full even when the
+report the check printed was not. It only shows the review: it approves
+nothing and changes no state.
+
 ## `slopcop update`
 
 Update slopcop to the latest release. A slopcop installed by the install script
