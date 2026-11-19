@@ -326,6 +326,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		withAdded.AddedTo = static.addedTo
 		var rendered bytes.Buffer
 		if err := report.Write(&rendered, *static.response, format, withAdded); err == nil && rendered.String() == bareCleanReport {
+			warnLowCredits(cmd, static.response)
 			return silentExit{exit}
 		}
 	}
@@ -372,12 +373,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if writeErr != nil {
 		return writeErr
 	}
-	// A low balance is said at the point of use, before a check is refused.
-	// JSON carries the same figures in its credits block.
-	if format == report.FormatHuman && static.response != nil {
-		if line := report.LowCreditsLine(static.response.Credits); line != "" {
-			fmt.Fprintln(cmd.ErrOrStderr(), line)
-		}
+	if format == report.FormatHuman {
+		warnLowCredits(cmd, static.response)
 	}
 	// Say whether the tree may be pushed only where the push gate is
 	// installed, and only when the check produced a result to judge: after a
@@ -1424,5 +1421,17 @@ func treeSource(root, tree string) report.Source {
 		}
 		content, err := gitx.RunBytes(root, nil, "cat-file", "blob", object)
 		return content, err == nil
+	}
+}
+
+// warnLowCredits says on stderr, at the point of use and before a check is
+// refused, that the workspace's free checks and credits are running low.
+// JSON carries the same figures in its credits block instead.
+func warnLowCredits(cmd *cobra.Command, response *service.Response) {
+	if response == nil {
+		return
+	}
+	if line := report.LowCreditsLine(response.Credits); line != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), line)
 	}
 }

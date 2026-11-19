@@ -207,7 +207,12 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 		output.SystemMessage = boundedHookText(strings.TrimSpace(state.added + "\n" + output.SystemMessage))
 	}
 	if state.lowCredits != "" {
-		output.SystemMessage = boundedHookText(strings.TrimSpace(output.SystemMessage + "\n" + state.lowCredits))
+		// First, so a long findings message cannot truncate it, and in the
+		// reason too when the agent is held: some harnesses pass on only that.
+		if output.Decision == "block" {
+			output.Reason = boundedHookText(state.lowCredits + "\n" + output.Reason)
+		}
+		output.SystemMessage = boundedHookText(strings.TrimSpace(state.lowCredits + "\n" + output.SystemMessage))
 	}
 	if fresh || scopeChanged {
 		if notice := hookOmittedFilesNotice(prepared.omittedFiles); notice != "" {

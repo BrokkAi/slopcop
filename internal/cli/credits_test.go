@@ -107,12 +107,30 @@ func TestHookSaysOnceInASessionThatCreditsAreLow(t *testing.T) {
 	server := fake.start(t, repo)
 
 	want := "slopcop: 1 check left on this workspace's free checks and credits; add credits on the Credits page in SlopCop"
-	if output := runTestHook(t, server.URL, stopPayload(repo, false)); !strings.HasSuffix(output.SystemMessage, want) {
+	if output := runTestHook(t, server.URL, stopPayload(repo, false)); !strings.HasPrefix(output.SystemMessage, want) {
 		t.Fatalf("output = %+v, want the low-credits line", output)
 	}
 	// A later check in the session, still low, does not repeat it.
 	writeFile(t, repo, "demo.go", "package demo // changed\n")
 	if output := runTestHook(t, server.URL, stopPayload(repo, false)); strings.Contains(output.SystemMessage, "check left") || fake.checks != 2 {
 		t.Fatalf("second output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestHookTellsAHeldAgentThatCreditsAreLow(t *testing.T) {
+	isolateHook(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	writeSessionEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"},
+		credits: &service.Credits{ChecksLeft: 3, Low: true}}
+	server := fake.start(t, repo)
+
+	// Held, the agent reads the reason, which some harnesses pass on alone;
+	// the line leads both so a long findings list cannot cut it off.
+	output := runTestHook(t, server.URL, stopPayload(repo, false))
+	want := "slopcop: 3 checks left on this workspace's free checks and credits;"
+	if output.Decision != "block" || !strings.HasPrefix(output.Reason, want) || !strings.HasPrefix(output.SystemMessage, want) {
+		t.Fatalf("output = %+v, want the low-credits line first in both", output)
 	}
 }
