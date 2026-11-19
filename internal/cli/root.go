@@ -172,6 +172,9 @@ type checkOptions struct {
 	ifEnabled bool
 	// include exempts selected paths/globs from the large-data filter.
 	include []string
+	// enable is set on the first check 'enable' runs, after a person
+	// confirmed adding the repository at a terminal.
+	enable *enableCheck
 }
 
 func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
