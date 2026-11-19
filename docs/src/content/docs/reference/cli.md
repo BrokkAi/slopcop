@@ -255,8 +255,9 @@ to be run by hand.
 duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
-must finish for a clean review). Adapter command
-overrides are under `review.adapters.<codex|dsh|claude>.command`.
+must finish for a clean review), and `review.provider` (`copilot` runs
+`terra`, `sol` and `haiku` through GitHub Copilot CLI). Adapter command
+overrides are under `review.adapters.<codex|dsh|claude|copilot>.command`.
 
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided

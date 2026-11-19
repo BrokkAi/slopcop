@@ -19,6 +19,39 @@ type agent struct {
 	acp.Agent
 	conn                       *acp.AgentSideConnection
 	mode, model, models, trace string
+	// cliModel, cliEffort and tools are Copilot CLI's --model,
+	// --reasoning-effort and --available-tools, for modes named copilot*.
+	cliModel, cliEffort, tools string
+}
+
+func (a *agent) copilot() bool { return strings.HasPrefix(a.mode, "copilot") }
+
+// copilotOptions mirrors the options Copilot CLI 1.0.114 returns from
+// session/new: its modes, the account's models, and allow_all.
+func (a *agent) copilotOptions() []acp.SessionConfigOption {
+	modes := acp.SessionConfigSelectOptionsUngrouped{{Value: "https://agentclientprotocol.com/protocol/session-modes#agent", Name: "Agent"}, {Value: "https://agentclientprotocol.com/protocol/session-modes#autopilot", Name: "Autopilot"}}
+	models := acp.SessionConfigSelectOptionsUngrouped{}
+	for _, value := range strings.Split(a.models, ",") {
+		o := acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId(value), Name: value}
+		if v, ok := strings.CutSuffix(value, "!"); ok {
+			o = acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId(v), Name: v, Meta: map[string]any{"copilotEnablement": "disabled"}}
+		}
+		models = append(models, o)
+	}
+	current := a.cliModel
+	if current == "" {
+		current = "auto"
+	}
+	allow := acp.SessionConfigSelectOptionsUngrouped{{Value: "on", Name: "On"}, {Value: "off", Name: "Off"}}
+	allowAll := "off"
+	if a.mode == "copilot-allow-all" {
+		allowAll = "on"
+	}
+	return []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "mode", Name: "Mode", CurrentValue: "https://agentclientprotocol.com/protocol/session-modes#agent", Options: acp.SessionConfigSelectOptions{Ungrouped: &modes}}},
+		{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "model", Name: "Model", CurrentValue: acp.SessionConfigValueId(current), Options: acp.SessionConfigSelectOptions{Ungrouped: &models}}},
+		{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "allow_all", Name: "Allow All", CurrentValue: acp.SessionConfigValueId(allowAll), Options: acp.SessionConfigSelectOptions{Ungrouped: &allow}}},
+	}
 }
 
 func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
@@ -27,6 +60,12 @@ func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.Initiali
 	// Codex and Claude adapters advertise session/delete; mode no-delete
 	// stands for an adapter that does not.
 	caps := acp.AgentCapabilities{}
+	if a.copilot() {
+		a.record(fmt.Sprintf("copilot model=%s effort=%s tools=%s", a.cliModel, a.cliEffort, a.tools))
+		// Copilot offers session/close, not session/delete.
+		caps.SessionCapabilities.Close = &acp.SessionCloseCapabilities{}
+		return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber, AgentCapabilities: caps}, nil
+	}
 	if a.mode != "no-delete" {
 		caps.SessionCapabilities.Delete = &acp.SessionDeleteCapabilities{}
 	}
@@ -36,6 +75,12 @@ func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.Initiali
 // Cancel accepts the client's session/cancel; a hanging prompt ends with its
 // own context.
 func (a *agent) Cancel(context.Context, acp.CancelNotification) error { return nil }
+
+// CloseSession records the session slopcop closes.
+func (a *agent) CloseSession(_ context.Context, p acp.CloseSessionRequest) (acp.CloseSessionResponse, error) {
+	a.record("close=" + string(p.SessionId))
+	return acp.CloseSessionResponse{}, nil
+}
 
 // UnstableDeleteSession records the session slopcop cleans up.
 func (a *agent) UnstableDeleteSession(_ context.Context, p acp.UnstableDeleteSessionRequest) (acp.UnstableDeleteSessionResponse, error) {
@@ -75,6 +120,12 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 	if a.mode == "new-error" {
 		return acp.NewSessionResponse{}, fmt.Errorf("fake session failure")
 	}
+	if a.copilot() {
+		if a.mode == "copilot-no-effort" && a.cliEffort != "" {
+			return acp.NewSessionResponse{}, fmt.Errorf("Request sessions.open failed with message: session construction failed: Model '%s' does not support reasoning effort configuration.", a.cliModel)
+		}
+		return acp.NewSessionResponse{SessionId: "fake", ConfigOptions: a.copilotOptions()}, nil
+	}
 	model := a.model
 	if a.models != "" {
 		model = a.models
@@ -85,6 +136,10 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 	return acp.NewSessionResponse{SessionId: "fake", ConfigOptions: options(model, a.mode)}, nil
 }
 func (a *agent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfigOptionRequest) (acp.SetSessionConfigOptionResponse, error) {
+	if a.copilot() {
+		a.record(fmt.Sprintf("set %s=%s", p.ValueId.ConfigId, p.ValueId.Value))
+		return acp.SetSessionConfigOptionResponse{}, nil
+	}
 	model := a.model
 	if a.models != "" {
 		model = a.models
@@ -174,6 +229,9 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 			}
 		}
 	}
+	if a.mode == "copilot-error-reply" {
+		text = fmt.Sprintf("Error: Execution failed: Model %q is not available.", a.cliModel)
+	}
 	if a.mode == "findings" {
 		text = "- [P1] fake defect"
 	}
@@ -221,6 +279,20 @@ func Main() {
 		}
 		if v, ok := strings.CutPrefix(arg, "--fake-trace="); ok {
 			a.trace = v
+		}
+	}
+	for i, arg := range os.Args {
+		switch arg {
+		case "--model":
+			if i+1 < len(os.Args) {
+				a.cliModel = os.Args[i+1]
+			}
+		case "--reasoning-effort":
+			if i+1 < len(os.Args) {
+				a.cliEffort = os.Args[i+1]
+			}
+		case "--available-tools":
+			a.tools = strings.Join(os.Args[i+1:], ",")
 		}
 	}
 	a.conn = acp.NewAgentSideConnection(a, os.Stdout, os.Stdin)

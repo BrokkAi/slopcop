@@ -1,12 +1,13 @@
 ---
 title: GitHub Copilot CLI
-description: "What a check run inside GitHub Copilot CLI sends about the models that wrote the change, read from the session's events.jsonl, and what is not supported yet."
+description: "Running the local review through GitHub Copilot CLI, what a check run inside Copilot CLI sends about the models that wrote the change, and what is not supported yet."
 sidebar:
   order: 4
 ---
 
-> **Not yet verified against a live session.** Copilot CLI is not open source.
-> What follows is built from the session event schema GitHub publishes in the
+> **What a check reads from a Copilot session is not yet verified against a
+> live session.** Copilot CLI is not open source. That part is built from the
+> session event schema GitHub publishes in the
 > [Copilot SDK](https://github.com/github/copilot-sdk/blob/99d90edf504f824c77dcdf0faa978f4b35848a87/nodejs/src/generated/session-events.ts),
 > the CLI's [changelog](https://github.com/github/copilot-cli/blob/main/changelog.md)
 > and its [hooks reference](https://docs.github.com/en/copilot/reference/hooks-configuration),
@@ -23,6 +24,55 @@ Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
 There is no Stop hook for Copilot CLI yet; `slopcop init` installs none there.
+
+## Copilot as a reviewer
+
+Copilot CLI can also run the local review, on your Copilot subscription,
+whichever agent wrote the change: Copilot itself, Pi on its Copilot provider,
+or VS Code. Set it with:
+
+```console
+slopcop config set review.provider copilot
+slopcop config unset review.reviewers
+slopcop init
+```
+
+`slopcop init` also picks Copilot by itself when no reviewer of its own works
+and Copilot may be signed in (a `GH_TOKEN`, `GITHUB_TOKEN` or
+`COPILOT_GITHUB_TOKEN`, a Copilot CLI login, or a GitHub CLI login). Each
+probe it sends uses one Copilot request.
+
+Copilot runs `terra`, `sol` and `haiku`; `flash` keeps dsh. The CLI starts
+Copilot (`@github/copilot@1.0.114`, through npx, unless
+`review.adapters.copilot.command` names another) once to list the models your
+account may use, which sends no prompt, and then once per reviewer, with:
+
+- **The newest model of the family** your account has enabled, through
+  `--model`. A model Copilot lists but has not enabled fails the reviewer and
+  says so, rather than running another model.
+- **Reasoning effort `high`**, through `--reasoning-effort`. If Copilot will
+  not start with it, which it does for a model without effort settings, the
+  reviewer starts again at the model's default effort and the report says
+  why.
+- **Only read tools**, through `--available-tools view grep glob`, with
+  `allow_all` off and the session out of autopilot. The reviewer cannot ask
+  to write or run anything, and the CLI refuses any request that is not a
+  read.
+
+A reply that is Copilot's own error, such as `Error: Execution failed: ...`,
+fails the reviewer rather than counting as a review.
+
+The review path is checked against Copilot CLI 1.0.114 on Copilot Free; the
+paid models have not yet been run from a live account.
+
+### Copilot Free
+
+Copilot Free offers only Auto, the model Copilot picks itself, and no
+reasoning effort on it. One reviewer then runs on Auto, and the report warns
+that it did; other families do not run, because a second Auto reviewer could
+get the same model. With one reviewer, a clean review needs only that one.
+Copilot Free also has a small monthly request allowance that every check
+draws on. Copilot Pro unlocks the `terra`, `sol` and `haiku` models.
 
 ## What the CLI reads from the session
 

@@ -659,14 +659,39 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 	if len(probed) > 0 {
 		fmt.Fprintf(out, "slopcop: checking which local reviewers work here (%s); this sends each a short prompt and can take a few minutes the first time, while npx downloads each adapter\n", joinFamilies(probed))
 	}
-	results := review.Probe(ctx, probeRoot, logDir, families, settings, func(r review.ProbeResult) {
+	printResult := func(r review.ProbeResult) {
 		switch {
 		case r.Available:
 			fmt.Fprintf(out, "slopcop: %s available (%s)\n", r.Family, r.Model)
+			if r.Warning != "" {
+				fmt.Fprintf(out, "slopcop: warning: %s\n", r.Warning)
+			}
 		case verbose:
 			fmt.Fprintf(out, "slopcop: %s unavailable: %s\n", r.Family, r.Reason)
 		}
-	})
+	}
+	results := review.Probe(ctx, probeRoot, logDir, families, settings, printResult)
+	// With no reviewer of its own working, a machine signed in to GitHub
+	// Copilot, such as one that runs Pi on Copilot, reviews through
+	// Copilot CLI.
+	provider, switched := settings.Provider, false
+	if !anyAvailable(results) && provider == "" && review.CopilotMayBeLoggedIn() {
+		settings.Provider = review.ProviderCopilot
+		var served []review.Family
+		for _, f := range families {
+			if review.CopilotServes(f) {
+				served = append(served, f)
+			}
+		}
+		fmt.Fprintf(out, "slopcop: trying the same reviewers through GitHub Copilot CLI (%s); each probe uses one Copilot request\n", joinFamilies(served))
+		copilotResults := review.Probe(ctx, probeRoot, filepath.Join(logDir, "copilot"), served, settings, printResult)
+		if anyAvailable(copilotResults) {
+			provider, switched = review.ProviderCopilot, true
+			results = copilotResults
+		} else {
+			results = append(results, copilotResults...)
+		}
+	}
 	// The first two that work review; the rest that work stand by as
 	// fallbacks for a reviewer that fails.
 	var names, fallbacks []string
@@ -691,7 +716,7 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 		if cfg.Mode != "" {
 			after = fmt.Sprintf("Until then, mode %s needs a reviewer, so run checks with --static.", cfg.Mode)
 		}
-		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code or Codex, or set DEEPSEEK_API_KEY, then run `slopcop init`%s). %s\n", why, after)
+		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code, Codex or GitHub Copilot CLI, or set DEEPSEEK_API_KEY, then run `slopcop init`%s). %s\n", why, after)
 		return nil
 	}
 	if cfg.Review == nil {
@@ -699,6 +724,7 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 	}
 	cfg.Review.Reviewers = names
 	cfg.Review.Fallbacks = fallbacks
+	cfg.Review.Provider = provider
 	if cfg.Review.MinCompleted > len(names) {
 		fmt.Fprintf(out, "slopcop: review.minCompleted was %d, more than the %d reviewers found; unset it, so the default applies\n", cfg.Review.MinCompleted, len(names))
 		cfg.Review.MinCompleted = 0
@@ -728,7 +754,19 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 	if len(fallbacks) > 0 {
 		fmt.Fprintf(out, "slopcop: fallbacks set to %s\n", strings.Join(fallbacks, ", "))
 	}
+	if switched {
+		fmt.Fprintf(out, "slopcop: review.provider set to %s, so %s review through GitHub Copilot CLI\n", provider, strings.Join(names, ", "))
+	}
 	return nil
+}
+
+func anyAvailable(results []review.ProbeResult) bool {
+	for _, r := range results {
+		if r.Available {
+			return true
+		}
+	}
+	return false
 }
 
 func joinFamilies(families []review.Family) string {

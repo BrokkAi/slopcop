@@ -73,7 +73,13 @@ type Settings struct {
 	// Adapters overrides argv by adapter name. An adapter without an entry
 	// uses its pinned npx package.
 	Adapters map[string][]string
+	// Provider, when ProviderCopilot, runs every family GitHub Copilot
+	// serves through the Copilot CLI instead of the family's own adapter.
+	Provider string
 }
+
+// ProviderCopilot routes the families Copilot serves through Copilot CLI.
+const ProviderCopilot = "copilot"
 
 func (s Settings) minCompleted() int {
 	if s.MinCompleted > 0 {
@@ -112,9 +118,11 @@ type Reviewer struct {
 	// Name is "<position>-<family>", such as "1-terra".
 	Name   string `json:"name"`
 	Family Family `json:"family"`
-	Model  string `json:"model,omitempty"`
-	Effort string `json:"effort,omitempty"`
-	Status Status `json:"status"`
+	// Adapter names the ACP adapter that ran the reviewer.
+	Adapter string `json:"adapter,omitempty"`
+	Model   string `json:"model,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+	Status  Status `json:"status"`
 	// Text is the reviewer's final reply: agent message text after its last
 	// tool call.
 	Text  string `json:"text,omitempty"`
@@ -127,6 +135,9 @@ type Reviewer struct {
 	FirstLog   string `json:"firstLog,omitempty"`
 	// StandsInFor names the reviewer a fallback replaced.
 	StandsInFor string `json:"standsInFor,omitempty"`
+	// Warning says how the reviewer ran differently from what was asked,
+	// such as on Copilot's Auto model or at its default effort.
+	Warning string `json:"warning,omitempty"`
 }
 
 // Verdict is the outcome of one review.

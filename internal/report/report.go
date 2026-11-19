@@ -2089,6 +2089,9 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		if r.StandsInFor != "" {
 			fmt.Fprintf(w, "    Stands in for %s, which failed\n", printable(r.StandsInFor))
 		}
+		if r.Warning != "" {
+			fmt.Fprintf(w, "    Warning: %s\n", printable(r.Warning))
+		}
 		if r.Text != "" {
 			for _, line := range strings.Split(r.Text, "\n") {
 				fmt.Fprintf(w, "    %s\n", printable(line))

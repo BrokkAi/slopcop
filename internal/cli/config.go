@@ -14,7 +14,7 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted"
+const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider"
 
 // newConfigCommand builds the user config commands.
 func newConfigCommand() *cobra.Command {
@@ -134,6 +134,11 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return strconv.Itoa(cfg.Review.MinCompleted), nil
 		}
 		return strconv.Itoa(review.DefaultMinCompleted) + " (not set; at most the number of reviewers)", nil
+	case "review.provider":
+		if cfg.Review != nil && cfg.Review.Provider != "" {
+			return cfg.Review.Provider, nil
+		}
+		return "(not set; each family uses its own adapter)", nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -194,6 +199,11 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("invalid review.minCompleted %q (want 1-%d, at most the number of reviewers)", value, limit)
 		}
 		ensureReview(cfg).MinCompleted = n
+	case "review.provider":
+		if value != review.ProviderCopilot {
+			return fmt.Errorf("invalid review.provider %q (want %s)", value, review.ProviderCopilot)
+		}
+		ensureReview(cfg).Provider = value
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -227,10 +237,14 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 		if cfg.Review != nil {
 			cfg.Review.MinCompleted = 0
 		}
+	case "review.provider":
+		if cfg.Review != nil {
+			cfg.Review.Provider = ""
+		}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
-	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && len(cfg.Review.Fallbacks) == 0 && cfg.Review.Timeout == "" && cfg.Review.MinCompleted == 0 && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && cfg.Review.Empty() {
 		cfg.Review = nil
 	}
 	return nil

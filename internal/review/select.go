@@ -3,6 +3,7 @@ package review
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,6 +34,29 @@ func AdapterName(f Family) string {
 		return "claude"
 	}
 	return ""
+}
+
+// AdapterFor names the adapter that runs a family under these settings:
+// Copilot for the families it serves when the provider is Copilot, otherwise
+// the family's own adapter.
+func AdapterFor(f Family, s Settings) string {
+	if s.Provider == ProviderCopilot && CopilotServes(f) {
+		return copilotAdapter
+	}
+	return AdapterName(f)
+}
+
+// CommandFor returns the argv that starts a family's adapter: the configured
+// override, else the pinned package.
+func CommandFor(f Family, s Settings) []string {
+	adapter := AdapterFor(f, s)
+	if cmd := s.Adapters[adapter]; len(cmd) > 0 {
+		return cmd
+	}
+	if adapter == copilotAdapter {
+		return slices.Clone(copilotDefaultCommand)
+	}
+	return DefaultCommand(f)
 }
 
 // ParseFamily accepts only the supported reviewer families.
