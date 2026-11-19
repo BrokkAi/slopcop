@@ -1768,7 +1768,7 @@ func TestEnableAddsARepositoryWithoutAsking(t *testing.T) {
 	}
 	for _, want := range []string{
 		"slopcop: added BrokkAi/slopcop to \"Dave\"; your agent's changes here are checked there from now on.\n",
-		"slopcop: wrong workspace? Run `slopcop enable --workspace <name>` here to add it to another (`slopcop workspace list` names them), then `slopcop repo disable BrokkAi/slopcop --workspace \"Dave\"` to remove it from \"Dave\".\n",
+		"slopcop: wrong workspace? Run `slopcop workspace map <name>` here to check it in another (`slopcop workspace list` names them), then `slopcop repo disable BrokkAi/slopcop --workspace \"Dave\"` to remove it from \"Dave\".\n",
 	} {
 		if !strings.Contains(stderr, want) {
 			t.Errorf("stderr = %q, want %q", stderr, want)

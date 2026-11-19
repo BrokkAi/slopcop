@@ -234,7 +234,7 @@ func enableAddedLines(repoURL string, added *report.AddedWorkspace, workspaces [
 		return []string{first + fmt.Sprintf(" `slopcop repo disable %s` undoes that.", name)}
 	}
 	selector := workspaceSelector(workspaces, service.Workspace{ID: added.ID, Name: added.Name})
-	return []string{first, fmt.Sprintf("slopcop: wrong workspace? Run `slopcop enable --workspace <name>` here to add it to another (`slopcop workspace list` names them), then `slopcop repo disable %s --workspace %q` to remove it from %s.",
+	return []string{first, fmt.Sprintf("slopcop: wrong workspace? Run `slopcop workspace map <name>` here to check it in another (`slopcop workspace list` names them), then `slopcop repo disable %s --workspace %q` to remove it from %s.",
 		name, selector, where)}
 }
 

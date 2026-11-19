@@ -66,7 +66,7 @@ running, `4` refused and a person must act, `130`/`143` interrupted. See
 Optional. Add the repository the `origin` remote names to the workspace that
 checks and bills it, run its first check, and map this machine's checkouts of
 it to that workspace. It does not ask: it says which workspace it added the
-repository to, and how to move it (`slopcop enable --workspace <name>`) or
+repository to, and how to move it (`slopcop workspace map <name>`) or
 remove it (`slopcop repo disable`). It exits with the first check's result. A
 check adds a repository the workspace has never added by itself, so `enable`
 is for adding one up front, picking its workspace, or turning a disabled

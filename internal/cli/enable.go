@@ -32,8 +32,8 @@ The workspace is the one --workspace names, else the one this checkout is
 mapped to, else the login's. 'enable' adds the repository there without asking,
 says which workspace that was, and maps this machine's checkouts of it to that
 workspace, so later checks run there whatever workspace the login is bound to
-('slopcop workspace map'). If it is the wrong one, run 'slopcop enable
---workspace <name>' to add it to another, and 'slopcop repo disable' to remove
+('slopcop workspace map'). If it is the wrong one, 'slopcop workspace map
+<name>' checks it in another from now on, and 'slopcop repo disable' removes
 it. An account with more than one workspace is told when another of them
 already has the repository.
 
@@ -104,10 +104,10 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	}
 	// The checkout is mapped to the workspace the repository is now enabled
 	// in, so later checks, the Stop hook's included, run there whatever the
-	// login is bound to. A first
-	// check that was cut short may still have added the repository; the
-	// workspace's own list tells.
+	// login is bound to. A first check that was cut short may still have
+	// added the repository; the workspace's own list tells.
 	mapped := enabledIn(err)
+	recovered := false
 	var ran silentExit
 	if !mapped && repository.State == statusNotAdded && errors.As(err, &ran) {
 		// An interrupt has cancelled the command's context, and this is the
@@ -116,15 +116,16 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 		defer cancel()
 		if listed, lookupErr := lookupRepositoryStatus(ctx, client, repoRoot); lookupErr == nil &&
 			listed.State != statusNotAdded && listed.State != statusUnsupported {
-			mapped = true
+			mapped, recovered = true, true
 		}
 	}
 	if mapped {
-		// The line that the repository was added already names the
-		// workspace checks here run in, and so does a mapping with one
-		// workspace, which is no choice at all.
+		// The line the first check printed when it added the repository
+		// already names the workspace checks here run in, and a mapping with
+		// one workspace is no choice at all. A check cut short printed no
+		// such line, so the mapping says so itself.
 		record := recordMapping
-		if len(whoami.Workspaces) <= 1 || repository.State == statusNotAdded {
+		if len(whoami.Workspaces) <= 1 || (repository.State == statusNotAdded && !recovered) {
 			record = saveMapping
 		}
 		if mapErr := record(cmd, client.BaseURL, repoURL, target); mapErr != nil {

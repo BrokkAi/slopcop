@@ -50,7 +50,7 @@ undo that:
 ```console
 $ slopcop enable
 slopcop: added acme/widgets to "Acme team"; your agent's changes here are checked there from now on.
-slopcop: wrong workspace? Run `slopcop enable --workspace <name>` here to add it to another (`slopcop workspace list` names them), then `slopcop repo disable acme/widgets --workspace "Acme team"` to remove it from "Acme team".
+slopcop: wrong workspace? Run `slopcop workspace map <name>` here to check it in another (`slopcop workspace list` names them), then `slopcop repo disable acme/widgets --workspace "Acme team"` to remove it from "Acme team".
 ```
 
 An account with one workspace gets the first line alone, ending with the
