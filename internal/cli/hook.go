@@ -206,6 +206,9 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 		}
 		output.SystemMessage = boundedHookText(strings.TrimSpace(state.added + "\n" + output.SystemMessage))
 	}
+	if state.lowCredits != "" {
+		output.SystemMessage = boundedHookText(strings.TrimSpace(output.SystemMessage + "\n" + state.lowCredits))
+	}
 	if fresh || scopeChanged {
 		if notice := hookOmittedFilesNotice(prepared.omittedFiles); notice != "" {
 			output.SystemMessage = boundedHookText(notice + "\n" + output.SystemMessage)
@@ -300,6 +303,10 @@ func sendHookCheck(ctx context.Context, prepared preparedCheck, state *hookState
 		// workspace has the repository from here on.
 		first, second := addedLines(prepared.request.RepoURL, addedWorkspace(ctx, prepared.client, prepared.request.RepoURL, prepared.choice))
 		state.added = first + " (the automatic check)\n" + second
+	}
+	if line := report.LowCreditsLine(response.Credits); line != "" && !state.CreditsWarned {
+		state.CreditsWarned = true
+		state.lowCredits = line
 	}
 	state.completed(prepared.workspace, prepared.fingerprint, response)
 	return "", true

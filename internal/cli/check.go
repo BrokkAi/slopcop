@@ -372,6 +372,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if writeErr != nil {
 		return writeErr
 	}
+	// A low balance is said at the point of use, before a check is refused.
+	// JSON carries the same figures in its credits block.
+	if format == report.FormatHuman && static.response != nil {
+		if line := report.LowCreditsLine(static.response.Credits); line != "" {
+			fmt.Fprintln(cmd.ErrOrStderr(), line)
+		}
+	}
 	// Say whether the tree may be pushed only where the push gate is
 	// installed, and only when the check produced a result to judge: after a
 	// refusal or a pending check, the static half's own message already says
