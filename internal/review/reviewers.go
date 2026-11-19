@@ -22,6 +22,10 @@ type panel struct {
 	dir      string
 	timeout  time.Duration
 	commands map[Family][]string
+	// adapters names each family's adapter; copilot lists the models for
+	// the families Copilot runs.
+	adapters map[Family]string
+	copilot  *copilotCatalog
 	prompt   func(Family) string
 	min      int
 
@@ -91,7 +95,7 @@ func (p *panel) takeFallback(replaced Family) (Family, int, bool) {
 	}
 	pick := p.used
 	for i := p.used; i < len(p.fallbacks); i++ {
-		if AdapterName(p.fallbacks[i]) != AdapterName(replaced) {
+		if p.adapter(p.fallbacks[i]) != p.adapter(replaced) {
 			pick = i
 			break
 		}
@@ -116,6 +120,9 @@ func (p *panel) review(name string, f Family, s *runner, startErr error) Reviewe
 	}
 	r.Status = parseVerdict(r)
 	if r.Status == StatusFailed {
+		if r.Model == copilotAuto {
+			p.copilot.release(f)
+		}
 		r.Error = explainFailure(r)
 	} else {
 		p.mu.Lock()
@@ -146,16 +153,15 @@ func (p *panel) attempt(name string, f Family, s *runner, startErr error, note s
 func (p *panel) start(name string, f Family) (*runner, error) {
 	p.startMu.Lock()
 	defer p.startMu.Unlock()
-	s, err := startRunner(p.ctx, p.root, p.commands[f], f, name, p.dir, p.timeout)
-	if err != nil {
-		return nil, err
+	return launch(p.ctx, p.root, p.adapter(f), p.commands[f], p.copilot, f, name, p.dir, p.timeout)
+}
+
+// adapter names the adapter that runs a family in this panel.
+func (p *panel) adapter(f Family) string {
+	if a, ok := p.adapters[f]; ok {
+		return a
 	}
-	if err = s.prepare(p.root); err != nil {
-		err = startError(s.ctx, err)
-		s.stop()
-		return s, err
-	}
-	return s, nil
+	return AdapterName(f)
 }
 
 // retryable reports whether a failed reviewer may get a second attempt. A
@@ -248,7 +254,10 @@ func explainFailure(r Reviewer) string {
 	} else if r.FirstError != "" {
 		text += " (retried once with the same result)"
 	}
-	adapter := AdapterName(r.Family)
+	adapter := r.Adapter
+	if adapter == "" {
+		adapter = AdapterName(r.Family)
+	}
 	switch failureCause(text) {
 	case causeAuth:
 		return fmt.Sprintf("%s is not signed in: sign in to its %s adapter, then run the check again. %s", r.Family, adapter, text)

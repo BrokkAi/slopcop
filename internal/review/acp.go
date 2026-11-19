@@ -185,8 +185,12 @@ type runner struct {
 	stopWatch       func() bool
 	watchDone       chan struct{}
 	result          Reviewer
-	// canDelete records that the adapter advertised session/delete.
-	canDelete bool
+	// canDelete records that the adapter advertised session/delete, and
+	// canClose session/close, which Copilot offers instead.
+	canDelete, canClose bool
+	// copilot marks a Copilot CLI reviewer, whose errors can arrive as a
+	// normal reply.
+	copilot bool
 	// sessionMu guards session, which the timeout's kill reads.
 	sessionMu sync.Mutex
 	session   acp.SessionId
@@ -217,12 +221,13 @@ func (s *runner) cleanup() {
 	})
 }
 
-// deleteSession sends session/delete when the adapter supports it.
+// deleteSession sends session/delete when the adapter supports it, else
+// session/close.
 func (s *runner) deleteSession() {
 	s.sessionMu.Lock()
 	session := s.session
 	s.sessionMu.Unlock()
-	if session == "" || !s.canDelete {
+	if session == "" || !s.canDelete && !s.canClose {
 		return
 	}
 	select {
@@ -232,6 +237,12 @@ func (s *runner) deleteSession() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cleanupTimeout)
 	defer cancel()
+	if !s.canDelete {
+		if _, err := s.conn.CloseSession(ctx, acp.CloseSessionRequest{SessionId: session}); err != nil {
+			fmt.Fprintf(s.stderr, "close session %s: %v\n", session, err)
+		}
+		return
+	}
 	if _, err := s.conn.UnstableDeleteSession(ctx, acp.UnstableDeleteSessionRequest{SessionId: session}); err != nil {
 		fmt.Fprintf(s.stderr, "delete session %s: %v\n", session, err)
 	}
@@ -315,6 +326,7 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 		return nil, fmt.Errorf("initialize: %w", startError(s.ctx, err))
 	}
 	s.canDelete = initialized.AgentCapabilities.SessionCapabilities.Delete != nil
+	s.canClose = initialized.AgentCapabilities.SessionCapabilities.Close != nil
 	return s, nil
 }
 func (s *runner) closeFiles() {
@@ -339,14 +351,20 @@ func (s *runner) stop() {
 	<-s.conn.Done()
 	s.closeFiles()
 }
+
+// setSession records the open session, which cleanup deletes or closes.
+func (s *runner) setSession(id acp.SessionId) {
+	s.sessionMu.Lock()
+	s.session = id
+	s.sessionMu.Unlock()
+}
+
 func (s *runner) prepare(root string) error {
 	session, err := s.conn.NewSession(s.ctx, acp.NewSessionRequest{Cwd: root, McpServers: []acp.McpServer{}})
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
 	}
-	s.sessionMu.Lock()
-	s.session = session.SessionId
-	s.sessionMu.Unlock()
+	s.setSession(session.SessionId)
 	modelOpt := configOption(session.ConfigOptions, "model")
 	model, ok := bestModel(s.result.Family, choices(modelOpt))
 	if !ok {
@@ -412,6 +430,9 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 	// as the reply. That is a failed reviewer, not a finding.
 	if err == nil && connectionReply(s.result.Text) {
 		err = fmt.Errorf("the adapter could not reach its provider and replied with its error instead of a review: %s", s.result.Text)
+	}
+	if err == nil && s.copilot && copilotErrorReply(s.result.Text) {
+		err = fmt.Errorf("Copilot ended the turn with its own error instead of a review: %s", s.result.Text)
 	}
 	if s.client.permissionError != nil {
 		err = s.client.permissionError

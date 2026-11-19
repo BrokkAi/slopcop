@@ -201,6 +201,14 @@ type Review struct {
 	// zero means review.DefaultMinCompleted.
 	MinCompleted int                `json:"minCompleted,omitempty"`
 	Adapters     map[string]Adapter `json:"adapters,omitempty"`
+	// Provider, when "copilot", runs the families GitHub Copilot serves
+	// through Copilot CLI.
+	Provider string `json:"provider,omitempty"`
+}
+
+// Empty reports whether no review setting is set.
+func (r *Review) Empty() bool {
+	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == ""
 }
 
 // Gate controls which hosted findings block push approval.
@@ -275,7 +283,7 @@ func Save(cfg Config) (string, error) {
 		return "", fmt.Errorf("create %s: %w", filepath.Dir(path), err)
 	}
 	cfg.migrate()
-	if cfg.Review != nil && len(cfg.Review.Reviewers) == 0 && len(cfg.Review.Fallbacks) == 0 && cfg.Review.Timeout == "" && cfg.Review.MinCompleted == 0 && len(cfg.Review.Adapters) == 0 {
+	if cfg.Review != nil && cfg.Review.Empty() {
 		cfg.Review = nil
 	}
 	if cfg.Gate != nil && cfg.Gate.BlockOn == "" {

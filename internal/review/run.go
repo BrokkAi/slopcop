@@ -44,12 +44,14 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	in := discoverIntent(opts.Intent)
 	v.IntentSource = in.Source
 	commands := map[Family][]string{}
+	adapters := map[Family]string{}
+	var copilot *copilotCatalog
 	for _, f := range slices.Concat(order, opts.Settings.Fallbacks) {
-		cmd := opts.Settings.Adapters[AdapterName(f)]
-		if len(cmd) == 0 {
-			cmd = DefaultCommand(f)
+		commands[f] = CommandFor(f, opts.Settings)
+		adapters[f] = AdapterFor(f, opts.Settings)
+		if adapters[f] == copilotAdapter && copilot == nil {
+			copilot = newCopilotCatalog(commands[f])
 		}
-		commands[f] = cmd
 	}
 	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands})
 	hash := sha256.Sum256(keyData)
@@ -97,7 +99,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	p := &panel{ctx: ctx, root: opts.Root, dir: dir, timeout: timeout, commands: commands, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
+	p := &panel{ctx: ctx, root: opts.Root, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
 		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, findings, string(diff), f) }}
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)

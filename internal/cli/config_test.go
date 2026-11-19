@@ -9,7 +9,7 @@ import (
 
 func TestConfigCommandGetSetUnset(t *testing.T) {
 	isolateUserConfig(t)
-	for _, tc := range []struct{ key, want string }{{"mode", "static (not set; no reviewers are configured)"}, {"review.reviewers", "(not set)"}, {"review.timeout", "20m0s"}, {"review.minCompleted", "2 (not set; at most the number of reviewers)"}, {"review.fallbacks", "(not set)"}} {
+	for _, tc := range []struct{ key, want string }{{"mode", "static (not set; no reviewers are configured)"}, {"review.reviewers", "(not set)"}, {"review.timeout", "20m0s"}, {"review.minCompleted", "2 (not set; at most the number of reviewers)"}, {"review.fallbacks", "(not set)"}, {"review.provider", "(not set; each family uses its own adapter)"}} {
 		code, out, errOut := runCLI(t, "config", "get", tc.key)
 		if code != 0 || strings.TrimSpace(out) != tc.want {
 			t.Fatalf("get %s: code=%d out=%q err=%q", tc.key, code, out, errOut)
@@ -53,6 +53,19 @@ func TestConfigCommandGetSetUnset(t *testing.T) {
 	code, _, errOut = runCLI(t, "config", "unset", "review.minCompleted")
 	if code != 0 {
 		t.Fatalf("unset minCompleted: code=%d err=%q", code, errOut)
+	}
+	code, _, errOut = runCLI(t, "config", "set", "review.provider", "pi")
+	if code == 0 || !strings.Contains(errOut, "invalid review.provider") {
+		t.Fatalf("invalid provider: code=%d err=%q", code, errOut)
+	}
+	if code, _, errOut = runCLI(t, "config", "set", "review.provider", "copilot"); code != 0 {
+		t.Fatalf("set provider: code=%d err=%q", code, errOut)
+	}
+	if code, out, _ := runCLI(t, "config", "get", "review.provider"); code != 0 || strings.TrimSpace(out) != "copilot" {
+		t.Fatalf("get provider: %q", out)
+	}
+	if code, _, errOut = runCLI(t, "config", "unset", "review.provider"); code != 0 {
+		t.Fatalf("unset provider: code=%d err=%q", code, errOut)
 	}
 	code, _, errOut = runCLI(t, "config", "unset", "review.reviewers")
 	if code != 0 {

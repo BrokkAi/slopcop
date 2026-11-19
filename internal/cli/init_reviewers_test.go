@@ -58,8 +58,53 @@ func clearReviewerLogins(t *testing.T) {
 	managed := review.ClaudeManagedSettings
 	t.Cleanup(func() { review.ClaudeManagedSettings = managed })
 	review.ClaudeManagedSettings = nil
-	for _, name := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY"} {
+	for _, name := range []string{"DEEPSEEK_API_KEY", "OPENAI_API_KEY", "CODEX_API_KEY", "DEFAULT_AUTH_REQUEST", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX", "CLAUDE_CODE_USE_FOUNDRY", "COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"} {
 		t.Setenv(name, "")
+	}
+	// Copilot CLI also finds its own login and the GitHub CLI's.
+	t.Setenv("COPILOT_HOME", t.TempDir())
+	t.Setenv("GH_CONFIG_DIR", t.TempDir())
+}
+
+// TestInitFallsBackToCopilot covers a machine whose only login is GitHub
+// Copilot, such as one that runs Pi on Copilot: init probes the families
+// Copilot serves through Copilot CLI and records the provider.
+func TestInitFallsBackToCopilot(t *testing.T) {
+	for _, tc := range []struct {
+		name, models, want, fallbacks, warning string
+	}{
+		{"paid", "auto,gpt-6.1-terra,gpt-6.1-sol,claude-haiku-5.5", "terra,sol", "haiku", ""},
+		{"free", "auto,auto", "terra", "", "only Auto"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			clearReviewerLogins(t)
+			t.Setenv("SLOPCOP_FAKE_ACP", "1")
+			t.Setenv("GH_TOKEN", "fake")
+			repo := newRepo(t, "")
+			copilot := []string{os.Args[0], "-test.run=^TestFakeAgent$", "--", "--fake-mode=copilot", "--fake-models=" + tc.models}
+			cfg := config.Config{Review: &config.Review{Adapters: map[string]config.Adapter{"copilot": {Command: copilot}}}}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			code, out, errOut := runCLI(t, "init", "--root", repo, "--no-skill", "--no-hooks")
+			if code != 0 {
+				t.Fatalf("%s: %s", out, errOut)
+			}
+			got, err := config.Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Review.Provider != "copilot" || strings.Join(got.Review.Reviewers, ",") != tc.want || strings.Join(got.Review.Fallbacks, ",") != tc.fallbacks || got.Review.MinCompleted != 0 {
+				t.Fatalf("%+v, %s", got.Review, out)
+			}
+			if !strings.Contains(out, "trying the same reviewers through GitHub Copilot CLI (terra, sol, haiku)") || !strings.Contains(out, "review.provider set to copilot") {
+				t.Fatal(out)
+			}
+			if tc.warning != "" && !strings.Contains(out, "slopcop: warning: ") || !strings.Contains(out, tc.warning) {
+				t.Fatal(out)
+			}
+		})
 	}
 }
 
@@ -78,7 +123,7 @@ func TestInitOnFreshMachine(t *testing.T) {
 		t.Fatalf("%s: %s", out, errOut)
 	}
 	want := "slopcop: left the automatic hooks alone (--no-hooks)\n" +
-		"slopcop: local review: none available yet (log in to Claude Code or Codex, or set DEEPSEEK_API_KEY, then run `slopcop init`). Hosted checks work now.\n"
+		"slopcop: local review: none available yet (log in to Claude Code, Codex or GitHub Copilot CLI, or set DEEPSEEK_API_KEY, then run `slopcop init`). Hosted checks work now.\n"
 	if !strings.HasSuffix(out, want) {
 		t.Fatalf("got %q", out)
 	}

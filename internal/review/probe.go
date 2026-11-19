@@ -12,8 +12,13 @@ import (
 
 // ProbeResult records whether a reviewer can complete a short prompt.
 type ProbeResult struct {
-	Family    Family
-	Model     string
+	Family  Family
+	Adapter string
+	Model   string
+	Effort  string
+	// Warning says how the reviewer would run differently from what its
+	// family asks for, such as on Copilot's Auto model.
+	Warning   string
 	Available bool
 	Reason    string
 	// Skipped is set when the probe never started the adapter, because
@@ -51,14 +56,17 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 	var groups [][]int
 	byCommand := map[string]int{}
 	commands := make([][]string, len(families))
+	adapters := make([]string, len(families))
+	var copilot *copilotCatalog
 	for i, f := range families {
 		if reason := MissingPrerequisite(f, root, settings); reason != "" {
 			report(i, ProbeResult{Family: f, Reason: reason, Skipped: true})
 			continue
 		}
-		argv := settings.Adapters[AdapterName(f)]
-		if len(argv) == 0 {
-			argv = DefaultCommand(f)
+		argv := CommandFor(f, settings)
+		adapters[i] = AdapterFor(f, settings)
+		if adapters[i] == copilotAdapter && copilot == nil {
+			copilot = newCopilotCatalog(argv)
 		}
 		commands[i] = argv
 		key := strings.Join(argv, "\x00")
@@ -76,7 +84,7 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 		go func() {
 			defer wg.Done()
 			for _, i := range group {
-				report(i, probeOne(ctx, root, logDir, commands[i], families[i], fmt.Sprintf("%d-%s", i+1, families[i])))
+				report(i, probeOne(ctx, root, logDir, adapters[i], commands[i], copilot, families[i], fmt.Sprintf("%d-%s", i+1, families[i])))
 			}
 		}()
 	}
@@ -86,20 +94,14 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 
 // probeOne starts one adapter, prepares a restricted session and sends it a
 // one-word prompt.
-func probeOne(ctx context.Context, root, logDir string, argv []string, f Family, name string) ProbeResult {
-	r := ProbeResult{Family: f}
-	s, err := startRunner(ctx, root, argv, f, name, logDir, probeTimeout)
-	if err == nil {
-		err = s.prepare(root)
-	}
+func probeOne(ctx context.Context, root, logDir, adapter string, argv []string, copilot *copilotCatalog, f Family, name string) ProbeResult {
+	r := ProbeResult{Family: f, Adapter: adapter}
+	s, err := launch(ctx, root, adapter, argv, copilot, f, name, logDir, probeTimeout)
 	if err != nil {
 		r.Reason = err.Error()
-		if s != nil {
-			s.stop()
-		}
 		return r
 	}
-	r.Model = s.result.Model
+	r.Model, r.Effort, r.Warning = s.result.Model, s.result.Effort, s.result.Warning
 	reply, err := s.prompt("Reply with exactly the word ok and nothing else. Do not use any tools.")
 	switch {
 	case err != nil:
@@ -108,6 +110,9 @@ func probeOne(ctx context.Context, root, logDir string, argv []string, f Family,
 		r.Reason = "empty reply"
 	default:
 		r.Available = true
+	}
+	if !r.Available && r.Model == copilotAuto {
+		copilot.release(f)
 	}
 	return r
 }
@@ -120,10 +125,15 @@ func probeOne(ctx context.Context, root, logDir string, argv []string, f Family,
 // what is certainly absent; a harness that keeps its login somewhere they
 // do not look is still probed.
 func MissingPrerequisite(f Family, root string, settings Settings) string {
-	if len(settings.Adapters[AdapterName(f)]) > 0 {
+	adapter := AdapterFor(f, settings)
+	if len(settings.Adapters[adapter]) > 0 {
 		return ""
 	}
-	switch AdapterName(f) {
+	switch adapter {
+	case copilotAdapter:
+		if !CopilotMayBeLoggedIn() {
+			return "GitHub Copilot CLI is not logged in"
+		}
 	case "dsh":
 		if os.Getenv("DEEPSEEK_API_KEY") == "" {
 			return "DEEPSEEK_API_KEY is not set"

@@ -23,6 +23,13 @@ project's `AGENTS.md`:
 Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
+## Local review on Copilot
+
+If Pi runs on GitHub Copilot, the local review can too: `slopcop init` picks
+Copilot CLI when no other reviewer works and Copilot may be signed in, or set
+`review.provider copilot`. See
+[Copilot as a reviewer](/agents/copilot-cli/#copilot-as-a-reviewer).
+
 ## No Stop hook
 
 Pi has no hook that runs a shell command: its hooks are TypeScript

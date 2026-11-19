@@ -171,15 +171,26 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			}
 			settings.MinCompleted = n
 		}
+		switch cfg.Review.Provider {
+		case "":
+		case review.ProviderCopilot:
+			settings.Provider = review.ProviderCopilot
+		default:
+			path, err = configPath()
+			if err != nil {
+				return review.Settings{}, err
+			}
+			return review.Settings{}, fmt.Errorf("invalid review.provider %q in %s: want %s", cfg.Review.Provider, path, review.ProviderCopilot)
+		}
 		if len(cfg.Review.Adapters) > 0 {
 			settings.Adapters = make(map[string][]string, len(cfg.Review.Adapters))
 			for name, adapter := range cfg.Review.Adapters {
-				if (name != "codex" && name != "dsh" && name != "claude") || len(adapter.Command) == 0 || adapter.Command[0] == "" {
+				if (name != "codex" && name != "dsh" && name != "claude" && name != review.ProviderCopilot) || len(adapter.Command) == 0 || adapter.Command[0] == "" {
 					path, err = configPath()
 					if err != nil {
 						return review.Settings{}, err
 					}
-					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, or claude", name, path)
+					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, claude, or copilot", name, path)
 				}
 				settings.Adapters[name] = append([]string(nil), adapter.Command...)
 			}

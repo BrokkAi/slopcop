@@ -75,7 +75,7 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
 `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -89,13 +89,20 @@ each family a short prompt. It tries different adapters at the same time and
 prints each result as it arrives. It skips flash without a dsh command override
 when `DEEPSEEK_API_KEY` is not set.
 
+`review.provider copilot` runs `terra`, `sol` and `haiku` through GitHub
+Copilot CLI instead of Codex and Claude, on your Copilot subscription; `flash`
+keeps dsh, since Copilot has no DeepSeek model. When no reviewer of its own
+works and Copilot may be signed in, `slopcop init` tries them through Copilot
+and sets the provider itself. See
+[GitHub Copilot CLI](/agents/copilot-cli/#copilot-as-a-reviewer).
+
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe
 logs are kept under `probes/` beside the user config because init is no longer
 repository-specific. When a reviewer or probe is done, the CLI asks its adapter
 to delete the session, so reviews
 do not pile up in your agent's history: Codex archives the thread (`codex
-unarchive <id>` restores it) and Claude deletes it. Cleanup is skipped when an
+unarchive <id>` restores it), Claude deletes it and Copilot closes it. Cleanup is skipped when an
 adapter does not support it, and a failed cleanup never affects the review. Checks that
 approve the tree (see [Exit codes](/checks/exit-codes/#which-results-approve-the-tree))
 and valid overrides write `refs/slopcop/reviewed/<tree>`.
