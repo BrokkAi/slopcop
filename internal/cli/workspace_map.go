@@ -35,24 +35,40 @@ func rootRepoURL(root string) (string, error) {
 // service, and says so. Every caller has had a person confirm, at a
 // terminal, a step that names the workspace.
 func recordMapping(cmd *cobra.Command, serviceURL, repoURL string, workspace service.Workspace) error {
-	if repoURL == "" {
-		return nil
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	if mapped, ok := cfg.WorkspaceFor(serviceURL, repoURL); ok && strings.EqualFold(mapped.ID, workspace.ID) && mapped.Name == workspace.Name {
-		return nil
-	}
-	cfg.MapRepository(serviceURL, repoURL, config.RepositoryWorkspace{ID: workspace.ID, Name: workspace.Name})
-	if _, err := config.Save(cfg); err != nil {
+	changed, err := storeMapping(serviceURL, repoURL, workspace)
+	if err != nil || !changed {
 		return err
 	}
 	fmt.Fprintf(cmd.ErrOrStderr(),
 		"slopcop: checkouts of %s on this machine now check in, and bill, %q; `slopcop workspace unmap` undoes that\n",
 		repositoryName(repoURL), workspace.Name)
 	return nil
+}
+
+// saveMapping stores the mapping as recordMapping does, without saying so.
+func saveMapping(_ *cobra.Command, serviceURL, repoURL string, workspace service.Workspace) error {
+	_, err := storeMapping(serviceURL, repoURL, workspace)
+	return err
+}
+
+// storeMapping stores that checkouts of repoURL check in workspace on the
+// service, and reports whether that changed the stored mapping.
+func storeMapping(serviceURL, repoURL string, workspace service.Workspace) (bool, error) {
+	if repoURL == "" {
+		return false, nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return false, err
+	}
+	if mapped, ok := cfg.WorkspaceFor(serviceURL, repoURL); ok && strings.EqualFold(mapped.ID, workspace.ID) && mapped.Name == workspace.Name {
+		return false, nil
+	}
+	cfg.MapRepository(serviceURL, repoURL, config.RepositoryWorkspace{ID: workspace.ID, Name: workspace.Name})
+	if _, err := config.Save(cfg); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // offerMapping maps a checkout whose repository is already active in

@@ -128,7 +128,11 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 	case statusDisabled, statusOverLimit:
 		err = enableExisting(cmd, client, repository, target)
 	case statusNotAdded:
-		err = addRepository(cmd, repoRoot, repository, target, serviceFlag, version)
+		source := choice.Source
+		if asked {
+			source = sourcePrompt
+		}
+		err = addRepository(cmd, repoRoot, repository, target, &enableCheck{workspaces: whoami.Workspaces, source: source}, serviceFlag, version)
 	default:
 		return fmt.Errorf("this repository is %s, so it cannot be enabled", repository.State)
 	}
@@ -150,7 +154,13 @@ func runEnable(cmd *cobra.Command, root, workspace, serviceFlag, version string)
 		}
 	}
 	if mapped {
-		if mapErr := recordMapping(cmd, client.BaseURL, repoURL, target); mapErr != nil {
+		// With one workspace the mapping is no choice the person made, and
+		// the line that the repository was added already names it.
+		record := recordMapping
+		if len(whoami.Workspaces) <= 1 {
+			record = saveMapping
+		}
+		if mapErr := record(cmd, client.BaseURL, repoURL, target); mapErr != nil {
 			// The repository is enabled there, but later checks would not
 			// know to run there: say so whatever the first check found.
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not map this checkout to %s: %v. Run `slopcop workspace map %q` to try again.\n",
@@ -303,7 +313,7 @@ func enableExisting(cmd *cobra.Command, client *service.Client, repository statu
 // addRepository is the one path that adds a repository to a workspace: a
 // person confirms it at a terminal, then the first check carries that
 // approval to the service.
-func addRepository(cmd *cobra.Command, repoRoot string, repository statusRepository, target service.Workspace, serviceFlag, version string) error {
+func addRepository(cmd *cobra.Command, repoRoot string, repository statusRepository, target service.Workspace, enable *enableCheck, serviceFlag, version string) error {
 	notifyChange(cmd, "adding", repository.FullName, target.Name)
 	if err := confirmChange(cmd, repository.FullName, "add"); err != nil {
 		return err
@@ -314,7 +324,17 @@ func addRepository(cmd *cobra.Command, repoRoot string, repository statusReposit
 		root:      repoRoot,
 		mode:      modeStatic,
 		workspace: target.ID,
+		enable:    enable,
 	}, serviceFlag, version)
+}
+
+// enableCheck is what the first check 'enable' runs knows of the person's
+// choice: the account's workspaces, so an account with one is not told how
+// to pick another, and how the workspace was chosen, which the check's own
+// choice would name as --workspace.
+type enableCheck struct {
+	workspaces []service.Workspace
+	source     string
 }
 
 // notifyChange says what adding or enabling a repository changes before the

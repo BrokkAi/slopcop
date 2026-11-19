@@ -1530,7 +1530,9 @@ type enableService struct {
 	// own; otherwise every workspace answers repositories.
 	inTeam []service.Repository
 	// teamFails makes the Acme team workspace refuse to list its repositories.
-	teamFails  bool
+	teamFails bool
+	// alone makes the account's personal workspace its only one.
+	alone      bool
 	lists      int
 	checks     []map[string]any
 	states     []map[string]any
@@ -1546,6 +1548,10 @@ func (s *enableService) start(t *testing.T, repo string) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
 		case "/v1/whoami":
+			if s.alone {
+				_, _ = w.Write([]byte(aloneWhoamiBody))
+				return
+			}
 			_, _ = w.Write([]byte(whoamiBody))
 		case "/v1/repositories":
 			s.lists++
@@ -1770,11 +1776,75 @@ func TestEnableAddsARepositoryAfterConfirmation(t *testing.T) {
 			t.Errorf("stderr = %q, want %q", stderr, want)
 		}
 	}
-	if !strings.Contains(stdout, "No new findings") {
-		t.Errorf("stdout = %q, want the first check's report", stdout)
+	// The person picked the workspace, so the line names how to move it,
+	// and an empty first check prints nothing more.
+	for _, unwanted := range []string{"chosen by", "the user runs", "patch is empty", "may not be pushed"} {
+		if strings.Contains(stderr, unwanted) {
+			t.Errorf("stderr = %q, want no %q", stderr, unwanted)
+		}
+	}
+	if !strings.Contains(stderr, "slopcop: to check it in another workspace instead, run `slopcop workspace map <name>` here") {
+		t.Errorf("stderr = %q, want how to move it", stderr)
+	}
+	if strings.Contains(stdout, "No new findings") {
+		t.Errorf("stdout = %q, want no report of an empty first check", stdout)
 	}
 	if len(svc.checks) != 1 || svc.checks[0]["addRepository"] != true {
 		t.Errorf("checks = %v, want one confirmed check", svc.checks)
+	}
+}
+
+const aloneWhoamiBody = `{
+	"account": {"id": "a", "username": "dave", "displayName": "Dave", "email": "dave@example.com"},
+	"workspace": {"id": "` + personalID + `", "name": "Dave", "kind": "personal", "role": "owner", "current": true},
+	"plan": "free",
+	"workspaces": [
+		{"id": "` + personalID + `", "name": "Dave", "kind": "personal", "role": "owner", "current": true}
+	]
+}`
+
+func TestEnableWithOneWorkspaceSaysOneLine(t *testing.T) {
+	isolateUserConfig(t)
+	realRepositoryCheck(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	svc := &enableService{alone: true}
+	server := svc.start(t, repo)
+	typed(t, "BrokkAi/slopcop\n")
+
+	code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	_, after, _ := strings.Cut(stderr, "Type BrokkAi/slopcop to add it:")
+	want := "slopcop: added BrokkAi/slopcop to \"Dave\". Your agent's changes here are checked from now on.\n"
+	// The test's own service is named first, as any other service would be.
+	after = strings.TrimPrefix(strings.TrimLeft(after, " "), "slopcop: using service "+server.URL+"\n")
+	if after != want || stdout != "" {
+		t.Errorf("after the confirmation stderr = %q, stdout = %q, want only %q", after, stdout, want)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapped, ok := cfg.WorkspaceFor(server.URL, "https://github.com/BrokkAi/slopcop"); !ok || mapped.ID != personalID {
+		t.Errorf("mapping = %v, %v, want the checkout mapped to the only workspace", mapped, ok)
+	}
+}
+
+func TestEnableReportsAFirstCheckThatHasAChange(t *testing.T) {
+	isolateUserConfig(t)
+	realRepositoryCheck(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	if err := os.WriteFile(filepath.Join(repo, "change.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	svc := &enableService{alone: true}
+	server := svc.start(t, repo)
+	typed(t, "BrokkAi/slopcop\n")
+
+	code, stdout, stderr := runCLI(t, "enable", "--root", repo, "--service", server.URL)
+	if code != 0 || !strings.Contains(stdout, "No new findings") {
+		t.Errorf("exit = %d, stdout = %q, stderr = %q, want the first check's report", code, stdout, stderr)
 	}
 }
 

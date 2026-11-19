@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -63,7 +64,10 @@ const (
 	noReviewersNotice = "slopcop: no reviewers are configured, so only the static check ran. " +
 		"Run `slopcop init` to add the local review, or `slopcop config set mode static` to stop this notice."
 	reviewInterruptedText = "slopcop: local reviewers were stopped before the review finished; run the same check again to retry it."
-	showExistingNotice    = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
+	// bareCleanReport is the whole human report of a clean check with
+	// nothing more to say.
+	bareCleanReport    = "No new findings | Analysis complete\n"
+	showExistingNotice = "slopcop: --show-existing is deprecated: the service lists only the findings a change introduced or touched, and every report counts the rest."
 )
 
 // staticOutcome holds one terminal result of the hosted half.
@@ -311,6 +315,20 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
 	reportOptions.SizeBreakdown = static.sizeBreakdown
+	// The first check 'enable' runs is how the repository gets added, and
+	// right after enabling there is usually nothing to check yet. Its line
+	// that the repository was added says all there is, so an empty, clean
+	// first check whose report would say only that prints no report, no
+	// empty-patch notice and no push line.
+	if opts.enable != nil && format == report.FormatHuman && prepared.bytes == 0 && len(prepared.omittedFiles) == 0 &&
+		static.addedTo != nil && static.response != nil && exit == service.ExitClean {
+		withAdded := reportOptions
+		withAdded.AddedTo = static.addedTo
+		var rendered bytes.Buffer
+		if err := report.Write(&rendered, *static.response, format, withAdded); err == nil && rendered.String() == bareCleanReport {
+			return silentExit{exit}
+		}
+	}
 	if prepared.bytes == 0 && len(prepared.omittedFiles) == 0 {
 		fmt.Fprintf(cmd.ErrOrStderr(), emptyChangeNotice+"\n", shortSHA(prepared.request.BaseCommit))
 		// A base the CLI moved explains an empty patch the user did not
@@ -547,7 +565,16 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		return staticFailure(cmd, err)
 	}
 	var addedTo *report.AddedWorkspace
-	if response.RepositoryAdded {
+	switch {
+	case response.RepositoryAdded && opts.enable != nil:
+		// 'enable' passes the workspace it settled on as --workspace would,
+		// so the choice is the one it made, not the flag's.
+		addedTo = addedWorkspace(cmd.Context(), client, request.RepoURL, prepared.choice)
+		addedTo.Source = opts.enable.source
+		for _, line := range enableAddedLines(request.RepoURL, addedTo, opts.enable.workspaces) {
+			fmt.Fprintln(cmd.ErrOrStderr(), line)
+		}
+	case response.RepositoryAdded:
 		addedTo = noticeAdded(cmd, client, request.RepoURL, prepared.choice)
 	}
 	if !response.KnownStatus() {

@@ -49,7 +49,7 @@ const sarifSchema = "https://docs.oasis-open.org/sarif/sarif/v2.1.0/errata01/os/
 type AddedWorkspace struct {
 	ID   string `json:"id,omitempty"`
 	Name string `json:"name,omitempty"`
-	// Source is flag, env, mapping or login.
+	// Source is flag, env, mapping, login or prompt.
 	Source string `json:"source"`
 	// Change is the step that moves the repository's checks to another
 	// workspace. Only a person at a terminal can take it.
