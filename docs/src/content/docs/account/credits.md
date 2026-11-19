@@ -10,11 +10,10 @@ calendar month in UTC. A check uses a free check while the month has one left,
 whether an agent, CI, or a pull request ran it. There are no paid tiers and no
 per-seat price.
 
-**Each check after those costs 0.1 credits.** One credit is one US cent, so
-that is $0.001 a check, charged when the check finishes. A check that fails is
-not charged, and asking again for a check that already ran is not charged
-again. Checks' fractions add up, and the balance goes down by a whole credit
-each time they reach one.
+**Each check after those costs 1 credit.** One credit is one US cent, so
+that is $0.01 a check, and $10 of credits buys 1,000 checks. A check is
+charged when it finishes. A check that fails is not charged, and asking again
+for a check that already ran is not charged again.
 
 **Repositories are free.** Adding or enabling a repository costs nothing.
 
