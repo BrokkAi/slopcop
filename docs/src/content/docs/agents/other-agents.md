@@ -40,7 +40,8 @@ repository root and read the report. It sends nothing when this repository is
 not enabled in the workspace.
 - Exit 0: clean, or skipped because the repository is not enabled. A skip is
   not a pass; do not ask the user to add the repository unless they asked you
-  to check it. They enable it with `slopcop enable` at a terminal.
+  to check it. They turn a disabled one back on with `slopcop enable` at a
+  terminal.
 - Exit 1: the change added findings. Fix each one and run the check again.
   Read a finding whose certainty is "possible" or "heuristic" before changing
   code; if it is a false positive, run `slopcop ignore <id>` with its id.

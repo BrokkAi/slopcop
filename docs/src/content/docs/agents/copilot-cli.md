@@ -14,8 +14,8 @@ sidebar:
 
 ## Checking a change
 
-Add the repository to the workspace from its checkout with `slopcop enable` at
-a terminal, then ask Copilot to check its change, or add the usual line to your
+The first check in a repository adds it to your workspace (`slopcop enable`
+does that up front, if you prefer). Ask Copilot to check its change, or add the usual line to your
 project's instructions:
 
 ```text

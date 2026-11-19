@@ -440,10 +440,10 @@ func TestEnableMapsTheCheckoutToTheWorkspaceItAddsTo(t *testing.T) {
 	repo := newRepo(t, "https://github.com/Acme/widgets.git")
 	svc := &mapService{}
 	server := svc.start(t, "")
-	typed(t, "Acme/widgets\n")
+	pipedStdin(t, "")
 
 	code, _, stderr := runCLI(t, "enable", "--root", repo, "-w", "Acme team", "--service", server.URL)
-	if code != 0 || !strings.Contains(stderr, `now check in, and bill, "Acme team"`) {
+	if code != 0 {
 		t.Fatalf("enable: exit = %d, stderr = %s", code, stderr)
 	}
 	if got := mappedID(t, server.URL, "https://github.com/Acme/widgets"); got != teamID {

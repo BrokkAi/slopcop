@@ -33,8 +33,8 @@ once it lands. -->
 - **A private repository needs the SlopCop GitHub App** on the account or
   organization that owns it, with the repository selected. See
   [Private repositories](/account/private-repositories/).
-- **The workspace has the repository.** Add it once with `slopcop enable` from
-  a checkout at a terminal; see
+- **The workspace has the repository.** Any `slopcop check` in a checkout adds
+  it, and so does `slopcop enable`; see
   [Repositories](/account/repositories/). The `check` tool can add it too, but
   only when the call sets `addRepository`, which the tool tells the agent to
   send only after you agree, since the workspace then pays for its checks.

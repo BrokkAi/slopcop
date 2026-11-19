@@ -80,19 +80,18 @@ those.
    For CI and agents that cannot open a browser, store a token instead:
    `slopcop login --token "$SLOPCOP_TOKEN"`. See [Sign in](/account/sign-in/).
 
-4. **Enable the repository, then check a change.** From any repository with a
-   GitHub, GitLab, or Bitbucket remote, add it to your workspace at a terminal:
+4. **Check a change.** From any repository with a GitHub, GitLab, or Bitbucket
+   remote, open your agent, or run a check yourself:
 
    ```console
-   slopcop enable
-   slopcop          # check later changes
+   slopcop
    ```
 
-   `enable` names the workspace and cost, asks you to confirm, and runs the
-   first check. A public repository works at once; a private one needs the
-   [SlopCop GitHub App](/account/private-repositories/) or a GitLab or Bitbucket
-   connection. `enable` is optional: a check of a repository the workspace has
-   never added adds it.
+   The first check adds the repository to your workspace and says which one;
+   repositories are free. A public repository works at once; a private one
+   needs the [SlopCop GitHub App](/account/private-repositories/) or a GitLab or
+   Bitbucket connection. `slopcop enable` does the same up front, if you want
+   to add a repository before its first change or pick its workspace.
 
 </Steps>
 

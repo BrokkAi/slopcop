@@ -14,7 +14,7 @@ there, and everything else in your personal one.
 ```console
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
 slopcop status                     # this checkout's repository, and the workspace that bills it
-slopcop enable                     # add this checkout's repository to that workspace, at a terminal
+slopcop enable                     # optional: add this checkout's repository to that workspace now
 slopcop workspace list             # the account's workspaces; * marks this login's
 slopcop workspace map "Acme team"  # check this checkout's repository there from now on, at a terminal
 slopcop workspace unmap            # go back to the login's workspace for this repository
@@ -50,11 +50,14 @@ elsewhere.
 Stop hook, `ignore`, `unignore`, `ignored`, `dictionary` and `repo` follow it
 when they run in that checkout. `slopcop enable` maps the checkout to the
 workspace it adds the repository to, so a repository checks where you enabled
-it without another step.
+it without another step; `slopcop enable --workspace <name>` adds it to another
+and moves the mapping there.
 
 The mapping decides which workspace pays, so `workspace map` and `workspace
-unmap` ask `[y/N]` and refuse when stdin is not a terminal. An agent cannot
-map a checkout for you; it can pass `--workspace` for one command.
+unmap` ask `[y/N]` and refuse when stdin is not a terminal. An agent can
+pass `--workspace` for one command instead. The one exception is `slopcop
+enable`, which maps the checkout to the workspace it has just added the
+repository to without asking, and says which one.
 
 Mappings are kept in the CLI's `config.json`, by service and by the
 repository's `https://host/owner/name` URL, so they cover every clone and
@@ -115,7 +118,7 @@ A team workspace has one **owner**, and any number of **managers** and
 
 | Capability | Member | Manager | Owner |
 | --- | --- | --- | --- |
-| Run checks, and add this checkout's repository with `slopcop enable` (within the workspace's limits) | yes | yes | yes |
+| Run checks, which add the checkout's repository on its first check, as `slopcop enable` does (within the workspace's limits) | yes | yes | yes |
 | Ignore a false positive | yes | yes | yes |
 | Unignore a finding | yes | yes | yes |
 | Read repository settings and check history | yes | yes | yes |

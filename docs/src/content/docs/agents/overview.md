@@ -41,11 +41,13 @@ reviewers run in Codex's read-only sandbox. A review finding is a model's judgme
 For the hosted static check, sign in once with `slopcop login` and run
 `slopcop init` once to install the user-level skills, Stop hooks and push gates.
 
-A check adds a repository the workspace has never added, so this is optional.
-To add one ahead of its first check, at a terminal:
+Then open your agent in any repository you want checked: its first check adds
+the repository to your workspace. Repositories are free; a check uses one of the
+workspace's free checks for the month, then credits. To add one ahead of its
+first check, or to pick its workspace:
 
 ```console
-slopcop enable   # add this checkout to the workspace and run its first check
+slopcop enable   # optional: add this checkout, say which workspace, run its first check
 ```
 
 The agent can also check a repository the workspace has never added: the check

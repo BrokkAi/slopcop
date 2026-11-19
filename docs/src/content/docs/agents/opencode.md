@@ -9,10 +9,10 @@ sidebar:
 
 `slopcop init` installs the shared skill once under `~/.agents/skills/`.
 opencode can also read repository-local `.agents/skills` and `.claude/skills`;
-SlopCop no longer writes those project copies during setup. Add the repository
-to the workspace from its checkout with `slopcop enable` at a terminal, then
-ask it to check its change, or add the usual line to your project's
-`AGENTS.md`:
+SlopCop no longer writes those project copies during setup. Ask it to check its
+change, or add the usual line to your project's `AGENTS.md`; the first check
+adds the repository to your workspace (`slopcop enable` does that up front, if
+you prefer):
 
 ```text
 Run `slopcop check --if-enabled` before you finish and fix what it reports.

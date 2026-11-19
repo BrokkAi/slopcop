@@ -35,13 +35,9 @@ explains the update and backup rules.
 
 ## Check every change
 
-First add the repository to the workspace from its checkout, at a terminal:
-
-```console
-slopcop enable
-```
-
-Then, to have Claude check every change without being asked, add a line to your
+The first check in a repository adds it to your workspace, so there is nothing
+to do per repository (`slopcop enable` adds one up front and says which
+workspace, if you prefer). To have Claude check every change without being asked, add a line to your
 project's `CLAUDE.md`:
 
 ```text
