@@ -101,9 +101,9 @@ names, whether the workspace has it and whether it is active.
   `-w`/`--workspace <name|id>` to that command (or set `$SLOPCOP_WORKSPACE`).
   It applies to that command only and moves no one.
 - `slopcop repo list` shows the workspace's repositories as `active`,
-  `disabled`, or `enabled, over the limit`. Every active repository after the
-  first costs credits every 30 days, and a disabled one is neither checked nor
-  charged. A check of a disabled repository answers `repository_disabled`.
+  `disabled`, or `enabled, over the limit`. Repositories are free: a check uses
+  one of the workspace's free checks for the month, then credits, and a
+  disabled repository is not checked. A check of a disabled repository answers `repository_disabled`.
 - Do not choose a workspace the user did not name: it changes which
   workspace pays.
 - A check adds a repository the workspace has never added, to the workspace
