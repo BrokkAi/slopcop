@@ -580,7 +580,9 @@ files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox.
 CI normally uses `--mode static`.
 
-Review state and logs are under `<git-dir>/slopcop/`. A complete review is
+Review state and logs are under `<git-dir>/slopcop/`. `slopcop review show
+[--format human|json|sarif]` prints the latest review again, rebuilding each
+reviewer's reply from its log, without running a reviewer. A complete review is
 reused when nothing relevant changed. A nonempty check with a clean review
 and a completed static result with no new findings at or above
 `gate.blockOn` (default `error`) records `refs/slopcop/reviewed/<tree>`.

@@ -84,9 +84,9 @@ func TestParseFindings(t *testing.T) {
 			want: []Finding{{Reviewer: "1-terra", Priority: "P3", Path: "src/café.go", StartLine: s4, EndLine: e4, Title: "Bug"}},
 		},
 		{
-			name: "untagged reply is one finding",
+			name: "untagged reply is one malformed finding",
 			text: "The change drops errors.\nSee run.go.",
-			want: []Finding{{Reviewer: "1-terra", Title: "The change drops errors.", Message: "See run.go."}},
+			want: []Finding{{Reviewer: "1-terra", Title: "The change drops errors.", Message: "See run.go.", Malformed: true}},
 		},
 		{name: "empty reply", text: " \n", want: nil},
 	}

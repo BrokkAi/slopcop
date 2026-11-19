@@ -26,6 +26,10 @@ type Finding struct {
 	Title     string `json:"title"`
 	// Message is the reviewer's explanation, joined into one paragraph.
 	Message string `json:"message,omitempty"`
+	// Malformed is set when the reply had no `- [Pn] ...` finding to parse,
+	// so Title and Message are the reply's first line and the rest as
+	// written, with no priority or location. Read the reviewer's Text.
+	Malformed bool `json:"malformed,omitempty"`
 }
 
 var (
@@ -44,7 +48,7 @@ var (
 )
 
 // ParseFindings splits one reviewer's reply into findings. A reply that has
-// text but no tagged list item is one untagged finding holding the whole
+// text but no tagged list item is one Malformed finding holding the whole
 // reply, so a reviewer that reported findings never counts as zero. changed
 // holds the paths the review covered; an unquoted location that ends a path
 // with spaces in it, such as `File.go:12` of `src/My File.go:12`, is widened
@@ -74,7 +78,7 @@ func ParseFindings(reviewer, text string, changed map[string]bool) []Finding {
 	flush()
 	if len(findings) == 0 {
 		if title, rest := firstLine(text); title != "" {
-			findings = append(findings, Finding{Reviewer: reviewer, Title: title, Message: joinParagraph(rest)})
+			findings = append(findings, Finding{Reviewer: reviewer, Title: title, Message: joinParagraph(rest), Malformed: true})
 		}
 	}
 	return findings

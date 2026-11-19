@@ -28,18 +28,37 @@ type reviewClient struct {
 	// messageID names the message text belongs to, when the adapter names
 	// messages.
 	messageID string
+	// toolSinceText records a tool update after the last message chunk, and
+	// callSinceText a tool call started after it.
+	toolSinceText, callSinceText bool
+}
+
+// reply is the reviewer's final reply so far: none when it started a tool
+// call after its last message, since text before a tool call is progress.
+func (c *reviewClient) reply() string {
+	if c.callSinceText {
+		return ""
+	}
+	return strings.TrimSpace(c.text.String())
 }
 
 // SessionUpdate retains only the agent's last message after its last tool
 // update, so the verdict is the reviewer's final reply and not progress notes
 // sent before it. Messages are told apart by their ids.
+//
+// A tool update ends the message before it, unless that same named message
+// goes on after the update: Codex streams updates for earlier calls, such as
+// a background command's output or a subagent finishing, into the middle of
+// its final reply, and resetting there kept only the reply's tail.
 func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotification) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	u := n.Update
-	// Earlier commentary cannot become the verdict after the agent inspects a tool result.
 	if u.ToolCall != nil || u.ToolCallUpdate != nil {
-		c.text.Reset()
+		c.toolSinceText = true
+	}
+	if u.ToolCall != nil {
+		c.callSinceText = true
 	}
 	if u.AgentMessageChunk != nil && u.AgentMessageChunk.Content.Text != nil {
 		id := ""
@@ -47,12 +66,14 @@ func (c *reviewClient) SessionUpdate(_ context.Context, n acp.SessionNotificatio
 			id = *u.AgentMessageChunk.MessageId
 		}
 		// A new message replaces the one before it. Only the adapter can say
-		// where a message starts; chunks without an id stay one message, so a
-		// reply is never cut short.
-		if id != "" && id != c.messageID {
+		// where a message starts; chunks without an id stay one message
+		// until a tool update, so a reply is never cut short.
+		resumed := id != "" && id == c.messageID
+		if (id != "" && id != c.messageID) || (c.toolSinceText && !resumed) {
 			c.text.Reset()
 			c.messageID = id
 		}
+		c.toolSinceText, c.callSinceText = false, false
 		c.text.WriteString(u.AgentMessageChunk.Content.Text.Text)
 	}
 	return nil
@@ -407,7 +428,7 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 		err = fmt.Errorf("incomplete turn: %s", r.StopReason)
 	}
 	s.client.mu.Lock()
-	s.result.Text = strings.TrimSpace(s.client.text.String())
+	s.result.Text = s.client.reply()
 	// Some adapters end the turn normally with their own connection error
 	// as the reply. That is a failed reviewer, not a finding.
 	if err == nil && connectionReply(s.result.Text) {

@@ -2020,6 +2020,9 @@ func reviewSARIFResult(finding review.Finding) sarifResult {
 	if finding.Priority != "" {
 		result.Properties = map[string]any{"slopcop.priority": finding.Priority}
 	}
+	if finding.Malformed {
+		result.Properties = map[string]any{"slopcop.malformed": true}
+	}
 	if finding.Path != "" {
 		location := sarifLocation{PhysicalLocation: sarifPhysicalLocation{
 			ArtifactLocation: sarifArtifactLocation{URI: sarifURI(finding.Path), URIBaseID: "SRCROOT"},
@@ -2067,7 +2070,14 @@ func failedReviewers(v review.Verdict) int {
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
-	switch count := len(v.Findings()); count {
+	findings := v.Findings()
+	malformed := map[string]bool{}
+	for _, f := range findings {
+		if f.Malformed {
+			malformed[f.Reviewer] = true
+		}
+	}
+	switch count := len(findings); count {
 	case 0:
 	case 1:
 		fmt.Fprintln(w, "  1 finding reported")
@@ -2083,6 +2093,9 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 			for _, line := range strings.Split(r.Text, "\n") {
 				fmt.Fprintf(w, "    %s\n", printable(line))
 			}
+		}
+		if malformed[r.Name] {
+			fmt.Fprintln(w, "    Not parsed: the reply has no `- [Pn]` finding, so it has no priority or location")
 		}
 		if r.Error != "" {
 			fmt.Fprintf(w, "    Error: %s\n", printable(r.Error))

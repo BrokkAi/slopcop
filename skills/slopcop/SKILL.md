@@ -276,7 +276,10 @@ Each finding also carries its
 Review findings are not in `findings` or `summary.newFindings`. In `json`,
 `review.findings` lists them, parsed from each reviewer's reply, with
 `reviewer`, `priority` (`P0` to `P3`), `path`, `startLine`, `endLine`,
-`title` and `message`; `summary.reviewFindings` counts them. In `sarif` they
+`title` and `message`; `summary.reviewFindings` counts them. A reply with no
+`- [Pn]` finding to parse is one finding with `malformed: true`, holding the
+reply's first line as `title` and the rest as `message`, with no priority or
+location: read that reviewer's `text` in `review.reviewers`. In `sarif` they
 are results of the `slopcop-review` run. They have no `id`, so `slopcop
 ignore` does not take them: fix the real ones and use `slopcop override` for
 wrong ones.
@@ -299,6 +302,10 @@ review findings, even when `--fail-on` lets them exit `0`; `staticStatus` keeps
 a different static status. Read
 `review.status`, `review.reviewers`, `review.error`,
 and `review.logDir`. Prompt and reviewer logs are under `<git-dir>/slopcop/`.
+Do not read them: to see the latest review again, such as a reply that looks
+cut short, run `slopcop review show --format json`. It rebuilds each
+reviewer's reply from its log and parses the findings again, without running
+a reviewer or spending a check, and approves nothing.
 
 The static service sets its own status; the CLI merges it with review. A failed
 request prints `{"status": "failed", "code": ..., "message": ..., "remedy": ...,
