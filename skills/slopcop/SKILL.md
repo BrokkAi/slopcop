@@ -57,6 +57,13 @@ a person at a terminal runs it.
   `slopcop: using service <url>` on stderr, and the Stop hook says once a
   session that `the automatic check uses service <url>`. If the user did not
   ask for that service, tell them before you go on.
+- When the workspace's free checks and credits run low, a check says
+  `slopcop: <n> checks left on this workspace's free checks and credits; add
+  credits at <url>` on stderr (in `json`, the `credits` block has `low: true`
+  and the same figures), and the Stop hook says it once a session. Each
+  check costs from the workspace's balance once its free checks are used, so
+  tell the user once in a session, with the link, and keep checking; do not
+  repeat it after every check, and never add credits yourself.
 - `slopcop login --default` and `slopcop service use <url>` change the default
   service for every command and agent on the machine. A login also makes its
   service the default when the default has no login, and says so. Both ask the person at

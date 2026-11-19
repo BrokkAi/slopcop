@@ -48,6 +48,8 @@ type fakeService struct {
 	adds int
 	// workspaces are the SlopCop-Workspace headers the requests carried.
 	workspaces []string
+	// credits, when set, is the standing every check answer carries.
+	credits *service.Credits
 }
 
 func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
@@ -86,7 +88,7 @@ func (f *fakeService) start(t *testing.T, repo string) *httptest.Server {
 			if body.AddRepository {
 				f.adds++
 			}
-			response := service.Response{Status: service.StatusClean, BaseCommit: base, Applied: true, Findings: []service.Finding{}, Incomplete: []service.IncompletePolicy{}}
+			response := service.Response{Status: service.StatusClean, BaseCommit: base, Applied: true, Findings: []service.Finding{}, Incomplete: []service.IncompletePolicy{}, Credits: f.credits}
 			line := 1
 			for i, path := range f.findings {
 				word := ""

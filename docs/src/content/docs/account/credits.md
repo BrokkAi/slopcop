@@ -23,6 +23,21 @@ workspace's Credits page, and can have them bought automatically when the
 balance falls below an amount the owner chooses. The current prices are listed
 on the Credits page and on the [pricing page](https://slopcop.com/pricing).
 
+## When credits run low
+
+Every check's answer says what funds the workspace's next checks: the free
+checks left this month, the credits available, and the price of a check (the
+`credits` block in `--format json`). When fewer than 100 checks are left
+across both, `slopcop check` prints one line on stderr:
+
+```text
+slopcop: 42 checks left on this workspace's free checks and credits; add credits at https://slopcop.com/credits
+```
+
+An agent's Stop hook says it once a session, and an agent that sees it tells
+you once rather than after every check. A workspace that is never charged gets
+no such line.
+
 ## When credits run out
 
 A workspace never goes into debt. Once the month's free checks are used and

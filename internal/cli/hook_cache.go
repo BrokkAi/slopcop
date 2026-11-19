@@ -57,9 +57,15 @@ type hookState struct {
 	// last told the hook's checks go to, so it is said once and not every
 	// turn.
 	ServiceNamed string `json:"serviceNamed,omitempty"`
+	// CreditsWarned says the user was told the workspace's free checks and
+	// credits are running low, which is said once in a session.
+	CreditsWarned bool `json:"creditsWarned,omitempty"`
 	// added is what to say, in this turn only, about a repository the
 	// hook's check just added to a workspace.
 	added string
+	// lowCredits is what to say, in this turn only, about a balance
+	// running low.
+	lowCredits string
 }
 
 // namingService adds to output, once in a session for a given service, that

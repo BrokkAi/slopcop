@@ -1072,6 +1072,26 @@ type jsonReport struct {
 	// OrgRules names the owner's shared rules the check ran, as the service
 	// sent it. It is set only when the check ran some.
 	OrgRules *service.OrgRules `json:"orgRules,omitempty"`
+	// Credits is what funds the workspace's next checks, as the service sent
+	// it. It is set only for a workspace that is charged for checks.
+	Credits *service.Credits `json:"credits,omitempty"`
+}
+
+// LowCreditsLine is the one line to print when the service says the
+// workspace's free checks and credits are running low, and empty otherwise.
+func LowCreditsLine(credits *service.Credits) string {
+	if credits == nil || !credits.Low {
+		return ""
+	}
+	where := "on the Credits page in SlopCop"
+	if credits.TopUpURL != "" {
+		where = "at " + credits.TopUpURL
+	}
+	noun := "checks"
+	if credits.ChecksLeft == 1 {
+		noun = "check"
+	}
+	return fmt.Sprintf("slopcop: %d %s left on this workspace's free checks and credits; add credits %s", credits.ChecksLeft, noun, where)
 }
 
 func writeJSON(w io.Writer, response service.Response, options Options) error {
@@ -1105,6 +1125,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		RepositorySize:       response.RepositorySize,
 		SizeBreakdown:        options.SizeBreakdown,
 		OrgRules:             response.OrgRules,
+		Credits:              response.Credits,
 	}, "json report")
 }
 

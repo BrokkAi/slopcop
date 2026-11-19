@@ -142,6 +142,36 @@ type Response struct {
 	// that the check ran. Nil when it ran none, or from a service that
 	// predates organization rules.
 	OrgRules *OrgRules `json:"orgRules,omitempty"`
+	// Credits is what funds the workspace's next checks. Nil for a workspace
+	// that is never charged for a check, and from a service from before it.
+	Credits *Credits `json:"credits,omitempty"`
+}
+
+// Credits mirrors CheckCredits: the workspace's free checks and credits as
+// the service admits a check, free checks first, then credits at the
+// check's price.
+type Credits struct {
+	// FreeChecksLeft and FreeChecksPerPeriod count the free checks left in
+	// the current period and the ones it holds.
+	FreeChecksLeft      int64 `json:"freeChecksLeft"`
+	FreeChecksPerPeriod int64 `json:"freeChecksPerPeriod"`
+	// Period is day or month: how often the free checks come back, at
+	// ResetsAt.
+	Period   string `json:"period"`
+	ResetsAt string `json:"resetsAt"`
+	// AvailableCredits is what admission can spend, exactly; it may be a
+	// fraction, or below zero.
+	AvailableCredits float64 `json:"availableCredits"`
+	// CheckPriceCredits is the price of a check once the free checks are
+	// used.
+	CheckPriceCredits float64 `json:"checkPriceCredits"`
+	// ChecksLeft counts the checks the free checks and credits pay for
+	// together.
+	ChecksLeft int64 `json:"checksLeft"`
+	// Low says the service judges ChecksLeft low enough to warn about.
+	Low bool `json:"low"`
+	// TopUpURL is where to add credits.
+	TopUpURL string `json:"topUpUrl,omitempty"`
 }
 
 // OrgRules is the set of an owner's shared rules a check ran: where they
