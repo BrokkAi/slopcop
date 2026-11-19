@@ -63,13 +63,14 @@ running, `4` refused and a person must act, `130`/`143` interrupted. See
 
 ## `slopcop enable`
 
-Add the repository the `origin` remote names to the workspace that checks and
-bills it, and run its first check. A repository already added but disabled is
-enabled again. The command names the workspace and the cost, asks you to type
-the repository's `owner/name`, and refuses when stdin is not a terminal. It
-exits with the first check's result. A check adds a repository the workspace
-has never added by itself, so `enable` is optional for that; it is how a
-person turns a disabled repository back on. See
+Optional. Add the repository the `origin` remote names to the workspace that
+checks and bills it, run its first check, and map this machine's checkouts of
+it to that workspace. It does not ask: it says which workspace it added the
+repository to, and how to move it (`slopcop enable --workspace <name>`) or
+remove it (`slopcop repo disable`). It exits with the first check's result. A
+check adds a repository the workspace has never added by itself, so `enable`
+is for adding one up front, picking its workspace, or turning a disabled
+repository back on, which it does only at a terminal. See
 [Repositories](/account/repositories/).
 
 | Flag | Meaning |

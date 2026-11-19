@@ -426,18 +426,24 @@ func newRepoListCommand(serviceURL, workspace *string, version string) *cobra.Co
 func newRepoStateCommand(serviceURL, workspace *string, version string, enable bool) *cobra.Command {
 	format := ""
 	use, short, done := "disable", "Disable a repository: it is not checked", "disabled"
+	long := short + `.
+
+The service cannot tell a person from an agent using the same login, so this
+asks whoever runs it to type the repository's owner/name, and refuses when
+stdin is not a terminal.`
 	if enable {
 		use, short, done = "enable", "Enable a repository, within the workspace's active limit", "enabled"
+		long = short + `.
+
+Someone in the workspace chose to disable it, and the service cannot tell a
+person from an agent using the same login, so this refuses when stdin is not a
+terminal.`
 	}
 	command := &cobra.Command{
 		Use:   use + " <owner/name|id>",
 		Short: short,
-		Long: short + `.
-
-The service cannot tell a person from an agent using the same login, so this
-asks whoever runs it to type the repository's owner/name, and refuses when
-stdin is not a terminal.`,
-		Args: cobra.ExactArgs(1),
+		Long:  long,
+		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := checkFormat(format); err != nil {
 				return err
@@ -457,7 +463,7 @@ stdin is not a terminal.`,
 			if err != nil {
 				return err
 			}
-			if err := confirmChange(cmd, repository.FullName, use); err != nil {
+			if err := confirmRepoState(cmd, repository.FullName, enable); err != nil {
 				return err
 			}
 			state, err := client.SetRepositoryEnabled(cmd.Context(), repository.ID, enable)
@@ -520,6 +526,20 @@ var confirmInput = func(cmd *cobra.Command) (io.Reader, bool) {
 		return nil, false
 	}
 	return file, true
+}
+
+// confirmRepoState is the step a person takes before 'repo enable' or 'repo
+// disable' changes a repository. Turning one back on only has to be run at a
+// terminal, as 'enable' does; turning one off, which stops an agent's own
+// checks, asks for the repository's name.
+func confirmRepoState(cmd *cobra.Command, name string, enable bool) error {
+	if !enable {
+		return confirmChange(cmd, name, "disable")
+	}
+	if _, atTerminal := confirmInput(cmd); !atTerminal {
+		return errors.New("repo enable must be run at a terminal; run it yourself, or change it on the Repositories page in SlopCop")
+	}
+	return nil
 }
 
 // confirmChange asks the person at the terminal to type the repository's

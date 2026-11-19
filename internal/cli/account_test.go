@@ -297,7 +297,7 @@ func TestRepoEnablePrintsTheServiceRemedy(t *testing.T) {
 	if code != 2 || stdout != "" {
 		t.Fatalf("exit = %d, stdout = %q", code, stdout)
 	}
-	want := "slopcop: using service " + server.URL + "\n" + "Type Acme/widgets to enable it: " + "Only the workspace's owner can enable or disable its repositories.\n" +
+	want := "slopcop: using service " + server.URL + "\n" + "Only the workspace's owner can enable or disable its repositories.\n" +
 		"Ask the workspace's owner, or switch to a workspace you own.\n" +
 		"Name a workspace you own with `--workspace <name>`.\n"
 	if stderr != want {
@@ -330,7 +330,7 @@ func TestAccountCommandsRejectAnUnknownFormat(t *testing.T) {
 	}
 }
 
-func TestRepoStateChangesNeedTheNameTypedAtATerminal(t *testing.T) {
+func TestRepoStateChangesNeedATerminal(t *testing.T) {
 	isolateUserConfig(t)
 	server, calls := accountService(t, nil)
 	posted := func() bool {
@@ -349,9 +349,15 @@ func TestRepoStateChangesNeedTheNameTypedAtATerminal(t *testing.T) {
 		t.Errorf("no terminal: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 
+	code, stdout, stderr = runCLI(t, "repo", "enable", "Acme/widgets", "--service", server.URL)
+	if code != 2 || stdout != "" || !strings.Contains(stderr, "repo enable must be run at a terminal") {
+		t.Errorf("no terminal: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+
+	// Disabling, which stops an agent's own checks, also wants the name.
 	for _, answer := range []string{"", "y\n", "acme/widgets\n", "Acme/gadgets\n"} {
 		typed(t, answer)
-		code, _, stderr := runCLI(t, "repo", "enable", "Acme/widgets", "--service", server.URL)
+		code, _, stderr := runCLI(t, "repo", "disable", "Acme/widgets", "--service", server.URL)
 		if code != 2 || !strings.Contains(stderr, "that is not Acme/widgets, so nothing was changed") {
 			t.Errorf("answer %q: exit = %d, stderr = %q", answer, code, stderr)
 		}

@@ -35,8 +35,6 @@ const (
 	sourceEnv     = "env"
 	sourceMapping = "mapping"
 	sourceLogin   = "login"
-	// sourcePrompt is the workspace a person picked when 'enable' asked.
-	sourcePrompt = "prompt"
 )
 
 // workspaceChoice is the workspace a command runs in and how it was chosen:
@@ -113,8 +111,6 @@ func sourceText(source string) string {
 		return "$SLOPCOP_WORKSPACE"
 	case sourceMapping:
 		return "this checkout's mapping (`slopcop workspace map`)"
-	case sourcePrompt:
-		return "your answer to `slopcop enable`"
 	default:
 		return "this login's workspace (`slopcop workspace use`)"
 	}
@@ -227,19 +223,19 @@ func addedLines(repoURL string, added *report.AddedWorkspace) (string, string) {
 }
 
 // enableAddedLines are what the first check 'enable' runs says once it added
-// the repository. The person just confirmed the repository and saw the
-// workspace named, so this says what changed, and only an account with
-// another workspace is told how to move it there.
+// the repository: which workspace now checks it, and how to undo that. Nothing
+// was asked before the add, so this is where the person learns the workspace;
+// only an account with another one is told how to move it there.
 func enableAddedLines(repoURL string, added *report.AddedWorkspace, workspaces []service.Workspace) []string {
 	name := repositoryName(repoURL)
 	where := workspaceName(added.Name, added.Name != "")
-	lines := []string{fmt.Sprintf("slopcop: added %s to %s. Your agent's changes here are checked from now on.", name, where)}
-	if len(workspaces) > 1 && added.Name != "" {
-		selector := workspaceSelector(workspaces, service.Workspace{ID: added.ID, Name: added.Name})
-		lines = append(lines, fmt.Sprintf("slopcop: to check it in another workspace instead, run `slopcop workspace map <name>` here (`slopcop workspace list` names them), then `slopcop repo disable %s --workspace %q` to remove it from %s.",
-			name, selector, where))
+	first := fmt.Sprintf("slopcop: added %s to %s; your agent's changes here are checked there from now on.", name, where)
+	if len(workspaces) <= 1 || added.Name == "" {
+		return []string{first + fmt.Sprintf(" `slopcop repo disable %s` undoes that.", name)}
 	}
-	return lines
+	selector := workspaceSelector(workspaces, service.Workspace{ID: added.ID, Name: added.Name})
+	return []string{first, fmt.Sprintf("slopcop: wrong workspace? Run `slopcop enable --workspace <name>` here to add it to another (`slopcop workspace list` names them), then `slopcop repo disable %s --workspace %q` to remove it from %s.",
+		name, selector, where)}
 }
 
 // noticeAdded says, on stderr, which workspace a check just added the

@@ -15,9 +15,9 @@ part of setup; point Pi at a project skill only if your Pi configuration needs
 one. Ask Pi to check its change, or force the shared skill with
 `/skill:slopcop` when your configuration discovers it.
 
-To have Pi check every change, add the repository to the workspace from its
-checkout with `slopcop enable` at a terminal, then add a line to your
-project's `AGENTS.md`:
+To have Pi check every change, add a line to your project's `AGENTS.md`; the
+first check adds the repository to your workspace (`slopcop enable` does that
+up front, if you prefer):
 
 ```text
 Run `slopcop check --if-enabled` before you finish and fix what it reports.

@@ -49,7 +49,9 @@ CLI, and keeps the login the machine has. `SLOPCOP_VERSION`,
 
 Without a code, `curl -fsSL https://slopcop.com/install | sh` does the same and
 signs in through the browser device flow instead (see [Sign in](#sign-in)).
-Then run `slopcop enable` in each repository you want checked.
+Then open your agent in any repository you want checked: its first check adds
+the repository to your workspace (repositories are free; a check uses a free
+check, then credits). `slopcop enable` is optional; see [Account](#account).
 
 ### Other channels
 
@@ -363,7 +365,7 @@ unless this machine maps the repository to another of your workspaces.
 ```console
 slopcop whoami                     # account, this login's workspace, its plan, the service URL
 slopcop status                     # this checkout's repository, and whether the workspace checks it
-slopcop enable                     # add this checkout's repository to the workspace, at a terminal
+slopcop enable                     # optional: add this checkout's repository now, and say which workspace
 slopcop workspace list             # the account's workspaces; * marks this login's
 slopcop workspace map "Acme team"  # check this checkout's repository there from now on, at a terminal
 slopcop workspace unmap            # go back to the login's workspace for this repository
@@ -408,23 +410,25 @@ has the repository; the check still runs.
 Names match without regard to case; when two workspaces share a name, or two
 providers a repository name, pass the id the listing prints.
 
-`slopcop enable`, run inside a checkout at a terminal, adds the repository the
-`origin` remote names to the workspace that checks and bills it, and runs its
-first check. It names the workspace and what adding the repository costs, asks
-you to type the repository's `owner/name`, and refuses when stdin is not a
-terminal. A repository that is already added but disabled is enabled again;
-one that is already active is left alone. Turning a disabled repository back
-on stays a step you take yourself.
+`slopcop enable` is optional. Run inside a checkout, it adds the repository the
+`origin` remote names to the workspace that checks and bills it, runs its first
+check, and maps this machine's checkouts of it to that workspace. It does not
+ask: the workspace is the one `--workspace` names, else the one the checkout is
+mapped to, else the login's, and it says which one on stderr along with how to
+undo it:
 
-When your account has more than one workspace and the repository is in neither
-the login's nor the one `--workspace` names, `enable` first lists the
-workspaces by number, marking the login's own and any that already have the
-repository, and asks which one should check and bill it. Before it adds a
-repository another of your workspaces already has, it says so, since both would
-then check and bill it. After enabling in a workspace other than the login's it
-reminds you that a plain check still runs in the login's workspace, and would
-add the repository there: pass `--workspace`, or set `SLOPCOP_WORKSPACE`, to
-check where you enabled it.
+```console
+$ slopcop enable
+slopcop: added Acme/widgets to "Acme team"; your agent's changes here are checked there from now on.
+slopcop: wrong workspace? Run `slopcop enable --workspace <name>` here to add it to another (`slopcop workspace list` names them), then `slopcop repo disable Acme/widgets --workspace "Acme team"` to remove it from "Acme team".
+```
+
+An account with one workspace gets the first line alone, ending with the
+`slopcop repo disable owner/name` that undoes it. Before it adds a repository another of your
+workspaces already has, it says so, since both would then check and bill it.
+A repository that is already active is left alone. One that someone disabled
+is enabled again, but only at a terminal: an agent running with your login does
+not undo that choice.
 
 A check does not need `enable` first: a check of a repository the workspace has
 never added adds it to the workspace the check runs in (the login's, or the one
@@ -432,8 +436,7 @@ never added adds it to the workspace the check runs in (the login's, or the one
 stopped to ask. A check of one the workspace has disabled exits `4` with
 `repository_disabled`, and one past the active limit with
 `active_repository_limit_reached`; these stop before the local reviewers start,
-so the report has no review. A check that adds a repository, like `slopcop
-enable`, says `added owner/name to "Workspace"` on stderr, and `json` reports
+so the report has no review. A check that adds a repository says `added owner/name to "Workspace"` on stderr, and `json` reports
 `"repositoryAdded": true` and `addedToWorkspace`: the workspace, how it was
 chosen, and how to check the repository in another one instead. `--add-repository` is no longer needed; it is still
 accepted. Deleting repositories, archiving workspaces, members, credits and
