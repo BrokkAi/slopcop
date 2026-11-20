@@ -150,6 +150,13 @@ func groupVerdict(rs []Reviewer) Status {
 	return out
 }
 
+// Overridable says whether `slopcop override` can accept the verdict's
+// findings as far as the review goes: it has findings and every reviewer
+// finished. The static half must also not block the push.
+func (v Verdict) Overridable() bool {
+	return v.Status == StatusFindings && groupVerdict(v.Reviewers) == StatusFindings
+}
+
 // Save atomically stores a record, adds its findings to the checked-out
 // branch's rounds for later reviews, and forgets those rounds once a review
 // is clean.
@@ -194,7 +201,7 @@ func (s *Store) Override(reason, currentTree string) error {
 	if err != nil {
 		return err
 	}
-	if r == nil || r.Status != StatusFindings || groupVerdict(r.Reviewers) != StatusFindings {
+	if r == nil || !r.Verdict.Overridable() {
 		return errors.New("override requires complete findings")
 	}
 	if r.StaticExit != nil && r.StaticBlocksPush {

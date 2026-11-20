@@ -35,8 +35,9 @@ func failingReviewFindings(v review.Verdict) int {
 // findings. summary.findings and the human report's headline count only
 // static findings, so without it a check failed by the review alone reads as
 // zero findings and a clean static check. It is "" when the review did not
-// fail the check.
-func reviewFailureNotice(reason string, count int, failOn, format string) string {
+// fail the check. overridable says `slopcop override` would accept the
+// findings now; only then does the notice offer it.
+func reviewFailureNotice(reason string, count int, failOn, format string, overridable bool) string {
 	if reason != report.ExitReasonReviewFindings && reason != report.ExitReasonStaticAndReviewFindings {
 		return ""
 	}
@@ -55,7 +56,12 @@ func reviewFailureNotice(reason string, count int, failOn, format string) string
 	if reason == report.ExitReasonStaticAndReviewFindings {
 		what = fmt.Sprintf("new static findings crossed --fail-on %s, and the local reviewers reported %d %s", failOn, count, noun)
 	}
-	return fmt.Sprintf("slopcop: the check failed (exit 1): %s. The review findings are listed %s. "+
-		"Fix the real ones and check again. For one that is wrong, `slopcop override --reason \"why it does not hold\"` approves the tree for push, "+
-		"but the check still exits 1; `--fail-on never` keeps review findings from failing it.", what, where)
+	remedy := "Fix the real ones and check again. `slopcop override` cannot accept them yet: " +
+		"it needs every reviewer to finish and no static result that blocks the push"
+	if overridable {
+		remedy = "Fix the real ones and check again. For one that is wrong, `slopcop override --reason \"why it does not hold\"` " +
+			"approves the tree for push, but the check still exits 1"
+	}
+	return fmt.Sprintf("slopcop: the check failed (exit 1): %s. The review findings are listed %s. %s; "+
+		"`--fail-on never` keeps review findings from failing it.", what, where, remedy)
 }

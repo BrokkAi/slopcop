@@ -33,29 +33,37 @@ func TestExitReason(t *testing.T) {
 }
 
 func TestReviewFailureNotice(t *testing.T) {
-	if got := reviewFailureNotice(report.ExitReasonStaticFindings, 0, "finding", report.FormatJSON); got != "" {
+	if got := reviewFailureNotice(report.ExitReasonStaticFindings, 0, "finding", report.FormatJSON, true); got != "" {
 		t.Errorf("static-only failure got a review notice: %q", got)
 	}
-	if got := reviewFailureNotice("", 2, "finding", report.FormatJSON); got != "" {
+	if got := reviewFailureNotice("", 2, "finding", report.FormatJSON, true); got != "" {
 		t.Errorf("no failure got a review notice: %q", got)
 	}
 	for _, tc := range []struct {
 		reason, format string
 		count          int
+		overridable    bool
 		want           []string
 	}{
-		{report.ExitReasonReviewFindings, report.FormatJSON, 1, []string{
+		{report.ExitReasonReviewFindings, report.FormatJSON, 1, true, []string{
 			"reported 1 review finding,", "no static finding crossed --fail-on warning",
 			"review.findings", "summary.findings counts static findings only",
 			"slopcop override --reason", "--fail-on never",
 		}},
-		{report.ExitReasonReviewFindings, report.FormatHuman, 2, []string{"reported 2 review findings,", "under Review above"}},
-		{report.ExitReasonReviewFindings, report.FormatSARIF, 2, []string{"slopcop-review run"}},
-		{report.ExitReasonStaticAndReviewFindings, report.FormatJSON, 3, []string{
-			"new static findings crossed --fail-on warning", "reported 3 review findings.",
+		// An override would be refused, so it is not offered as the remedy.
+		{report.ExitReasonReviewFindings, report.FormatJSON, 1, false, []string{
+			"`slopcop override` cannot accept them yet", "every reviewer to finish", "--fail-on never",
+		}},
+		{report.ExitReasonReviewFindings, report.FormatHuman, 2, true, []string{"reported 2 review findings,", "under Review above"}},
+		{report.ExitReasonReviewFindings, report.FormatSARIF, 2, true, []string{"slopcop-review run"}},
+		{report.ExitReasonStaticAndReviewFindings, report.FormatJSON, 3, false, []string{
+			"new static findings crossed --fail-on warning", "reported 3 review findings.", "cannot accept them yet",
 		}},
 	} {
-		got := reviewFailureNotice(tc.reason, tc.count, "warning", tc.format)
+		got := reviewFailureNotice(tc.reason, tc.count, "warning", tc.format, tc.overridable)
+		if offered := strings.Contains(got, "override --reason"); offered != tc.overridable {
+			t.Errorf("%s/%s override offered = %v, want %v: %q", tc.reason, tc.format, offered, tc.overridable, got)
+		}
 		if !strings.HasPrefix(got, "slopcop: the check failed (exit 1): ") {
 			t.Errorf("%s/%s notice = %q", tc.reason, tc.format, got)
 		}

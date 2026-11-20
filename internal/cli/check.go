@@ -375,7 +375,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if writeErr != nil {
 		return writeErr
 	}
-	if notice := reviewFailureNotice(reportOptions.ExitReason, failingReviewFindings(verdict), failOn, format); notice != "" {
+	overridable := verdict.Overridable() && staticPasses(static, mode, blockLevel)
+	if notice := reviewFailureNotice(reportOptions.ExitReason, failingReviewFindings(verdict), failOn, format, overridable); notice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
 	if format == report.FormatHuman {
