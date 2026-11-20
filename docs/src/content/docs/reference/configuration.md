@@ -96,7 +96,7 @@ works and Copilot may be signed in, `slopcop init` tries them through Copilot
 and sets the provider itself. See
 [GitHub Copilot CLI](/agents/copilot-cli/#copilot-as-a-reviewer).
 
-Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `findings.json`,
+Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe
 logs are kept under `probes/` beside the user config because init is no longer
 repository-specific. When a reviewer or probe is done, the CLI asks its adapter

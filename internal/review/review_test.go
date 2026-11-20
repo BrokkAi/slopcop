@@ -40,19 +40,19 @@ func TestConnectionReply(t *testing.T) {
 	}
 }
 func TestPrompt(t *testing.T) {
-	p := reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{Source: "not available"}, nil, "+added line\n", Terra)
+	p := reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{Source: "not available"}, "", "+added line\n", Terra)
 	for _, v := range []string{"snapshot of the working tree", "Base tree: base", "Snapshot tree: snap", "+added line", "git -C '/repo' diff --no-ext-diff base snap", "No findings."} {
 		if !strings.Contains(p, v) {
 			t.Fatal(v)
 		}
 	}
 	for _, family := range []Family{Sol, Flash} {
-		p = reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, nil, "diff", family)
+		p = reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", family)
 		if strings.Contains(p, "git -C") != (family == Sol) || strings.Contains(p, sandboxRules) != (family == Sol) {
 			t.Fatal(family)
 		}
 	}
-	p = reviewPrompt("/repo", Capture{}, intent{}, nil, strings.Repeat("a\n", 131073), Flash)
+	p = reviewPrompt("/repo", Capture{}, intent{}, "", strings.Repeat("a\n", 131073), Flash)
 	if !strings.Contains(p, "Diff truncated at 256 KiB") || strings.Contains(p, strings.Repeat("a\n", 131073)) {
 		t.Fatal("truncation")
 	}
@@ -64,7 +64,7 @@ func TestIntentKeepsTheMostRecentMessages(t *testing.T) {
 	if got := capIntent(short, 64); got != short {
 		t.Fatalf("short intent changed: %+v", got)
 	}
-	if p := reviewPrompt("/repo", Capture{}, short, nil, "", Flash); strings.Contains(p, "omitted") {
+	if p := reviewPrompt("/repo", Capture{}, short, "", "", Flash); strings.Contains(p, "omitted") {
 		t.Fatal("untruncated intent marked")
 	}
 	old := strings.Repeat("o", 40)
@@ -86,7 +86,7 @@ func TestIntentKeepsTheMostRecentMessages(t *testing.T) {
 	if len(in.Text) > intentLimit || !strings.HasSuffix(in.Text, "the latest request") || !strings.HasPrefix(in.Text, "old message") {
 		t.Fatalf("capped to %d bytes", len(in.Text))
 	}
-	p := reviewPrompt("/repo", Capture{}, in, nil, "", Flash)
+	p := reviewPrompt("/repo", Capture{}, in, "", "", Flash)
 	if !strings.Contains(p, "<user_intent>\n[Earlier user messages omitted; only the most recent 64 KiB are shown.]\nold message") {
 		t.Fatal("truncation not marked")
 	}
@@ -145,7 +145,7 @@ func TestState(t *testing.T) {
 	if e = s.Save(r); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = os.Stat(filepath.Join(s.dir, "findings.json")); e != nil {
+	if _, e = os.Stat(filepath.Join(s.dir, roundsFile)); e != nil {
 		t.Fatal(e)
 	}
 	if e = s.Override("reason", tree); e != nil {
@@ -162,7 +162,7 @@ func TestState(t *testing.T) {
 	if e = s.Save(r); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = os.Stat(filepath.Join(s.dir, "findings.json")); !os.IsNotExist(e) {
+	if _, e = os.Stat(filepath.Join(s.dir, roundsFile)); !os.IsNotExist(e) {
 		t.Fatal(e)
 	}
 }

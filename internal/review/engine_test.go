@@ -424,7 +424,7 @@ func TestReuseAndInvalidation(t *testing.T) {
 	if err := s.Override("false positive", c.Tree); err == nil {
 		t.Fatal("old findings override allowed")
 	}
-	b, err := os.ReadFile(filepath.Join(s.dir, "findings.json"))
+	b, err := os.ReadFile(filepath.Join(s.dir, roundsFile))
 	if err != nil || !strings.Contains(string(b), "fake defect") {
 		t.Fatal(err)
 	}
@@ -438,7 +438,7 @@ func TestReuseAndInvalidation(t *testing.T) {
 	if !strings.Contains(string(p), "fake defect") {
 		t.Fatal("previous findings omitted")
 	}
-	if _, err := os.Stat(filepath.Join(s.dir, "findings.json")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(s.dir, roundsFile)); !os.IsNotExist(err) {
 		t.Fatal(err)
 	}
 }

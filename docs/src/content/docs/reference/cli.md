@@ -266,6 +266,12 @@ accept failed or incomplete reviews or real bugs. The override is recorded
 locally, so it accepts `-w`/`--workspace` from the `check` it follows and
 ignores it.
 
+Each review is shown the findings of every earlier round since the last
+clean review, with whether the lines a finding cites have changed since, and
+the reason of an override beside the findings it accepted. Reviewers are told
+not to raise an answered point again unless the code shows the reason is
+wrong, so write the reason for them: say why the finding does not hold.
+
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override. It also
