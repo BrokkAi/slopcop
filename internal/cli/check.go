@@ -302,6 +302,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		status = service.StatusFindings
 	}
 	reportOptions.Status = status
+	reviewFailed := mode != modeStatic && verdict.Status == review.StatusFindings && failOn != "never"
+	reportOptions.ExitReason = exitReason(exit, static.exit, reviewFailed)
 	if mode != modeAI && status != static.status {
 		reportOptions.StaticStatus = static.status
 	}
@@ -372,6 +374,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	if writeErr != nil {
 		return writeErr
+	}
+	if notice := reviewFailureNotice(reportOptions.ExitReason, failingReviewFindings(verdict), failOn, format); notice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
 	if format == report.FormatHuman {
 		warnLowCredits(cmd, static.response)

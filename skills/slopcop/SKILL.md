@@ -284,12 +284,21 @@ are results of the `slopcop-review` run. They have no `id`, so `slopcop
 ignore` does not take them: fix the real ones and use `slopcop override` for
 wrong ones.
 
+A review finding fails the check under every `--fail-on` but `never`: it has a
+priority, not a static severity, so `note`, `warning` and `error` do not
+filter it. A check the review alone fails exits `1` with `summary.findings: 0`
+and `staticStatus: clean`; `exitReason` is then `review_findings`, and stderr
+says how many review findings failed it. Read `review.findings`, never the
+static counts, before you decide the check passed. An override approves the
+tree for push but does not change the exit code. Do not pass `--fail-on never`
+to get exit `0`; that is the user's call.
+
 ## Read the exit code
 
 | Exit | Meaning |
 | --- | --- |
 | `0` | Every half that ran completed and nothing crossed `--fail-on`. The static check is clean, has only findings below `--fail-on` (`status` then says `findings`), or was skipped by `--if-enabled`; the review is clean, or had nothing to review. Check `status` for `skipped` and `review.status` for `empty` before you call the change checked. |
-| `1` | A new static finding crossed `--fail-on`, or a reviewer reported findings (unless `--fail-on never`). Fix the real ones and run the check again. |
+| `1` | A new static finding crossed `--fail-on`, or a reviewer reported findings (under any `--fail-on` but `never`). JSON `exitReason` is `static_findings`, `review_findings` or `static_and_review_findings`. Fix the real ones and run the check again. |
 | `2` | Nothing crossed `--fail-on`, but a static check did not complete, the review failed or was incomplete (fewer than `review.minCompleted` reviewers finished after retries and fallbacks; with findings this exits `2` only under `--fail-on never`), or the CLI or service failed. Read the errors and log paths. |
 | `3` | The static check was still running when `--timeout` ran out. Run the same check again; a complete review of the same content is reused. |
 | `4` | The service refused the static check, and only a person can clear it. Do not retry; tell the user the `code` and remedy. |

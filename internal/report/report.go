@@ -76,6 +76,9 @@ type Options struct {
 	Status string
 	// StaticStatus preserves the service status when it differs.
 	StaticStatus string
+	// ExitReason is what made the check exit 1, one of the ExitReason
+	// constants, or "" when it did not exit 1.
+	ExitReason string
 	// ShowExisting lists the findings that were already in the code, after
 	// the new ones. They are counted either way.
 	ShowExisting bool
@@ -100,6 +103,20 @@ type Options struct {
 	// each finding's span. Nil quotes none.
 	Source Source
 }
+
+// ExitReason values say which findings made a check exit 1. Review findings
+// are not in summary.findings or summary.newFindings, so without this a check
+// failed only by the local review reads as zero findings and a clean static
+// check.
+const (
+	// ExitReasonStaticFindings is new static findings at or above --fail-on.
+	ExitReasonStaticFindings = "static_findings"
+	// ExitReasonReviewFindings is review findings alone: no static finding
+	// crossed --fail-on.
+	ExitReasonReviewFindings = "review_findings"
+	// ExitReasonStaticAndReviewFindings is both.
+	ExitReasonStaticAndReviewFindings = "static_and_review_findings"
+)
 
 // OmittedFile is a file left out of both hosted upload and local review.
 type OmittedFile struct {
@@ -1016,6 +1033,9 @@ type jsonReport struct {
 	Approved bool   `json:"approved"`
 	// StaticStatus preserves the hosted status when the combined status differs.
 	StaticStatus string `json:"staticStatus,omitempty"`
+	// ExitReason says which findings made the check exit 1. It is set only
+	// when the check exited 1.
+	ExitReason string `json:"exitReason,omitempty"`
 	// Review is the local verdict, when one ran.
 	Review *reviewJSON `json:"review,omitempty"`
 	// ReviewSkipped is why the local review did not run. It is set only
@@ -1103,6 +1123,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Checks:               response.Checks,
 		Approved:             options.Approved,
 		StaticStatus:         options.StaticStatus,
+		ExitReason:           options.ExitReason,
 		Review:               reviewValue(options.Review),
 		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
@@ -1143,6 +1164,7 @@ type pendingReport struct {
 	Status        string        `json:"status"`
 	Approved      bool          `json:"approved"`
 	StaticStatus  string        `json:"staticStatus,omitempty"`
+	ExitReason    string        `json:"exitReason,omitempty"`
 	Review        *reviewJSON   `json:"review,omitempty"`
 	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
 	RetryAfter    int           `json:"retryAfter"`
@@ -1162,6 +1184,7 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 			OmittedFiles:  options.OmittedFiles,
 			Status:        status(service.StatusPending, options),
 			StaticStatus:  options.StaticStatus,
+			ExitReason:    options.ExitReason,
 			Approved:      options.Approved,
 			Review:        reviewValue(options.Review),
 			ReviewSkipped: options.ReviewSkipped,
@@ -1205,6 +1228,7 @@ type skippedReport struct {
 	Status        string        `json:"status"`
 	Approved      bool          `json:"approved"`
 	StaticStatus  string        `json:"staticStatus,omitempty"`
+	ExitReason    string        `json:"exitReason,omitempty"`
 	Review        *reviewJSON   `json:"review,omitempty"`
 	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
 	Code          string        `json:"code"`
@@ -1227,6 +1251,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 			OmittedFiles:  options.OmittedFiles,
 			Status:        status("skipped", options),
 			StaticStatus:  options.StaticStatus,
+			ExitReason:    options.ExitReason,
 			Approved:      options.Approved,
 			Review:        reviewValue(options.Review),
 			ReviewSkipped: options.ReviewSkipped,
@@ -1264,6 +1289,7 @@ type failureReport struct {
 	Status        string        `json:"status"`
 	Approved      bool          `json:"approved"`
 	StaticStatus  string        `json:"staticStatus,omitempty"`
+	ExitReason    string        `json:"exitReason,omitempty"`
 	Review        *reviewJSON   `json:"review,omitempty"`
 	ReviewSkipped string        `json:"reviewSkipped,omitempty"`
 	Code          string        `json:"code"`
@@ -1290,6 +1316,7 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 			OmittedFiles:  options.OmittedFiles,
 			Status:        status(service.StatusFailed, options),
 			StaticStatus:  options.StaticStatus,
+			ExitReason:    options.ExitReason,
 			Approved:      options.Approved,
 			Review:        reviewValue(options.Review),
 			ReviewSkipped: options.ReviewSkipped,
@@ -1329,6 +1356,9 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
 	properties["slopcop.approved"] = options.Approved
+	if options.ExitReason != "" {
+		properties["slopcop.exitReason"] = options.ExitReason
+	}
 	if options.ReviewSkipped != "" {
 		properties["slopcop.reviewSkipped"] = options.ReviewSkipped
 	}
@@ -1886,7 +1916,7 @@ func WriteAI(w io.Writer, format string, options Options) error {
 	case "", FormatHuman:
 		return writeHumanOmittedAndReview(w, options)
 	case FormatJSON:
-		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, Status: status("clean", options), Approved: options.Approved, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
+		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, Status: status("clean", options), Approved: options.Approved, ExitReason: options.ExitReason, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "SlopCop", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: true}}, Properties: runProperties(map[string]any{"slopcop.status": status("clean", options)}, options)}), "sarif report")
 	default:
@@ -1900,6 +1930,9 @@ type aiReport struct {
 	// Status is the AI-only report's Status field.
 	Status   string `json:"status"`
 	Approved bool   `json:"approved"`
+	// ExitReason says which findings made the check exit 1. It is set only
+	// when the check exited 1.
+	ExitReason string `json:"exitReason,omitempty"`
 	// EmptyChange is the AI-only report's EmptyChange field.
 	EmptyChange bool `json:"emptyChange,omitempty"`
 	// Review is the AI-only report's Review field.

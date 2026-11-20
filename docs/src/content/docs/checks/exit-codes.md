@@ -17,7 +17,7 @@ script or an agent can act on the code alone for check completion; use
 | Exit | Meaning | What to do |
 | --- | --- | --- |
 | `0` | The check completed and no new finding crossed `--fail-on`; or `--if-enabled` found the repository disabled or past the active limit and sent nothing. | Carry on. On an empty change or a skip, nothing was checked; see below. |
-| `1` | A new finding crossed `--fail-on`. | Fix the new findings and run the check again. |
+| `1` | A new static finding crossed `--fail-on`, or a reviewer reported a finding (under any `--fail-on` but `never`). JSON `exitReason` says which. | Fix the new findings and run the check again. |
 | `2` | No new finding crossed `--fail-on`, but some rule did not complete; or the CLI or service failed. | With a report: say which rules did not complete, and why; running again usually gives the same answer. Without one: read the code on stderr. Never treat it as clean. |
 | `3` | The check was still running when `--timeout` ran out. | Run the same check again; it picks up the same analysis. |
 | `4` | The service refused the check, and only a person can clear it. | Do not retry. Tell the person the `code` and remedy. |
@@ -48,6 +48,23 @@ New findings that cross `--fail-on` exit `1` even when some rule did not
 complete. The findings are the work: fix them in the working tree and run the
 same check again. Exit `2` remains incomplete even when `summary.newFindings`
 is `0`.
+
+In JSON, `exitReason` says which findings made the check exit `1`:
+`static_findings`, `review_findings`, or `static_and_review_findings`. It is
+absent for every other exit.
+
+A reviewer's finding fails the check by default, under every `--fail-on`
+level but `never`. Review findings carry a priority (`P0` to `P3`), not a
+static severity, so `note`, `warning` and `error` do not filter them. They fail
+by default because a script, CI job or agent loop that reads only the exit code
+would otherwise pass a change a reviewer flagged. The static counts in
+`summary` (`findings`, `newFindings`) never include them, so a check the
+review alone fails can show `summary.findings: 0` and `staticStatus: clean`
+and still exit `1`. JSON `exitReason` names what failed it, and stderr says so
+in every format, with the count and where the review findings are listed.
+Fix the real ones and check again. For a wrong one, `slopcop override` approves
+the tree for push but does not change the exit code; `--fail-on never` keeps
+review findings, and static ones, from exiting `1`.
 
 ## Which results approve the tree
 

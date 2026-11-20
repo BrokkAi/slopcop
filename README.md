@@ -495,7 +495,7 @@ Flags:
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` |
 | `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`) |
-| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
+| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new static findings (default `finding`); a review finding exits `1` at every level but `never` |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--policy-id ID` | built-in policy ID (repeatable) |
@@ -736,7 +736,7 @@ whichever is used.
 | Exit | Meaning |
 | --- | --- |
 | `0` | Check completed; no new finding crossed the `--fail-on` level |
-| `1` | A new finding crossed `--fail-on` |
+| `1` | A new static finding crossed `--fail-on`, or a reviewer reported a finding (unless `--fail-on never`); JSON `exitReason` says which |
 | `2` | No new finding crossed `--fail-on`, but a check was incomplete; or the CLI or service failed |
 | `3` | The check was still running when `--timeout` ran out |
 | `4` | The service refused the check, and only a person can clear it |
@@ -750,6 +750,19 @@ status. An
 interrupted check prints no report. Interrupted before it was sent, nothing
 reached the service; after, a service that received it keeps running it, and
 running the same check again picks up its result.
+
+A reviewer's finding fails the check by default, under every `--fail-on` level
+but `never`. Review findings carry a priority (`P0` to `P3`), not a static
+severity, so `note`, `warning` and `error` do not filter them. They fail by
+default because a script, CI job or agent loop that reads only the exit code
+would otherwise pass a change a reviewer flagged. The static counts in
+`summary` (`findings`, `newFindings`) never include them, so a check the review
+alone fails can show `summary.findings: 0` and `staticStatus: clean` and still
+exit `1`. JSON `exitReason` names what failed it, and stderr says so in every
+format, with the count and where the review findings are listed. Fix the real
+ones and check again. For a wrong one, `slopcop override` approves the tree for
+push but does not change the exit code; `--fail-on never` keeps review
+findings, and static ones, from exiting `1`.
 
 An inconclusive check, one that ran but could not prove there is nothing
 more to find, never changes the exit code or the status. Complete proof is

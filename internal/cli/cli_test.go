@@ -2356,16 +2356,19 @@ func TestCombinedExitAndStatus(t *testing.T) {
 	cases := []struct {
 		name, static, agent, failOn, wantStatus, wantStatic string
 		wantExit                                            int
+		// wantReason is the JSON exitReason, set only for exit 1.
+		wantReason string
 	}{
-		{"static findings review clean", "findings", "clean", "finding", "findings", "", 1},
-		{"static clean review findings", "clean", "findings", "finding", "findings", "clean", 1},
-		{"person review findings", "person", "findings", "finding", "findings", "failed", 1},
-		{"person review clean", "person", "clean", "finding", "failed", "", 4},
-		{"static clean review failed", "clean", "empty", "finding", "incomplete", "clean", 2},
-		{"static pending review clean", "pending", "clean", "finding", "pending", "", 3},
-		{"static pending review failed", "pending", "empty", "finding", "pending", "", 3},
-		{"fail never review findings", "clean", "findings", "never", "findings", "clean", 0},
-		{"static incomplete review clean", "incomplete", "clean", "finding", "incomplete", "", 2},
+		{"static findings review clean", "findings", "clean", "finding", "findings", "", 1, "static_findings"},
+		{"static clean review findings", "clean", "findings", "finding", "findings", "clean", 1, "review_findings"},
+		{"static findings review findings", "findings", "findings", "finding", "findings", "", 1, "static_and_review_findings"},
+		{"person review findings", "person", "findings", "finding", "findings", "failed", 1, "review_findings"},
+		{"person review clean", "person", "clean", "finding", "failed", "", 4, ""},
+		{"static clean review failed", "clean", "empty", "finding", "incomplete", "clean", 2, ""},
+		{"static pending review clean", "pending", "clean", "finding", "pending", "", 3, ""},
+		{"static pending review failed", "pending", "empty", "finding", "pending", "", 3, ""},
+		{"fail never review findings", "clean", "findings", "never", "findings", "clean", 0, ""},
+		{"static incomplete review clean", "incomplete", "clean", "finding", "incomplete", "", 2, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -2398,6 +2401,7 @@ func TestCombinedExitAndStatus(t *testing.T) {
 			var doc struct {
 				Status       string `json:"status"`
 				StaticStatus string `json:"staticStatus"`
+				ExitReason   string `json:"exitReason"`
 				Review       struct {
 					Status string `json:"status"`
 				} `json:"review"`
@@ -2407,6 +2411,15 @@ func TestCombinedExitAndStatus(t *testing.T) {
 			}
 			if doc.Status != tc.wantStatus || doc.StaticStatus != tc.wantStatic {
 				t.Fatalf("status %+v want %q/%q", doc, tc.wantStatus, tc.wantStatic)
+			}
+			if doc.ExitReason != tc.wantReason {
+				t.Fatalf("exitReason %q want %q", doc.ExitReason, tc.wantReason)
+			}
+			// A failure the review caused is said on stderr, since the
+			// summary's static counts do not show it.
+			explained := strings.Contains(stderr, "slopcop: the check failed (exit 1)") && strings.Contains(stderr, "review.findings")
+			if explained != strings.Contains(tc.wantReason, "review") {
+				t.Fatalf("review failure explained = %v for reason %q: stderr %s", explained, tc.wantReason, stderr)
 			}
 			if tc.agent == "empty" && doc.Review.Status != "failed" {
 				t.Fatalf("failed review hidden: %+v", doc)
