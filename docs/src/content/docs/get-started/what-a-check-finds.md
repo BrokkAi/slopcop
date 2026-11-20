@@ -97,8 +97,10 @@ resolves.
   (`72 already in the code`), never listed, and never fail the check.
 - Findings in files the change does not write. The check analyzes the files
   the patch touches, in the context of the whole repository.
-- Anything a model might say. There is no AI review in a check, and no code is
-  sent to one.
+- A model's review of the change, from the service. The hosted check has no AI
+  review, and the similar-function check is the only one that sends code to a
+  model. Review by models is the [local review](#local-review), under your own
+  logins.
 
 The web app's own scans of a repository are a different surface: broader,
 triggered by pushes and pull requests or on a schedule, and paid in credits.
