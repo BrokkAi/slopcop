@@ -8,9 +8,11 @@ sidebar:
 **A workspace gets 1,000 free checks each calendar month.** The month is the
 calendar month in UTC. A check uses a free check while the month has one left,
 whether an agent, CI, or a pull request ran it. Your personal workspace has them
-from the start. A team workspace gets them once credits have been bought for
-it; until then its checks use credits, and the first team workspace you create
-starts with 100.
+from the start, unless your account's free checks are withheld: an address at a
+throwaway mailbox provider, a second account with the same address, or one of
+many sign-ups from one client get none, and the Credits page says why. A team
+workspace gets them once credits have been bought for it; until then its checks
+use credits, and the first team workspace you create starts with 100.
 
 **Each check after those costs 1 credit.** One credit is one US cent, so
 that is $0.01 a check, and $10 of credits buys 1,000 checks. A check is
