@@ -88,9 +88,12 @@ pip install brokk-slopcop
 
 `pipx install brokk-slopcop` or `uv tool install brokk-slopcop` puts it in an
 environment of its own. The wheels carry the release binary, so no Go toolchain
-is needed either. The package is `brokk-slopcop` because PyPI already has an
-unrelated project named `slopcop`; the command it installs is still `slopcop`,
-and `python -m brokk_slopcop` runs the same binary.
+is needed either.
+
+The package is [`brokk-slopcop`](https://pypi.org/project/brokk-slopcop/),
+published from this repository. Do not run `pip install slopcop`: PyPI's
+`slopcop` is an unrelated project by someone else. The command `brokk-slopcop`
+installs is still `slopcop`, and `python -m brokk_slopcop` runs the same binary.
 
 ### Release archive
 
