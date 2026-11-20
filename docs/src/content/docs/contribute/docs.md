@@ -96,6 +96,12 @@ without deploying it, so a broken link or page fails the check before it
 merges. Running the workflow from the Actions tab on `docs-production` redeploys
 the current site; on any other branch it only builds.
 
+After each deploy the workflow submits every page in the site's sitemap to
+[IndexNow](https://www.indexnow.org), so Bing and the other engines that
+share it recrawl within minutes. `docs/scripts/indexnow.mjs` does it, and
+first checks that the site serves the key file in `docs/public/`. The step is
+advisory: if it fails, the deploy still counts.
+
 So merge docs to `master` once what they describe is ready to ship with the
 next release:
 

@@ -15,6 +15,10 @@ name: Docs
 # runs this workflow on `docs-production` with workflow_dispatch after moving it.
 # The Actions tab can do the same to redeploy by hand; a dispatch on any other
 # branch only builds.
+#
+# After a deploy, the indexnow job submits the site's sitemap to IndexNow
+# (docs/scripts/indexnow.mjs) so Bing and the engines that share it recrawl
+# within minutes. It is advisory: a failed submission never fails the deploy.
 on:
   push:
     branches: [master, docs-production]
@@ -56,6 +60,10 @@ jobs:
         run: npm ci
         working-directory: docs
 
+      - name: Test docs scripts
+        run: npm test
+        working-directory: docs
+
       - name: Build docs
         run: npm run build
         working-directory: docs
@@ -88,6 +96,8 @@ jobs:
     permissions:
       pages: write
       id-token: write
+    outputs:
+      page_url: ${{ steps.deployment.outputs.page_url }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -95,3 +105,25 @@ jobs:
       - name: Deploy Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  indexnow:
+    name: Tell IndexNow engines the docs changed
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Submit the docs sitemap
+        run: node docs/scripts/indexnow.mjs --site "$PAGE_URL"
+        env:
+          PAGE_URL: ${{ needs.deploy.outputs.page_url || vars.DOCS_SITE || 'https://docs.slopcop.com' }}
