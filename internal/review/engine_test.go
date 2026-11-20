@@ -591,6 +591,92 @@ func TestCancelStopsAllAdapters(t *testing.T) {
 	}
 }
 
+// A check can run for minutes, and the checkout may move to another branch
+// after the snapshot is taken: while the hosted half's checks run, before the
+// review starts, or while the reviewers run. The review's rounds are still
+// those of the branch the snapshot was taken on.
+func TestRoundsStayOnTheBranchTheReviewStartedOn(t *testing.T) {
+	root, capture, store := reviewRepo(t)
+	git := func(args ...string) {
+		t.Helper()
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	started := store.branch()
+	// The other branch has an unresolved finding of its own.
+	git("checkout", "-b", "other")
+	if err := store.Save(findingsRecord(capture, "- [P2] Other `change.txt:1-1` point.")); err != nil {
+		t.Fatal(err)
+	}
+	git("checkout", started)
+	// review runs a held reviewer and switches to the other branch while it
+	// waits, as a person does during a background check.
+	review := func(mode string) Verdict {
+		t.Helper()
+		trace := filepath.Join(t.TempDir(), "trace")
+		opts := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: 10 * time.Second, Adapters: map[string][]string{"codex": fakeAdapter(mode, "gpt-6.10-terra", trace)}}}
+		done := make(chan Verdict, 1)
+		go func() { done <- Run(context.Background(), store, capture, opts) }()
+		for deadline := time.After(5 * time.Second); ; {
+			if data, _ := os.ReadFile(trace); strings.Contains(string(data), "prompt") {
+				break
+			}
+			select {
+			case v := <-done:
+				t.Fatalf("the review ended before its reviewer was prompted: %+v", v)
+			case <-deadline:
+				t.Fatal("the reviewer did not receive its prompt")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+		git("checkout", "other")
+		if err := os.WriteFile(trace+".release", nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+		v := <-done
+		git("checkout", started)
+		return v
+	}
+	otherKeepsItsRound := func() {
+		t.Helper()
+		git("checkout", "other")
+		if rounds, err := store.Rounds(); err != nil || len(rounds) != 1 || rounds[0].Findings[0].Title != "Other" {
+			t.Fatalf("the other branch's rounds = %+v, %v", rounds, err)
+		}
+		git("checkout", started)
+	}
+
+	if v := review("held-findings"); v.Status != StatusFindings {
+		t.Fatalf("%+v", v)
+	}
+	if rounds, err := store.Rounds(); err != nil || len(rounds) != 1 || rounds[0].Findings[0].Title != "fake defect" {
+		t.Fatalf("rounds of the branch the review started on = %+v, %v", rounds, err)
+	}
+	otherKeepsItsRound()
+
+	// A clean review clears the rounds of the branch it captured only.
+	if v := review("held"); v.Status != StatusClean {
+		t.Fatalf("%+v", v)
+	}
+	if rounds, err := store.Rounds(); err != nil || len(rounds) != 0 {
+		t.Fatalf("rounds kept after a clean review = %+v, %v", rounds, err)
+	}
+	otherKeepsItsRound()
+
+	// The checkout moved before the review of the snapshot began.
+	git("checkout", "other")
+	opts := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Timeout: 10 * time.Second, Adapters: map[string][]string{"codex": fakeAdapter("findings", "gpt-6.10-terra", filepath.Join(t.TempDir(), "trace"))}}}
+	if v := Run(context.Background(), store, capture, opts); v.Status != StatusFindings {
+		t.Fatalf("%+v", v)
+	}
+	git("checkout", started)
+	if rounds, err := store.Rounds(); err != nil || len(rounds) != 1 || rounds[0].Findings[0].Title != "fake defect" {
+		t.Fatalf("rounds of the branch the snapshot was taken on = %+v, %v", rounds, err)
+	}
+	otherKeepsItsRound()
+}
+
 func TestSerialInitializeParallelPrompts(t *testing.T) {
 	root, capture, store := reviewRepo(t)
 	trace := filepath.Join(t.TempDir(), "trace")

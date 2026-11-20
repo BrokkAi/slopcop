@@ -111,6 +111,15 @@ func RemoteDefaultBranch(ctx context.Context, root string) (string, bool) {
 	return "", false
 }
 
+// CurrentBranch names the checked-out branch, or "" when HEAD is detached.
+func CurrentBranch(root string) string {
+	name, err := Run(root, "symbolic-ref", "-q", "--short", "HEAD")
+	if err != nil {
+		return ""
+	}
+	return name
+}
+
 // OriginHead returns the remote-tracking branch refs/remotes/origin/HEAD
 // names, such as "origin/main", or "" when it is unset.
 func OriginHead(root string) string {

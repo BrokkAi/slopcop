@@ -675,3 +675,24 @@ func TestCompactDeletionsKeepsOtherSections(t *testing.T) {
 		}
 	}
 }
+
+// A snapshot names the branch it was taken on, so a check that outlives a
+// branch switch still knows which branch's change it captured.
+func TestSnapshotNamesTheCheckedOutBranch(t *testing.T) {
+	root := initRepo(t)
+	writeFile(t, root, "a.txt", "one\n")
+	git(t, root, "add", "-A")
+	git(t, root, "commit", "-qm", "base")
+	snapshot, err := CaptureWorkingTree(root, nil)
+	if err != nil || snapshot.Branch != "main" {
+		t.Fatalf("snapshot on main = %+v, %v", snapshot, err)
+	}
+	git(t, root, "checkout", "-q", "-b", "feature/x")
+	if snapshot, err = CaptureWorkingTree(root, nil); err != nil || snapshot.Branch != "feature/x" {
+		t.Fatalf("snapshot on feature/x = %+v, %v", snapshot, err)
+	}
+	git(t, root, "checkout", "-q", "--detach")
+	if snapshot, err = CaptureWorkingTree(root, nil); err != nil || snapshot.Branch != "" || CurrentBranch(root) != "" {
+		t.Fatalf("snapshot of a detached HEAD = %+v, %v", snapshot, err)
+	}
+}

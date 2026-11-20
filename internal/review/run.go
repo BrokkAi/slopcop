@@ -19,8 +19,12 @@ import (
 func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdict {
 	v := Verdict{Status: StatusFailed, Capture: capture, Time: time.Now().UTC()}
 	key := ""
+	// The reviewers can run for minutes and the checkout may switch branches
+	// meanwhile, so every read and write of the round ledger below names the
+	// branch the snapshot was taken on, not the one checked out by then.
+	branch := capture.Branch
 	save := func() {
-		if err := store.Save(Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}); err != nil {
+		if err := store.saveOn(branch, Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}); err != nil {
 			v.Status = StatusFailed
 			v.Error = "save state: " + err.Error()
 		}
@@ -69,13 +73,13 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	rounds, err := store.Rounds()
+	rounds, err := store.roundsOn(branch)
 	if err != nil {
 		v.Error = "read earlier review rounds: " + err.Error()
 		return v
 	}
 	// A failed record invalidates override eligibility before any adapter starts.
-	if err = store.Save(Record{Mode: opts.Mode, Verdict: v}); err != nil {
+	if err = store.saveOn(branch, Record{Mode: opts.Mode, Verdict: v}); err != nil {
 		v.Error = "invalidate last review: " + err.Error()
 		return v
 	}
@@ -105,7 +109,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
 	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}
-	if err = store.Save(r); err != nil {
+	if err = store.saveOn(branch, r); err != nil {
 		v.Status = StatusFailed
 		v.Error = "save review: " + err.Error()
 	}

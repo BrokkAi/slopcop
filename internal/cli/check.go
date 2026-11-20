@@ -207,7 +207,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 				reviewDone <- v
 				return
 			}
-			capture, err := review.NewFilteredCapture(prepared.repoRoot, prepared.request.BaseCommit, prepared.snapshot.Tree, prepared.reviewTree)
+			capture, err := review.NewFilteredCapture(prepared.repoRoot, prepared.snapshot.Branch, prepared.request.BaseCommit, prepared.snapshot.Tree, prepared.reviewTree)
 			if err != nil {
 				v.Error = err.Error()
 				reviewDone <- v
