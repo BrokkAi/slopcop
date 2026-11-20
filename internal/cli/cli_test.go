@@ -2238,7 +2238,8 @@ func TestAILocalReviewAndOverride(t *testing.T) {
 				}
 			}
 			if tc.mode == "findings" {
-				code, out, stderr = runCLI(t, "override", "--root", repo, "--reason", "false positive")
+				// -w is reused from check and ignored: an override is local.
+				code, out, stderr = runCLI(t, "override", "--root", repo, "-w", "Acme team", "--reason", "false positive")
 				if code != 0 {
 					t.Fatalf("override %d %s %s", code, out, stderr)
 				}
