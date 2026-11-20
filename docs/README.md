@@ -7,6 +7,7 @@ From this directory:
 npm ci
 npm run dev          # http://localhost:4321
 npm run check        # astro check
+npm test             # tests for scripts/ (never touch the network)
 npm run build        # renders dist/ and checks every internal link
 PUBLIC_DOCS_BASE=/slopcop npm run build   # proves links hold below a path prefix
 ```

@@ -8,6 +8,7 @@
     "build": "ASTRO_TELEMETRY_DISABLED=1 astro build && node scripts/check-links.mjs",
     "check": "ASTRO_TELEMETRY_DISABLED=1 astro check",
     "check:links": "node scripts/check-links.mjs",
+    "test": "node --test \"scripts/*.test.mjs\"",
     "preview": "ASTRO_TELEMETRY_DISABLED=1 astro preview"
   },
   "dependencies": {
