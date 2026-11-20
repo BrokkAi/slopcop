@@ -87,9 +87,9 @@ func TestEarlierRoundsKeepEveryRoundAndTheOverrideReason(t *testing.T) {
 			t.Errorf("history lacks %q:\n%s", want, history)
 		}
 	}
-	// A finding about a file that left the change cannot be raised again.
-	if strings.Contains(history, "gone.go") {
-		t.Errorf("history keeps a finding outside the change:\n%s", history)
+	// A finding about a file that left the change stays, marked as such.
+	if !strings.Contains(history, "`gone.go:1-2` (1-terra; file is no longer in the reviewed diff)") {
+		t.Errorf("history lost a finding outside the change:\n%s", history)
 	}
 	prompt := reviewPrompt(root, third, intent{}, history, "diff", Terra)
 	if !strings.Contains(prompt, "Apart from the author's reasons quoted under the earlier rounds") {

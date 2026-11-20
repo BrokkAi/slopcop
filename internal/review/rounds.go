@@ -316,31 +316,31 @@ func renamedSince(root, from, to string) map[string]string {
 }
 
 // findingOutcome says what became of the lines an earlier finding cites,
-// from git alone. ok is false when the finding names a file that is no
-// longer part of the change, where it cannot be raised again. renames is
-// renamedSince for the round, computed on first need.
-func findingOutcome(root string, round Round, capture Capture, changed map[string]bool, renames func() map[string]string, f Finding) (outcome string, ok bool) {
+// from git alone. A finding whose file has left the diff stays listed: the
+// fix may be a revert there and a change elsewhere, which a later suggestion
+// should not undo. renames is renamedSince for the round, computed on first
+// need.
+func findingOutcome(root string, round Round, capture Capture, changed map[string]bool, renames func() map[string]string, f Finding) string {
 	if f.Path == "" || f.StartLine == nil || f.EndLine == nil {
-		return "no location recorded", true
+		return "no location recorded"
 	}
 	if !changed[f.Path] {
 		if to := renames()[f.Path]; changed[to] {
-			return "file renamed to `" + to + "` since that round", true
+			return "file renamed to `" + to + "` since that round"
 		}
-		return "", false
+		return "file is no longer in the reviewed diff"
 	}
 	differ, err := linesChanged(root, round.Capture.CheckedTree(), capture.CheckedTree(), f.Path, *f.StartLine, *f.EndLine)
 	switch {
 	case err != nil:
-		return "could not compare the cited lines with that round", true
+		return "could not compare the cited lines with that round"
 	case differ:
-		return "cited lines changed since that round", true
+		return "cited lines changed since that round"
 	}
-	return "cited lines unchanged since that round", true
+	return "cited lines unchanged since that round"
 }
 
-// renderRound writes one earlier round, or nothing when none of its findings
-// is about a file still in the change.
+// renderRound writes one earlier round, or nothing when it has no findings.
 func renderRound(root string, round Round, capture Capture, changed map[string]bool) string {
 	var b strings.Builder
 	var renamed map[string]string
@@ -351,10 +351,7 @@ func renderRound(root string, round Round, capture Capture, changed map[string]b
 		return renamed
 	}
 	for _, f := range round.Findings {
-		outcome, ok := findingOutcome(root, round, capture, changed, renames, f)
-		if !ok {
-			continue
-		}
+		outcome := findingOutcome(root, round, capture, changed, renames, f)
 		b.WriteString("- ")
 		if f.Priority != "" {
 			fmt.Fprintf(&b, "[%s] ", f.Priority)
@@ -396,7 +393,7 @@ const historyRules = `How to use the earlier rounds:
 `
 
 // earlierRounds is the prompt section about the rounds before this review,
-// or "" when none of them has a finding about a file still in the change.
+// or "" when there are none.
 // The newest rounds are kept when the section would pass historyLimit, and
 // the newest one is cut to the limit rather than dropped.
 func earlierRounds(root string, rounds []Round, capture Capture) string {
