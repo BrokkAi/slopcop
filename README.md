@@ -513,8 +513,11 @@ or the check's exit code. Check notices, including partial comparison notices,
 appear as notes and do not make analysis incomplete. To select only
 similarity, pass `--policy-id slopcop.similarity`.
 
-For this check, function source from the change is sent to third-party
-embedding and model providers used by the hosted service.
+This is the one hosted check that is not rule-based: the hosted service sends
+function source to third-party providers. An embedding provider receives the
+functions the change adds or edits and, to index the repository, the functions
+in the rest of its source files, not only the ones the change touches. A model
+receives each changed function with the existing functions closest to it.
 
 A finding of the hosted `slopcop.dependencies.known-vulnerability` check is a
 known-vulnerable dependency version the change brings in. Its location is the

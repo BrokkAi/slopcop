@@ -71,7 +71,9 @@ front end.
 
 ## What it is not
 
-- **Static findings are rule-based.** The hosted analyzer is deterministic.
+- **Static findings are rule-based.** The hosted analyzer is deterministic,
+  with one exception: the similar-function check sends function source to an
+  embedding provider and a model, and its findings are advisory.
   Local review uses language models and its findings need inspection.
 - **Not a build.** The service reads source as written. It never builds or runs
   your code, so half-finished edits can be checked.

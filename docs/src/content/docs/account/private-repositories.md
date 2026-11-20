@@ -53,7 +53,8 @@ reconnected.
 
 ## What the service reads
 
-Read-only access to source. The service never builds or runs your code and
-never sends it to a language model. A finding carries the rule, severity,
-certainty, file, and line, with no source excerpt. See
-[What leaves your machine](/account/privacy/).
+Read-only access to source. The service never builds or runs your code. Its
+check is rule-based, with one exception: the similar-function check sends the
+source of the repository's functions to an embedding provider and a model. A
+finding carries the rule, severity, certainty, file, and line, with no source
+excerpt. See [What leaves your machine](/account/privacy/).

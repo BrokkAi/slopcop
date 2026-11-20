@@ -12,6 +12,12 @@ structural and data-flow rules that run on the source as written, with no build
 and no language model. The service pins the catalog version, so a check run
 twice on the same code gives the same result.
 
+One hosted check is outside that catalog. The similar-function check
+(`slopcop.similarity`), which runs by default, sends function source to an
+embedding provider and a model to find existing functions that resemble the
+ones a change adds or edits. Its findings are advisory.
+[What leaves your machine](/account/privacy/) says what it sends.
+
 ## Local review
 
 By default, `slopcop check` runs the hosted static check and local review
