@@ -23,6 +23,21 @@ export const onRequest = defineRouteMiddleware((context) => {
       { tag: 'link', attrs: { rel: 'describedby', href: sitePath('llms.txt') }, content: '' },
     );
   }
+  // Google takes a search result's site name from WebSite structured data on the home page of each domain
+  // and subdomain, and shows the bare domain when it finds none. The publisher is the slopcop.com organization.
+  if (route.entry.id === '' && context.site) {
+    const home = new URL(import.meta.env.BASE_URL, context.site).href;
+    const website = {
+      '@context': 'https://schema.org',
+      '@type': 'WebSite',
+      '@id': `${home}#website`,
+      url: home,
+      name: 'SlopCop',
+      alternateName: 'SlopCop documentation',
+      publisher: { '@type': 'Organization', '@id': 'https://slopcop.com/#organization', name: 'SlopCop', url: 'https://slopcop.com/' },
+    };
+    route.head.push({ tag: 'script', attrs: { type: 'application/ld+json' }, content: JSON.stringify(website) });
+  }
   if (route.entry.data.template !== 'splash' || !route.entry.data.hero) return;
   route.head.push({
     tag: 'link',
