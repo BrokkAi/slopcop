@@ -33,10 +33,7 @@ Lists every repository of the active workspace. Repositories join with their
 first check, or when someone runs `slopcop enable` in their checkout; the page
 has no way to add one. Each row links
 to the repository's page and its settings, says whether it is disabled, and for
-the owner offers **Disable** and **Enable**. When the
-[active-repository limit](/account/repositories/#the-active-repository-limit)
-applies, the page says how many are active and lets the owner choose which stay
-so.
+the owner offers **Disable** and **Enable**.
 
 When one of the workspace's GitHub, GitLab, or Bitbucket connections needs to
 be reconnected, the page names it with a link to the workspace's settings.
@@ -73,8 +70,9 @@ it. [Workspaces](/account/workspaces/) lists what each role may do.
 ## Credits
 
 The Credits page shows the workspace's balance, what each kind of run costs,
-the free-scan allowance, and where credits went. The owner buys credits there,
-sets billing alerts, and can turn on auto top-up. A coupon you hold can be
+the free checks left this month, and where credits went. The owner buys credits there,
+sets billing alerts, can turn on auto top-up, and subscribes a team workspace
+to the Team plan. A coupon you hold can be
 applied to a workspace from the same page. See
 [Credits and what it costs](/account/credits/).
 
@@ -82,6 +80,6 @@ applied to a workspace from the same page. See
 
 Besides checks, the web app can scan a whole repository: by hand, on a push or
 pull request through the GitHub App, or over the repository's history. Scans
-use credits and the daily free-scan allowance, and produce reports with
+use the same monthly free checks and credits as checks, and produce reports with
 source-linked findings. They are a separate surface from the CLI's checks: a
 check never starts a scan and never needs one to have run.

@@ -18,13 +18,13 @@ import (
 // Run performs or reuses a review; setup failures become a failed Verdict.
 func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdict {
 	v := Verdict{Status: StatusFailed, Capture: capture, Time: time.Now().UTC()}
-	key := ""
+	key, contentKey := "", ""
 	// The reviewers can run for minutes and the checkout may switch branches
 	// meanwhile, so every read and write of the round ledger below names the
 	// branch the snapshot was taken on, not the one checked out by then.
 	branch := capture.Branch
 	save := func() {
-		if err := store.saveOn(branch, Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}); err != nil {
+		if err := store.saveOn(branch, Record{Mode: opts.Mode, Verdict: v, ReuseKey: key, ContentKey: contentKey}); err != nil {
 			v.Status = StatusFailed
 			v.Error = "save state: " + err.Error()
 		}
@@ -60,6 +60,9 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
+	contentData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands})
+	contentHash := sha256.Sum256(contentData)
+	contentKey = hex.EncodeToString(contentHash[:])
 	previous, err := store.Last()
 	if err != nil {
 		v.Error = "read last review: " + err.Error()
@@ -85,6 +88,18 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
 		v.applyOverrides(overrides)
 		v.settleOverrides(opts.Root)
+		save()
+		return v
+	}
+	// Asking the agent to amend a commit message or squash commits adds a
+	// user message, which changes the intent but not the code. A tree this
+	// review already passed and that is still approved for push is not
+	// reviewed again only for that: the gate would let it through anyway,
+	// and a second run could only withdraw an approval the code still has.
+	if previous != nil && previous.Status == StatusClean && groupVerdict(previous.Reviewers) == StatusClean &&
+		previous.ContentKey != "" && previous.ContentKey == contentKey && approvedTree(opts.Root, capture.Tree) {
+		v = previous.Verdict
+		v.Reused = true
 		save()
 		return v
 	}
@@ -127,12 +142,19 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
 	v.applyOverrides(overrides)
 	v.settleOverrides(opts.Root)
-	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}
+	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key, ContentKey: contentKey}
 	if err = store.saveOn(branch, r); err != nil {
 		v.Status = StatusFailed
 		v.Error = "save review: " + err.Error()
 	}
 	return v
+}
+
+// approvedTree says whether tree is approved for push. A tree whose approval
+// cannot be read is treated as not approved, so it is reviewed again.
+func approvedTree(root, tree string) bool {
+	approved, err := Reviewed(root, tree)
+	return err == nil && approved
 }
 
 // TrimLogs keeps the newest twenty review and the newest twenty probe log

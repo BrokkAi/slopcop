@@ -198,7 +198,11 @@ In Claude Code, run Bash with **`run_in_background: true`** and poll
 TaskOutput until the check exits. In Codex, run in the foreground and poll
 the running shell session. Do not detach with `nohup` or `&`. Reviews can
 take minutes; a running command is not a pass. `--review-timeout` defaults
-to `20m`. A complete review is reused when its inputs have not changed.
+to `20m`. A complete review is reused when its inputs have not changed. Its inputs are the
+reviewed content, the reviewers, the slopcop version and the intent, the
+user's messages in the session. A clean review of a tree that is still
+approved for push is also reused when only the intent changed, such as after
+asking the agent to amend a commit message or squash commits.
 
 ## Run a check
 
@@ -454,10 +458,13 @@ Other bounds in the report:
 - `failure`: the analysis as a whole did not complete, and the report makes no
   claim about the code, even if it lists findings. `applied` is `false`
   whenever the analysis did not complete.
-- `emptyChange`: the patch has no in-scope changes. If `omittedFiles` is present,
-  the size filter left nothing to check; this is `skipped`, never a clean
-  analysis or push approval. Otherwise the working tree matches the base;
-  rerun with `--base` if you meant to check committed work.
+- `emptyChange`: the patch has no in-scope changes. If every `omittedFiles`
+  reason is `excluded`, the repository's `[check] exclude` or `.bifrostignore`
+  keeps every changed file out of checks: the report says `Nothing checked`,
+  and the tree is approved for push, since nothing in it is in scope. If any
+  other reason is present, the size filter left files unread; this is never a
+  clean analysis or push approval. Otherwise the working tree matches the
+  base; rerun with `--base` if you meant to check committed work.
 - `repositorySize`: the service's measure of the check's checkout against its
   bounds (`files`, `bytes`, `maxFiles`, `maxBytes`, `excludedFiles`,
   `excludedBytes`, `nearLimit`), counts only. When `nearLimit` is true the
