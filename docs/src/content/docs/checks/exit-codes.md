@@ -40,7 +40,11 @@ was retried, and `standsInFor` on a fallback. A review is clean when at least
 finished clean and the others failed after their retry. `review.incomplete`
 is true when fewer finished; with findings, that still exits `2` under
 `--fail-on never`. Review findings count toward exit `1` unless `--fail-on never` is
-set. A complete review is reused when its inputs have not changed.
+set. A complete review is reused when its inputs have not changed. Its inputs are the
+reviewed content, the reviewers, the slopcop version and the intent, the
+user's messages in the session. A clean review of a tree that is still
+approved for push is also reused when only the intent changed, such as after
+asking the agent to amend a commit message or squash commits.
 
 ## Exit 1: findings
 

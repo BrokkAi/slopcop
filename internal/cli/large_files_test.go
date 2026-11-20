@@ -121,6 +121,70 @@ func TestOnlyLargeDataSkipsWithoutARequestOrApproval(t *testing.T) {
 	}
 }
 
+// A change that only touches files the repository excludes from checks, such
+// as docs under exclude = ["**/*.md"], has nothing in scope to review. The
+// check says "Nothing checked" and passes, so the push gate must let its tree
+// through, or excluding a path would block every push that touches only it.
+// Large data the size filter left unread is in scope, so it still blocks.
+func TestOnlyExcludedChangeIsApprovedForPush(t *testing.T) {
+	cases := []struct {
+		name         string
+		mode         string
+		largeData    bool
+		wantApproved bool
+	}{
+		{name: "static", mode: "static", wantApproved: true},
+		{name: "ai", mode: "ai", wantApproved: true},
+		{name: "excluded beside unread large data", mode: "static", largeData: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, ".slopcop/config.toml", "[check]\nexclude = [\"**/*.md\"]\n")
+			runGit(t, repo, "add", "-A")
+			runGit(t, repo, "commit", "-qm", "config")
+			base := strings.TrimSpace(runGit(t, repo, "rev-parse", "HEAD"))
+			writeFile(t, repo, "README.md", "hello again\n")
+			writeFile(t, repo, "docs/guide.md", "a guide\n")
+			if tc.largeData {
+				writeFile(t, repo, "evidence.json", strings.Repeat("x", 500001))
+			}
+			if tc.mode == "ai" {
+				// The fake reviewer fails the test's review if it runs: an
+				// excluded-only change must leave the reviewers nothing to do.
+				t.Setenv("SLOPCOP_FAKE_ACP", "1")
+				cfg := config.Config{Review: &config.Review{Reviewers: []string{"terra"}, Adapters: map[string]config.Adapter{"codex": {Command: []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-mode=findings"}}}}}
+				if _, err := config.Save(cfg); err != nil {
+					t.Fatal(err)
+				}
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"status":"clean","applied":true,"baseCommit":"` + base + `","summary":{"files":0,"findings":0,"onlyExcluded":true},"findings":[],"incomplete":[]}`))
+			}))
+			defer server.Close()
+			code, out, stderr := runCLI(t, "check", "--root", repo, "--base", base, "--service", server.URL, "--mode", tc.mode, "--format", "json")
+			var doc struct {
+				Approved bool `json:"approved"`
+			}
+			if err := json.Unmarshal([]byte(out), &doc); err != nil {
+				t.Fatalf("%v: %s %s", err, out, stderr)
+			}
+			snapshot, err := gitx.CaptureWorkingTree(repo, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			approved, err := review.Reviewed(repo, snapshot.Tree)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if code != 0 || doc.Approved != tc.wantApproved || approved != tc.wantApproved {
+				t.Fatalf("exit=%d approved=%v recorded=%v, want %v: %s\n%s", code, doc.Approved, approved, tc.wantApproved, out, stderr)
+			}
+		})
+	}
+}
+
 func TestIncludeOnlyOptsMatchingDataBackIn(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "")

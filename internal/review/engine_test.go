@@ -694,3 +694,49 @@ func TestSerialInitializeParallelPrompts(t *testing.T) {
 		t.Fatalf("initialize/prompt order: %q", events)
 	}
 }
+
+// TestNewIntentReusesAnApprovedCleanReview checks that a user message that
+// changes only the intent, such as asking the agent to amend a commit message
+// or squash commits, does not review a tree again that a clean review passed
+// and that is still approved for push. Without the approval, or after a
+// review with findings, the new intent is reviewed.
+func TestNewIntentReusesAnApprovedCleanReview(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		mode      string
+		approve   bool
+		wantReuse bool
+	}{
+		{"clean and approved", "clean", true, true},
+		{"clean, not approved", "clean", false, false},
+		{"findings, approved by override", "findings", true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root, c, s := reviewRepo(t)
+			trace := filepath.Join(t.TempDir(), "trace")
+			o := Options{Root: root, Intent: "add the feature", Settings: Settings{Reviewers: []Family{Terra}, MinCompleted: 1, Adapters: map[string][]string{"codex": fakeAdapter(tc.mode, "gpt-6.10-terra", trace)}}}
+			first := Run(context.Background(), s, c, o)
+			if first.Reused || first.Status == StatusFailed {
+				t.Fatalf("first review: %+v", first)
+			}
+			if tc.approve {
+				if err := MarkReviewed(root, c.Tree); err != nil {
+					t.Fatal(err)
+				}
+			}
+			o.Intent = "now squash the commits into one"
+			second := Run(context.Background(), s, c, o)
+			if second.Reused != tc.wantReuse || second.Status != first.Status {
+				t.Fatalf("second review reused=%v status=%s, want reused=%v status=%s", second.Reused, second.Status, tc.wantReuse, first.Status)
+			}
+			data, _ := os.ReadFile(trace)
+			runs := 2
+			if tc.wantReuse {
+				runs = 1
+			}
+			if got := strings.Count(string(data), "prompt"); got != runs {
+				t.Fatalf("reviewer prompted %d times, want %d: %s", got, runs, data)
+			}
+		})
+	}
+}

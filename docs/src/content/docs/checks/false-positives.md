@@ -163,7 +163,10 @@ still applies first; `[check]` only removes more.
 - A rule that matches no rule the check runs, such as one that was renamed, is
   a warning.
 - A change that touches only excluded files says `Nothing checked` instead of
-  `No new findings` (`summary.onlyExcluded`); it still exits `0`.
+  `No new findings` (`summary.onlyExcluded`); it still exits `0`, and the
+  [push gate](/agents/stop-hook/) lets its tree through, since nothing in it is
+  in scope. A change that also has files the size filter left unread is not
+  approved.
 - A `[check]` the service cannot read fails the check with
   `check_config_invalid` rather than check nothing.
 
