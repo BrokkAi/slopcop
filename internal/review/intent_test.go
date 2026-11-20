@@ -62,6 +62,35 @@ func TestClaudeIntentKeepsTheQuestionAReplyAnswers(t *testing.T) {
 	}
 }
 
+// TestClaudeIntentSkipsHarnessRows checks that rows Claude Code writes as
+// the user, such as a background command's result, are not intent, so they
+// neither reach reviewers nor change the reuse key between two checks.
+func TestClaudeIntentSkipsHarnessRows(t *testing.T) {
+	rows := []string{
+		`{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"Fix the parser"}}`,
+		`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Should I also add a test?"}]}}`,
+		`{"type":"user","origin":{"kind":"task-notification","producer":"session-task"},"message":{"role":"user","content":"<task-notification>\n<status>completed</status>\n</task-notification>"}}`,
+		`{"type":"user","origin":{"kind":"something-new"},"message":{"role":"user","content":"not typed by the person"}}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"<system-reminder>r</system-reminder>\n<task-notification>\nold transcript\n</task-notification>"}]}}`,
+		`{"type":"user","message":{"role":"user","content":"<ci-monitor-event>checks failed</ci-monitor-event>"}}`,
+		`{"type":"user","message":{"role":"user","content":"yes, and mention <task-notification> in the docs"}}`,
+		`{"type":"user","origin":{"kind":"human"},"message":{"role":"user","content":"<ci-monitor-event>pasted</ci-monitor-event> fix this"}}`,
+		`{"type":"user","message":{"role":"user","content":"<task-notification>a</task-notification>\n<ci-monitor-event>b</ci-monitor-event>\nfix what these say"}}`,
+	}
+	p := filepath.Join(t.TempDir(), "t.jsonl")
+	if err := os.WriteFile(p, []byte(strings.Join(rows, "\n")), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readClaudeIntent(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Fix the parser\n\n[agent asked: Should I also add a test?]\nyes, and mention <task-notification> in the docs\n\n<ci-monitor-event>pasted</ci-monitor-event> fix this\n\n<task-notification>a</task-notification>\n<ci-monitor-event>b</ci-monitor-event>\nfix what these say"
+	if got != want {
+		t.Fatalf("intent:\n%s\n\nwant:\n%s", got, want)
+	}
+}
+
 func TestClipKeepsTheEndOfALongQuestion(t *testing.T) {
 	q := strings.Repeat("é", questionLimit) + " why?"
 	got := clip(q)

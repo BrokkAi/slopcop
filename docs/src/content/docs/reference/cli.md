@@ -262,7 +262,9 @@ overrides are under `review.adapters.<codex|dsh|claude|copilot>.command`.
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided
 the static half passed or did not run. It records the reason and cannot
-accept failed or incomplete reviews or real bugs.
+accept failed or incomplete reviews or real bugs. The override is recorded
+locally, so it accepts `-w`/`--workspace` from the `check` it follows and
+ignores it.
 
 Each review is shown the findings of every earlier round since the last
 clean review, with whether the lines a finding cites have changed since, and
