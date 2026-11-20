@@ -12,6 +12,12 @@ structural and data-flow rules that run on the source as written, with no build
 and no language model. The service pins the catalog version, so a check run
 twice on the same code gives the same result.
 
+One hosted check is outside that catalog. The similar-function check
+(`slopcop.similarity`), which runs by default, sends function source to an
+embedding provider and a model to find existing functions that resemble the
+ones a change adds or edits. Its findings are advisory.
+[What leaves your machine](/account/privacy/) says what it sends.
+
 ## Local review
 
 By default, `slopcop check` runs the hosted static check and local review
@@ -91,8 +97,10 @@ resolves.
   (`72 already in the code`), never listed, and never fail the check.
 - Findings in files the change does not write. The check analyzes the files
   the patch touches, in the context of the whole repository.
-- Anything a model might say. There is no AI review in a check, and no code is
-  sent to one.
+- A model's review of the change, from the service. The hosted check has no AI
+  review, and the similar-function check is the only one that sends code to a
+  model. Review by models is the [local review](#local-review), under your own
+  logins.
 
 The web app's own scans of a repository are a different surface: broader,
 triggered by pushes and pull requests or on a schedule, and paid in credits.

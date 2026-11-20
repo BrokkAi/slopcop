@@ -378,9 +378,12 @@ and a probability. Similarity findings have `info` severity and are always
 shown regardless of `--certainty`; they are advisory and never affect the
 push gate or check exit code. Readiness and partial comparison notices are
 notes, not incomplete checks. To select only similarity, use
-`--policy-id slopcop.similarity`. Function source from the
-change is sent to third-party embedding and model providers used by the hosted
-service.
+`--policy-id slopcop.similarity`. This is the one hosted check that is not
+rule-based: the hosted service sends function source to third-party
+providers. An embedding provider receives the functions the change adds or
+edits and, to index the repository, the functions in the rest of its source
+files, not only the ones the change touches. A model receives each changed
+function with the existing functions closest to it.
 
 A `slopcop.dependencies.known-vulnerability` finding is a known-vulnerable
 dependency version the change brings in, located at its lockfile entry. Its

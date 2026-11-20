@@ -64,9 +64,18 @@ and so the workspace's Checks page can show what was found and ignored.
 
 - **Never runs your code.** The analysis reads source as written. Nothing is
   built or executed.
-- **Never sends your code to a language model through the SlopCop service.**
-  The hosted half is static analysis. Local reviewers send the diff to
-  model providers under your own harness logins.
+- **Never sends your code to a language model, with one exception.** The
+  hosted check is rule-based, except the similar-function check
+  (`slopcop.similarity`), which runs by default. For that check the service
+  sends function source to third-party providers. An embedding provider
+  receives the functions the change adds or edits and, to index the
+  repository, the functions in the rest of its source files, not only the ones
+  the change touches. A model receives each changed function with the existing
+  functions closest to it, to judge whether they should be combined. A vector
+  index stores each function's embedding and location (file, name, and line
+  range), not its source. The [privacy policy](https://slopcop.com/privacy)
+  names the providers. Local reviewers send the diff to model providers under
+  your own harness logins.
 - **Never writes to your repository.** The GitHub App asks for read-only
   contents and metadata; the optional issues permission is for the web app's
   issue filing, not checks.

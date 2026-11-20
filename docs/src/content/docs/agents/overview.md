@@ -71,7 +71,9 @@ checkouts do not need another install. See the
 3. The service applies the patch at that base commit in its own clone and runs
    Bifrost over the files the change writes. Your code is read, never run, and
    sent to local reviewers only in the default `both` mode. The hosted
-   static service does not send code to a model.
+   check is rule-based, with one exception: the similar-function check sends
+   function source to an embedding provider and a model. See
+   [What leaves your machine](/account/privacy/).
 4. The report comes back. New findings, on lines the change added or touched,
    fail the check. Findings already in the code are counted, never failed.
 5. The agent fixes the new findings and checks again, until none are left. A
