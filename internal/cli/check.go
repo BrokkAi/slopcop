@@ -342,9 +342,15 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			}
 		}
 	}
-	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean
+	// A change the repository's own exclusions emptied leaves the reviewers
+	// nothing to read, so an empty review passes it, as the service's
+	// "Nothing checked" does. The size filter emptying a change is not the
+	// same: those files are in scope but went unread, so it stays unapproved.
+	excludedOnly := prepared.onlyExcluded()
+	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean ||
+		(excludedOnly && verdict.Status == review.StatusEmpty)
 	staticPassed := staticPasses(static, mode, blockLevel)
-	nonempty := prepared.bytes > 0 && (static.response != nil || verdict.Status == review.StatusClean)
+	nonempty := (prepared.bytes > 0 || excludedOnly) && (static.response != nil || (reviewPassed && mode != modeStatic))
 	reportOptions.Approved = reviewPassed && staticPassed && nonempty
 	if reportOptions.Approved {
 		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
@@ -392,7 +398,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		if reportOptions.Approved {
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may be pushed: it passed the check.\n", tree)
 		} else {
-			reason := approvalReason(prepared.bytes == 0, reviewPassed, verdict, static, mode, blockLevel)
+			reason := approvalReason(prepared.bytes == 0 && !excludedOnly, reviewPassed, verdict, static, mode, blockLevel)
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may not be pushed yet: %s.\n", tree, reason)
 		}
 	}
@@ -990,6 +996,20 @@ func (p preparedCheck) onlyOmitted() bool {
 	}
 	for _, file := range p.omittedFiles {
 		if file.Reason == gitx.OmittedExcluded {
+			return false
+		}
+	}
+	return true
+}
+
+// onlyExcluded reports a change whose every changed file .bifrostignore or
+// [check] exclude keeps out of checks, so nothing in it is in scope.
+func (p preparedCheck) onlyExcluded() bool {
+	if p.bytes != 0 || len(p.omittedFiles) == 0 {
+		return false
+	}
+	for _, file := range p.omittedFiles {
+		if file.Reason != gitx.OmittedExcluded {
 			return false
 		}
 	}

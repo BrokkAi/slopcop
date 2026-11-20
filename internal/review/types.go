@@ -158,7 +158,9 @@ type Verdict struct {
 	// finished; with findings, the check still cannot pass.
 	Incomplete bool `json:"incomplete,omitempty"`
 	// Reused is set when the verdict is an earlier complete review of the
-	// same capture by the same reviewers, returned without running again.
+	// same capture by the same reviewers, returned without running again:
+	// with the same intent, or, for a clean review of a tree still approved
+	// for push, with any intent.
 	Reused bool      `json:"reused,omitempty"`
 	Time   time.Time `json:"time"`
 }
@@ -188,6 +190,10 @@ type Options struct {
 // can reject static findings, failures, and pending checks.
 type Record struct {
 	ReuseKey string `json:"reuseKey,omitempty"`
+	// ContentKey is ReuseKey without the intent: what the reviewers read
+	// and who read it. A clean review of an approved tree is reused when
+	// only the intent changed.
+	ContentKey string `json:"contentKey,omitempty"`
 	// Mode is "both" or "ai".
 	Mode string `json:"mode"`
 	// StaticExit is the static half's exit code; nil in "ai" mode.
