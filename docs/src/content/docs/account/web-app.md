@@ -33,10 +33,7 @@ Lists every repository of the active workspace. Repositories join with their
 first check, or when someone runs `slopcop enable` in their checkout; the page
 has no way to add one. Each row links
 to the repository's page and its settings, says whether it is disabled, and for
-the owner offers **Disable** and **Enable**. When the
-[active-repository limit](/account/repositories/#the-active-repository-limit)
-applies, the page says how many are active and lets the owner choose which stay
-so.
+the owner offers **Disable** and **Enable**.
 
 When one of the workspace's GitHub, GitLab, or Bitbucket connections needs to
 be reconnected, the page names it with a link to the workspace's settings.
