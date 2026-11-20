@@ -1,6 +1,6 @@
 ---
 title: Repositories
-description: "A repository's first check adds it to the workspace, and `slopcop enable` can add it up front. Listing, enabling, and disabling repositories, the active-repository limit, and the steps an agent cannot take."
+description: "A repository's first check adds it to the workspace, and `slopcop enable` can add it up front. Listing, enabling, and disabling repositories, and the steps an agent cannot take."
 sidebar:
   order: 3
 ---
@@ -92,16 +92,10 @@ repository's `owner/name`.
 Names match without regard to case; when two providers have a repository of
 the same name, pass the id the listing prints.
 
-## The active-repository limit
+## How many repositories
 
-A workspace that has never paid (never topped up, had a coupon applied, or been
-unlocked by an operator) has no limit for its first 45 days, then **one**
-active repository until it unlocks. A workspace that has paid once has no limit,
-for good. `repo list` marks a repository that is enabled but over the limit, and
-the web app's Repositories page is where the owner chooses which stay active.
-Ten days before the limit applies, the workspace is told by email and in the
-app. A check of a repository over the limit answers
-`active_repository_limit_reached`.
+A workspace can have any number of repositories, and every enabled one is
+checked: repositories are free and there is no limit on how many are active.
 
 ## What stays in the web app
 
