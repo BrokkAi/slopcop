@@ -164,6 +164,13 @@ func OverrideFinding(root, id, reason string) (override FindingOverride, added b
 			return FindingOverride{}, false, fmt.Errorf("no review of this checkout reported finding %s; use an id from review.findings of the latest `slopcop check`", id)
 		}
 	}
+	// Parsing leaves a path absolute when it cannot tell which changed file
+	// it is; the repository root can, and later reviews cite paths relative.
+	if filepath.IsAbs(finding.Path) {
+		if rel, err := filepath.Rel(root, finding.Path); err == nil && filepath.IsLocal(rel) {
+			finding.Path = filepath.ToSlash(rel)
+		}
+	}
 	override = FindingOverride{ID: id, Finding: finding, Reason: reason, OverriddenAt: time.Now().UTC()}
 	err = changeOverrides(root, func(overrides []FindingOverride) ([]FindingOverride, bool) {
 		for i := range overrides {
@@ -380,6 +387,11 @@ func matchOverride(overrides []FindingOverride, f Finding) (id, match string) {
 	best, bestScore := "", 0.0
 	for _, o := range overrides {
 		other := o.Finding
+		// The id is the overridden text as it was cited, even when the stored
+		// path was since made relative to the repository root.
+		if o.ID == f.ID && samePlace(other, f) {
+			return o.ID, MatchText
+		}
 		if !samePath(other.Path, f.Path) || !samePlace(other, f) {
 			continue
 		}
@@ -556,8 +568,11 @@ func overriddenSection(overrides []FindingOverride, capture Capture) (string, []
 }
 
 // OverridesHold reports whether every finding override the verdict relied
-// on is still in place. A check asks after recording the tree's approval: an
-// undo that ran between the review and the approval could not withdraw it.
+// on is still in place, and still has the verdict's tree recorded on it, so
+// undoing it will withdraw the tree's approval. An override undone and made
+// again since has not, and does not hold. A check asks after recording the
+// tree's approval: an undo that ran between the review and the approval
+// could not withdraw it.
 func OverridesHold(root string, v Verdict) (bool, error) {
 	used := v.usedOverrides()
 	if len(used) == 0 {
@@ -567,7 +582,13 @@ func OverridesHold(root string, v Verdict) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return stillOverridden(used, overrides), nil
+	for _, id := range used {
+		i := slices.IndexFunc(overrides, func(o FindingOverride) bool { return o.ID == id })
+		if i < 0 || !slices.Contains(overrides[i].Trees, v.Capture.Tree) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // stillOverridden reports whether every id is still overridden.

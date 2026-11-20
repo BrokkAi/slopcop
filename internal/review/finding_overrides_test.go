@@ -395,3 +395,53 @@ func TestWholeReviewOverrideNeedsTheFindingOverridesItReliedOn(t *testing.T) {
 		t.Fatalf("override = %v", err)
 	}
 }
+
+func TestARecreatedOverrideDoesNotHoldForAnEarlierReview(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	trace := filepath.Join(t.TempDir(), "trace")
+	o := Options{Root: root, Settings: Settings{Reviewers: []Family{Terra}, MinCompleted: 1, Adapters: map[string][]string{"codex": fakeAdapter("release-race", "gpt-6.10-terra", trace)}}}
+	id := Run(context.Background(), s, c, o).Findings()[0].ID
+	if _, _, err := OverrideFinding(root, id, "first"); err != nil {
+		t.Fatal(err)
+	}
+	v := Run(context.Background(), s, c, o)
+	if hold, err := OverridesHold(root, v); err != nil || !hold || v.Status != StatusClean {
+		t.Fatalf("%v %v %+v", hold, err, v)
+	}
+	if _, _, err := UndoFindingOverride(root, id); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := OverrideFinding(root, id, "again"); err != nil {
+		t.Fatal(err)
+	}
+	// The new override never recorded v's tree, so undoing it would not
+	// withdraw v's approval: v must not count as relying on it.
+	if hold, err := OverridesHold(root, v); err != nil || hold {
+		t.Fatalf("recreated override holds: %v", err)
+	}
+}
+
+func TestAnOverrideStoredRelativeStillMatchesItsAbsoluteCitation(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	text := strings.ReplaceAll(releaseRace, "`setup.sh", "`"+filepath.ToSlash(filepath.Join(root, "change.txt")))
+	// Both changed paths end the absolute one when the root's own name is a
+	// directory of the change.
+	nested := filepath.Base(root) + "/change.txt"
+	f := ParseFindings("1-terra", text, map[string]bool{"change.txt": true, nested: true})[0]
+	if !filepath.IsAbs(f.Path) {
+		t.Fatalf("ambiguous path parsed as %q", f.Path)
+	}
+	v := Verdict{Status: StatusFindings, Capture: c, Reviewers: []Reviewer{{Name: "1-terra", Status: StatusFindings, Text: text}}}
+	v.Capture.Numstat = "1\t1\tchange.txt\n1\t1\t" + nested
+	if err := s.write("last.json", Record{Verdict: v}); err != nil {
+		t.Fatal(err)
+	}
+	o, _, err := OverrideFinding(root, f.ID, "reason")
+	if err != nil || o.Finding.Path != "change.txt" {
+		t.Fatalf("%+v %v", o, err)
+	}
+	v.applyOverrides([]FindingOverride{o})
+	if v.Status != StatusClean || len(v.Overridden) != 1 {
+		t.Fatalf("%+v", v)
+	}
+}

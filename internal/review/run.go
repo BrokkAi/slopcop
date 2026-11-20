@@ -97,9 +97,11 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	// reviewed again only for that: the gate would let it through anyway,
 	// and a second run could only withdraw an approval the code still has.
 	if previous != nil && previous.Status == StatusClean && groupVerdict(previous.Reviewers) == StatusClean &&
-		previous.ContentKey != "" && previous.ContentKey == contentKey && approvedTree(opts.Root, capture.Tree) {
+		previous.ContentKey != "" && previous.ContentKey == contentKey && approvedTree(opts.Root, capture.Tree) &&
+		stillOverridden(previous.PromptOverrides, overrides) {
 		v = previous.Verdict
 		v.Reused = true
+		v.settleOverrides(opts.Root)
 		save()
 		return v
 	}
