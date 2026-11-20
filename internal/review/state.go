@@ -213,6 +213,13 @@ func (s *Store) Override(reason, currentTree string) error {
 	if currentTree != r.Capture.Tree {
 		return errors.New("working tree differs from reviewed tree")
 	}
+	// The review may have left a finding out, or its reviewers may have been
+	// told to, because of a finding override since undone.
+	if hold, err := OverridesHold(s.root, r.Verdict); err != nil {
+		return err
+	} else if !hold {
+		return errors.New("a finding override this review relied on was undone since; run slopcop check again before overriding")
+	}
 	f, err := os.OpenFile(filepath.Join(s.dir, "overrides.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
@@ -236,7 +243,21 @@ func (s *Store) Override(reason, currentTree string) error {
 	if err = s.overrideRound(*r, reason); err != nil {
 		return err
 	}
-	return MarkReviewed(s.root, currentTree)
+	if err = MarkReviewed(s.root, currentTree); err != nil {
+		return err
+	}
+	// An undo that ran after the check above withdrew the approvals it knew
+	// of, not this one; then this one does not stand either.
+	if hold, err := OverridesHold(s.root, r.Verdict); err != nil || !hold {
+		if unmarkErr := Unmark(s.root, currentTree); unmarkErr != nil {
+			return unmarkErr
+		}
+		if err != nil {
+			return err
+		}
+		return errors.New("a finding override this review relied on was undone while overriding; run slopcop check again")
+	}
+	return nil
 }
 
 // MarkReviewed creates the approval ref for a reviewed tree.

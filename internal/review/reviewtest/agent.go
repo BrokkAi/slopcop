@@ -249,6 +249,15 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 	if a.mode == "findings" || a.mode == "held-findings" {
 		text = "- [P1] fake defect"
 	}
+	// One false positive, then the same point as another review words it.
+	if a.mode == "release-race" {
+		text = "- [P2] npm can publish a newer version than the latest GitHub release `change.txt:3-4`\n" +
+			"The setup script compares the installed npm package with the latest GitHub release, so when the npm job publishes before goreleaser creates the release, the check reports a newer version that does not exist yet."
+	}
+	if a.mode == "release-race-reworded" {
+		text = "- [P2] Check the installed package's channel for updates `change.txt:6-7`\n" +
+			"When the npm package is published before goreleaser finishes the GitHub release, the setup script sees a newer npm version than the latest release and reports an update that is not available yet."
+	}
 	if a.mode == "empty" {
 		text = ""
 	}

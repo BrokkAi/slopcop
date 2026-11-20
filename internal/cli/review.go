@@ -66,6 +66,9 @@ func runReviewShow(cmd *cobra.Command, root, format string) error {
 	for _, problem := range problems {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %v\n", problem)
 	}
+	if verdict, err = review.ApplyFindingOverrides(repo, verdict); err != nil {
+		return err
+	}
 	status := string(verdict.Status)
 	if verdict.Status == review.StatusEmpty {
 		status = string(review.StatusClean)

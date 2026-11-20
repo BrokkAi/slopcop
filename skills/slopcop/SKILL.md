@@ -275,14 +275,19 @@ Each finding also carries its
 
 Review findings are not in `findings` or `summary.newFindings`. In `json`,
 `review.findings` lists them, parsed from each reviewer's reply, with
-`reviewer`, `priority` (`P0` to `P3`), `path`, `startLine`, `endLine`,
+`id`, `reviewer`, `priority` (`P0` to `P3`), `path`, `startLine`, `endLine`,
 `title` and `message`; `summary.reviewFindings` counts them. A reply with no
 `- [Pn]` finding to parse is one finding with `malformed: true`, holding the
 reply's first line as `title` and the rest as `message`, with no priority or
 location: read that reviewer's `text` in `review.reviewers`. In `sarif` they
-are results of the `slopcop-review` run. They have no `id`, so `slopcop
-ignore` does not take them: fix the real ones and use `slopcop override` for
-wrong ones.
+are results of the `slopcop-review` run, with the id in
+`properties["slopcop.findingId"]`. A review finding's `id` starts with `rv-`
+(a static finding's is a UUID). `slopcop ignore` does not take it, since review
+findings never reach the service: fix the real ones, and override a wrong one
+with `slopcop override <rv-id> --reason "..."` (see below).
+`review.overridden` lists the findings left out because they match a finding
+you overrode, each with `overrideId`; they are not counted and do not fail the
+check.
 
 A review finding fails the check under every `--fail-on` but `never`: it has a
 priority, not a static severity, so `note`, `warning` and `error` do not
@@ -478,8 +483,8 @@ Other bounds in the report:
 
 The new findings are the work: fix them in the working tree and run the same
 check again. A static finding traces to a rule; a review finding is a model's
-judgment, so read the code it names before you change anything, and use
-`slopcop override` (below) when it is wrong. The loop ends when the check
+judgment, so read the code it names before you change anything, and override
+it (below) when it is wrong. The loop ends when the check
 approves the tree: `approved` is `true` in `json`, and where the push gate is
 installed, stderr says the tree may be pushed. That needs a clean review and
 no new static finding at or above the push level (`error` by default); a
@@ -499,7 +504,8 @@ pre-existing findings unless asked: they are not this change's, and they never
 stop the loop.
 
 When a hosted static finding is a false positive, run `slopcop ignore <id>`
-with its id.
+with its id. For a local review finding, whose id starts with `rv-`, run
+`slopcop override <rv-id> --reason "..."` instead (see below).
 That finding is not reported again for this repository. Undo a mistaken ignore
 with `slopcop unignore <id>`. List the repository's ignored findings, with
 their ids, with `slopcop ignored`. A finding marked as matching an ignored
@@ -548,17 +554,40 @@ the change, so a new rule is picked up by the next check with no extra setup.
 
 ## Override, gate, and configuration
 
-For demonstrably incorrect or unreasonable **complete** review findings,
-run `slopcop override --reason "concrete explanation"`. This accepts the
-last reviewed snapshot only when the static half has no new findings at or
-above the push level and completed, was skipped, or did not run. The override
-is local: it accepts the `-w` you passed to `check` and ignores it.
+`slopcop override` is local, like the review: it never reaches the service, and
+it accepts the `-w` you passed to `check` and ignores it. It has two forms.
+
+**One wrong finding: `slopcop override <rv-id> --reason "why it does not
+hold"`.** Use this for a review finding that is demonstrably wrong, by the
+`id` from `review.findings`. Then run the same `slopcop check` again: the same
+review is reused, without running the reviewers, and the finding moves to
+`review.overridden`, so it no longer fails the check or blocks the push. The
+override holds for every later review in the clone, on any branch or
+worktree. Later reviewers are shown the finding with your reason and told not
+to raise it again, and a finding that repeats it, even reworded near the same
+lines, goes to `review.overridden` with `overrideId` set to the id you
+overrode. Write the reason for the reviewers: say why the finding does not
+hold. Overriding the same id again replaces the reason.
+
+After each check, read `review.overridden`: it should hold only the point you
+overrode. An entry with `match: words` was matched by similar wording at the
+same place; read it to be sure. If a real, different problem landed there, undo the override with
+`slopcop override --undo <id>` (the overridden id, or the left-out finding's
+own id) and fix it. Undoing withdraws the push approval of every tree that
+passed because of the override. `slopcop override --list` lists the clone's
+finding overrides with their reasons; add `--format json` to read them.
+
+**The whole review, this tree only: `slopcop override --reason "concrete
+explanation"`.** This accepts every finding of the last **complete** review of
+the current snapshot, only when the static half has no new findings at or
+above the push level and completed, was skipped, or did not run. It does not
+carry over: the next change is reviewed afresh and the findings can come back.
 Later review rounds show the reviewers this reason beside the findings it
-accepted, and tell them not to raise the point again unless the code shows
-the reason is wrong. Write it for them: say why the finding does not hold.
+accepted. Prefer overriding the one wrong finding.
+
 Never override a real bug, timeout, failed or incomplete review, or a
 different tree. Do not switch reviewers or reduce the count to bypass a
-failure.
+failure. Tell the user every review finding you overrode and why.
 
 Set the push level with `gate.blockOn` in the config file. Only a person
 should change it. The default is `error`; `--fail-on` affects exit codes,

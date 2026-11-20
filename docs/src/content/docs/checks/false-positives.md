@@ -103,6 +103,60 @@ Lost the id? `slopcop ignored` lists the findings your workspace ignored in
 this repository, newest first, with each one's id, location, rule, and when and
 by whom it was ignored. It shows 25 at a time; pass `--page 2` for the next.
 
+## Override a review finding
+
+`slopcop ignore` is for static findings, which the service reports and keeps.
+The local LLM review runs on your machine, and its findings never reach the
+service, so a wrong one is overridden locally instead. Each carries an id
+starting with `rv-`: `id` in `review.findings` in `json`, and beside each
+finding under the review's count in `human`.
+
+```console
+slopcop override rv-3f9a1c0b7d2e --reason "the npm job needs goreleaser, so npm never publishes first"
+```
+
+Then check again. The review of the same change is reused, without running
+the reviewers, and leaves the finding out, so it no longer fails the check or
+holds back the push gate.
+
+Reviewers word the same point differently from one review to the next, so a
+finding override covers more than the exact text, in every later review of the
+clone:
+
+- Later reviews are shown the overridden findings about the files they review,
+  with your reason, and told not to raise them again in any wording. Write the
+  reason for them.
+- A finding a reviewer reports anyway is left out when it repeats an overridden
+  one at the same place (the same file, within 20 lines of the overridden
+  one): the same text (`match: text`), or enough of the same words
+  (`match: words`). A short finding, such as a title alone, is left out only
+  when its text is the same. The same text far from the overridden lines is
+  another instance and is reported.
+
+A finding left out this way is never hidden. It is listed apart from the
+findings and does not fail the check: in `human` under *findings left out*,
+with the id it matches, in `json` under `review.overridden` with `overrideId`,
+and in `sarif` as a suppressed result. If one of them is a real problem, undo
+the override.
+
+```console
+slopcop override --list
+slopcop override --undo rv-3f9a1c0b7d2e
+```
+
+`--undo` takes the overridden id, or the id of a finding listed as matching
+it. It withdraws the push approval of every tree whose review relied on the
+override, and a review whose reviewers were told to leave the finding out runs
+again on the next check.
+
+A finding override is kept in the clone's git directory, shared by all its
+worktrees and branches, and not committed, so it does not change the reviewed
+tree. It is yours alone: it is not in your workspace, and `-w` does not apply.
+
+`slopcop override --reason "..."` without an id is the other form: it accepts
+every finding of the latest complete review for the current tree only, and the
+next change is reviewed afresh.
+
 ## Add a word to the dictionary
 
 A misspelled-identifier finding flags one part of an identifier as a typo. When

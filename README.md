@@ -595,7 +595,13 @@ and a completed static result with no new findings at or above
 Warnings and notes are advisory for push approval, though they still exit `1`
 by default. The Claude Code gate checks HEAD's tree, so
 after checking a dirty tree, commit exactly that state. For demonstrably wrong
-complete review findings, `slopcop override --reason "..."` records acceptance
+complete review findings, `slopcop override <rv-id> --reason "..."` overrides
+one finding, by the `rv-` id in `review.findings`, for every later review in the
+clone: check again and the reused review leaves it out, later reviewers are
+told not to raise it, and a finding that repeats it, even reworded near the
+same lines, is listed under `review.overridden` instead of failing the check.
+`--undo <rv-id>` and `--list` manage them. Without an id,
+`slopcop override --reason "..."` records acceptance
 when the static half has no findings at or above the push level
 and completed, was skipped, or did not run. Never override real bugs or failed or incomplete reviews.
 
@@ -760,8 +766,10 @@ would otherwise pass a change a reviewer flagged. The static counts in
 alone fails can show `summary.findings: 0` and `staticStatus: clean` and still
 exit `1`. JSON `exitReason` names what failed it, and stderr says so in every
 format, with the count and where the review findings are listed. Fix the real
-ones and check again. For a wrong one, `slopcop override` approves the tree for
-push but does not change the exit code; `--fail-on never` keeps review
+ones and check again. For a wrong one, `slopcop override <rv-id> --reason "..."`
+and check again: the reused review leaves it out and later reviews do not
+report it. `slopcop override --reason "..."` without an id approves the tree
+for push but does not change the exit code; `--fail-on never` keeps review
 findings, and static ones, from exiting `1`.
 
 An inconclusive check, one that ran but could not prove there is nothing

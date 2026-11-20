@@ -1,6 +1,9 @@
 package review
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -12,6 +15,10 @@ import (
 // reviewers mostly follow it but vary the punctuation, so the parse is
 // lenient and keeps whatever it cannot place in Message.
 type Finding struct {
+	// ID names the finding for `slopcop override <rv-id>`: FindingIDPrefix and a hash
+	// of its path, title and message, so every reviewer that reports the same
+	// text gives it the same id, and a moved line keeps it.
+	ID string `json:"id"`
 	// Reviewer is the Name of the reviewer that reported the finding.
 	Reviewer string `json:"reviewer"`
 	// Priority is the reviewer's tag, "P0" (most urgent) to "P3". It is
@@ -81,7 +88,71 @@ func ParseFindings(reviewer, text string, changed map[string]bool) []Finding {
 			findings = append(findings, Finding{Reviewer: reviewer, Title: title, Message: joinParagraph(rest), Malformed: true})
 		}
 	}
+	seen := map[string]int{}
+	for i := range findings {
+		findings[i].Path = relativeToChange(findings[i].Path, changed)
+		// The same text twice in one reply is two findings at two places:
+		// the second and later get ids of their own, so each can be named.
+		// Whether a later finding repeats an overridden one is decided by its
+		// place as well, not by these ids alone.
+		id := findingID(findings[i], 0)
+		seen[id]++
+		if n := seen[id]; n > 1 {
+			id = findingID(findings[i], n)
+		}
+		findings[i].ID = id
+	}
 	return findings
+}
+
+// relativeToChange turns an absolute path that ends with exactly one
+// changed path into that repository-relative path: a reviewer is told the
+// repository root and may cite a file under it, from whichever worktree it
+// ran in. When several changed paths fit, as `setup.sh` and `tools/setup.sh`
+// both fit `/tmp/tools/setup.sh`, the root alone could tell which is meant,
+// so the path is left as it is. So is any other path.
+func relativeToChange(path string, changed map[string]bool) string {
+	slashed := filepath.ToSlash(path)
+	if !filepath.IsAbs(path) && !strings.HasPrefix(slashed, "/") {
+		return path
+	}
+	match := ""
+	for p := range changed {
+		if strings.HasSuffix(slashed, "/"+p) {
+			if match != "" {
+				return path
+			}
+			match = p
+		}
+	}
+	if match == "" {
+		return path
+	}
+	return match
+}
+
+// FindingIDPrefix starts every review finding id, telling it apart from the
+// UUID of a hosted static finding, which `slopcop ignore` takes.
+const FindingIDPrefix = "rv-"
+
+// findingIDPattern is the shape of a review finding id.
+var findingIDPattern = regexp.MustCompile(`^` + FindingIDPrefix + `[0-9a-f]{12}$`)
+
+// IsFindingID reports whether id has the shape of a review finding id.
+func IsFindingID(id string) bool { return findingIDPattern.MatchString(id) }
+
+// findingID hashes what a finding says and where, without its reviewer,
+// priority or lines. Case and runs of white space do not count. occurrence
+// tells apart the second and later findings with the same text in one
+// reply; it is 0 for the first.
+func findingID(f Finding, occurrence int) string {
+	normal := func(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
+	key := strings.TrimPrefix(f.Path, "./") + "\x00" + normal(f.Title) + "\x00" + normal(f.Message)
+	if occurrence > 0 {
+		key += "\x00" + strconv.Itoa(occurrence)
+	}
+	sum := sha256.Sum256([]byte(key))
+	return FindingIDPrefix + hex.EncodeToString(sum[:6])
 }
 
 // headerFinding parses the text after a priority tag: the title, then the
@@ -224,8 +295,27 @@ func firstLine(text string) (string, []string) {
 }
 
 // Findings parses the replies of every reviewer that reported findings, in
-// reviewer order.
+// reviewer order, leaving out each finding that matched a finding override.
 func (v Verdict) Findings() []Finding {
+	overridden := map[string]bool{}
+	for _, f := range v.Overridden {
+		overridden[f.instance()] = true
+	}
+	findings := []Finding{}
+	for _, f := range v.reported() {
+		if !overridden[f.instance()] {
+			findings = append(findings, f)
+		}
+	}
+	return findings
+}
+
+// instance names one reported finding: two reviewers may give findings at
+// different places the same id, but one reply never repeats an id.
+func (f Finding) instance() string { return f.Reviewer + "\x00" + f.ID }
+
+// reported is every finding the reviewers reported, overridden or not.
+func (v Verdict) reported() []Finding {
 	findings := []Finding{}
 	changed := ChangedPaths(v.Capture.Numstat)
 	for _, r := range v.Reviewers {

@@ -92,7 +92,15 @@ func TestParseFindings(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			if got := ParseFindings("1-terra", test.text, test.changed); !reflect.DeepEqual(got, test.want) {
+			got := ParseFindings("1-terra", test.text, test.changed)
+			for i := range got {
+				// The id is tested on its own; here it would only repeat the hash.
+				if !IsFindingID(got[i].ID) {
+					t.Fatalf("id %q", got[i].ID)
+				}
+				got[i].ID = ""
+			}
+			if !reflect.DeepEqual(got, test.want) {
 				t.Fatalf("got  %s\nwant %s", describe(got), describe(test.want))
 			}
 		})

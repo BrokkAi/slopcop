@@ -65,6 +65,10 @@ filter took effect.
 Every finding carries an `id`: an `ID:` line in `human`, `id` in `json`,
 `properties["slopcop.findingId"]` in `sarif`. It is what
 [`slopcop ignore`](/checks/false-positives/) takes.
+A local review finding carries one too, starting with `rv-`, in
+`review.findings`. It never reaches the service, so `slopcop ignore` does not
+take it: override a wrong one with `slopcop override <rv-id> --reason "..."`,
+see [Override a review finding](/checks/false-positives/#override-a-review-finding).
 
 ## Incomplete checks
 

@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/service"
 )
 
@@ -61,6 +62,9 @@ func sendFinding(
 	send func(*service.Client, context.Context, string) (service.IgnoreResponse, error),
 ) (service.IgnoreResponse, error) {
 	findingID = strings.TrimSpace(findingID)
+	if review.IsFindingID(findingID) {
+		return service.IgnoreResponse{}, fmt.Errorf("%s is a local review finding's id, which never reaches the service; run `slopcop override %s --reason \"why it does not hold\"` instead", findingID, findingID)
+	}
 	if !uuidPattern.MatchString(findingID) {
 		return service.IgnoreResponse{}, fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
 	}

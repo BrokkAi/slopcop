@@ -268,6 +268,17 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return silentExit{interruptCode(cmd.Context())}
 	}
 
+	// A finding override the review relied on may have been undone while
+	// the static half ran: then the review is not what the overrides now say.
+	if mode != modeStatic && (verdict.Status == review.StatusClean || verdict.Status == review.StatusFindings) {
+		if hold, err := review.OverridesHold(prepared.repoRoot, verdict); err != nil || !hold {
+			verdict.Status = review.StatusFailed
+			verdict.Error = "a finding override this review relied on was undone while the check ran; run slopcop check again"
+			if err != nil {
+				verdict.Error = "read review finding overrides: " + err.Error()
+			}
+		}
+	}
 	exit := static.exit
 	if mode != modeStatic {
 		if verdict.Status == review.StatusFindings && failOn != "never" {
@@ -349,6 +360,32 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if reportOptions.Approved {
 		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
 			return err
+		}
+		// A finding override the review relied on may have been undone after
+		// the review recorded the tree on it and before this approval, too
+		// late for the undo to withdraw it. Then the approval does not stand.
+		if mode != modeStatic {
+			hold, err := review.OverridesHold(prepared.repoRoot, verdict)
+			if err != nil {
+				if unmarkErr := review.Unmark(prepared.repoRoot, prepared.snapshot.Tree); unmarkErr != nil {
+					return unmarkErr
+				}
+				return err
+			}
+			if !hold {
+				if err := review.Unmark(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
+					return err
+				}
+				// The result fails as the earlier guard makes it fail: the
+				// review is no longer what the overrides say.
+				reportOptions.Approved = false
+				verdict.Status = review.StatusFailed
+				verdict.Error = "a finding override this review relied on was undone while the check ran; run slopcop check again"
+				if exit == service.ExitClean {
+					exit = service.ExitIncomplete
+					reportOptions.Status = "incomplete"
+				}
+			}
 		}
 	} else if prepared.bytes > 0 || len(prepared.omittedFiles) > 0 {
 		// A later failed decision also withdraws an override for this tree.
