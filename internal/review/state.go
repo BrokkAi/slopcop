@@ -150,14 +150,19 @@ func groupVerdict(rs []Reviewer) Status {
 	return out
 }
 
-// Save atomically stores a record, adds its findings to the round ledger
-// for later reviews, and forgets the ledger once a review is clean.
-func (s *Store) Save(r Record) error {
-	if err := s.recordRound(r); err != nil {
+// Save atomically stores a record, adds its findings to the checked-out
+// branch's rounds for later reviews, and forgets those rounds once a review
+// is clean.
+func (s *Store) Save(r Record) error { return s.saveOn(s.branch(), r) }
+
+// saveOn is Save for a review of a snapshot taken on the named branch. Its
+// rounds stay that branch's when the checkout has moved to another one since.
+func (s *Store) saveOn(branch string, r Record) error {
+	if err := s.recordRound(branch, r); err != nil {
 		return err
 	}
 	if r.Status == StatusClean {
-		if err := s.clearRounds(r.Capture); err != nil {
+		if err := s.clearRounds(branch, r.Capture); err != nil {
 			return err
 		}
 	}
@@ -254,20 +259,22 @@ func Reviewed(root, tree string) (bool, error) {
 	return found == ref, nil
 }
 
-// NewCapture resolves the base tree and records the diffstat for a fixed snapshot.
+// NewCapture resolves the base tree and records the diffstat for a snapshot
+// of the checked-out branch taken just now.
 func NewCapture(root, baseCommit, tree string) (Capture, error) {
-	return NewFilteredCapture(root, baseCommit, tree, tree)
+	return NewFilteredCapture(root, gitx.CurrentBranch(root), baseCommit, tree, tree)
 }
 
 // NewFilteredCapture keeps the complete snapshot's identity while recording
-// the smaller tree whose changes are in review scope.
-func NewFilteredCapture(root, baseCommit, tree, diffTree string) (Capture, error) {
+// the smaller tree whose changes are in review scope. branch is the branch
+// that was checked out when the snapshot was taken, "" for a detached HEAD.
+func NewFilteredCapture(root, branch, baseCommit, tree, diffTree string) (Capture, error) {
 	base, err := gitx.Run(root, "rev-parse", baseCommit+"^{tree}")
 	if err != nil {
 		return Capture{}, err
 	}
 	stat, err := gitx.Run(root, "diff", "--no-ext-diff", "--no-textconv", "--numstat", base, diffTree)
-	capture := Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: stat}
+	capture := Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: stat, Branch: branch}
 	if diffTree != tree {
 		capture.DiffTree = diffTree
 	}

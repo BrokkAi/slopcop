@@ -21,6 +21,10 @@ type WorkingChange struct {
 type Snapshot struct {
 	Tree      string
 	PatchTree string
+	// Branch is the branch checked out when the tree was captured, "" when
+	// HEAD was detached. The checkout may be on another one by the time a
+	// check that began with this snapshot ends.
+	Branch string
 }
 
 // CaptureWorkingTree writes the working tree to tree objects through a
@@ -31,7 +35,7 @@ type Snapshot struct {
 // tree. PatchTree adds the selected policy files even when ignored, since the
 // service must receive them; it equals Tree when none is ignored.
 func CaptureWorkingTree(root string, policyFiles []string) (Snapshot, error) {
-	var snapshot Snapshot
+	snapshot := Snapshot{Branch: CurrentBranch(root)}
 	dir, err := os.MkdirTemp("", "slopcop-index-")
 	if err != nil {
 		return snapshot, fmt.Errorf("create temporary index: %w", err)

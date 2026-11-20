@@ -23,7 +23,7 @@ func TestFilteredCaptureDiffAndReuseScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	capture, err := NewFilteredCapture(root, original.BaseCommit, snapshot.Tree, filtered.Tree)
+	capture, err := NewFilteredCapture(root, snapshot.Branch, original.BaseCommit, snapshot.Tree, filtered.Tree)
 	if err != nil {
 		t.Fatal(err)
 	}

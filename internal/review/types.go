@@ -100,6 +100,10 @@ type Capture struct {
 	DiffTree string `json:"diffTree,omitempty"`
 	// Numstat is `git diff --numstat BaseTree CheckedTree()`.
 	Numstat string `json:"numstat"`
+	// Branch is the branch that was checked out when the snapshot was taken,
+	// "" when HEAD was detached. The review's rounds are that branch's. It is
+	// not stored: the round ledger already keys the rounds by it.
+	Branch string `json:"-"`
 }
 
 // CheckedTree names the contents actually sent to the reviewers.

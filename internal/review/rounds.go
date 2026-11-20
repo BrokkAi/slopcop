@@ -69,13 +69,7 @@ func (s *Store) ledger() (ledger roundLedger, found bool, err error) {
 const legacyFindingsFile = "findings.json"
 
 // branch names the checked-out branch, or "" when HEAD is detached.
-func (s *Store) branch() string {
-	name, err := gitx.Run(s.root, "symbolic-ref", "-q", "--short", "HEAD")
-	if err != nil {
-		return ""
-	}
-	return name
-}
+func (s *Store) branch() string { return gitx.CurrentBranch(s.root) }
 
 // Rounds returns the rounds with findings since the last clean review of
 // the checked-out branch, oldest first. Rounds recorded on another branch
@@ -85,13 +79,19 @@ func (s *Store) branch() string {
 // following the tree instead would hand one change another's reasons.
 // Without a ledger, the review an earlier release left in findings.json is
 // round 1.
-func (s *Store) Rounds() ([]Round, error) {
+func (s *Store) Rounds() ([]Round, error) { return s.roundsOn(s.branch()) }
+
+// roundsOn returns the rounds of the named branch. A review reads and writes
+// the rounds of the branch its snapshot was taken on, whatever is checked out
+// by then: the checkout may move to another branch while the hosted half's
+// checks or the reviewers run.
+func (s *Store) roundsOn(branch string) ([]Round, error) {
 	ledger, found, err := s.ledger()
 	if err != nil {
 		return nil, err
 	}
 	if found {
-		return ledger.Branches[s.branch()], nil
+		return ledger.Branches[branch], nil
 	}
 	previous, err := s.read(legacyFindingsFile)
 	if err != nil || previous == nil {
@@ -103,9 +103,9 @@ func (s *Store) Rounds() ([]Round, error) {
 	return nil, nil
 }
 
-// writeRounds replaces the checked-out branch's rounds and leaves the other
+// writeRounds replaces the named branch's rounds and leaves the other
 // branches' alone. No rounds removes the branch.
-func (s *Store) writeRounds(rounds []Round) error {
+func (s *Store) writeRounds(branch string, rounds []Round) error {
 	ledger, _, err := s.ledger()
 	if err != nil {
 		return err
@@ -114,9 +114,9 @@ func (s *Store) writeRounds(rounds []Round) error {
 		ledger.Branches = map[string][]Round{}
 	}
 	if len(rounds) == 0 {
-		delete(ledger.Branches, s.branch())
+		delete(ledger.Branches, branch)
 	} else {
-		ledger.Branches[s.branch()] = rounds
+		ledger.Branches[branch] = rounds
 	}
 	for len(ledger.Branches) > maxBranches {
 		oldest, first := "", true
@@ -159,22 +159,23 @@ func (s *Store) recordFindings(r Record) []Finding {
 	return findings
 }
 
-// recordRound adds a review's findings to the ledger as a round of its own.
-// A review without findings adds nothing, and neither does one that repeats
-// the newest round's findings for the same tree, as when a review is reused.
-func (s *Store) recordRound(r Record) error {
+// recordRound adds a review's findings to the named branch's rounds as a
+// round of its own. A review without findings adds nothing, and neither does
+// one that repeats the newest round's findings for the same tree, as when a
+// review is reused.
+func (s *Store) recordRound(branch string, r Record) error {
 	findings := s.recordFindings(r)
 	if len(findings) == 0 {
 		return nil
 	}
-	rounds, err := s.Rounds()
+	rounds, err := s.roundsOn(branch)
 	if err != nil {
 		return err
 	}
 	if n := len(rounds); n > 0 && sameTree(rounds[n-1].Capture, r.Capture) && reflect.DeepEqual(rounds[n-1].Findings, findings) {
 		return nil
 	}
-	return s.writeRounds(appendRound(rounds, r, findings))
+	return s.writeRounds(branch, appendRound(rounds, r, findings))
 }
 
 // sameTree reports whether two captures reviewed the same content.
@@ -202,7 +203,8 @@ func appendRound(rounds []Round, r Record, findings []Finding) []Round {
 // branch was created or renamed since the review, r becomes one, so the
 // reason is never dropped.
 func (s *Store) overrideRound(r Record, reason string) error {
-	rounds, err := s.Rounds()
+	branch := s.branch()
+	rounds, err := s.roundsOn(branch)
 	if err != nil {
 		return err
 	}
@@ -219,17 +221,17 @@ func (s *Store) overrideRound(r Record, reason string) error {
 	case !strings.Contains(last.Override, reason):
 		last.Override += "\n" + reason
 	}
-	return s.writeRounds(rounds)
+	return s.writeRounds(branch, rounds)
 }
 
-// clearRounds forgets the checked-out branch's rounds after a clean review
-// of capture. A review that left large data files out says nothing about
+// clearRounds forgets the named branch's rounds after a clean review of
+// capture. A review that left large data files out says nothing about
 // them, so findings about files outside its diff, or with no location,
 // stay, with their rounds' reasons, for a later review that covers them.
-func (s *Store) clearRounds(capture Capture) error {
+func (s *Store) clearRounds(branch string, capture Capture) error {
 	// Read before removing: an earlier release's findings.json may be the
 	// only history.
-	rounds, err := s.Rounds()
+	rounds, err := s.roundsOn(branch)
 	if err != nil {
 		return err
 	}
@@ -252,7 +254,7 @@ func (s *Store) clearRounds(capture Capture) error {
 			}
 		}
 	}
-	return s.writeRounds(kept)
+	return s.writeRounds(branch, kept)
 }
 
 // hunkHeader matches the old-side range of a unified diff hunk.

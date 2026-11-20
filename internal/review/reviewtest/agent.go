@@ -173,6 +173,20 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 			}
 		}
 	}
+	// A held reviewer replies once the test creates the release file, so the
+	// test can change the checkout while the review is running.
+	if strings.HasPrefix(a.mode, "held") {
+		for {
+			if _, err := os.Stat(a.trace + ".release"); err == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return acp.PromptResponse{}, ctx.Err()
+			case <-time.After(5 * time.Millisecond):
+			}
+		}
+	}
 	text := "No findings."
 	if len(p.Prompt) == 1 && p.Prompt[0].Text != nil && p.Prompt[0].Text.Text == "Reply with exactly the word ok and nothing else. Do not use any tools." {
 		text = "ok"
@@ -232,7 +246,7 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 	if a.mode == "copilot-error-reply" {
 		text = fmt.Sprintf("Error: Execution failed: Model %q is not available.", a.cliModel)
 	}
-	if a.mode == "findings" {
+	if a.mode == "findings" || a.mode == "held-findings" {
 		text = "- [P1] fake defect"
 	}
 	if a.mode == "empty" {
