@@ -73,7 +73,12 @@ type claudeRow struct {
 	IsCompactSummary bool            `json:"isCompactSummary"`
 	ToolUseResult    json.RawMessage `json:"toolUseResult"`
 	ParentToolUseID  json.RawMessage `json:"parent_tool_use_id"`
-	Message          struct {
+	// Origin says who produced a user row; Claude Code leaves it out of
+	// older transcripts and of some rows the person typed.
+	Origin struct {
+		Kind string `json:"kind"`
+	} `json:"origin"`
+	Message struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
@@ -143,13 +148,16 @@ func readClaudeIntent(path string) (string, error) {
 						}
 					}
 				}
-			case v.Type == "user" && v.Message.Role == "user" && !v.IsMeta:
+			case v.Type == "user" && v.Message.Role == "user" && !v.IsMeta && !harnessRow(v):
 				msg := ""
 				if len(v.ToolUseResult) > 0 {
 					if asked[toolResultID(v.Message.Content)] {
 						msg = askUserAnswers(v.ToolUseResult)
 					}
-				} else if msg = userText(v.Message.Content); msg != "" {
+				} else if msg = userText(v.Message.Content); msg != "" && v.Origin.Kind == "" {
+					msg = stripHarness(msg)
+				}
+				if msg != "" && len(v.ToolUseResult) == 0 {
 					q := ask
 					if q == "" {
 						q = proseQuestion(lastText)
@@ -169,6 +177,51 @@ func readClaudeIntent(path string) (string, error) {
 		}
 	}
 	return strings.Join(out, "\n\n"), nil
+}
+
+// harnessTags name the blocks Claude Code writes into user rows itself: the
+// result of a background command and an event about a watched pull request.
+var harnessTags = []string{"task-notification", "ci-monitor-event"}
+
+// harnessRow reports whether a user row says something other than the person
+// wrote it. Such a row is not intent. It also arrives between two checks of
+// one tree, for instance when the first check ran in the background, and
+// counting it would change the review's reuse key and review the tree again.
+func harnessRow(v claudeRow) bool {
+	return v.Origin.Kind != "" && v.Origin.Kind != "human"
+}
+
+// stripHarness returns "" for the text of a row that does not say who wrote
+// it and holds nothing but harness blocks. Text with anything after the
+// blocks is kept whole: it may be the person's request under an event they
+// pasted, and the event is what the request is about.
+func stripHarness(text string) string {
+	if onlyHarness(text) {
+		return ""
+	}
+	return text
+}
+
+// onlyHarness reports whether text is one or more harness blocks and nothing
+// else.
+func onlyHarness(text string) bool {
+	for text != "" {
+		rest := text
+		for _, tag := range harnessTags {
+			open, closing := "<"+tag+">", "</"+tag+">"
+			if !strings.HasPrefix(text, open) {
+				continue
+			}
+			if i := strings.Index(text, closing); i >= 0 {
+				rest = strings.TrimSpace(text[i+len(closing):])
+			}
+		}
+		if rest == text {
+			return false
+		}
+		text = rest
+	}
+	return true
 }
 
 // userText returns a user row's typed text without harness-injected
