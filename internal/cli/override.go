@@ -13,7 +13,7 @@ import (
 
 // newOverrideCommand accepts review findings for the current working tree.
 func newOverrideCommand() *cobra.Command {
-	var root, reason string
+	var root, reason, workspace string
 	command := &cobra.Command{
 		Use:   "override",
 		Short: "Accept the local review's findings with a recorded reason",
@@ -49,5 +49,9 @@ func newOverrideCommand() *cobra.Command {
 	}
 	command.Flags().StringVar(&root, "root", ".", "repository path")
 	command.Flags().StringVar(&reason, "reason", "", "reason for accepting the findings")
+	// An override is local and never reaches a workspace, but an agent
+	// reuses check's flags across the check -> override loop, so -w is
+	// accepted and ignored rather than refused.
+	command.Flags().StringVarP(&workspace, "workspace", "w", "", "accepted for parity with check and ignored: an override is recorded locally, in no workspace")
 	return command
 }

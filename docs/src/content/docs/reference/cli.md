@@ -262,7 +262,9 @@ overrides are under `review.adapters.<codex|dsh|claude|copilot>.command`.
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided
 the static half passed or did not run. It records the reason and cannot
-accept failed or incomplete reviews or real bugs.
+accept failed or incomplete reviews or real bugs. The override is recorded
+locally, so it accepts `-w`/`--workspace` from the `check` it follows and
+ignores it.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or

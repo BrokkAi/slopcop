@@ -539,7 +539,8 @@ the change, so a new rule is picked up by the next check with no extra setup.
 For demonstrably incorrect or unreasonable **complete** review findings,
 run `slopcop override --reason "concrete explanation"`. This accepts the
 last reviewed snapshot only when the static half has no new findings at or
-above the push level and completed, was skipped, or did not run.
+above the push level and completed, was skipped, or did not run. The override
+is local: it accepts the `-w` you passed to `check` and ignores it.
 Never override a real bug, timeout, failed or incomplete review, or a
 different tree. Do not switch reviewers or reduce the count to bypass a
 failure.
