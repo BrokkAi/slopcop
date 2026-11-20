@@ -2329,6 +2329,59 @@ func TestReviewFindingsAreStructuredAndCounted(t *testing.T) {
 	}
 }
 
+// TestReviewFindingsCarryIdsAndOverriddenOnesAreSetApart checks that every
+// format gives each review finding the id `slopcop override <rv-id>` takes, and
+// lists a finding that matched a finding override apart from the findings,
+// uncounted.
+func TestReviewFindingsCarryIdsAndOverriddenOnesAreSetApart(t *testing.T) {
+	text := "- [P1] Drops errors `internal/x.go:12-14`\nThe error from Close is lost.\n- [P3] Slow loop `internal/y.go:3`"
+	parsed := review.ParseFindings("1-terra", text, nil)
+	kept, overridden := parsed[0], parsed[1]
+	verdict := review.Verdict{Status: review.StatusFindings, Reviewers: []review.Reviewer{
+		{Name: "1-terra", Status: review.StatusFindings, Text: text},
+	}, Overridden: []review.OverriddenFinding{{Finding: overridden, OverrideID: "rv-0123456789ab", Match: review.MatchWords}}}
+	options := Options{Review: &verdict, Status: "findings"}
+
+	var out bytes.Buffer
+	if err := Write(&out, service.Response{Status: service.StatusClean}, FormatJSON, options); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Summary struct {
+			ReviewFindings *int `json:"reviewFindings"`
+		} `json:"summary"`
+		Review struct {
+			Findings   []review.Finding           `json:"findings"`
+			Overridden []review.OverriddenFinding `json:"overridden"`
+		} `json:"review"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if *doc.Summary.ReviewFindings != 1 || len(doc.Review.Findings) != 1 || doc.Review.Findings[0].ID != kept.ID ||
+		len(doc.Review.Overridden) != 1 || doc.Review.Overridden[0].ID != overridden.ID || doc.Review.Overridden[0].OverrideID != "rv-0123456789ab" {
+		t.Fatalf("json: %s", out.String())
+	}
+
+	run := sarifLogWithReview(options, sarifRun{}).Runs[1]
+	if len(run.Results) != 2 || run.Results[0].Properties["slopcop.findingId"] != kept.ID || run.Results[0].Suppressions != nil ||
+		run.Results[1].Properties["slopcop.overrideId"] != "rv-0123456789ab" || run.Results[1].Suppressions[0].Kind != "external" {
+		t.Fatalf("sarif: %+v", run.Results)
+	}
+
+	out.Reset()
+	writeReviewHuman(&out, verdict)
+	for _, want := range []string{
+		"  1 finding reported\n    " + kept.ID + " [P1] internal/x.go:12-14 Drops errors (1-terra)\n",
+		"  1 finding left out: it matches a finding you overrode (it does not fail the check)\n    " + overridden.ID + " [P3] internal/y.go:3 Slow loop (1-terra) (matches overridden rv-0123456789ab by similar words; read it, and if it is a different problem run `slopcop override --undo " + overridden.ID + "` and fix it)\n",
+		"  Fix the real findings. For one that is wrong, run `slopcop override <id> --reason \"why it does not hold\"`, then check again\n",
+	} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("human report missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
 // TestStaticSummaryOmitsReviewFindingsWithoutReview checks that a static-only
 // report does not claim the review found nothing.
 func TestStaticSummaryOmitsReviewFindingsWithoutReview(t *testing.T) {

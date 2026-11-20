@@ -48,11 +48,12 @@ func TestReviewFailureNotice(t *testing.T) {
 		{report.ExitReasonReviewFindings, report.FormatJSON, 1, true, []string{
 			"reported 1 review finding,", "no static finding crossed --fail-on warning",
 			"review.findings", "summary.findings counts static findings only",
-			"slopcop override --reason", "--fail-on never",
+			"`slopcop override <rv-id> --reason", "`slopcop override --reason \"why they do not hold\"` approves it for push", "--fail-on never",
 		}},
-		// An override would be refused, so it is not offered as the remedy.
+		// An override of the whole review would be refused, so it is not
+		// offered; overriding one finding still is.
 		{report.ExitReasonReviewFindings, report.FormatJSON, 1, false, []string{
-			"`slopcop override` cannot accept them yet", "every reviewer to finish", "--fail-on never",
+			"`slopcop override <rv-id> --reason", "for the whole review cannot accept them yet", "every reviewer to finish", "--fail-on never",
 		}},
 		{report.ExitReasonReviewFindings, report.FormatHuman, 2, true, []string{"reported 2 review findings,", "under Review above"}},
 		{report.ExitReasonReviewFindings, report.FormatSARIF, 2, true, []string{"slopcop-review run"}},
@@ -61,7 +62,7 @@ func TestReviewFailureNotice(t *testing.T) {
 		}},
 	} {
 		got := reviewFailureNotice(tc.reason, tc.count, "warning", tc.format, tc.overridable)
-		if offered := strings.Contains(got, "override --reason"); offered != tc.overridable {
+		if offered := strings.Contains(got, "approves it for push"); offered != tc.overridable {
 			t.Errorf("%s/%s override offered = %v, want %v: %q", tc.reason, tc.format, offered, tc.overridable, got)
 		}
 		if !strings.HasPrefix(got, "slopcop: the check failed (exit 1): ") {

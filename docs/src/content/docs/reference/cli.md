@@ -178,8 +178,9 @@ answer, and refuse when stdin is not a terminal.
 
 ## `slopcop ignore <finding-id>`
 
-Stop reporting one finding that is a false positive. The id is the one a check
-printed. Ignoring covers that one finding in its repository for your workspace,
+Stop reporting one static finding that is a false positive. The id is the UUID
+a check printed. A local review finding's `rv-` id is refused with the
+`slopcop override` command to run instead. Ignoring covers that one finding in its repository for your workspace,
 not its rule. Takes `-w`/`--workspace`. Exits `0` with a confirmation, `2` with
 the service's message otherwise. See [False positives](/checks/false-positives/).
 
@@ -259,12 +260,23 @@ must finish for a clean review), and `review.provider` (`copilot` runs
 `terra`, `sol` and `haiku` through GitHub Copilot CLI). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude|copilot>.command`.
 
+`slopcop override <rv-id> --reason "..."` overrides one local review finding
+that is wrong, by the `rv-` id in `review.findings`, for every later review in
+the clone, on any branch or worktree. Run `check` again afterwards: the same
+review is reused and leaves the finding out. Later reviews are shown it with
+the reason and told not to raise it again, and a finding that repeats it, even
+reworded near the same lines, is listed under `review.overridden` and does not
+fail the check. `--undo <rv-id>` removes one (the overridden id, or a
+left-out finding's id) and withdraws the push approval of every tree that
+relied on it; `--list [--format json]` lists them with their reasons. See
+[Override a review finding](/checks/false-positives/#override-a-review-finding).
+
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided
 the static half passed or did not run. It records the reason and cannot
-accept failed or incomplete reviews or real bugs. The override is recorded
-locally, so it accepts `-w`/`--workspace` from the `check` it follows and
-ignores it.
+accept failed or incomplete reviews or real bugs. It covers that snapshot
+only. Both forms are recorded locally, never on the service, so they accept
+`-w`/`--workspace` from the `check` they follow and ignore it.
 
 Each review is shown the findings of every earlier round since the last
 clean review, with whether the lines a finding cites have changed since, and

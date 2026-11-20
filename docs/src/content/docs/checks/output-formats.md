@@ -118,7 +118,7 @@ slopcop check --format json
 | `checkId` | the check that answered; absent from an older service |
 | `staticStatus` | the static half's status when it differs from merged `status` |
 | `exitReason` | present only when the check exits `1`: `static_findings` (new static findings crossed `--fail-on`), `review_findings` (only the local review's findings failed it; `summary.findings` can then be `0`), or `static_and_review_findings`. Also in every other `json` document that can exit `1`, and in `sarif` as `properties["slopcop.exitReason"]` |
-| `review` | `status`, `reviewers`, `findings`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused`. `findings` is what the reviewers reported, parsed from each one's reply: `reviewer`, `priority` (`P0` to `P3`, absent when untagged), `path`, `startLine` and `endLine` when the reviewer named a location, `title`, and `message`. A reply without a tagged finding is one finding with `malformed: true`, holding the whole reply with no priority or location; read the reviewer's `text`. `slopcop review show --format json` prints the latest review again from the reviewer logs. Review findings have no `id`, so `slopcop ignore` does not take them; use `slopcop override` for wrong ones |
+| `review` | `status`, `reviewers`, `findings`, `error`, `logDir`, `intentSource`, `baseTree`, `tree`, and `reused`. `findings` is what the reviewers reported, parsed from each one's reply: `id` (`rv-` and twelve hex digits, which [`slopcop override <rv-id>`](/checks/false-positives/#override-a-review-finding) takes), `reviewer`, `priority` (`P0` to `P3`, absent when untagged), `path`, `startLine` and `endLine` when the reviewer named a location, `title`, and `message`. A reply without a tagged finding is one finding with `malformed: true`, holding the whole reply with no priority or location; read the reviewer's `text`. `overridden`, present when it has any, lists the reported findings left out because they match a finding overridden with `slopcop override <rv-id>`: each with the fields of a finding, `overrideId`, the id of the override it matched, and `match`: `text` for the same text at the same place, `words` for a rewording at the same place, worth reading to be sure it is the same point; they are not in `findings` and do not fail the check. `slopcop review show --format json` prints the latest review again from the reviewer logs |
 | `reviewSkipped` | present when the local review did not run, and why: `noReviewers` (no mode set and no reviewers configured), `ci` (no mode set in a CI job), `staticMode` (static mode chosen by flag or config), or `repositoryInactive` (the check was refused as `repository_disabled` or `active_repository_limit_reached` before the review started). A static-only `clean` is not a reviewed change |
 | `approved` | whether the checked tree got push approval; always present |
 | `status` | merged result: `clean`, `findings`, `incomplete`, `pending`, `failed`, or a static-only `skipped`. It is `findings` whenever the change has new findings, whatever `--fail-on` is; `--fail-on` decides only the exit code |
@@ -171,8 +171,11 @@ A SARIF 2.1.0 log with a second run, `slopcop-review`, containing
 one result per reviewer finding and failures as notifications. Each review
 result's `ruleId` is the reviewer, its `level` follows the priority (`error`
 for `P0` and `P1`, `note` for `P3`, otherwise `warning`), its
-`properties["slopcop.priority"]` is the priority, and it has a location when
-the reviewer named one.
+`properties["slopcop.priority"]` is the priority,
+`properties["slopcop.findingId"]` is its `rv-` id, and it has a location when
+the reviewer named one. A reviewer finding left out because it matches an
+overridden finding is a result with an `external` suppression and the
+override's id in `properties["slopcop.overrideId"]`.
 Each static result's `message.text` is the finding's title, then its
 `message` on a second line when it has one, and its region carries
 `startColumn` and `endColumn` when the service sent the span.

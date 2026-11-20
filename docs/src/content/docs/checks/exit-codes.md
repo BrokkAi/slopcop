@@ -66,9 +66,12 @@ would otherwise pass a change a reviewer flagged. The static counts in
 review alone fails can show `summary.findings: 0` and `staticStatus: clean`
 and still exit `1`. JSON `exitReason` names what failed it, and stderr says so
 in every format, with the count and where the review findings are listed.
-Fix the real ones and check again. For a wrong one, `slopcop override` approves
-the tree for push but does not change the exit code; `--fail-on never` keeps
-review findings, and static ones, from exiting `1`.
+Fix the real ones and check again. For a wrong one, run
+`slopcop override <rv-id> --reason "..."` and check again: the reused review
+leaves it out, so the check passes, and later reviews do not report it.
+`slopcop override --reason "..."` without an id approves this tree for push
+with all its findings, but does not change the exit code; `--fail-on never`
+keeps review findings, and static ones, from exiting `1`.
 
 ## Which results approve the tree
 

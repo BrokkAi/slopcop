@@ -136,16 +136,27 @@ func (s *Store) writeRounds(branch string, rounds []Round) error {
 	return s.write(roundsFile, ledger)
 }
 
-// recordFindings parses the findings of every reviewer that reported some.
+// recordFindings parses the findings of every reviewer that reported some,
+// without those a finding override left out.
 // A reviewer is told the repository root and may cite a file under it by its
 // absolute path; the ledger keeps every path repository-relative, as git
 // names it.
 func (s *Store) recordFindings(r Record) []Finding {
 	var findings []Finding
 	changed := ChangedPaths(r.Capture.Numstat)
+	overridden := map[string]bool{}
+	for _, f := range r.Overridden {
+		overridden[f.instance()] = true
+	}
 	for _, reviewer := range r.Reviewers {
 		if parseVerdict(reviewer) == StatusFindings {
-			findings = append(findings, ParseFindings(reviewer.Name, reviewer.Text, changed)...)
+			for _, f := range ParseFindings(reviewer.Name, reviewer.Text, changed) {
+				// An overridden finding is listed to reviewers with its
+				// override, not as an open point of an earlier round.
+				if !overridden[f.instance()] {
+					findings = append(findings, f)
+				}
+			}
 		}
 	}
 	for i, f := range findings {

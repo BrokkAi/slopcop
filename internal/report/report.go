@@ -1977,8 +1977,13 @@ type reviewJSON struct {
 	LogDir string `json:"logDir"`
 	// Reviewers is the local review's Reviewers field.
 	Reviewers []review.Reviewer `json:"reviewers"`
-	// Findings is what the reviewers reported, parsed from their replies.
+	// Findings is what the reviewers reported, parsed from their replies,
+	// without the findings Overridden lists.
 	Findings []review.Finding `json:"findings"`
+	// Overridden lists the reported findings that matched a review finding
+	// overridden with `slopcop override <rv-id>`, each with the id of the
+	// override it matched.
+	Overridden []review.OverriddenFinding `json:"overridden,omitempty"`
 	// Incomplete is set when fewer reviewers finished than review.minCompleted.
 	Incomplete bool `json:"incomplete,omitempty"`
 	// Error is the local review's Error field.
@@ -2000,7 +2005,7 @@ func reviewValue(v *review.Verdict) *reviewJSON {
 	if v == nil {
 		return nil
 	}
-	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Findings: v.Findings(), Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
+	result := &reviewJSON{Status: v.Status, BaseTree: v.Capture.BaseTree, Tree: v.Capture.Tree, DiffTree: v.Capture.DiffTree, IntentSource: v.IntentSource, LogDir: v.LogDir, Reviewers: v.Reviewers, Findings: v.Findings(), Overridden: v.Overridden, Incomplete: v.Incomplete, Error: v.Error, Reused: v.Reused}
 	if result.Reviewers == nil {
 		result.Reviewers = []review.Reviewer{}
 	}
@@ -2029,6 +2034,12 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	for _, finding := range v.Findings() {
 		run.Results = append(run.Results, reviewSARIFResult(finding))
 	}
+	for _, overridden := range v.Overridden {
+		result := reviewSARIFResult(overridden.Finding)
+		result.Properties["slopcop.overrideId"] = overridden.OverrideID
+		result.Suppressions = []sarifSuppression{{Kind: "external", Justification: "overridden with slopcop override " + overridden.OverrideID}}
+		run.Results = append(run.Results, result)
+	}
 	for _, r := range v.Reviewers {
 		if r.Status == review.StatusFailed {
 			run.Invocations[0].ToolExecutionNotifications = append(run.Invocations[0].ToolExecutionNotifications, sarifNotification{Level: "error", Message: sarifMessage{Text: r.Error}})
@@ -2050,11 +2061,12 @@ func reviewSARIFResult(finding review.Finding) sarifResult {
 	}
 	// The rubric asks reviewers to flag only what the change introduced.
 	result := sarifResult{RuleID: finding.Reviewer, Level: reviewSARIFLevel(finding.Priority), Message: sarifMessage{Text: text}, Locations: []sarifLocation{}, BaselineState: "new"}
+	result.Properties = map[string]any{"slopcop.findingId": finding.ID}
 	if finding.Priority != "" {
-		result.Properties = map[string]any{"slopcop.priority": finding.Priority}
+		result.Properties["slopcop.priority"] = finding.Priority
 	}
 	if finding.Malformed {
-		result.Properties = map[string]any{"slopcop.malformed": true}
+		result.Properties["slopcop.malformed"] = true
 	}
 	if finding.Path != "" {
 		location := sarifLocation{PhysicalLocation: sarifPhysicalLocation{
@@ -2089,6 +2101,27 @@ func writeReview(w io.Writer, v *review.Verdict) error {
 	return nil
 }
 
+// ReviewFindingLine is one review finding on a line for a person: its id,
+// priority, location, title and reviewer.
+func ReviewFindingLine(f review.Finding) string {
+	parts := []string{printable(f.ID)}
+	if f.Priority != "" {
+		parts = append(parts, "["+printable(f.Priority)+"]")
+	}
+	if f.Path != "" {
+		location := printable(f.Path)
+		if f.StartLine != nil {
+			location = fmt.Sprintf("%s:%d", location, *f.StartLine)
+			if f.EndLine != nil && *f.EndLine != *f.StartLine {
+				location = fmt.Sprintf("%s-%d", location, *f.EndLine)
+			}
+		}
+		parts = append(parts, location)
+	}
+	parts = append(parts, printable(f.Title), "("+printable(f.Reviewer)+")")
+	return strings.Join(parts, " ")
+}
+
 // failedReviewers counts reviewers without a verdict.
 func failedReviewers(v review.Verdict) int {
 	n := 0
@@ -2116,6 +2149,26 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		fmt.Fprintln(w, "  1 finding reported")
 	default:
 		fmt.Fprintf(w, "  %d findings reported\n", count)
+	}
+	for _, f := range findings {
+		fmt.Fprintf(w, "    %s\n", ReviewFindingLine(f))
+	}
+	switch count := len(v.Overridden); count {
+	case 0:
+	case 1:
+		fmt.Fprintln(w, "  1 finding left out: it matches a finding you overrode (it does not fail the check)")
+	default:
+		fmt.Fprintf(w, "  %d findings left out: they match findings you overrode (they do not fail the check)\n", count)
+	}
+	for _, f := range v.Overridden {
+		how := ""
+		if f.Match == review.MatchWords {
+			how = " by similar words; read it, and if it is a different problem run `slopcop override --undo " + printable(f.ID) + "` and fix it"
+		}
+		fmt.Fprintf(w, "    %s (matches overridden %s%s)\n", ReviewFindingLine(f.Finding), printable(f.OverrideID), how)
+	}
+	if len(findings) > 0 {
+		fmt.Fprintln(w, "  Fix the real findings. For one that is wrong, run `slopcop override <id> --reason \"why it does not hold\"`, then check again")
 	}
 	for _, r := range v.Reviewers {
 		fmt.Fprintf(w, "  %s %s %s: %s\n", printable(r.Name), printable(r.Model), printable(r.Effort), r.Status)

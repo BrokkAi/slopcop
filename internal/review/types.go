@@ -163,6 +163,24 @@ type Verdict struct {
 	// for push, with any intent.
 	Reused bool      `json:"reused,omitempty"`
 	Time   time.Time `json:"time"`
+	// Overridden are the findings that matched a finding the author overrode
+	// with `slopcop override <rv-id>`. Findings leaves them out, and they do
+	// not make the review's Status findings.
+	Overridden []OverriddenFinding `json:"overridden,omitempty"`
+	// PromptOverrides are the ids of the overridden findings the reviewers
+	// were told not to report. A review is not reused once one is undone: a
+	// reviewer may have left that finding out only because it was told to.
+	PromptOverrides []string `json:"promptOverrides,omitempty"`
+}
+
+// OverriddenFinding is a reported finding that matched a finding override.
+type OverriddenFinding struct {
+	Finding
+	// OverrideID is the id of the overridden finding it matched: its own ID when
+	// it is the same text, and another when a reviewer reworded it.
+	OverrideID string `json:"overrideId"`
+	// Match says how it matched: MatchText or MatchWords.
+	Match string `json:"match"`
 }
 
 // Options are the inputs of Run.

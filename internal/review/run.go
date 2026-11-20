@@ -68,11 +68,26 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		v.Error = "read last review: " + err.Error()
 		return v
 	}
+	// The finding overrides are not part of the reuse key: overriding a
+	// finding of the last review takes effect on that review, without running
+	// it again.
+	overrides, err := LoadFindingOverrides(opts.Root)
+	if err != nil {
+		v.Error = "read review finding overrides: " + err.Error()
+		save()
+		return v
+	}
 	// Only a review every reviewer finished is reused; a reviewer that
-	// failed gets another chance on the next check.
-	if previous != nil && (previous.Status == StatusClean || previous.Status == StatusFindings) && groupVerdict(previous.Reviewers) == previous.Status && previous.ReuseKey == key {
+	// failed gets another chance on the next check. Its status is worked out
+	// again from the replies, since the finding overrides may have changed
+	// since. A review whose reviewers were told to leave out a finding whose
+	// override was since undone runs again, so they can report it.
+	if previous != nil && (previous.Status == StatusClean || previous.Status == StatusFindings) && groupVerdict(previous.Reviewers) != StatusFailed && previous.ReuseKey == key && stillOverridden(previous.PromptOverrides, overrides) {
 		v = previous.Verdict
 		v.Reused = true
+		v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
+		v.applyOverrides(overrides)
+		v.settleOverrides(opts.Root)
 		save()
 		return v
 	}
@@ -82,9 +97,11 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	// reviewed again only for that: the gate would let it through anyway,
 	// and a second run could only withdraw an approval the code still has.
 	if previous != nil && previous.Status == StatusClean && groupVerdict(previous.Reviewers) == StatusClean &&
-		previous.ContentKey != "" && previous.ContentKey == contentKey && approvedTree(opts.Root, capture.Tree) {
+		previous.ContentKey != "" && previous.ContentKey == contentKey && approvedTree(opts.Root, capture.Tree) &&
+		stillOverridden(previous.PromptOverrides, overrides) {
 		v = previous.Verdict
 		v.Reused = true
+		v.settleOverrides(opts.Root)
 		save()
 		return v
 	}
@@ -112,7 +129,9 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	history := earlierRounds(opts.Root, rounds, capture)
+	overriddenText, shown := overriddenSection(overrides, capture)
+	v.PromptOverrides = shown
+	history := earlierRounds(opts.Root, rounds, capture) + overriddenText
 	prompt := reviewPrompt(opts.Root, capture, in, history, string(diff), order[0])
 	if err = os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(prompt), 0600); err != nil {
 		v.Error = "write review prompt: " + err.Error()
@@ -123,6 +142,8 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, string(diff), f) }}
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
+	v.applyOverrides(overrides)
+	v.settleOverrides(opts.Root)
 	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key, ContentKey: contentKey}
 	if err = store.saveOn(branch, r); err != nil {
 		v.Status = StatusFailed

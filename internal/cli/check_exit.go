@@ -56,11 +56,13 @@ func reviewFailureNotice(reason string, count int, failOn, format string, overri
 	if reason == report.ExitReasonStaticAndReviewFindings {
 		what = fmt.Sprintf("new static findings crossed --fail-on %s, and the local reviewers reported %d %s", failOn, count, noun)
 	}
-	remedy := "Fix the real ones and check again. `slopcop override` cannot accept them yet: " +
-		"it needs every reviewer to finish and no static result that blocks the push"
+	remedy := "Fix the real ones and check again. For one that is wrong, run `slopcop override <rv-id> --reason \"why it does not hold\"` " +
+		"with its id from the report, then check again: the same review is reused and leaves it out, and later reviews do not report it. " +
+		"`slopcop override --reason` for the whole review cannot accept them yet: it needs every reviewer to finish and no static result that blocks the push"
 	if overridable {
-		remedy = "Fix the real ones and check again. For one that is wrong, `slopcop override --reason \"why it does not hold\"` " +
-			"approves the tree for push, but the check still exits 1"
+		remedy = "Fix the real ones and check again. For one that is wrong, run `slopcop override <rv-id> --reason \"why it does not hold\"` " +
+			"with its id from the report, then check again: the same review is reused and leaves it out, and later reviews do not report it. " +
+			"To accept every finding for this tree only, `slopcop override --reason \"why they do not hold\"` approves it for push, but the check still exits 1"
 	}
 	return fmt.Sprintf("slopcop: the check failed (exit 1): %s. The review findings are listed %s. %s; "+
 		"`--fail-on never` keeps review findings from failing it.", what, where, remedy)
