@@ -43,7 +43,7 @@ func newOverrideCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: accepted the review's findings for tree %s; the reason is recorded in %s\n", snapshot.Tree, filepath.Join(gitDir, "slopcop", "overrides.jsonl"))
+			fmt.Fprintf(cmd.OutOrStdout(), "slopcop: accepted the review's findings for tree %s; the reason is recorded in %s and shown to the reviewers of later rounds\n", snapshot.Tree, filepath.Join(gitDir, "slopcop", "overrides.jsonl"))
 			return nil
 		},
 	}

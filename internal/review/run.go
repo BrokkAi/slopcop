@@ -69,9 +69,9 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	findings, err := store.read("findings.json")
+	rounds, err := store.Rounds()
 	if err != nil {
-		v.Error = "read previous findings: " + err.Error()
+		v.Error = "read earlier review rounds: " + err.Error()
 		return v
 	}
 	// A failed record invalidates override eligibility before any adapter starts.
@@ -93,14 +93,15 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	prompt := reviewPrompt(opts.Root, capture, in, findings, string(diff), order[0])
+	history := earlierRounds(opts.Root, rounds, capture)
+	prompt := reviewPrompt(opts.Root, capture, in, history, string(diff), order[0])
 	if err = os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(prompt), 0600); err != nil {
 		v.Error = "write review prompt: " + err.Error()
 		save()
 		return v
 	}
 	p := &panel{ctx: ctx, root: opts.Root, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
-		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, findings, string(diff), f) }}
+		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, string(diff), f) }}
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
 	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key}

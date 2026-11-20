@@ -72,8 +72,8 @@ func (s *Store) read(name string) (*Record, error) {
 
 // Last returns the most recent review record, or nil if none exists.
 func (s *Store) Last() (*Record, error) { return s.read("last.json") }
-func (s *Store) write(name string, r Record) error {
-	b, err := json.MarshalIndent(r, "", "  ")
+func (s *Store) write(name string, value any) error {
+	b, err := json.MarshalIndent(value, "", "  ")
 	if err != nil {
 		return err
 	}
@@ -150,18 +150,14 @@ func groupVerdict(rs []Reviewer) Status {
 	return out
 }
 
-// Save atomically stores a record and retains findings for corrective reviews.
+// Save atomically stores a record, adds its findings to the round ledger
+// for later reviews, and forgets the ledger once a review is clean.
 func (s *Store) Save(r Record) error {
-	for _, v := range r.Reviewers {
-		if parseVerdict(v) == StatusFindings {
-			if err := s.write("findings.json", r); err != nil {
-				return err
-			}
-			break
-		}
+	if err := s.recordRound(r); err != nil {
+		return err
 	}
 	if r.Status == StatusClean {
-		if err := os.Remove(filepath.Join(s.dir, "findings.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := s.clearRounds(r.Capture); err != nil {
 			return err
 		}
 	}
@@ -183,7 +179,8 @@ func (s *Store) SetStatic(code int, status string, blocks bool) error {
 	return s.write("last.json", *r)
 }
 
-// Override logs a justified acceptance and marks only the reviewed tree approved.
+// Override logs a justified acceptance, keeps the reason for later rounds,
+// and marks only the reviewed tree approved.
 func (s *Store) Override(reason, currentTree string) error {
 	if strings.TrimSpace(reason) == "" {
 		return errors.New("override requires a nonempty reason")
@@ -222,6 +219,10 @@ func (s *Store) Override(reason, currentTree string) error {
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	// Later rounds show reviewers the reason beside the findings it answers.
+	if err = s.overrideRound(*r, reason); err != nil {
+		return err
 	}
 	return MarkReviewed(s.root, currentTree)
 }

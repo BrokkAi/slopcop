@@ -540,6 +540,9 @@ For demonstrably incorrect or unreasonable **complete** review findings,
 run `slopcop override --reason "concrete explanation"`. This accepts the
 last reviewed snapshot only when the static half has no new findings at or
 above the push level and completed, was skipped, or did not run.
+Later review rounds show the reviewers this reason beside the findings it
+accepted, and tell them not to raise the point again unless the code shows
+the reason is wrong. Write it for them: say why the finding does not hold.
 Never override a real bug, timeout, failed or incomplete review, or a
 different tree. Do not switch reviewers or reduce the count to bypass a
 failure.
