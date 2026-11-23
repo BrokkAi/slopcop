@@ -23,12 +23,16 @@ func TestStatusShowsAnActiveRepository(t *testing.T) {
 		"Account:    dave <dave@example.com>\n" +
 		"Workspace:  Dave (personal, owner)\n" +
 		"Chosen by:  this login's workspace (`slopcop workspace use`)\n" +
+		"Also in:    \"Acme team\" (active)\n" +
+		"PR checks:  " + pullRequestChecksText + "\n" +
 		"Plan:       Free\n" +
 		"Service:    " + server.URL + "\n"
 	if stdout != want {
 		t.Errorf("stdout = %q, want %q", stdout, want)
 	}
-	if len(*calls) != 2 || (*calls)[0].path != "/v1/whoami" || (*calls)[1].path != "/v1/repositories" {
+	// The account's other workspace is asked for the repository too.
+	if len(*calls) != 3 || (*calls)[0].path != "/v1/whoami" || (*calls)[1].path != "/v1/repositories" ||
+		(*calls)[2].path != "/v1/repositories" || (*calls)[2].workspace != teamID {
 		t.Errorf("calls = %+v", *calls)
 	}
 
@@ -158,9 +162,10 @@ func TestStatusUsesTheWorkspaceFlag(t *testing.T) {
 	if !strings.Contains(stdout, "Workspace:  Acme team (team, member)\n") {
 		t.Errorf("stdout = %q", stdout)
 	}
-	last := (*calls)[len(*calls)-1]
-	if last.path != "/v1/repositories" || last.workspace != teamID {
-		t.Errorf("last call = %+v", last)
+	// The workspace named is listed, then the account's other one.
+	if len(*calls) != 3 || (*calls)[1].path != "/v1/repositories" || (*calls)[1].workspace != teamID ||
+		(*calls)[2].workspace != personalID {
+		t.Errorf("calls = %+v", *calls)
 	}
 }
 

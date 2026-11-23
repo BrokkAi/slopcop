@@ -99,6 +99,14 @@ same state as `active`,
 `url`, `fullName`, `provider`, `id`, `enabled`, and `active`. Exits `2` when
 the checkout has no `origin`, or the service cannot answer.
 
+When other workspaces of the account have the repository, an `Also in` line
+names each with its state there, and `json` carries them as `otherWorkspaces`
+(`id`, `name`, `kind`, `role`, and `state`, which adds `unknown` for a
+workspace the service would not answer for). For a GitHub repository a
+`PR checks` line follows: pull request checks are turned on per workspace in
+the web app and do not follow the workspace `status` prints. See
+[Pull request checks have their own workspace](/account/workspaces/#pull-request-checks-have-their-own-workspace).
+
 ## `slopcop login`
 
 Sign in to the SlopCop check service. With no flags, starts the browser device
@@ -158,7 +166,7 @@ login to another of them. See
 | --- | --- |
 | `workspace list [--format human\|json]` | the account's workspaces; `*` marks this login's |
 | `workspace use <name\|id> [--format human\|json]` | bind this login to another workspace; moves every agent and script using the login, so it asks `[y/N]` and refuses when stdin is not a terminal |
-| `workspace map <name\|id> [--root PATH]` | check this checkout's repository in that workspace from now on, on this machine; it decides which workspace pays, so it asks `[y/N]` and refuses when stdin is not a terminal |
+| `workspace map <name\|id> [--root PATH]` | check this checkout's repository in that workspace from now on, on this machine; it decides which workspace pays, so it asks `[y/N]` and refuses when stdin is not a terminal. Pull request checks are unaffected, and it says so |
 | `workspace unmap [--root PATH]` | forget the mapping, so the repository checks in the login's workspace again; asks `[y/N]` at a terminal |
 | `workspace mappings [--format human\|json]` | the repositories this machine maps, and to which workspace |
 

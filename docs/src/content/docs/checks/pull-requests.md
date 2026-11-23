@@ -67,6 +67,20 @@ to the repository and for any App's check run: GitHub accepts that call only
 from a GitHub App. The `404` says nothing about the check or about SlopCop's
 settings.
 
+## More than one workspace
+
+Each workspace has its own **Check pull requests** setting for a repository.
+When more than one workspace turns it on for the same repository, the first
+to have turned it on checks its pull requests and pays for those checks; the
+others do not post a second check. Every check's summary ends by naming the
+workspace that ran it.
+
+The workspace a checkout checks in locally (`slopcop workspace map`,
+`--workspace`, or the login's) has no say in this. To move a repository's pull
+request checks, turn the setting off in the workspace that runs them and on in
+the one that should; see
+[Pull request checks have their own workspace](/account/workspaces/#pull-request-checks-have-their-own-workspace).
+
 ## Block a merge on it
 
 SlopCop never changes branch protection. To keep a pull request with new

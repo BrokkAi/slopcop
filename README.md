@@ -405,7 +405,9 @@ mapping is kept in `config.json`, by service and repository URL; it decides
 which workspace pays, so `workspace map` and `workspace unmap` ask `[y/N]` and
 refuse when stdin is not a terminal. `--workspace` and `$SLOPCOP_WORKSPACE`
 still win for one command, and `slopcop status` prints the workspace a
-checkout gets and a `Chosen by` line saying why. A mapping to a workspace that
+checkout gets and a `Chosen by` line saying why. Pull request checks do not
+follow the mapping: each workspace turns them on for a repository in the web
+app, and `status` names your other workspaces that have the repository. A mapping to a workspace that
 was archived, or that your account left, stops the check with
 `workspace_not_found` instead of falling back to another workspace. The first
 check of a repository with no mapping, when your account has more than one

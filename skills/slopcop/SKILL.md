@@ -88,7 +88,11 @@ prints the account, the login's own workspace (name, kind, role), its plan
 `workspace`, `plan` and `services`). Each service has its own login, bound to its own workspace: with
 more than one stored, `whoami` also lists them and marks the default.
 `slopcop status` shows the same for this checkout: the repository `origin`
-names, whether the workspace has it and whether it is active.
+names, whether the workspace has it and whether it is active. Its `Also in`
+line (`otherWorkspaces` in json) names the account's other workspaces that
+have the repository. Pull request checks are turned on per workspace in the
+web app and do not follow `--workspace` or a mapping, so one of those may run
+them; the CLI cannot read or change that setting.
 
 - `slopcop workspace list` lists the account's workspaces; `*` marks this
   login's. `slopcop workspace use <name|id>` moves this login to another one,

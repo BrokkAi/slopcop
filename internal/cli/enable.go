@@ -151,23 +151,47 @@ func enabledIn(err error) bool {
 	return err == nil
 }
 
-// workspacesWithRepository lists the account's workspaces, other than the one
-// with id except, that already have repoURL, enabled or not, and those whose
-// repositories the service would not list, about which nothing is known.
-func workspacesWithRepository(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) (holders, unanswered []service.Workspace) {
-	current := client.Workspace
-	defer func() { client.Workspace = current }()
+// workspaceRepository is a repository's state in one workspace of the
+// account. Err is set when the service would not list that workspace's
+// repositories, so nothing is known of it there.
+type workspaceRepository struct {
+	Workspace service.Workspace
+	State     string
+	Err       error
+}
+
+// repositoryElsewhere asks each of the account's workspaces, other than the
+// one with id except, for repoURL's state there.
+func repositoryElsewhere(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) []workspaceRepository {
+	other := *client
+	other.WorkspaceRefusal = nil
+	var asked []workspaceRepository
 	for _, workspace := range workspaces {
 		if strings.EqualFold(workspace.ID, except) {
 			continue
 		}
-		client.Workspace = workspace.ID
-		repository, err := repositoryStatus(ctx, client, repoURL)
+		other.Workspace = workspace.ID
+		repository, err := repositoryStatus(ctx, &other, repoURL)
+		asked = append(asked, workspaceRepository{Workspace: workspace, State: repository.State, Err: err})
+	}
+	return asked
+}
+
+// held reports whether the workspace has the repository, enabled or not.
+func (r workspaceRepository) held() bool {
+	return r.Err == nil && r.State != statusNotAdded && r.State != statusUnsupported
+}
+
+// workspacesWithRepository lists the account's workspaces, other than the one
+// with id except, that already have repoURL, enabled or not, and those whose
+// repositories the service would not list, about which nothing is known.
+func workspacesWithRepository(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) (holders, unanswered []service.Workspace) {
+	for _, asked := range repositoryElsewhere(ctx, client, workspaces, repoURL, except) {
 		switch {
-		case err != nil:
-			unanswered = append(unanswered, workspace)
-		case repository.State != statusNotAdded && repository.State != statusUnsupported:
-			holders = append(holders, workspace)
+		case asked.Err != nil:
+			unanswered = append(unanswered, asked.Workspace)
+		case asked.held():
+			holders = append(holders, asked.Workspace)
 		}
 	}
 	return holders, unanswered
