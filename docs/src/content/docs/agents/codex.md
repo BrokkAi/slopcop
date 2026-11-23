@@ -77,7 +77,7 @@ again.
 When Codex stops, the hook checks the working tree through the same hosted API,
 but only when the session wrote files in the repository (its subagents
 included, or a dependency manifest or lockfile changed), slopcop is signed in
-with the repository active, and the tree differs from the last check in the
+with the repository active or not yet added to the workspace, and the tree differs from the last check in the
 session. New findings in files the session wrote are handed back to Codex to
 fix, once for a given tree and at most twice in a row. The hook runs as
 `slopcop hook codex || true` (`|| exit /b 0` under Windows' `cmd`), so a

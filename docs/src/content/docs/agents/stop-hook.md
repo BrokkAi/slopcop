@@ -52,9 +52,9 @@ API, but only when all of these hold:
   agent ran by hand. A check whose result the session already has is not sent
   again.
 
-The hook is therefore dormant in a repository until someone runs `slopcop
-enable` there. It stays quiet otherwise; it does not ask to enable the
-repository.
+The hook does not wait for `slopcop enable`, and it does not ask before its
+first check adds a repository. It stays quiet for a repository the workspace
+has disabled or has past its active limit.
 
 ### Dependency changes
 
