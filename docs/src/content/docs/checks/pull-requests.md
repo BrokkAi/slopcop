@@ -127,3 +127,14 @@ and the [pricing page](https://slopcop.com/pricing).
 your choice of `--fail-on`, rules, and output formats. Pull request checks need
 no workflow, token, or clone, and always use the CLI's defaults: every rule,
 `--fail-on finding`.
+
+## Compared with the push gate
+
+A pull request check fails on any new finding, a `note` included. The
+[push gate](/checks/exit-codes/#which-results-approve-the-tree) on your
+machine blocks only findings at or above `gate.blockOn`, which defaults to
+`error`. So a tree with new notes or warnings is approved for push and then
+fails its pull request check. The local check does say so: it exits `1`,
+counts them in `advisoryFindings`, and warns on stderr. See
+[The push gate and pull request checks](/checks/exit-codes/#the-push-gate-and-pull-request-checks)
+for the three thresholds side by side and how to make them agree.
