@@ -221,11 +221,40 @@ func TestStatusSaysWhyAWorkspaceWasChosen(t *testing.T) {
 		"State:      active\n",
 		"Workspace:  Acme team (team, member)\n",
 		"Chosen by:  this checkout's mapping (`slopcop workspace map`)\n",
-		"Plan:       Free (the plan of \"Dave\", this login's workspace)\n",
+		"Login:      Dave (personal, owner), Free plan\n",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout = %q, want %q", stdout, want)
 		}
+	}
+	// The service tells the login's plan only, which is not the mapped
+	// workspace's: no Plan line stands beside "Acme team".
+	if strings.Contains(stdout, "Plan:") {
+		t.Errorf("stdout = %q, has a Plan line for a workspace whose plan is not known", stdout)
+	}
+
+	code, stdout, _ = runCLI(t, "status", "--root", repo, "--format", "json", "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("json exit = %d", code)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("stdout is not json: %v\n%s", err, stdout)
+	}
+	if plan, ok := decoded["plan"]; ok {
+		t.Errorf("json plan = %s beside the mapped workspace, want none", plan)
+	}
+	var login struct {
+		Workspace struct {
+			ID string `json:"id"`
+		} `json:"workspace"`
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(decoded["login"], &login); err != nil {
+		t.Fatalf("json login = %s: %v", decoded["login"], err)
+	}
+	if login.Workspace.ID != personalID || login.Plan != "free" {
+		t.Errorf("json login = %s", decoded["login"])
 	}
 
 	t.Chdir(repo)

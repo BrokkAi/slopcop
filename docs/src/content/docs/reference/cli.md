@@ -99,6 +99,13 @@ same state as `active`,
 `url`, `fullName`, `provider`, `id`, `enabled`, and `active`. Exits `2` when
 the checkout has no `origin`, or the service cannot answer.
 
+`Plan` is the plan of the workspace shown. The service tells a login the plan
+of the workspace it is bound to and no other, so when the workspace shown is
+another one (chosen by `--workspace`, `SLOPCOP_WORKSPACE` or a mapping) there
+is no `Plan` line and `json` has no `plan`. A `Login` line names the login's
+own workspace and its plan instead, and `json` carries them as `login`
+(`workspace` and `plan`). `json` no longer has `planOf`.
+
 When other workspaces of the account have the repository, an `Also in` line
 names each with its state there, and `json` carries them as `otherWorkspaces`
 (`id`, `name`, `kind`, `role`, and `state`, which adds `unknown` for a
