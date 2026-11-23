@@ -118,7 +118,7 @@ func startKimi(ctx context.Context, root string, trees reviewTrees, base []strin
 	}
 	guard := newKimiToolCheck(workspace, changed)
 	s, err := startRunnerWith(ctx, root, base, f, name, dir, timeout, runnerOptions{
-		guard:     &toolGuard{check: guard.check},
+		guard:     &toolGuard{check: mayHaveRun(guard.check)},
 		refuseAll: true,
 		verify:    guard.unreadChange,
 		environment: func(env []string) []string {

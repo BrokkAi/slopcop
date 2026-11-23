@@ -23,6 +23,8 @@ func DefaultCommand(f Family) []string {
 		return slices.Clone(antigravityDefaultCommand)
 	case Kimi:
 		return slices.Clone(kimiDefaultCommand)
+	case Grok:
+		return slices.Clone(grokDefaultCommand)
 	}
 	return nil
 }
@@ -40,6 +42,8 @@ func AdapterName(f Family) string {
 		return antigravityAdapter
 	case Kimi:
 		return kimiAdapter
+	case Grok:
+		return grokAdapter
 	}
 	return ""
 }
@@ -104,9 +108,16 @@ func FamilyOf(model string) (Family, bool) {
 		return Gemini, true
 	case kimiModelName.MatchString(m):
 		return Kimi, true
+	case grokModel.MatchString(m):
+		return Grok, true
 	}
 	return "", false
 }
+
+// grokModel matches plain versioned Grok models and grok-build. Dated variants
+// such as grok-4.20-0309-reasoning are left out: their numbers would sort them
+// above newer releases, and some are non-reasoning or multi-agent.
+var grokModel = regexp.MustCompile(`^grok-([0-9]+(\.[0-9]+)?|build)$`)
 
 // configOption locates grouped or ungrouped ACP selectors by id or category.
 func configOption(options []acp.SessionConfigOption, key string) *acp.SessionConfigOptionSelect {
@@ -201,6 +212,10 @@ func bestModel(f Family, options []acp.SessionConfigSelectOption) (string, bool)
 }
 
 func reviewerMode(f Family) (string, string) {
+	// Grok has no mode option; its profile and sandbox restrict it instead.
+	if f == Grok {
+		return "", ""
+	}
 	if f == Flash {
 		return "permission_mode", "ask"
 	}

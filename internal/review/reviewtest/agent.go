@@ -22,6 +22,8 @@ type agent struct {
 	// cliModel, cliEffort and tools are Copilot CLI's --model,
 	// --reasoning-effort and --available-tools, for modes named copilot*.
 	cliModel, cliEffort, tools string
+	// cwd is the session's working directory, for Grok's client reads.
+	cwd string
 }
 
 func (a *agent) copilot() bool { return strings.HasPrefix(a.mode, "copilot") }
@@ -54,9 +56,12 @@ func (a *agent) copilotOptions() []acp.SessionConfigOption {
 	}
 }
 
-func (a *agent) Initialize(context.Context, acp.InitializeRequest) (acp.InitializeResponse, error) {
+func (a *agent) Initialize(_ context.Context, p acp.InitializeRequest) (acp.InitializeResponse, error) {
 	a.record(fmt.Sprintf("pid=%d", os.Getpid()))
 	a.record("initialize")
+	if strings.HasPrefix(a.mode, "grok-") {
+		a.record(fmt.Sprintf("client-fs read=%v write=%v", p.ClientCapabilities.Fs.ReadTextFile, p.ClientCapabilities.Fs.WriteTextFile))
+	}
 	// Codex and Claude adapters advertise session/delete; mode no-delete
 	// stands for an adapter that does not.
 	caps := acp.AgentCapabilities{}
@@ -107,6 +112,7 @@ func options(model, mode string) []acp.SessionConfigOption {
 	return append(out, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "mode", Name: "Mode", CurrentValue: "full-access", Options: acp.SessionConfigSelectOptions{Ungrouped: &modes}}}, acp.SessionConfigOption{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "permission_mode", Name: "Permission mode", CurrentValue: "auto", Options: acp.SessionConfigSelectOptions{Ungrouped: &permission}}})
 }
 func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
+	a.cwd = p.Cwd
 	if a.mode == "cwd" {
 		dir, _ := os.Getwd()
 		a.record("process-cwd=" + dir)
@@ -138,6 +144,31 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 		}
 		config, _ := os.ReadFile(filepath.Join(os.Getenv("KIMI_CODE_HOME"), "config.toml"))
 		a.record("config:\n" + string(config))
+	}
+	// A Grok reviewer's workspace and the environment it started with. Key
+	// values stay out of the trace.
+	if a.mode == "grok-workspace" {
+		dir, _ := os.Getwd()
+		a.record("process-cwd=" + dir)
+		a.record("session-cwd=" + p.Cwd)
+		a.record("args=" + strings.Join(os.Args, " "))
+		for _, rel := range []string{"repo/change.txt", "repo/.grok/hooks.json", "repo/link", ".grok"} {
+			_, err := os.Lstat(filepath.Join(p.Cwd, rel))
+			a.record(fmt.Sprintf("exists %s=%v", rel, err == nil))
+		}
+		for _, v := range os.Environ() {
+			k, value, _ := strings.Cut(v, "=")
+			if k == "XAI_API_KEY" {
+				a.record("key-set=" + fmt.Sprint(value != ""))
+			} else if k == "HOME" || strings.HasPrefix(k, "GROK_") || strings.HasPrefix(k, "XAI_") {
+				a.record("env " + v)
+			}
+		}
+		grokHome := os.Getenv("GROK_HOME")
+		for _, file := range []string{"sandbox.toml", "config.toml"} {
+			data, _ := os.ReadFile(filepath.Join(grokHome, file))
+			a.record(file + "=" + strings.ReplaceAll(string(data), "\n", " "))
+		}
 	}
 	if a.mode == "hang-session" {
 		a.record("new-session")
@@ -267,6 +298,43 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		}
 		<-ctx.Done()
 		return acp.PromptResponse{}, ctx.Err()
+	}
+	// Grok names its tools in x.ai/tool metadata and reads through the client.
+	// grok-tool-<name>:<path> calls one tool; grok-direct-<name>:<path> reports
+	// the same call without asking the client, as a read from disk would.
+	tool, viaClient := strings.CutPrefix(a.mode, "grok-tool-")
+	direct, isDirect := strings.CutPrefix(a.mode, "grok-direct-")
+	if isDirect {
+		tool = direct
+	}
+	if viaClient || isDirect {
+		name, path, _ := strings.Cut(tool, ":")
+		call := acp.StartToolCall("call-1", name, acp.WithStartStatus(acp.ToolCallStatusInProgress))
+		call.ToolCall.Meta = map[string]any{"x.ai/tool": map[string]any{"name": name, "input": map[string]any{"path": path}}}
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: call}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		if viaClient && name == "read_file" {
+			full := path
+			if !filepath.IsAbs(full) {
+				full = filepath.Join(a.cwd, path)
+			}
+			got, err := a.conn.ReadTextFile(ctx, acp.ReadTextFileRequest{SessionId: p.SessionId, Path: full})
+			if err != nil {
+				a.record("read-refused")
+				<-ctx.Done()
+				return acp.PromptResponse{}, ctx.Err()
+			}
+			a.record(fmt.Sprintf("read-bytes=%d", len(got.Content)))
+		}
+		done := acp.UpdateToolCall("call-1", acp.WithUpdateStatus(acp.ToolCallStatusCompleted))
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: done}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		if name != "read_file" || isDirect || filepath.IsAbs(path) {
+			<-ctx.Done()
+			return acp.PromptResponse{}, ctx.Err()
+		}
 	}
 	// Antigravity asks only about a read outside the workspace, and ends its
 	// turn with no reply when refused.

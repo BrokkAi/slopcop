@@ -276,7 +276,7 @@ func TestFailureCause(t *testing.T) {
 		{"connect ECONNREFUSED 127.0.0.1:443", "could not be reached"},
 		{"incomplete turn: cancelled", "Run the check again to retry"},
 	} {
-		got := explainFailure(Reviewer{Family: Sol, Error: tc.err})
+		got := explainFailure(Reviewer{Family: Sol, Error: tc.err}, errors.New(tc.err))
 		if !strings.Contains(got, tc.want) || !strings.Contains(got, tc.err) {
 			t.Errorf("%q: %q", tc.err, got)
 		}

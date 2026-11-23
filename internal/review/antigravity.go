@@ -53,21 +53,48 @@ const (
 // guard enforce it; this keeps an honest reviewer from ending its own turn.
 const antigravityRules = "The snapshot's files are in the `repo` folder of your workspace, and `files.txt` in the workspace lists them. Read them only with the read_file tool. Do not call any other tool: shell commands, edits, web search and subagents are refused or stop your review.\n"
 
-// errForbiddenTool marks a reviewer stopped for calling a tool that runs
-// without asking. It is not retried: a repository that talked the reviewer
-// into the call would get a second attempt.
-var errForbiddenTool = errors.New("the reviewer called a tool SlopCop cannot restrict, so it was stopped")
+// errForbiddenTool marks a reviewer stopped by a toolGuard. It is not retried:
+// a repository that talked the reviewer into the call would get a second
+// attempt.
+var errForbiddenTool = errors.New("SlopCop stopped the reviewer")
+
+// toolStop is why a toolGuard stopped a reviewer. The zero value is no stop.
+type toolStop struct {
+	what string
+	// notServed records a request SlopCop did not serve and that nothing
+	// reported as finished. Every other stop may have had an effect.
+	notServed bool
+}
+
+func (s toolStop) Error() string { return errForbiddenTool.Error() + ": " + s.what }
+
+func (s toolStop) Unwrap() error { return errForbiddenTool }
+
+// advice says what the stop means for the person running the check. A guard
+// that saw only tool metadata cannot prove the agent did nothing locally, so
+// the milder text does not claim that.
+func (s toolStop) advice() string {
+	if s.notServed {
+		return "SlopCop did not serve this request and saw no sign that it ran another way. Check the change for text aimed at reviewers before running it again."
+	}
+	return "That call may have run, and what it sent may have left this machine, so check the change for text aimed at reviewers before running it again."
+}
+
+// mayHaveRun adapts a check whose every stop is a call that may have run.
+func mayHaveRun(check func([]byte) string) func([]byte) toolStop {
+	return func(line []byte) toolStop { return toolStop{what: check(line)} }
+}
 
 // errDiffTooLarge marks a change a Gemini reviewer cannot cover. Other
 // reviewers read the rest of a truncated diff with git; this one has no git
 // history and no way to see deletions or files left out of its export, so it
 // could only approve a change it had not seen.
-var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB a Gemini or Kimi reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
+var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB this reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
 
 // errChangeNotExported marks a change to a file the reviewer's workspace does
 // not hold: one over the size limit, or one whose path cannot be written
 // safely. The reviewer could not read the code around that change.
-var errChangeNotExported = errors.New("a changed file is over 1 MiB or has a path a Gemini or Kimi reviewer cannot read, so it did not review the change; configure a fallback on another provider")
+var errChangeNotExported = errors.New("a changed file is over 1 MiB or has a path this reviewer cannot read, so it did not review the change; configure a fallback on another provider")
 
 // reviewTrees names the trees of a review. A probe, which reads nothing, has
 // neither.
@@ -88,9 +115,9 @@ type toolGuard struct {
 	asking  map[string]bool
 	trip    func(error)
 	tripped bool
-	// check, when set, replaces the Antigravity rules: it returns what the
-	// reviewer must be stopped for, or "".
-	check func(line []byte) string
+	// check, when set, replaces Antigravity's rules: it returns what the
+	// reviewer did wrong in one message, or the zero toolStop.
+	check func([]byte) toolStop
 }
 
 // Write inspects each complete line and never fails, so it cannot disturb the
@@ -102,7 +129,7 @@ func (g *toolGuard) Write(p []byte) (int, error) {
 		if i < 0 {
 			g.line = append(g.line, p...)
 			if len(g.line) > toolGuardMaxLine {
-				g.stop("a message too long to inspect")
+				g.stop(toolStop{what: "a message too long to inspect"})
 			}
 			break
 		}
@@ -116,8 +143,8 @@ func (g *toolGuard) Write(p []byte) (int, error) {
 
 func (g *toolGuard) inspect(line []byte) {
 	if g.check != nil {
-		if what := g.check(line); what != "" {
-			g.stop(what)
+		if s := g.check(line); s.what != "" {
+			g.stop(s)
 		}
 		return
 	}
@@ -146,27 +173,27 @@ func (g *toolGuard) inspect(line []byte) {
 			}
 			g.asking[u.ToolCallID] = true
 			if u.Status == "completed" {
-				g.stop(u.Name + " without a permission request")
+				g.stop(toolStop{what: u.Name + " without a permission request"})
 			}
 		case u.Name == "":
-			g.stop("an unnamed tool")
+			g.stop(toolStop{what: "an unnamed tool"})
 		default:
-			g.stop(u.Name)
+			g.stop(toolStop{what: u.Name})
 		}
 	case "tool_call_update":
 		// The client refuses every request, so one of these finishing means
 		// it ran without asking.
 		if g.asking[u.ToolCallID] && u.Status == "completed" {
-			g.stop("a tool that was not approved")
+			g.stop(toolStop{what: "a tool that was not approved"})
 		}
 	}
 }
 
-func (g *toolGuard) stop(what string) {
+func (g *toolGuard) stop(s toolStop) {
 	g.tripped = true
 	g.line = nil
 	if g.trip != nil {
-		g.trip(fmt.Errorf("%w: %s", errForbiddenTool, what))
+		g.trip(s)
 	}
 }
 
@@ -208,7 +235,7 @@ func antigravityWorkspace(ctx context.Context, root string, trees reviewTrees) (
 // isolatedAdapter reports whether an adapter reviews an export of the tree,
 // with no git history to read the rest of a truncated diff.
 func isolatedAdapter(adapter string) bool {
-	return adapter == antigravityAdapter || adapter == kimiAdapter
+	return adapter == antigravityAdapter || adapter == kimiAdapter || adapter == grokAdapter
 }
 
 // isolatedWorkspace creates a temporary directory holding a workspace with an
