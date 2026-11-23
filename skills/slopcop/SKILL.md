@@ -258,9 +258,10 @@ updated from vX to vY; the next run uses it.` on stderr; there is nothing to
 do. `SLOPCOP_NO_AUTO_UPDATE=1` or `CI` keeps it from doing that.
 
 In Claude Code and Codex, `slopcop init` can install a `Stop` hook that checks
-the change when you stop and hands back new findings in files you wrote. It
-sends nothing for a repository the workspace does not have active, so it never
-adds one. A dependency manifest or lockfile a package manager changed, such as
+the change when you stop and hands back new findings in files you wrote. Its
+first check of a repository the workspace has never added adds it. It sends
+nothing for one the workspace has disabled or has past its active limit. A
+dependency manifest or lockfile a package manager changed, such as
 after `npm install` or `cargo add`, counts as one you wrote. It does not send a
 check whose result your session already has, so a check you ran by hand is not
 repeated. Keep running checks as described above; the hook is a backstop, not

@@ -80,7 +80,7 @@ machine-wide install does not block unrelated projects.
 stops, the hook checks the working tree through the same hosted API, but only
 when the session wrote files in the repository (or
 a dependency manifest or lockfile changed), slopcop is signed in with the
-repository active, and the tree differs from the last check in the session.
+repository active or not yet added to the workspace, and the tree differs from the last check in the session.
 
 New findings in files the session wrote are handed back to Claude to fix, once
 for a given tree and at most twice in a row. Then Claude is let go and you are

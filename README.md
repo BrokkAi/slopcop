@@ -255,7 +255,9 @@ hosted API, but only when all of these hold:
   dependency manifest or lockfile (see below);
 - slopcop is signed in, and the workspace a check would use
   (`$SLOPCOP_WORKSPACE`, the one the checkout is mapped to, or the login's) has the repository active
-  (`slopcop repo list`), so nothing is sent from other repositories;
+  (`slopcop repo list`) or has never added it, in which case the first check
+  adds it. Nothing is sent for a repository the workspace has disabled or has
+  past its active limit;
 - the tree differs from the last check in the session, including a check the
   agent ran by hand.
 

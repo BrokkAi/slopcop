@@ -64,7 +64,7 @@ checkouts do not need another install. See the
 
 1. Your agent runs `slopcop`, because the skill tells it to, because you asked,
    or because the Stop hook fired. The hook sends nothing for a repository the
-   workspace does not have active.
+   workspace has disabled or has past its active limit.
 2. The CLI builds one git patch from the merge base with your upstream branch
    to the working tree: unpushed commits, unstaged edits, and untracked files.
    Git-ignored files stay out.
