@@ -1,10 +1,14 @@
 package review
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/BrokkAi/slopcop/internal/gitx"
 )
 
 // codexSplitReply is a Codex stream whose final reply has a tool update for
@@ -74,5 +78,93 @@ func TestReplayStatus(t *testing.T) {
 	v := Verdict{Status: StatusClean, Reviewers: []Reviewer{{Name: "2-sol", Status: StatusClean, Text: CleanReply, Log: empty}}}
 	if got, _ := Replay(v); got.Status != StatusFailed || !got.Incomplete || got.Reviewers[0].Status != StatusFailed {
 		t.Fatalf("lost reply: %+v", got)
+	}
+}
+
+// TestOverrideStateReadsAnEarlierReleasesOverride checks that an override
+// logged by a release that did not mark the record is shown for that exact
+// review, and for no other.
+func TestOverrideStateReadsAnEarlierReleasesOverride(t *testing.T) {
+	root, c, s := reviewRepo(t)
+	snapshot, err := gitx.CaptureWorkingTree(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c.Tree = snapshot.Tree
+	if err = s.Save(Record{Mode: "ai", Verdict: Verdict{Status: StatusFindings, Capture: c, Time: time.Now().UTC(),
+		Reviewers: []Reviewer{{Name: "1-terra", Status: StatusFindings, Text: "- [P2] bug"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := s.Last()
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendLog := func(line []byte) {
+		t.Helper()
+		f, err := os.OpenFile(filepath.Join(s.dir, overrideLog), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		if _, err = f.Write(append(line, '\n')); err != nil {
+			t.Fatal(err)
+		}
+	}
+	line, err := json.Marshal(overrideLogEntry{time.Now().UTC(), " an earlier reason ", saved})
+	if err != nil {
+		t.Fatal(err)
+	}
+	appendLog(line)
+	if err = MarkReviewed(root, c.Tree); err != nil {
+		t.Fatal(err)
+	}
+	stateOf := func() *OverrideState {
+		t.Helper()
+		last, err := s.Last()
+		if err != nil {
+			t.Fatal(err)
+		}
+		state, err := last.OverrideState(root)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state
+	}
+	if state := stateOf(); state == nil || state.Status != OverrideAccepted || state.Reason != "an earlier reason" {
+		t.Fatalf("earlier release's override: %+v", state)
+	}
+
+	// A later check saves another record, which the logged override is not of.
+	later := *saved
+	later.Reused = true
+	if err = s.Save(later); err != nil {
+		t.Fatal(err)
+	}
+	if state := stateOf(); state != nil {
+		t.Fatalf("later record: %+v", state)
+	}
+
+	// A torn last line is an override that did not complete.
+	if err = s.Save(*saved); err != nil {
+		t.Fatal(err)
+	}
+	appendLog([]byte(`{"time":`))
+	if state := stateOf(); state != nil {
+		t.Fatalf("torn log line: %+v", state)
+	}
+
+	// This release's entry is marked, so a later unmarked record equal to it
+	// in every other way does not inherit it.
+	if err = s.Override("this release", c.Tree); err != nil {
+		t.Fatal(err)
+	}
+	if state := stateOf(); state == nil || state.Status != OverrideAccepted || state.Reason != "this release" {
+		t.Fatalf("this release's override: %+v", state)
+	}
+	if err = s.Save(*saved); err != nil {
+		t.Fatal(err)
+	}
+	if state := stateOf(); state != nil {
+		t.Fatalf("after this release's override: %+v", state)
 	}
 }

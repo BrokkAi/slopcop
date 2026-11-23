@@ -328,7 +328,11 @@ and `review.logDir`. Prompt and reviewer logs are under `<git-dir>/slopcop/`.
 Do not read them: to see the latest review again, such as a reply that looks
 cut short, run `slopcop review show --format json`. It rebuilds each
 reviewer's reply from its log and parses the findings again, without running
-a reviewer or spending a check, and approves nothing.
+a reviewer or spending a check, and approves nothing. After `slopcop override`
+of the whole review it still shows `status: findings` and `approved: false`,
+because it records no approval. Read `reviewOverride.status`: `accepted` means
+the override applies to the working tree as it is now; `tree_changed`,
+`withdrawn` or `unverified` means it does not, so run `slopcop check`.
 
 The static service sets its own status; the CLI merges it with review. A failed
 request prints `{"status": "failed", "code": ..., "message": ..., "remedy": ...,
