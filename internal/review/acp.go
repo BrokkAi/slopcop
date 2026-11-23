@@ -31,6 +31,11 @@ type reviewClient struct {
 	// toolSinceText records a tool update after the last message chunk, and
 	// callSinceText a tool call started after it.
 	toolSinceText, callSinceText bool
+	// refuseAll refuses reads too, for an adapter that asks only about a read
+	// outside the reviewer's workspace.
+	refuseAll bool
+	// violation is why a toolGuard stopped the reviewer.
+	violation error
 }
 
 // reply is the reviewer's final reply so far: none when it started a tool
@@ -87,7 +92,7 @@ const declineOptionID = "decline"
 // RequestPermission allows only file reading, searching, and thinking. Every
 // other request is refused, preferring a refusal that keeps the turn going.
 func (c *reviewClient) RequestPermission(_ context.Context, p acp.RequestPermissionRequest) (acp.RequestPermissionResponse, error) {
-	if p.ToolCall.Kind != nil && (*p.ToolCall.Kind == acp.ToolKindRead || *p.ToolCall.Kind == acp.ToolKindSearch || *p.ToolCall.Kind == acp.ToolKindThink) {
+	if !c.refuseAll && p.ToolCall.Kind != nil && (*p.ToolCall.Kind == acp.ToolKindRead || *p.ToolCall.Kind == acp.ToolKindSearch || *p.ToolCall.Kind == acp.ToolKindThink) {
 		if id, ok := permissionOption(p.Options, "", acp.PermissionOptionKindAllowOnce, acp.PermissionOptionKindAllowAlways); ok {
 			return selectedPermission(id), nil
 		}
@@ -209,6 +214,8 @@ type runner struct {
 	// canDelete records that the adapter advertised session/delete, and
 	// canClose session/close, which Copilot offers instead.
 	canDelete, canClose bool
+	// tempDir, when set, is removed once the adapter has exited.
+	tempDir string
 	// copilot marks a Copilot CLI reviewer, whose errors can arrive as a
 	// normal reply.
 	copilot bool
@@ -278,8 +285,21 @@ func startError(ctx context.Context, err error) error {
 	return err
 }
 
+// runnerOptions restrict a reviewer beyond the default permission policy.
+type runnerOptions struct {
+	// guard watches the adapter's messages and stops it on a forbidden tool.
+	guard *toolGuard
+	// refuseAll refuses every permission request, reads included.
+	refuseAll bool
+}
+
 // startRunner initializes adapters serially so first-run npx installs never overlap.
 func startRunner(ctx context.Context, root string, argv []string, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+	return startRunnerWith(ctx, root, argv, f, name, dir, timeout, runnerOptions{})
+}
+
+// startRunnerWith is startRunner with extra restrictions on the reviewer.
+func startRunnerWith(ctx context.Context, root string, argv []string, f Family, name, dir string, timeout time.Duration, opts runnerOptions) (*runner, error) {
 	s := &runner{result: Reviewer{Name: name, Family: f, Log: filepath.Join(dir, name+".jsonl")}, exited: make(chan struct{})}
 	s.ctx, s.cancel = context.WithTimeout(ctx, timeout)
 	var err error
@@ -330,8 +350,15 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 		return nil, err
 	}
 	go func() { _ = s.cmd.Wait(); close(s.exited) }()
-	s.client = &reviewClient{stderr: s.stderr}
-	s.conn = acp.NewClientSideConnection(s.client, s.stdin, io.TeeReader(stdout, s.updates))
+	s.client = &reviewClient{stderr: s.stderr, refuseAll: opts.refuseAll}
+	// The guard sees each message before the connection handles it, so a
+	// violation is recorded before the turn can be reported as finished.
+	var incoming io.Reader = io.TeeReader(stdout, s.updates)
+	if opts.guard != nil {
+		opts.guard.trip = s.violate
+		incoming = io.TeeReader(incoming, opts.guard)
+	}
+	s.conn = acp.NewClientSideConnection(s.client, s.stdin, incoming)
 	s.conn.SetLogger(slog.New(slog.NewTextHandler(s.stderr, nil)))
 	// On a timeout or interrupt, delete the session while the adapter still
 	// runs, then kill it.
@@ -371,6 +398,20 @@ func (s *runner) stop() {
 	<-s.exited
 	<-s.conn.Done()
 	s.closeFiles()
+	if s.tempDir != "" {
+		_ = os.RemoveAll(s.tempDir)
+	}
+}
+
+// violate records why the reviewer must stop and ends it; the timeout's
+// watcher then kills the adapter.
+func (s *runner) violate(err error) {
+	s.client.mu.Lock()
+	if s.client.violation == nil {
+		s.client.violation = err
+	}
+	s.client.mu.Unlock()
+	s.cancel()
 }
 
 // setSession records the open session, which cleanup deletes or closes.
@@ -459,9 +500,17 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 		err = s.client.permissionError
 	}
 	denied := s.client.deniedEdit
+	// Antigravity ends its turn with no reply when a request is refused.
+	if err == nil && s.client.refuseAll && denied != "" && s.result.Text == "" {
+		err = errors.New("the reviewer's turn ended when a tool request was refused")
+	}
+	violation := s.client.violation
 	s.client.mu.Unlock()
 	if s.ctx.Err() != nil {
 		err = s.ctx.Err()
+	}
+	if violation != nil {
+		err = violation
 	}
 	if err != nil {
 		s.result.Error = err.Error()

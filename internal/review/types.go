@@ -21,9 +21,14 @@ const (
 	Flash Family = "flash"
 	// Haiku is Claude Haiku through the Claude ACP adapter.
 	Haiku Family = "haiku"
+	// Gemini is Google Gemini through the Antigravity CLI's ACP server. It is
+	// opt-in: Antigravity's web search cannot be turned off or refused, so it
+	// runs only when named in review.reviewers or review.fallbacks.
+	Gemini Family = "gemini"
 )
 
-// Families lists every family in priority order.
+// Families lists, in priority order, the families `slopcop init` may choose.
+// Gemini is left out because it is opt-in.
 var Families = []Family{Terra, Sol, Flash, Haiku}
 
 const (

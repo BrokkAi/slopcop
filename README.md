@@ -558,6 +558,9 @@ the hosted patch. The full snapshot still identifies the tree approved for push.
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
 Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
 through Claude ACP. Each uses the newest model of its family at high effort.
+Gemini (`gemini`) through Antigravity CLI is opt-in: init never picks it, because
+Antigravity's web search cannot be refused, only detected. See
+[Gemini through Antigravity](https://docs.slopcop.com/reference/configuration/#gemini-through-antigravity-opt-in).
 `slopcop init` probes each family once when reviewers are not configured and
 mode is not static, then saves the first two that work (or one) as reviewers
 and the rest that work as `review.fallbacks`. Configured reviewers are left
@@ -579,7 +582,7 @@ entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol
 Set `review.fallbacks` (ordered, like `review.reviewers`), `review.timeout`
 (default `20m`), `review.minCompleted` (1 up to the number of reviewers) or
 `mode` with `slopcop config set`;
-adapter commands are under `review.adapters.<codex|dsh|claude>.command`.
+adapter commands are under `review.adapters.<codex|dsh|claude|copilot|antigravity>.command`.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex

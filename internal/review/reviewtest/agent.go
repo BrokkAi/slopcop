@@ -112,6 +112,17 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 		a.record("process-cwd=" + dir)
 		a.record("session-cwd=" + p.Cwd)
 	}
+	// An Antigravity reviewer's workspace: what it holds, and how it started.
+	if a.mode == "workspace" {
+		a.record("session-cwd=" + p.Cwd)
+		a.record("args=" + strings.Join(os.Args, " "))
+		for _, rel := range []string{"repo/change.txt", "repo/.agents/hooks.json", "repo/link", ".agents"} {
+			_, err := os.Lstat(filepath.Join(p.Cwd, rel))
+			a.record(fmt.Sprintf("exists %s=%v", rel, err == nil))
+		}
+		index, _ := os.ReadFile(filepath.Join(p.Cwd, "files.txt"))
+		a.record("index=" + strings.ReplaceAll(strings.TrimSpace(string(index)), "\n", ","))
+	}
 	if a.mode == "hang-session" {
 		a.record("new-session")
 		<-ctx.Done()
@@ -207,6 +218,28 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 	if a.mode == "no-allow" {
 		kind := acp.ToolKindRead
 		_, _ = a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindRejectOnce, OptionId: "reject"}}})
+	}
+	// A tool that runs without asking, as Antigravity's web search does.
+	if a.mode == "ungated-tool" {
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.StartToolCall("web", "query on Web")}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		<-ctx.Done()
+		return acp.PromptResponse{}, ctx.Err()
+	}
+	// Antigravity asks only about a read outside the workspace, and ends its
+	// turn with no reply when refused.
+	if a.mode == "outside-read" {
+		kind := acp.ToolKindRead
+		title := "/outside/secret"
+		got, err := a.conn.RequestPermission(ctx, acp.RequestPermissionRequest{SessionId: p.SessionId, ToolCall: acp.ToolCallUpdate{ToolCallId: "fake", Kind: &kind, Title: &title}, Options: []acp.PermissionOption{{Kind: acp.PermissionOptionKindAllowOnce, OptionId: "allow"}, {Kind: acp.PermissionOptionKindRejectOnce, OptionId: "deny"}}})
+		if err != nil {
+			return acp.PromptResponse{}, err
+		}
+		if got.Outcome.Selected != nil {
+			a.record("permission=" + string(got.Outcome.Selected.OptionId))
+		}
+		return acp.PromptResponse{StopReason: acp.StopReasonEndTurn}, nil
 	}
 	if a.mode == "denied-then-fail" {
 		kind := acp.ToolKindExecute

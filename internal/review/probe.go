@@ -96,7 +96,7 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 // one-word prompt.
 func probeOne(ctx context.Context, root, logDir, adapter string, argv []string, copilot *copilotCatalog, f Family, name string) ProbeResult {
 	r := ProbeResult{Family: f, Adapter: adapter}
-	s, err := launch(ctx, root, adapter, argv, copilot, f, name, logDir, probeTimeout)
+	s, err := launch(ctx, root, reviewTrees{}, adapter, argv, copilot, f, name, logDir, probeTimeout)
 	if err != nil {
 		r.Reason = err.Error()
 		return r
