@@ -36,6 +36,30 @@ type reviewClient struct {
 	refuseAll bool
 	// violation is why a toolGuard stopped the reviewer.
 	violation error
+	// readRoot, when set, is the only directory ReadTextFile serves.
+	readRoot string
+	// onRead, when set, hears of each read served, before the reply goes out.
+	onRead func(path string)
+}
+
+// ReadTextFile serves a read from readRoot for an adapter that reads through
+// the client, so a path outside it is refused before anything is read.
+func (c *reviewClient) ReadTextFile(ctx context.Context, p acp.ReadTextFileRequest) (acp.ReadTextFileResponse, error) {
+	if c.readRoot == "" {
+		return c.unsupportedClient.ReadTextFile(ctx, p)
+	}
+	r, err := readWorkspaceFile(c.readRoot, p)
+	if err == nil && c.onRead != nil {
+		c.onRead(p.Path)
+	}
+	if errors.Is(err, errSnapshotUnreadable) {
+		c.mu.Lock()
+		if c.permissionError == nil {
+			c.permissionError = err
+		}
+		c.mu.Unlock()
+	}
+	return r, err
 }
 
 // reply is the reviewer's final reply so far: none when it started a tool
@@ -298,6 +322,14 @@ type runnerOptions struct {
 	// verify, when set, says what a reviewer's reply did not cover. It fails
 	// an approval and marks a reply with findings.
 	verify func() error
+	// dir, when set, is the adapter's working directory.
+	dir string
+	// readRoot, when set, makes the client serve file reads from it. Writes
+	// are advertised too, since Grok uses client files only with both, and
+	// are always refused.
+	readRoot string
+	// onRead, when set, hears of each read the client served.
+	onRead func(path string)
 }
 
 // startRunner initializes adapters serially so first-run npx installs never overlap.
@@ -333,6 +365,9 @@ func startRunnerWith(ctx context.Context, root string, argv []string, f Family, 
 	// would let that repository choose what runs. The adapter starts in the
 	// temporary directory; the session still gets the repository as its cwd.
 	s.cmd.Dir = os.TempDir()
+	if opts.dir != "" {
+		s.cmd.Dir = opts.dir
+	}
 	s.cmd.Env = reviewerEnvironment(f, root, filepath.Join(dir, name+"-data"), os.Environ())
 	if opts.environment != nil {
 		s.cmd.Env = opts.environment(s.cmd.Env)
@@ -360,7 +395,7 @@ func startRunnerWith(ctx context.Context, root string, argv []string, f Family, 
 		return nil, err
 	}
 	go func() { _ = s.cmd.Wait(); close(s.exited) }()
-	s.client = &reviewClient{stderr: s.stderr, refuseAll: opts.refuseAll}
+	s.client = &reviewClient{stderr: s.stderr, refuseAll: opts.refuseAll, readRoot: opts.readRoot, onRead: opts.onRead}
 	// The guard sees each message before the connection handles it, so a
 	// violation is recorded before the turn can be reported as finished.
 	var incoming io.Reader = io.TeeReader(stdout, s.updates)
@@ -378,7 +413,11 @@ func startRunnerWith(ctx context.Context, root string, argv []string, f Family, 
 		s.cleanup()
 		killProcessTree(s.cmd)
 	})
-	initialized, err := s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: acp.ClientCapabilities{}})
+	capabilities := acp.ClientCapabilities{}
+	if opts.readRoot != "" {
+		capabilities.Fs = acp.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true}
+	}
+	initialized, err := s.conn.Initialize(s.ctx, acp.InitializeRequest{ProtocolVersion: acp.ProtocolVersionNumber, ClientCapabilities: capabilities})
 	if err != nil {
 		s.stop()
 		return nil, fmt.Errorf("initialize: %w", startError(s.ctx, err))
@@ -471,6 +510,9 @@ func (s *runner) prepare(root string) error {
 	s.result.Effort = "high"
 	modeOptions := response.ConfigOptions
 	key, value := reviewerMode(s.result.Family)
+	if key == "" {
+		return nil
+	}
 	option := configOption(modeOptions, key)
 	if option == nil {
 		option = configOption(effortOptions, key)

@@ -346,6 +346,9 @@ func launch(ctx context.Context, root string, trees reviewTrees, adapter string,
 	if adapter == kimiAdapter {
 		return startKimi(ctx, root, trees, argv, f, name, dir, timeout)
 	}
+	if adapter == grokAdapter {
+		return startGrok(ctx, root, trees, argv, f, name, dir, timeout)
+	}
 	s, err := startRunner(ctx, root, argv, f, name, dir, timeout)
 	if err != nil {
 		return nil, err

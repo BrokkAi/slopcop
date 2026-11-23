@@ -28,10 +28,14 @@ const (
 	// Kimi is Moonshot's Kimi K3 through Kimi Code CLI's ACP server. It is
 	// opt-in: it needs an API key, and it sends the change to Moonshot.
 	Kimi Family = "kimi"
+	// Grok is xAI Grok through the Grok Build CLI's ACP server. It is opt-in:
+	// its restrictions have layers SlopCop cannot verify from outside, such
+	// as what the CLI itself sends over the network.
+	Grok Family = "grok"
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
-// Gemini and Kimi are left out because they are opt-in.
+// Gemini, Kimi and Grok are left out because they are opt-in.
 var Families = []Family{Terra, Sol, Flash, Haiku}
 
 const (

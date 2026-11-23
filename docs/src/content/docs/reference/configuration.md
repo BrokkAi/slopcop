@@ -75,7 +75,7 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
 `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -184,6 +184,64 @@ These limits were checked against Kimi Code 2.7.2 on macOS, Windows and Linux.
 A command override with `--yolo`,
 `--auto`, `--auto-approve`, `--add-dir`, `--skills-dir`, `--agent` or
 `--agent-file` is rejected.
+
+### Grok through Grok Build (opt-in)
+
+Checked live against Grok Build 1.0.92 on macOS on Apple silicon. Its Linux
+sandbox has not been run with this reviewer.
+
+The `grok` family reviews with the newest plain versioned Grok model your
+account offers, such as `grok-4.7`, at high effort, through Grok Build's ACP
+server (`grok agent stdio`). `slopcop init` never picks it. It needs an xAI API
+key from [console.x.ai](https://console.x.ai) and does not use a `grok login`
+browser session. Enter the key without saving it to your shell history, then
+name the reviewer:
+
+```bash
+read -rs XAI_API_KEY && export XAI_API_KEY
+```
+
+```bash
+slopcop config set review.reviewers terra,grok
+```
+
+Keep `XAI_API_KEY` set in the shell that runs `slopcop`.
+
+It is opt-in because SlopCop cannot confirm everything the Grok CLI does from
+outside it, including what the CLI itself sends over the network. Telemetry,
+trace upload, session relay, web search, subagents and memory are turned off
+through settings the CLI documents. **Grok's sandbox does not block network
+access on macOS or for the CLI's own requests**, so these settings and the tool
+limits below are what keep repository text from leaving through another route.
+Leave `grok` off for code that must not risk this.
+
+Each Grok reviewer runs with these limits:
+
+- It gets the same temporary copy of the reviewed tree as a Gemini reviewer,
+  with the same limits on size, symlinks and submodules, so Grok does not load
+  the repository's hooks, MCP servers, rules or skills.
+- It runs with an empty temporary home and Grok home. Your Grok, Claude Code and
+  Cursor hooks, MCP servers, skills and history are not loaded, and the review
+  is not saved to your Grok history.
+- It runs in a custom sandbox profile based on Grok's `strict` profile that also
+  denies your real home directory. Grok refuses to start if a custom profile
+  cannot be applied. On Linux this needs `bubblewrap`. It does not run on
+  Windows, or when `TMPDIR` is inside your home directory.
+- It may use only `read_file`. SlopCop serves each read itself and refuses any
+  path outside the workspace before reading it. It also refuses every permission
+  request. If the reviewer calls any other tool, names a path outside the
+  workspace, or finishes a read SlopCop did not serve, SlopCop stops it at once
+  and fails it without a retry.
+- It does not review a change whose diff is over 256 KiB, or a change to a file
+  the copy leaves out. It fails instead of approving what it has not seen, so
+  give it a fallback on another provider.
+
+The adapter runs the pinned `@xai-official/grok@1.0.92` package with
+auto-update and npm install scripts off. Because each reviewer has its own Grok
+home, the package unpacks its binary there for each run, which takes about
+190 MB of temporary disk until the reviewer finishes. A command override may
+change how the CLI is started, but one that sets its permission mode, sandbox,
+trust, plugins, agent profile, working directory or API endpoints is rejected.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

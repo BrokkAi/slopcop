@@ -119,7 +119,7 @@ func (p *panel) review(name string, f Family, s *runner, startErr error) Reviewe
 	r, err := p.attempt(name, f, s, startErr, "")
 	if parseVerdict(r) == StatusFailed && retryable(p.ctx, err) {
 		first := r
-		r, _ = p.attempt(name+"-retry", f, nil, nil, retryNote(failureText(first)))
+		r, err = p.attempt(name+"-retry", f, nil, nil, retryNote(failureText(first)))
 		r.Name = name
 		r.FirstError, r.FirstLog = failureText(first), first.Log
 	}
@@ -128,7 +128,7 @@ func (p *panel) review(name string, f Family, s *runner, startErr error) Reviewe
 		if r.Model == copilotAuto {
 			p.copilot.release(f)
 		}
-		r.Error = explainFailure(r)
+		r.Error = explainFailure(r, err)
 	} else {
 		p.mu.Lock()
 		p.completed++
@@ -255,10 +255,12 @@ func connectionReply(text string) bool {
 }
 
 // explainFailure turns a reviewer's final error into one that says what to do.
-func explainFailure(r Reviewer) string {
+// err is the error of its last attempt.
+func explainFailure(r Reviewer, err error) string {
 	text := failureText(r)
-	if strings.Contains(text, errForbiddenTool.Error()) {
-		return text + ". What it sent that tool may have left this machine, so check the change for text aimed at reviewers before running it again."
+	var stop toolStop
+	if errors.As(err, &stop) {
+		return text + ". " + stop.advice()
 	}
 	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) {
 		return text

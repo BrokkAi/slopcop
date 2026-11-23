@@ -85,6 +85,10 @@ func TestToolGuard(t *testing.T) {
 			if !errors.Is(got, errForbiddenTool) || !strings.Contains(got.Error(), tc.want) {
 				t.Fatalf("got %v, want %q", got, tc.want)
 			}
+			// Nothing Antigravity reports is a request SlopCop refused itself.
+			if text := explainFailure(Reviewer{Family: Gemini, Error: got.Error()}, got); !strings.Contains(text, "may have left this machine") {
+				t.Fatalf("no warning: %s", text)
+			}
 		})
 	}
 }
@@ -176,7 +180,7 @@ func TestGeminiToolThatCannotBeRefusedStopsTheReviewer(t *testing.T) {
 		t.Fatalf("%+v", v)
 	}
 	r := v.Reviewers[0]
-	if !strings.Contains(r.Error, errForbiddenTool.Error()) || !strings.Contains(r.Error, "may have left this machine") || r.FirstError != "" {
+	if !strings.Contains(r.Error, errForbiddenTool.Error()) || !strings.Contains(r.Error, "may have left this machine") || !strings.Contains(r.Error, "text aimed at reviewers") || r.FirstError != "" {
 		t.Fatalf("%+v", r)
 	}
 	data, _ := os.ReadFile(trace)

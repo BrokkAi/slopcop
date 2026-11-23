@@ -165,7 +165,7 @@ func TestKimiToolGuard(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var got error
 			check := newKimiToolCheck("/w", nil)
-			g := &toolGuard{check: check.check, trip: func(err error) { got = err }}
+			g := &toolGuard{check: mayHaveRun(check.check), trip: func(err error) { got = err }}
 			stream := []byte(strings.Join(tc.lines, ""))
 			for len(stream) > 0 {
 				n := min(7, len(stream))
