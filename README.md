@@ -492,7 +492,7 @@ Flags:
 | `--mode both\|static\|ai` | both halves (the default where reviewers are configured, outside CI), static only (the default otherwise), or review only |
 | `--static`, `--ai` | shortcuts for the corresponding mode |
 | `--intent TEXT` | user request when no session transcript is found |
-| `--review-timeout DURATION` | local review timeout (default `20m`) |
+| `--review-timeout DURATION` | local review timeout, and the longest a check waits for another review or override in the same checkout (default `20m`) |
 | `--root PATH` | repository to check (default `.`) |
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` |
 | `--base-exact REV` | exact base commit or revision, without a merge base |

@@ -198,7 +198,11 @@ In Claude Code, run Bash with **`run_in_background: true`** and poll
 TaskOutput until the check exits. In Codex, run in the foreground and poll
 the running shell session. Do not detach with `nohup` or `&`. Reviews can
 take minutes; a running command is not a pass. `--review-timeout` defaults
-to `20m`. A complete review is reused when its inputs have not changed. Its inputs are the
+to `20m`. Only one review or override runs at a time in a checkout; separate
+worktrees do not wait for each other. A check that finds another one running
+says so in one stderr line, sends nothing, waits up to the review timeout, and
+then checks the tree as it is by then. `slopcop override` does not wait: it
+refuses, so read the running check's result before overriding. A complete review is reused when its inputs have not changed. Its inputs are the
 reviewed content, the reviewers, the slopcop version and the intent, the
 user's messages in the session. A clean review of a tree that is still
 approved for push is also reused when only the intent changed, such as after
@@ -359,6 +363,7 @@ the usual codes mean:
 | `client_outdated` | This slopcop is older than the service accepts. Upgrade it (the install channel's upgrade command), then run the check again. |
 | `service_unavailable` | Retry; the service is unavailable. |
 | `service_unreachable` | The CLI got no answer from the service, usually because the network is down. Check the connection, then run the same command again. |
+| `review_busy` | Another review or override in this checkout outlasted the review timeout, so this check ran nothing and spent no static check. Run the same check again when it finishes. |
 
 ## What a result claims
 
