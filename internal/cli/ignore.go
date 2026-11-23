@@ -63,7 +63,7 @@ func sendFinding(
 ) (service.IgnoreResponse, error) {
 	findingID = strings.TrimSpace(findingID)
 	if review.IsFindingID(findingID) {
-		return service.IgnoreResponse{}, fmt.Errorf("%s is a local review finding's id, which never reaches the service; run `slopcop override %s --reason \"why it does not hold\"` instead", findingID, findingID)
+		return service.IgnoreResponse{}, fmt.Errorf("%s is a local review finding's id, which `slopcop ignore` does not take; run `slopcop override %s --reason \"why it does not hold\"` instead", findingID, findingID)
 	}
 	if !uuidPattern.MatchString(findingID) {
 		return service.IgnoreResponse{}, fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)

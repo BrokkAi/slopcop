@@ -187,6 +187,10 @@ type Verdict struct {
 	// were told not to report. A review is not reused once one is undone: a
 	// reviewer may have left that finding out only because it was told to.
 	PromptOverrides []string `json:"promptOverrides,omitempty"`
+	// DurationsMs is how long each reviewer ran, retry included, by Name. It
+	// is kept here rather than on Reviewer because the check's JSON report
+	// prints Reviewer as it is.
+	DurationsMs map[string]int64 `json:"durationsMs,omitempty"`
 }
 
 // OverriddenFinding is a reported finding that matched a finding override.
@@ -240,6 +244,10 @@ type Record struct {
 	// It is on the record rather than the verdict so that a later check, which
 	// saves a new record even when it reuses the verdict, does not inherit it.
 	Accepted *AcceptedOverride `json:"acceptedOverride,omitempty"`
+	// Check is the hosted check this review ran beside, when it answered with
+	// an id. Like Accepted it is on the record, so a later check that reuses
+	// the verdict does not inherit it.
+	Check *CheckRef `json:"check,omitempty"`
 	Verdict
 }
 

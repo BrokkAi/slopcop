@@ -291,9 +291,8 @@ reply's first line as `title` and the rest as `message`, with no priority or
 location: read that reviewer's `text` in `review.reviewers`. In `sarif` they
 are results of the `slopcop-review` run, with the id in
 `properties["slopcop.findingId"]`. A review finding's `id` starts with `rv-`
-(a static finding's is a UUID). `slopcop ignore` does not take it, since review
-findings never reach the service: fix the real ones, and override a wrong one
-with `slopcop override <rv-id> --reason "..."` (see below).
+(a static finding's is a UUID). `slopcop ignore` does not take it: fix the real
+ones, and override a wrong one with `slopcop override <rv-id> --reason "..."` (see below).
 `review.overridden` lists the findings left out because they match a finding
 you overrode, each with `overrideId`; they are not counted and do not fail the
 check.
@@ -571,8 +570,14 @@ the change, so a new rule is picked up by the next check with no extra setup.
 
 ## Override, gate, and configuration
 
-`slopcop override` is local, like the review: it never reaches the service, and
-it accepts the `-w` you passed to `check` and ignores it. It has two forms.
+Nothing from the local review goes to the service unless the workspace turned
+on review tracking. Then the CLI reports each finding's location, title, message
+and tags, which reviewers ran and how they ended, and each override with its
+reason, to the check's workspace. The prompt, the diff, the intent text and
+reviewer transcripts are never sent, and a failed report never changes a check.
+
+`slopcop override` takes effect locally, and it accepts the `-w` you passed to
+`check` and ignores it. It has two forms.
 
 **One wrong finding: `slopcop override <rv-id> --reason "why it does not
 hold"`.** Use this for a review finding that is demonstrably wrong, by the

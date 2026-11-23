@@ -113,7 +113,7 @@ func TestIgnoreSendsAReviewFindingToOverride(t *testing.T) {
 	defer server.Close()
 	for _, command := range []string{"ignore", "unignore"} {
 		code, stdout, stderr := runCLI(t, command, id, "--service", server.URL)
-		if code != 2 || stdout != "" || !strings.Contains(stderr, "is a local review finding's id, which never reaches the service; run `slopcop override "+id+" --reason") {
+		if code != 2 || stdout != "" || !strings.Contains(stderr, "is a local review finding's id, which `slopcop ignore` does not take; run `slopcop override "+id+" --reason") {
 			t.Errorf("%s: exit = %d, stdout = %q, stderr = %q", command, code, stdout, stderr)
 		}
 	}

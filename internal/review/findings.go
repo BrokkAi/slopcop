@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode"
@@ -37,6 +38,19 @@ type Finding struct {
 	// so Title and Message are the reply's first line and the rest as
 	// written, with no priority or location. Read the reviewer's Text.
 	Malformed bool `json:"malformed,omitempty"`
+	// Category and API are the reviewer's optional tags, from a `Tags:` line
+	// closing the finding. Category is one of FindingCategories. They are only
+	// sent to a workspace that tracks reviews: they are not stored, printed in
+	// a report, or part of the finding's id.
+	Category string `json:"-"`
+	API      string `json:"-"`
+}
+
+// FindingCategories is the closed list of category tags the rubric offers.
+// A reviewer's other values are dropped.
+var FindingCategories = []string{
+	"api-misuse", "compatibility", "concurrency", "correctness", "data-loss",
+	"error-handling", "input-validation", "performance", "resource-leak", "security",
 }
 
 var (
@@ -52,6 +66,9 @@ var (
 	// `[AGENTS.md:15](...)` still yields `AGENTS.md`. The rubric asks for
 	// backticks, which quotedLocation reads exactly; this is the fallback.
 	bareLocation = regexp.MustCompile(`(?:^|[\s(\[])([\p{L}\p{N}_@+.\-]+(?:/[\p{L}\p{N}_@+.\-\[\]()]+)*):(\d+)(?:\s*[-–]\s*(\d+))?`)
+	// tagLine matches the optional line closing a finding:
+	// "Tags: category=resource-leak api=tokio::fs::File".
+	tagLine = regexp.MustCompile("(?i)^\\s*`?tags:\\s*(?:category=([a-z0-9-]+))?\\s*(?:api=(.*?))?`?\\s*$")
 )
 
 // ParseFindings splits one reviewer's reply into findings. A reply that has
@@ -68,6 +85,7 @@ func ParseFindings(reviewer, text string, changed map[string]bool) []Finding {
 			return
 		}
 		last := &findings[len(findings)-1]
+		body, last.Category, last.API = splitTags(body)
 		last.Message = joinParagraph(append([]string{last.Message}, body...))
 		body = nil
 	}
@@ -103,6 +121,27 @@ func ParseFindings(reviewer, text string, changed map[string]bool) []Finding {
 		findings[i].ID = id
 	}
 	return findings
+}
+
+// splitTags takes the optional tag line off the end of a finding's body. A
+// body whose last line is anything else comes back as it was. An unknown
+// category is dropped, and the line still does not join the message.
+func splitTags(body []string) (rest []string, category, api string) {
+	last := len(body) - 1
+	for last >= 0 && strings.TrimSpace(body[last]) == "" {
+		last--
+	}
+	if last < 0 {
+		return body, "", ""
+	}
+	match := tagLine.FindStringSubmatch(body[last])
+	if match == nil || (match[1] == "" && strings.TrimSpace(match[2]) == "") {
+		return body, "", ""
+	}
+	if value := strings.ToLower(match[1]); slices.Contains(FindingCategories, value) {
+		category = value
+	}
+	return body[:last], category, strings.TrimSpace(match[2])
 }
 
 // relativeToChange turns an absolute path that ends with exactly one

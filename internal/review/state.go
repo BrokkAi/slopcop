@@ -229,6 +229,20 @@ func (s *Store) SetStatic(code int, status string, blocks bool) error {
 	return s.write("last.json", *r)
 }
 
+// SetCheck records the hosted check that ran beside the review v, when the
+// latest record is that review. A record of anything else keeps its own.
+func (s *Store) SetCheck(ref CheckRef, v Verdict) error {
+	r, err := s.Last()
+	if err != nil || r == nil {
+		return err
+	}
+	if r.Capture.Tree != v.Capture.Tree || !r.Time.Equal(v.Time) {
+		return nil
+	}
+	r.Check = &ref
+	return s.write("last.json", *r)
+}
+
 // overrideLog is the append-only log of whole-review overrides.
 const overrideLog = "overrides.jsonl"
 

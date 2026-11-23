@@ -53,9 +53,41 @@ Code ([details](/reference/configuration/#kimi-through-kimi-code-opt-in)).
 If you name the opt-in `grok` reviewer, they also go to xAI through Grok Build,
 using your `XAI_API_KEY`
 ([details](/reference/configuration/#grok-through-grok-build-opt-in)).
-Review results and logs stay under
-`<git-dir>/slopcop/`; nothing from the local review goes to the SlopCop service.
+Review results and logs stay under `<git-dir>/slopcop/`.
 Use `--mode static` to avoid the local review and these provider requests.
+
+### Review tracking
+
+Nothing from the local review goes to the SlopCop service unless your workspace
+turns on **review tracking**, which is off by default. A CLI upgrade alone never
+starts sending: the CLI reports a review only when the answer to that check says
+the workspace tracks reviews, and only for a check that ran both halves, so
+`--mode ai` and a check whose static half did not finish send nothing.
+
+With tracking on, after printing the report the CLI sends the service, for that
+check:
+
+- **About the run:** the CLI version, the mode, a label for where the intent came
+  from (never the intent), the base and reviewed tree ids, and whether the review
+  was reused. For each reviewer: its position, family, adapter and version,
+  model, effort, status, duration, how well its reply followed the format, and
+  how many findings it reported, including how many a standing finding override
+  left out.
+- **Each finding that cites a file and lines:** its `rv-` id, priority, path, line
+  range, title, message, and the optional category and API tags. Fenced code and
+  long inline code are removed from the text first, and it is cut to 200
+  characters for a title and 500 for a message. This reduces the chance of
+  sending quoted code or a secret, but cannot rule it out, since a reviewer's
+  prose can quote either. A finding that cites no place is sent as a count, with
+  no text.
+- **Later commands:** `slopcop override` of a finding or a whole review, with your
+  reason, and `--undo`.
+
+**Never sent:** the review prompt, the diff, the intent text, and the reviewers'
+replies as written, transcripts, logs and stderr.
+
+Reporting is best-effort, with a limit of a few seconds. If it fails, the check's
+output and exit code are the same, and `--verbose` says why on stderr.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
