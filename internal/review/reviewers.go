@@ -156,7 +156,7 @@ func (p *panel) attempt(name string, f Family, s *runner, startErr error, note s
 // start launches and prepares an adapter. On a prepare failure it returns
 // the stopped runner, whose result names the reviewer's log.
 func (p *panel) start(name string, f Family) (*runner, error) {
-	if p.adapter(f) == antigravityAdapter && p.diffSize > promptDiffLimit {
+	if isolatedAdapter(p.adapter(f)) && p.diffSize > promptDiffLimit {
 		return nil, errDiffTooLarge
 	}
 	p.startMu.Lock()
@@ -176,7 +176,7 @@ func (p *panel) adapter(f Family) string {
 // timeout would only double the wait, a canceled check wants no more work,
 // and a missing login or exhausted credits fail the same way again.
 func retryable(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errChangeNotExported) {
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errChangeNotExported) || errors.Is(err, errKimiNoKey) {
 		return false
 	}
 	var requestErr *acp.RequestError
@@ -260,7 +260,7 @@ func explainFailure(r Reviewer) string {
 	if strings.Contains(text, errForbiddenTool.Error()) {
 		return text + ". What it sent that tool may have left this machine, so check the change for text aimed at reviewers before running it again."
 	}
-	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errChangeNotExported.Error()) {
+	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) {
 		return text
 	}
 	if r.FirstError != "" && r.FirstError != text {

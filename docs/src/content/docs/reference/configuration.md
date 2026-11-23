@@ -75,7 +75,7 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
 `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -136,6 +136,54 @@ Each Gemini reviewer runs with these limits:
 The adapter runs the installed `agy`, not a pinned package; it was checked
 against version 1.5.14. A command override that includes
 `--dangerously-skip-permissions` is rejected.
+
+### Kimi through Kimi Code (opt-in)
+
+The `kimi` family reviews with Moonshot's Kimi K3 (`kimi-k3`) at high effort,
+through the ACP server of Kimi Code CLI, pinned to version 2.7.2. `slopcop init`
+never picks it. It uses a Kimi platform API key and does not use a `kimi login`
+session. Enter the key without saving it to your shell history, then name the
+reviewer:
+
+```bash
+read -rs KIMI_API_KEY && export KIMI_API_KEY
+```
+
+```bash
+slopcop config set review.reviewers terra,kimi
+```
+
+Keep `KIMI_API_KEY` set in the shell that runs `slopcop`. For a key from another
+Kimi region, set `KIMI_BASE_URL` to that region's API URL. The default is
+`https://api.moonshot.ai/v1`.
+
+It is opt-in because the change and the files the reviewer reads go to Moonshot,
+and because Kimi Code has no operating-system sandbox. **Its limits come from
+Kimi Code honoring the configuration SlopCop generates.** Leave `kimi` off for
+code that must not rely on that. These limits restrict what the reviewer can
+do, not what it says: text in a repository can still sway its reply, as with
+any LLM reviewer, so pair it with a reviewer from another provider.
+
+Each Kimi reviewer runs with these limits:
+
+- It gets the same temporary copy of the reviewed tree as a Gemini reviewer, so
+  Kimi Code does not load the repository's MCP servers, rules, skills or agents.
+  A change it cannot read fails the reviewer, as does a diff over 256 KiB or an
+  approval given after a read of a changed text file failed, so give it a
+  fallback on another provider.
+- It has its own empty Kimi Code home and user home, so your personal config,
+  hooks, MCP servers, skills and agents do not load, and reviews stay out of
+  your Kimi Code history. Telemetry and update checks are off, and other `KIMI_`
+  environment variables are not passed to it.
+- Its only tool is `Read`, and a deny rule refuses any path outside the temporary
+  workspace. SlopCop refuses every permission request.
+- If any other tool starts, SlopCop stops the reviewer at once, fails it without
+  a retry, and says so. **That tool has already started by then.**
+
+These limits were checked against Kimi Code 2.7.2 on macOS, Windows and Linux.
+A command override with `--yolo`,
+`--auto`, `--auto-approve`, `--add-dir`, `--skills-dir`, `--agent` or
+`--agent-file` is rejected.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

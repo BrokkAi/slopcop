@@ -123,6 +123,22 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 		index, _ := os.ReadFile(filepath.Join(p.Cwd, "files.txt"))
 		a.record("index=" + strings.ReplaceAll(strings.TrimSpace(string(index)), "\n", ","))
 	}
+	// A Kimi reviewer's environment and generated config. It records whether
+	// the key arrived, never the key.
+	if a.mode == "kimi-env" {
+		a.record("session-cwd=" + p.Cwd)
+		a.record("args=" + strings.Join(os.Args, " "))
+		a.record(fmt.Sprintf("key-set=%v", os.Getenv("KIMI_API_KEY") != ""))
+		for _, k := range []string{"HOME", "USERPROFILE", "KIMI_CODE_HOME", "KIMI_DISABLE_TELEMETRY", "KIMI_CODE_NO_AUTO_UPDATE", "KIMI_CODE_TRUST_WORKSPACE", "KIMI_MODEL_NAME", "npm_config_cache", "npm_config_userconfig"} {
+			a.record(k + "=" + os.Getenv(k))
+		}
+		for _, rel := range []string{"repo/change.txt", "repo/.kimi-code/mcp.json", "repo/link", ".kimi-code", ".agents"} {
+			_, err := os.Lstat(filepath.Join(p.Cwd, rel))
+			a.record(fmt.Sprintf("exists %s=%v", rel, err == nil))
+		}
+		config, _ := os.ReadFile(filepath.Join(os.Getenv("KIMI_CODE_HOME"), "config.toml"))
+		a.record("config:\n" + string(config))
+	}
 	if a.mode == "hang-session" {
 		a.record("new-session")
 		<-ctx.Done()
@@ -227,6 +243,31 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 		<-ctx.Done()
 		return acp.PromptResponse{}, ctx.Err()
 	}
+	// A read, reported the way Kimi Code reports one, then a clean reply.
+	if a.mode == "kimi-read" || a.mode == "kimi-read-fails" || a.mode == "kimi-read-fails-findings" || a.mode == "kimi-read-missing" {
+		path, status := "repo/change.txt", acp.ToolCallStatusCompleted
+		if a.mode != "kimi-read" {
+			status = acp.ToolCallStatusFailed
+		}
+		if a.mode == "kimi-read-missing" {
+			path = "repo/not-in-the-change.txt"
+		}
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.StartToolCall("read", "Reading "+path, acp.WithStartKind(acp.ToolKindRead), acp.WithStartStatus(acp.ToolCallStatusInProgress), acp.WithStartRawInput(map[string]any{"path": path}))}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateToolCall("read", acp.WithUpdateStatus(status))}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+	}
+	// A web fetch, which Kimi Code would run without asking if its allowlist
+	// did not apply.
+	if a.mode == "kimi-fetch" {
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.StartToolCall("web", "Fetching https://example.test/", acp.WithStartKind(acp.ToolKindOther), acp.WithStartStatus(acp.ToolCallStatusInProgress))}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		<-ctx.Done()
+		return acp.PromptResponse{}, ctx.Err()
+	}
 	// Antigravity asks only about a read outside the workspace, and ends its
 	// turn with no reply when refused.
 	if a.mode == "outside-read" {
@@ -279,7 +320,7 @@ func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResp
 	if a.mode == "copilot-error-reply" {
 		text = fmt.Sprintf("Error: Execution failed: Model %q is not available.", a.cliModel)
 	}
-	if a.mode == "findings" || a.mode == "held-findings" {
+	if a.mode == "findings" || a.mode == "held-findings" || a.mode == "kimi-read-fails-findings" {
 		text = "- [P1] fake defect"
 	}
 	// One false positive, then the same point as another review words it.

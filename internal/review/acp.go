@@ -219,6 +219,8 @@ type runner struct {
 	// copilot marks a Copilot CLI reviewer, whose errors can arrive as a
 	// normal reply.
 	copilot bool
+	// verify, when set, says what the reviewer's reply did not cover.
+	verify func() error
 	// sessionMu guards session, which the timeout's kill reads.
 	sessionMu sync.Mutex
 	session   acp.SessionId
@@ -291,6 +293,11 @@ type runnerOptions struct {
 	guard *toolGuard
 	// refuseAll refuses every permission request, reads included.
 	refuseAll bool
+	// environment, when set, adjusts the adapter's environment.
+	environment func([]string) []string
+	// verify, when set, says what a reviewer's reply did not cover. It fails
+	// an approval and marks a reply with findings.
+	verify func() error
 }
 
 // startRunner initializes adapters serially so first-run npx installs never overlap.
@@ -300,7 +307,7 @@ func startRunner(ctx context.Context, root string, argv []string, f Family, name
 
 // startRunnerWith is startRunner with extra restrictions on the reviewer.
 func startRunnerWith(ctx context.Context, root string, argv []string, f Family, name, dir string, timeout time.Duration, opts runnerOptions) (*runner, error) {
-	s := &runner{result: Reviewer{Name: name, Family: f, Log: filepath.Join(dir, name+".jsonl")}, exited: make(chan struct{})}
+	s := &runner{result: Reviewer{Name: name, Family: f, Log: filepath.Join(dir, name+".jsonl")}, exited: make(chan struct{}), verify: opts.verify}
 	s.ctx, s.cancel = context.WithTimeout(ctx, timeout)
 	var err error
 	s.updates, err = os.OpenFile(s.result.Log, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
@@ -327,6 +334,9 @@ func startRunnerWith(ctx context.Context, root string, argv []string, f Family, 
 	// temporary directory; the session still gets the repository as its cwd.
 	s.cmd.Dir = os.TempDir()
 	s.cmd.Env = reviewerEnvironment(f, root, filepath.Join(dir, name+"-data"), os.Environ())
+	if opts.environment != nil {
+		s.cmd.Env = opts.environment(s.cmd.Env)
+	}
 	configureProcess(s.cmd)
 	s.cmd.Stderr = s.stderr
 	s.stdin, err = s.cmd.StdinPipe()
@@ -495,6 +505,16 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 	}
 	if err == nil && s.copilot && copilotErrorReply(s.result.Text) {
 		err = fmt.Errorf("Copilot ended the turn with its own error instead of a review: %s", s.result.Text)
+	}
+	if err == nil && s.verify != nil {
+		if unread := s.verify(); unread != nil {
+			if s.result.Text == CleanReply {
+				err = unread
+			} else {
+				s.result.UnreadChange = unread.Error()
+				s.result.Warning = unread.Error()
+			}
+		}
 	}
 	if s.client.permissionError != nil {
 		err = s.client.permissionError

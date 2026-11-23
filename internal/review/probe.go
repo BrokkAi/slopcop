@@ -138,6 +138,10 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 		if os.Getenv("DEEPSEEK_API_KEY") == "" {
 			return "DEEPSEEK_API_KEY is not set"
 		}
+	case kimiAdapter:
+		if strings.TrimSpace(os.Getenv(kimiKeyEnv)) == "" {
+			return kimiKeyEnv + " is not set"
+		}
 	case "codex":
 		if !codexMayBeLoggedIn() {
 			return "Codex is not logged in"

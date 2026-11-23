@@ -152,9 +152,9 @@ func groupVerdict(rs []Reviewer) Status {
 
 // Overridable says whether `slopcop override` can accept the verdict's
 // findings as far as the review goes: it has findings and every reviewer
-// finished. The static half must also not block the push.
+// finished and read the change. The static half must also not block the push.
 func (v Verdict) Overridable() bool {
-	return v.Status == StatusFindings && groupVerdict(v.Reviewers) == StatusFindings
+	return v.Status == StatusFindings && groupVerdict(v.Reviewers) == StatusFindings && v.unreadChange() == ""
 }
 
 // Save atomically stores a record, adds its findings to the checked-out
