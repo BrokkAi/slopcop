@@ -180,7 +180,12 @@ func listFindingOverrides(out io.Writer, repo, format string) error {
 // overrideReview accepts every finding of the latest review for the current
 // working tree.
 func overrideReview(out io.Writer, repo, reason string) error {
+	// Never waits: the running check is about to replace the review this
+	// override means to accept, and its result has to be read first.
 	store, err := review.OpenStore(repo)
+	if errors.Is(err, review.ErrBusy) {
+		return fmt.Errorf("%w, so nothing was accepted; when it finishes, read its result and run the override again if it still applies", err)
+	}
 	if err != nil {
 		return err
 	}

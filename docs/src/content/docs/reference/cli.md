@@ -41,7 +41,7 @@ slopcop --root ../repo --base origin/main
 | `--mode both\|static\|ai` | both halves (the default where reviewers are configured, outside CI), static only (the default otherwise), or review only |
 | `--static`, `--ai` | shortcuts for the corresponding mode |
 | `--intent TEXT` | user request if no session transcript is found |
-| `--review-timeout DURATION` | review timeout (default `20m`) |
+| `--review-timeout DURATION` | review timeout, and the longest a check waits for another review or override in the same checkout (default `20m`) |
 | `--root PATH` | repository path to check (default `.`) |
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` (default: merge base with the upstream branch, then with `origin/HEAD`, then `HEAD`) |
 | `--base-exact REV` | exact base commit or revision, used without taking a merge base |

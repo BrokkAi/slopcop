@@ -47,6 +47,9 @@ const (
 	// activeLimitCode is the refusal of a check of a repository past the
 	// workspace's active-repository limit.
 	activeLimitCode = "active_repository_limit_reached"
+	// reviewBusyCode is a check that gave up waiting for another review or
+	// override in the same checkout.
+	reviewBusyCode = "review_busy"
 	// interruptedText is printed when Ctrl-C or SIGTERM stops a check that
 	// was sent: a service that received it keeps it, so asking again picks up
 	// its result.
@@ -145,12 +148,30 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	effectiveOpts := *opts
 	effectiveOpts.mode = mode
 	prepared, err := prepareCheck(&effectiveOpts, cfg, serviceFlag, version, failOn)
+	// The review store is taken before anything is sent, so a check that
+	// cannot review spends no hosted check. After a wait the checkout may have
+	// moved on, and the check covers what is there now.
+	var store *review.Store
+	var storeErr error
+	if err == nil && mode != modeStatic {
+		var waited bool
+		store, waited, storeErr = review.WaitStore(cmd.Context(), prepared.repoRoot, settings.Timeout, func() {
+			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %v; waiting up to %s for it to finish.\n", review.ErrBusy, settings.Timeout)
+		})
+		defer store.Close()
+		if waited && storeErr == nil {
+			prepared, err = prepareCheck(&effectiveOpts, cfg, serviceFlag, version, failOn)
+		}
+	}
 	if cmd.Context().Err() != nil {
 		fmt.Fprintln(cmd.ErrOrStderr(), interruptedBeforeSendText)
 		return silentExit{interruptCode(cmd.Context())}
 	}
 	if err != nil {
 		return err
+	}
+	if errors.Is(storeErr, review.ErrBusy) {
+		return checkFailure(cmd, reviewBusy(settings.Timeout), format, reportOptions)
 	}
 	reportOptions.OmittedFiles = prepared.omittedFiles
 	reportOptions.Source = treeSource(prepared.repoRoot, prepared.checkedTree)
@@ -187,12 +208,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		}
 		// A store another check holds is not a reason to lose the refusal's
 		// own report, so failing to record it is only said.
-		if err := recordStaticRefusal(prepared.repoRoot, prepared.snapshot.Tree, static); err != nil {
+		if err := recordStaticRefusal(prepared.repoRoot, prepared.snapshot.Tree, static, store); err != nil {
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not record the refusal in the local review state, so check again before `slopcop override`: %v\n", err)
 		}
 		mode = modeStatic
 	}
-	var store *review.Store
 	var verdict review.Verdict
 	var reviewDone chan review.Verdict
 	if mode != modeStatic {
@@ -200,10 +220,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: reviewing with %s; this can take several minutes.\n", reviewerNames(settings.Reviewers))
 		go func() {
 			v := review.Verdict{Status: review.StatusFailed}
-			var err error
-			store, err = review.OpenStore(prepared.repoRoot)
-			if err != nil {
-				v.Error = err.Error()
+			if storeErr != nil {
+				v.Error = storeErr.Error()
 				reviewDone <- v
 				return
 			}
@@ -541,23 +559,35 @@ const refusalLockWait = 5 * time.Second
 // recordStaticRefusal marks the last local review's static half as refused
 // and blocking when that review is of tree, so no override builds on a static
 // pass the workspace has since refused. A review of another tree keeps its
-// own static result.
-func recordStaticRefusal(root, tree string, static staticOutcome) error {
-	store, err := review.OpenStore(root)
-	// An override holds the store only briefly, so wait it out rather than
-	// leave it a passing static result to approve the tree with afterwards.
-	for deadline := time.Now().Add(refusalLockWait); errors.Is(err, review.ErrBusy) && time.Now().Before(deadline); {
-		time.Sleep(100 * time.Millisecond)
-		store, err = review.OpenStore(root)
-	}
-	if err != nil {
-		return err
+// own static result. held is the store when this check already has it, and
+// stays open.
+func recordStaticRefusal(root, tree string, static staticOutcome, held *review.Store) error {
+	store := held
+	if store == nil {
+		// An override holds the store only briefly, so wait it out rather than
+		// leave it a passing static result to approve the tree with afterwards.
+		var err error
+		if store, _, err = review.WaitStore(context.Background(), root, refusalLockWait, nil); err != nil {
+			return err
+		}
+		defer store.Close()
 	}
 	last, err := store.Last()
 	if err == nil && last != nil && last.Capture.Tree == tree {
 		err = store.SetStatic(static.exit, static.status, true)
 	}
-	return errors.Join(err, store.Close())
+	return err
+}
+
+// reviewBusy is the failure of a check that gave up waiting for another
+// review or override in this checkout. Nothing was sent or reviewed.
+func reviewBusy(limit time.Duration) *service.Error {
+	return &service.Error{Body: service.ErrorBody{
+		Code:      reviewBusyCode,
+		Message:   fmt.Sprintf("Another slopcop review or override in this checkout was still running after %s, so this check did not run and spent no static check.", limit),
+		Remedy:    "Run the same check again when it finishes, or give it longer with --review-timeout.",
+		Retryable: true,
+	}}
 }
 
 // repositoryOverLimit is the local refusal of a check of a repository the

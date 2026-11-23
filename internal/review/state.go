@@ -1,6 +1,7 @@
 package review
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,34 +13,71 @@ import (
 	"github.com/BrokkAi/slopcop/internal/gitx"
 )
 
-// ErrBusy means another process owns the nonblocking review state lock.
-var ErrBusy = errors.New("another slopcop review or override is running")
+// ErrBusy means another process owns the checkout's review state lock.
+var ErrBusy = errors.New("another slopcop review or override is running in this checkout")
 
-// Store owns the repository review state lock until Close.
+// storeLockPoll is how often a waiting process tries the review state lock.
+const storeLockPoll = 100 * time.Millisecond
+
+// Store owns the checkout's review state lock until Close. The state is under
+// the worktree's own git directory, so worktrees do not contend for it.
 type Store struct {
 	root, dir string
 	lock      *os.File
 }
 
-// OpenStore creates the repository state directory and takes an exclusive lock.
+// OpenStore creates the checkout's state directory and takes its exclusive
+// lock, or returns ErrBusy at once if another process holds it.
 func OpenStore(root string) (*Store, error) {
+	store, _, err := WaitStore(context.Background(), root, 0, nil)
+	return store, err
+}
+
+// WaitStore is OpenStore that waits up to limit for another process to release
+// the lock, calling waiting once if it has to. It returns ErrBusy when the
+// limit runs out and ctx's error when ctx ends first. waited says the lock was
+// not free at first, so anything read from the checkout before may be stale.
+func WaitStore(ctx context.Context, root string, limit time.Duration, waiting func()) (store *Store, waited bool, err error) {
 	gitDir, err := gitx.Run(root, "rev-parse", "--absolute-git-dir")
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	dir := filepath.Join(gitDir, "slopcop")
 	if err = os.MkdirAll(dir, 0700); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	f, err := os.OpenFile(filepath.Join(dir, "lock"), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if err = lockFile(f); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("%w: %v", ErrBusy, err)
+	deadline := time.Now().Add(limit)
+	for {
+		err = lockFile(f)
+		if err == nil {
+			return &Store{root, dir, f}, waited, nil
+		}
+		if !lockBusy(err) {
+			f.Close()
+			return nil, waited, fmt.Errorf("lock review state: %w", err)
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			f.Close()
+			return nil, waited, ErrBusy
+		}
+		if !waited {
+			waited = true
+			if waiting != nil {
+				waiting()
+			}
+		}
+		select {
+		case <-ctx.Done():
+			f.Close()
+			return nil, waited, ctx.Err()
+		case <-time.After(min(remaining, storeLockPoll)):
+		}
 	}
-	return &Store{root, dir, f}, nil
 }
 
 // Close releases the lock and closes its file handle.
