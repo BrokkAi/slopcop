@@ -19,6 +19,8 @@ func DefaultCommand(f Family) []string {
 		return []string{"npx", "--yes", "@brokkai/dsh-acp@0.6.0"}
 	case Haiku:
 		return []string{"npx", "--yes", "@agentclientprotocol/claude-agent-acp@0.100.0"}
+	case Gemini:
+		return slices.Clone(antigravityDefaultCommand)
 	}
 	return nil
 }
@@ -32,6 +34,8 @@ func AdapterName(f Family) string {
 		return "dsh"
 	case Haiku:
 		return "claude"
+	case Gemini:
+		return antigravityAdapter
 	}
 	return ""
 }
@@ -92,6 +96,8 @@ func FamilyOf(model string) (Family, bool) {
 		return Flash, true
 	case m == "haiku" || strings.HasPrefix(m, "claude-") && has("haiku"):
 		return Haiku, true
+	case strings.HasPrefix(m, "gemini-") && (has("flash") || has("pro")) && !has("lite") && !has("image"):
+		return Gemini, true
 	}
 	return "", false
 }
@@ -192,7 +198,9 @@ func reviewerMode(f Family) (string, string) {
 	if f == Flash {
 		return "permission_mode", "ask"
 	}
-	if f == Haiku {
+	// Antigravity's default mode asks before edits and commands; its plan
+	// mode only adds an instruction, and its auto mode approves them.
+	if f == Haiku || f == Gemini {
 		return "mode", "default"
 	}
 	return "mode", "read-only"

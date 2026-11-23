@@ -17,8 +17,13 @@ import (
 // hands its place to the next unused fallback while fewer than min reviewers
 // have finished.
 type panel struct {
-	ctx      context.Context
-	root     string
+	ctx  context.Context
+	root string
+	// trees are the captured trees; an isolated reviewer gets a copy of the
+	// checked one.
+	trees reviewTrees
+	// diffSize is the captured diff's length in bytes.
+	diffSize int
 	dir      string
 	timeout  time.Duration
 	commands map[Family][]string
@@ -151,9 +156,12 @@ func (p *panel) attempt(name string, f Family, s *runner, startErr error, note s
 // start launches and prepares an adapter. On a prepare failure it returns
 // the stopped runner, whose result names the reviewer's log.
 func (p *panel) start(name string, f Family) (*runner, error) {
+	if p.adapter(f) == antigravityAdapter && p.diffSize > promptDiffLimit {
+		return nil, errDiffTooLarge
+	}
 	p.startMu.Lock()
 	defer p.startMu.Unlock()
-	return launch(p.ctx, p.root, p.adapter(f), p.commands[f], p.copilot, f, name, p.dir, p.timeout)
+	return launch(p.ctx, p.root, p.trees, p.adapter(f), p.commands[f], p.copilot, f, name, p.dir, p.timeout)
 }
 
 // adapter names the adapter that runs a family in this panel.
@@ -168,7 +176,7 @@ func (p *panel) adapter(f Family) string {
 // timeout would only double the wait, a canceled check wants no more work,
 // and a missing login or exhausted credits fail the same way again.
 func retryable(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errChangeNotExported) {
 		return false
 	}
 	var requestErr *acp.RequestError
@@ -249,6 +257,12 @@ func connectionReply(text string) bool {
 // explainFailure turns a reviewer's final error into one that says what to do.
 func explainFailure(r Reviewer) string {
 	text := failureText(r)
+	if strings.Contains(text, errForbiddenTool.Error()) {
+		return text + ". What it sent that tool may have left this machine, so check the change for text aimed at reviewers before running it again."
+	}
+	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errChangeNotExported.Error()) {
+		return text
+	}
 	if r.FirstError != "" && r.FirstError != text {
 		text += " (retried once; the first attempt failed with: " + r.FirstError + ")"
 	} else if r.FirstError != "" {

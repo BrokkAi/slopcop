@@ -75,7 +75,7 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
 `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -95,6 +95,47 @@ keeps dsh, since Copilot has no DeepSeek model. When no reviewer of its own
 works and Copilot may be signed in, `slopcop init` tries them through Copilot
 and sets the provider itself. See
 [GitHub Copilot CLI](/agents/copilot-cli/#copilot-as-a-reviewer).
+
+### Gemini through Antigravity (opt-in)
+
+The `gemini` family reviews with the newest Gemini Flash or Pro model your
+account offers, at high effort, through Antigravity CLI's ACP server
+(`agy acp`). `slopcop init` never picks it. Install Antigravity CLI, sign in
+with `agy`, then name it yourself:
+
+```bash
+slopcop config set review.reviewers terra,gemini
+```
+
+It is opt-in because Antigravity's web search and subagents run without asking
+the client, so SlopCop cannot refuse them. If a reviewer calls either one, or
+any tool SlopCop does not recognize, SlopCop stops it at once, fails it without
+a retry, and says so. **The call has already started by then, so a repository
+that tricks the reviewer into a web search could get text from the change into
+that query.** Leave `gemini` off for code that must not risk this.
+
+Each Gemini reviewer runs with these limits:
+
+- It gets a temporary copy of the reviewed tree, in a folder below an empty
+  workspace, so Antigravity does not load the repository's hooks, MCP servers,
+  rules or skills. The copy has no `.git` and no symlinks or submodules, and
+  leaves out files over 1 MiB. A tree over 1 GiB fails the reviewer, and so
+  does a change to a file the copy leaves out, because the reviewer could not
+  read the code around it.
+- It uses its own Antigravity config directory, so your personal hooks and MCP
+  servers do not load and reviews stay out of your Antigravity history. Your
+  login still applies. Telemetry is off.
+- It may use only `read_file` inside that workspace. SlopCop refuses every
+  permission request, including commands, edits and reads outside the
+  workspace. A refusal ends Antigravity's turn, so that attempt fails and is
+  retried once.
+- It does not review a change whose diff is over 256 KiB, because it has no git
+  history to read the rest. The reviewer fails instead of approving what it has
+  not seen, so give it a fallback on another provider.
+
+The adapter runs the installed `agy`, not a pinned package; it was checked
+against version 1.5.14. A command override that includes
+`--dangerously-skip-permissions` is rejected.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

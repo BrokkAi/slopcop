@@ -333,12 +333,15 @@ func copilotErrorReply(text string) bool {
 
 // launch starts a family's adapter and prepares its session. On a prepare
 // failure it returns the stopped runner, whose result names the log.
-func launch(ctx context.Context, root, adapter string, argv []string, catalog *copilotCatalog, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+func launch(ctx context.Context, root string, trees reviewTrees, adapter string, argv []string, catalog *copilotCatalog, f Family, name, dir string, timeout time.Duration) (*runner, error) {
 	if adapter == copilotAdapter {
 		if catalog == nil {
 			catalog = newCopilotCatalog(argv)
 		}
 		return startCopilot(ctx, root, catalog, f, name, dir, timeout)
+	}
+	if adapter == antigravityAdapter {
+		return startAntigravity(ctx, root, trees, argv, f, name, dir, timeout)
 	}
 	s, err := startRunner(ctx, root, argv, f, name, dir, timeout)
 	if err != nil {

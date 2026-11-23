@@ -258,7 +258,9 @@ for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
 must finish for a clean review), and `review.provider` (`copilot` runs
 `terra`, `sol` and `haiku` through GitHub Copilot CLI). Adapter command
-overrides are under `review.adapters.<codex|dsh|claude|copilot>.command`.
+overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity>.command`.
+The opt-in `gemini` family is used only when you name it; see
+[Gemini through Antigravity](/reference/configuration/#gemini-through-antigravity-opt-in).
 
 `slopcop override <rv-id> --reason "..."` overrides one local review finding
 that is wrong, by the `rv-` id in `review.findings`, for every later review in

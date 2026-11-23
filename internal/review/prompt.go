@@ -11,6 +11,9 @@ import (
 //go:embed rubric.md
 var rubric string
 
+// promptDiffLimit is the most of the captured diff a prompt carries.
+const promptDiffLimit = 256 * 1024
+
 // shellQuote protects a repository path in the exact diff command sent to agents.
 func shellQuote(path string) string { return "'" + strings.ReplaceAll(path, "'", "'\\''") + "'" }
 
@@ -44,10 +47,9 @@ func reviewPrompt(root string, capture Capture, in intent, history string, diff 
 	}
 	fmt.Fprintf(&b, "%s\n</user_intent>\n", in.Text)
 	fmt.Fprintf(&b, "\nPer-file diffstat (git diff --numstat between the captured trees):\n%s\n", capture.Numstat)
-	const limit = 256 * 1024
-	truncated := len(diff) > limit
+	truncated := len(diff) > promptDiffLimit
 	if truncated {
-		cut := strings.LastIndexByte(diff[:limit], '\n')
+		cut := strings.LastIndexByte(diff[:promptDiffLimit], '\n')
 		if cut < 0 {
 			diff = ""
 		} else {
@@ -64,13 +66,20 @@ func reviewPrompt(root string, capture Capture, in intent, history string, diff 
 		b.WriteString("Diff truncated at 256 KiB. Read the remaining changed files listed\n")
 		b.WriteString("in the numstat with file-reading tools.\n")
 	}
-	fmt.Fprintf(&b, "\nRepository root: %s\nBase tree: %s\nSnapshot tree: %s\n", root, capture.BaseTree, capture.CheckedTree())
+	// A Gemini reviewer sees only an export of the snapshot in its workspace.
+	shownRoot := root
+	if family == Gemini {
+		shownRoot = antigravityRepoDir
+	}
+	fmt.Fprintf(&b, "\nRepository root: %s\nBase tree: %s\nSnapshot tree: %s\n", shownRoot, capture.BaseTree, capture.CheckedTree())
 	if capture.DiffTree != "" {
 		b.WriteString("Large data artifacts were omitted before this review. Review only the changed paths in this captured diff; their omitted contents have not been analyzed.\n")
 	}
 	if family == Terra || family == Sol {
 		fmt.Fprintf(&b, "Run this exact command yourself to inspect the diff:\ngit -C %s diff --no-ext-diff %s %s\n", shellQuote(root), capture.BaseTree, capture.CheckedTree())
 		b.WriteString(sandboxRules)
+	} else if family == Gemini {
+		b.WriteString(antigravityRules)
 	} else {
 		b.WriteString("Read changed files with file-reading tools; do not run commands.\n")
 	}
