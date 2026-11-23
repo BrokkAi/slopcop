@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -22,7 +23,14 @@ const (
 	statusOverLimit   = "over_limit"
 	statusNotAdded    = "not_added"
 	statusUnsupported = "unsupported"
+	// statusUnknown is a workspace whose repositories the service would not
+	// list: it may have the repository.
+	statusUnknown = "unknown"
 )
+
+// elsewhereTimeout bounds the lookups behind status's other workspaces, so
+// an account with many does not hold up the answer.
+const elsewhereTimeout = 15 * time.Second
 
 type statusOptions struct {
 	root      string
@@ -43,6 +51,21 @@ type statusReport struct {
 	// Workspace is another one: whoami answers only that plan.
 	PlanOf     string           `json:"planOf,omitempty"`
 	Repository statusRepository `json:"repository"`
+	// OtherWorkspaces are the account's other workspaces that have the
+	// repository, or may: each can run its pull request checks, whatever
+	// Workspace is.
+	OtherWorkspaces []statusElsewhere `json:"otherWorkspaces,omitempty"`
+}
+
+// statusElsewhere is another workspace of the account and the repository's
+// state there: active, disabled, over_limit, or unknown when the service
+// would not say.
+type statusElsewhere struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Kind  string `json:"kind"`
+	Role  string `json:"role"`
+	State string `json:"state"`
 }
 
 // statusRepository is the checkout's repository, with the workspace's record
@@ -68,6 +91,11 @@ the origin remote names is added to that workspace and active.
 "Chosen by" says why that workspace: --workspace, then $SLOPCOP_WORKSPACE,
 then the workspace this machine maps the checkout to ('slopcop workspace
 map'), then the one the login is bound to.
+
+"Also in" names the account's other workspaces that have the repository.
+Pull request checks do not follow the workspace above: each workspace turns
+them on for a repository in the web app, so one of those may be the one that
+runs them. A pull request's SlopCop check names the workspace that ran it.
 
 A repository that is not added is added by its first check. A disabled one is not checked; the workspace's owner
 enables it with 'slopcop repo enable'. SlopCop checks repositories on
@@ -132,11 +160,38 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 	if !strings.EqualFold(workspace.ID, whoami.Workspace.ID) {
 		answer.PlanOf = whoami.Workspace.Name
 	}
+	if repository.State != statusUnsupported && len(whoami.Workspaces) > 1 {
+		answer.OtherWorkspaces = otherWorkspaces(cmd.Context(), client, whoami.Workspaces, repoURL, workspace.ID)
+	}
 	if opts.format == "json" {
 		return writeJSON(cmd.OutOrStdout(), answer)
 	}
 	writeStatus(cmd.OutOrStdout(), answer)
 	return nil
+}
+
+// otherWorkspaces are the account's workspaces, other than the one with id
+// except, that have repoURL, and those the service would not answer for.
+// Pull request checks are turned on per workspace and do not follow the
+// workspace a checkout checks in, so these are where they may run instead.
+func otherWorkspaces(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) []statusElsewhere {
+	ctx, cancel := context.WithTimeout(ctx, elsewhereTimeout)
+	defer cancel()
+	var others []statusElsewhere
+	for _, asked := range repositoryElsewhere(ctx, client, workspaces, repoURL, except) {
+		state := asked.State
+		switch {
+		case asked.Err != nil:
+			state = statusUnknown
+		case !asked.held():
+			continue
+		}
+		others = append(others, statusElsewhere{
+			ID: asked.Workspace.ID, Name: asked.Workspace.Name,
+			Kind: asked.Workspace.Kind, Role: asked.Workspace.Role, State: state,
+		})
+	}
+	return others
 }
 
 // lookupRepositoryStatus describes the repository the checkout's origin remote
@@ -225,12 +280,40 @@ func writeStatus(out io.Writer, answer statusReport) {
 	fmt.Fprintf(out, "Account:    %s\n", account)
 	fmt.Fprintf(out, "Workspace:  %s (%s, %s)\n", answer.Workspace.Name, answer.Workspace.Kind, answer.Workspace.Role)
 	fmt.Fprintf(out, "Chosen by:  %s\n", sourceText(answer.Source))
+	if len(answer.OtherWorkspaces) > 0 {
+		others := make([]string, len(answer.OtherWorkspaces))
+		for index, other := range answer.OtherWorkspaces {
+			others[index] = fmt.Sprintf("%q (%s)", other.Name, elsewhereText(other.State))
+		}
+		fmt.Fprintf(out, "Also in:    %s\n", strings.Join(others, ", "))
+		if answer.Repository.Provider == "github" {
+			fmt.Fprintf(out, "PR checks:  %s\n", pullRequestChecksText)
+		}
+	}
 	plan := planName(answer.Plan)
 	if answer.PlanOf != "" {
 		plan += fmt.Sprintf(" (the plan of %q, this login's workspace)", answer.PlanOf)
 	}
 	fmt.Fprintf(out, "Plan:       %s\n", plan)
 	fmt.Fprintf(out, "Service:    %s\n", answer.Service)
+}
+
+// pullRequestChecksText is what status says of pull request checks when
+// more than one workspace has the repository. The service tells a login
+// nothing about them, so it says where to look.
+const pullRequestChecksText = "turned on per workspace in the web app, not by the workspace above; a pull request's SlopCop check names the workspace that ran it"
+
+// elsewhereText is a repository's state in another workspace as a person
+// reads it.
+func elsewhereText(state string) string {
+	switch state {
+	case statusOverLimit:
+		return "enabled, over the limit"
+	case statusUnknown:
+		return "could not be asked"
+	default:
+		return state
+	}
 }
 
 // statusText is the state as a person reads it, with the next step where

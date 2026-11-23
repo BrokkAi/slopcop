@@ -109,6 +109,11 @@ origin URL, for the service the command talks to. --workspace and
 $SLOPCOP_WORKSPACE still win for one command. 'slopcop enable' maps the
 checkout to the workspace it adds the repository to.
 
+Pull request checks are unaffected. Each workspace turns them on for a
+repository in the web app, and they keep running in the workspace that has
+them on whatever this machine maps. 'slopcop status' names the account's other
+workspaces that have the repository.
+
 It decides which workspace pays, so it asks whoever runs it to confirm, and
 refuses when stdin is not a terminal.`,
 		Args: cobra.ExactArgs(1),
@@ -155,6 +160,9 @@ refuses when stdin is not a terminal.`,
 			client.Workspace = workspace.ID
 			if repository, err := repositoryStatus(cmd.Context(), client, repoURL); err == nil && repository.State == statusNotAdded {
 				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %s is not added to %q yet; run `slopcop enable` to add it\n", name, workspace.Name)
+			}
+			if localRepository(repoURL).Provider == "github" {
+				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: pull request checks are unaffected: they run in whichever workspace has Check pull requests on for %s in the web app; `slopcop status` names the workspaces that have it\n", name)
 			}
 			return nil
 		},

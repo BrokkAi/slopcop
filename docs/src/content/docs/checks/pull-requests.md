@@ -49,6 +49,20 @@ the summary and never fail the check.
 **Re-run** on the check checks the head again, for example after a top-up or
 once a manager has turned the setting back on.
 
+## More than one workspace
+
+Each workspace has its own **Check pull requests** setting for a repository.
+When more than one workspace turns it on for the same repository, the first
+to have turned it on checks its pull requests and pays for those checks; the
+others do not post a second check. Every check's summary ends by naming the
+workspace that ran it.
+
+The workspace a checkout checks in locally (`slopcop workspace map`,
+`--workspace`, or the login's) has no say in this. To move a repository's pull
+request checks, turn the setting off in the workspace that runs them and on in
+the one that should; see
+[Pull request checks have their own workspace](/account/workspaces/#pull-request-checks-have-their-own-workspace).
+
 ## Block a merge on it
 
 SlopCop never changes branch protection. To keep a pull request with new
