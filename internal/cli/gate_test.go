@@ -222,6 +222,13 @@ func TestAdvisoryFindingsAreWhatOnlyThePullRequestCheckFailsOn(t *testing.T) {
 			t.Errorf("advisoryFindings at %s = %d, want %d", level, got, want)
 		}
 	}
+	// Findings the service left out of the list block no push and still fail
+	// the pull request check, even when nothing listed is advisory.
+	response = service.Response{Findings: []service.Finding{{New: true, Severity: "warning", Certainty: "possible"}}}
+	response.Summary.OmittedFindings = 4
+	if got := advisoryFindings(response, "error"); got != 4 {
+		t.Errorf("advisoryFindings with 4 omitted = %d, want 4", got)
+	}
 	if pullRequestFailOn != "finding" {
 		t.Fatalf("pullRequestFailOn = %q: the docs (checks/exit-codes.md, checks/pull-requests.md) and the skill say finding; change them together", pullRequestFailOn)
 	}

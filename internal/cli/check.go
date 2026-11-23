@@ -1465,9 +1465,13 @@ const pullRequestFailOn = failOnFinding
 // advisoryFindings counts the new findings that do not block the push at
 // level but fail a check under pullRequestFailOn: the definite ones below the
 // push level. A service from before certainty omits it, and listed only
-// definite findings. An info finding fails neither.
+// definite findings. An info finding fails neither. The new findings the
+// service left out of the list (summary.omittedFindings) count too: the push
+// gate does not see them, so none blocks, and the pull request check fails
+// on them. Under --certainty all some of those may be less certain, so the
+// count can then run high, never low.
 func advisoryFindings(response service.Response, level string) int {
-	count := 0
+	count := int(response.Summary.OmittedFindings)
 	for _, finding := range response.Findings {
 		definite := finding.Certainty == "" || finding.Certainty == certaintyDefinite
 		if finding.New && definite && finding.Severity != "info" && !blocksPush(finding, level) {
