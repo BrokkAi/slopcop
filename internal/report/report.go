@@ -68,6 +68,9 @@ type Options struct {
 	Approved bool
 	// Review is the local reviewers' verdict, when one ran.
 	Review *review.Verdict
+	// ReviewOverride is what became of the override of that review, for
+	// `slopcop review show`. It never implies Approved.
+	ReviewOverride *review.OverrideState
 	// ReviewSkipped is why the local review did not run, one of the
 	// ReviewSkipped constants, or "" when it ran. A static-only report must
 	// not read like a clean review.
@@ -326,7 +329,7 @@ func writeHumanOmittedAndReview(w io.Writer, options Options) error {
 	if _, err := io.WriteString(w, omittedFilesHuman(options)); err != nil {
 		return err
 	}
-	return writeReview(w, options.Review)
+	return writeReview(w, options)
 }
 
 // onlyExcluded says .slopcop/config.toml [check] left the change nothing to
@@ -1356,6 +1359,9 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 // runProperties adds what the options mark to a SARIF run's properties.
 func runProperties(properties map[string]any, options Options) map[string]any {
 	properties["slopcop.approved"] = options.Approved
+	if options.ReviewOverride != nil {
+		properties["slopcop.reviewOverride"] = options.ReviewOverride
+	}
 	if options.ExitReason != "" {
 		properties["slopcop.exitReason"] = options.ExitReason
 	}
@@ -1881,7 +1887,7 @@ func Write(w io.Writer, response service.Response, format string, options Option
 			_, err := io.WriteString(w, "\nReview: skipped (no reviewers are configured; run `slopcop init` to add them)\n")
 			return err
 		}
-		return writeReview(w, options.Review)
+		return writeReview(w, options)
 	}
 	return writeBase(w, response, format, options)
 }
@@ -1916,7 +1922,7 @@ func WriteAI(w io.Writer, format string, options Options) error {
 	case "", FormatHuman:
 		return writeHumanOmittedAndReview(w, options)
 	case FormatJSON:
-		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, Status: status("clean", options), Approved: options.Approved, ExitReason: options.ExitReason, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
+		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, Status: status("clean", options), Approved: options.Approved, ReviewOverride: options.ReviewOverride, ExitReason: options.ExitReason, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "SlopCop", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: true}}, Properties: runProperties(map[string]any{"slopcop.status": status("clean", options)}, options)}), "sarif report")
 	default:
@@ -1930,6 +1936,9 @@ type aiReport struct {
 	// Status is the AI-only report's Status field.
 	Status   string `json:"status"`
 	Approved bool   `json:"approved"`
+	// ReviewOverride is what became of the review's override, in `slopcop
+	// review show`.
+	ReviewOverride *review.OverrideState `json:"reviewOverride,omitempty"`
 	// ExitReason says which findings made the check exit 1. It is set only
 	// when the check exited 1.
 	ExitReason string `json:"exitReason,omitempty"`
@@ -2093,12 +2102,30 @@ func reviewSARIFLevel(priority string) string {
 }
 
 // writeReview renders the review section when a verdict exists.
-func writeReview(w io.Writer, v *review.Verdict) error {
-	if v == nil {
+func writeReview(w io.Writer, options Options) error {
+	if options.Review == nil {
 		return nil
 	}
-	writeReviewHuman(w, *v)
+	writeReviewWithOverride(w, *options.Review, options.ReviewOverride)
 	return nil
+}
+
+// writeReviewOverride says what became of the override of the shown review.
+func writeReviewOverride(w io.Writer, o *review.OverrideState) {
+	if o == nil {
+		return
+	}
+	switch o.Status {
+	case review.OverrideAccepted:
+		fmt.Fprintf(w, "  Accepted by `slopcop override` for this working tree (%s). The findings stay listed, and a push of exactly this tree is allowed\n", printable(o.Tree))
+	case review.OverrideTreeChanged:
+		fmt.Fprintf(w, "  Override not in effect: it accepted tree %s and the working tree is now %s. Run `slopcop check`\n", printable(o.Tree), printable(o.CurrentTree))
+	case review.OverrideWithdrawn:
+		fmt.Fprintf(w, "  Override not in effect: the approval of tree %s was withdrawn. Run `slopcop check`\n", printable(o.Tree))
+	default:
+		fmt.Fprintf(w, "  Override not confirmed: it could not be compared with the working tree (it accepted tree %s)\n", printable(o.Tree))
+	}
+	fmt.Fprintf(w, "  Override reason: %s\n", printable(o.Reason))
 }
 
 // ReviewFindingLine is one review finding on a line for a person: its id,
@@ -2135,7 +2162,15 @@ func failedReviewers(v review.Verdict) int {
 
 // writeReviewHuman renders one review verdict for a person.
 func writeReviewHuman(w io.Writer, v review.Verdict) {
+	writeReviewWithOverride(w, v, nil)
+}
+
+// writeReviewWithOverride is writeReviewHuman with what became of the review's
+// override, right under its status, so the status does not read as a failed
+// override.
+func writeReviewWithOverride(w io.Writer, v review.Verdict, override *review.OverrideState) {
 	fmt.Fprintf(w, "\nReview: %s\n", v.Status)
+	writeReviewOverride(w, override)
 	findings := v.Findings()
 	malformed := map[string]bool{}
 	for _, f := range findings {
@@ -2167,7 +2202,7 @@ func writeReviewHuman(w io.Writer, v review.Verdict) {
 		}
 		fmt.Fprintf(w, "    %s (matches overridden %s%s)\n", ReviewFindingLine(f.Finding), printable(f.OverrideID), how)
 	}
-	if len(findings) > 0 {
+	if len(findings) > 0 && (override == nil || override.Status != review.OverrideAccepted) {
 		fmt.Fprintln(w, "  Fix the real findings. For one that is wrong, run `slopcop override <id> --reason \"why it does not hold\"`, then check again")
 	}
 	for _, r := range v.Reviewers {

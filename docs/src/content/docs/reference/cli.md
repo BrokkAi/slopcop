@@ -301,6 +301,24 @@ findings are parsed again, so the reply is shown in full even when the
 report the check printed was not. It only shows the review: it approves
 nothing and changes no state.
 
+When `slopcop override` accepted the whole review, the output says so with the
+recorded reason, and whether the override still applies to the working tree as
+it is now. The findings stay listed and `status` stays `findings`. In JSON,
+`approved` stays `false`, because it says whether this run recorded push
+approval, and `reviewOverride` carries the override:
+
+| `reviewOverride.status` | Meaning |
+| --- | --- |
+| `accepted` | The override applies to the working tree as it is now, and the tree has its push approval. |
+| `tree_changed` | The working tree is no longer the accepted `tree`; `currentTree` names it. Run `slopcop check`. |
+| `withdrawn` | The tree's push approval is gone, or a finding override the review relied on was undone. Run `slopcop check`. |
+| `unverified` | The override could not be compared with the repository, so it is not claimed to apply. |
+
+`reviewOverride` also has `reason`, `tree` and `time`, and is absent when the
+review has no override. SARIF carries it as the `slopcop.reviewOverride` run
+property. A later check of the tree records a new decision, so its review
+starts with no override.
+
 ## `slopcop update`
 
 Update slopcop to the latest release. A slopcop installed by the install script

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -35,6 +36,43 @@ type Snapshot struct {
 // tree. PatchTree adds the selected policy files even when ignored, since the
 // service must receive them; it equals Tree when none is ignored.
 func CaptureWorkingTree(root string, policyFiles []string) (Snapshot, error) {
+	return captureWorkingTree(root, policyFiles, os.Environ())
+}
+
+// WorkingTreeID is the Tree CaptureWorkingTree would capture, for a command
+// that must change nothing: new objects go to a temporary directory that is
+// removed afterwards, with the repository's own objects readable through it.
+func WorkingTreeID(root string) (string, error) {
+	objects, err := Run(root, "rev-parse", "--git-path", "objects")
+	if err != nil {
+		return "", err
+	}
+	if !filepath.IsAbs(objects) {
+		objects = filepath.Join(root, objects)
+	}
+	scratch, err := os.MkdirTemp("", "slopcop-objects-")
+	if err != nil {
+		return "", fmt.Errorf("create temporary object directory: %w", err)
+	}
+	defer os.RemoveAll(scratch)
+	// Git reads a quoted entry whole, so a separator in the path cannot split it.
+	alternates := objects
+	if strings.ContainsRune(objects, os.PathListSeparator) || strings.HasPrefix(objects, `"`) {
+		alternates = strconv.Quote(objects)
+	}
+	if existing := os.Getenv("GIT_ALTERNATE_OBJECT_DIRECTORIES"); existing != "" {
+		alternates += string(os.PathListSeparator) + existing
+	}
+	env := withEnv(withEnv(os.Environ(), "GIT_OBJECT_DIRECTORY", scratch), "GIT_ALTERNATE_OBJECT_DIRECTORIES", alternates)
+	snapshot, err := captureWorkingTree(root, nil, env)
+	if err != nil {
+		return "", err
+	}
+	return snapshot.Tree, nil
+}
+
+// captureWorkingTree is CaptureWorkingTree with git run in baseEnv.
+func captureWorkingTree(root string, policyFiles, baseEnv []string) (Snapshot, error) {
 	snapshot := Snapshot{Branch: CurrentBranch(root)}
 	dir, err := os.MkdirTemp("", "slopcop-index-")
 	if err != nil {
@@ -42,7 +80,7 @@ func CaptureWorkingTree(root string, policyFiles []string) (Snapshot, error) {
 	}
 	defer os.RemoveAll(dir)
 
-	env := withEnv(os.Environ(), "GIT_INDEX_FILE", filepath.Join(dir, "index"))
+	env := withEnv(baseEnv, "GIT_INDEX_FILE", filepath.Join(dir, "index"))
 	// Seed the index from HEAD so git can keep the committed mode where the
 	// filesystem cannot express it: with core.filemode=false or
 	// core.symlinks=false (Git for Windows' defaults), a path with no index

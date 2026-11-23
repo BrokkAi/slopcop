@@ -191,6 +191,17 @@ func (s *Store) SetStatic(code int, status string, blocks bool) error {
 	return s.write("last.json", *r)
 }
 
+// overrideLog is the append-only log of whole-review overrides.
+const overrideLog = "overrides.jsonl"
+
+// overrideLogEntry is one line of overrideLog. Record has Accepted set, except
+// in an entry from a release that did not record it.
+type overrideLogEntry struct {
+	Time   time.Time `json:"time"`
+	Reason string    `json:"reason"`
+	Record *Record   `json:"record"`
+}
+
 // Override logs a justified acceptance, keeps the reason for later rounds,
 // and marks only the reviewed tree approved.
 func (s *Store) Override(reason, currentTree string) error {
@@ -220,15 +231,13 @@ func (s *Store) Override(reason, currentTree string) error {
 	} else if !hold {
 		return errors.New("a finding override this review relied on was undone since; run slopcop check again before overriding")
 	}
-	f, err := os.OpenFile(filepath.Join(s.dir, "overrides.jsonl"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+	accepted := *r
+	accepted.Accepted = &AcceptedOverride{Reason: strings.TrimSpace(reason), Time: time.Now().UTC()}
+	f, err := os.OpenFile(filepath.Join(s.dir, overrideLog), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err
 	}
-	err = json.NewEncoder(f).Encode(struct {
-		Time   time.Time `json:"time"`
-		Reason string    `json:"reason"`
-		Record *Record   `json:"record"`
-	}{time.Now().UTC(), reason, r})
+	err = json.NewEncoder(f).Encode(overrideLogEntry{accepted.Accepted.Time, reason, &accepted})
 	if err == nil {
 		err = f.Sync()
 	}
@@ -241,6 +250,11 @@ func (s *Store) Override(reason, currentTree string) error {
 	}
 	// Later rounds show reviewers the reason beside the findings it answers.
 	if err = s.overrideRound(*r, reason); err != nil {
+		return err
+	}
+	// Recorded before the approval: if the approval then fails, the record
+	// names an override that OverrideState reports as not in effect.
+	if err = s.write("last.json", accepted); err != nil {
 		return err
 	}
 	if err = MarkReviewed(s.root, currentTree); err != nil {

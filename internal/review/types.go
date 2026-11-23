@@ -232,5 +232,16 @@ type Record struct {
 	StaticBlocksPush bool `json:"staticBlocksPush,omitempty"`
 	// StaticStatus is the hosted half's own status; empty in AI mode.
 	StaticStatus string `json:"staticStatus,omitempty"`
+	// Accepted is the `slopcop override` that accepted this review's findings.
+	// It is on the record rather than the verdict so that a later check, which
+	// saves a new record even when it reuses the verdict, does not inherit it.
+	Accepted *AcceptedOverride `json:"acceptedOverride,omitempty"`
 	Verdict
+}
+
+// AcceptedOverride is an override of a whole review, as it was made. Whether
+// it still applies is OverrideState's to say.
+type AcceptedOverride struct {
+	Reason string    `json:"reason"`
+	Time   time.Time `json:"time"`
 }

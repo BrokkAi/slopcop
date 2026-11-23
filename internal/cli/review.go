@@ -32,6 +32,10 @@ reviewer or spending a check. Each reviewer's reply is rebuilt from its log,
 so it is shown in full even when the report that check printed was not, and
 its findings are parsed again.
 
+When 'slopcop override' accepted the review, this says so with its reason, and
+whether it still applies to the working tree as it is now. The findings stay
+listed, and JSON "approved" stays false; read "reviewOverride".
+
 The review is only shown: it approves nothing and changes no state. Run
 'slopcop check' to review the working tree as it is now.`,
 		Args: cobra.NoArgs,
@@ -73,5 +77,13 @@ func runReviewShow(cmd *cobra.Command, root, format string) error {
 	if verdict.Status == review.StatusEmpty {
 		status = string(review.StatusClean)
 	}
-	return report.WriteAI(cmd.OutOrStdout(), format, report.Options{Review: &verdict, Status: status})
+	// A failure to confirm the override must not hide the review: the state
+	// then says it is unverified.
+	override, err := record.OverrideState(repo)
+	if err != nil {
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: could not confirm this review's override: %v\n", err)
+	}
+	// Approved stays false: it says this run recorded push approval, and
+	// showing a review never does. ReviewOverride carries the override.
+	return report.WriteAI(cmd.OutOrStdout(), format, report.Options{Review: &verdict, Status: status, ReviewOverride: override})
 }
