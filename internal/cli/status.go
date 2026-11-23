@@ -38,23 +38,33 @@ type statusOptions struct {
 	workspace string
 }
 
-// statusReport is the human and json answer. Account, Workspace and Plan come
-// from whoami; Repository describes the checkout the origin remote names.
+// statusReport is the human and json answer. Account, Workspace, Plan and
+// Login come from whoami; Repository describes the checkout the origin remote
+// names.
 type statusReport struct {
 	Service   string            `json:"service"`
 	Account   service.Account   `json:"account"`
 	Workspace service.Workspace `json:"workspace"`
 	// Source says how Workspace was chosen: flag, env, mapping or login.
 	Source string `json:"workspaceSource"`
-	Plan   string `json:"plan"`
-	// PlanOf is the login's own workspace, which Plan describes, when
-	// Workspace is another one: whoami answers only that plan.
-	PlanOf     string           `json:"planOf,omitempty"`
+	// Plan is Workspace's plan. It is empty when Workspace is not the
+	// login's own: whoami answers only that one's plan.
+	Plan string `json:"plan,omitempty"`
+	// Login is the login's own workspace and its plan, when Workspace is
+	// another one.
+	Login      *statusLogin     `json:"login,omitempty"`
 	Repository statusRepository `json:"repository"`
 	// OtherWorkspaces are the account's other workspaces that have the
 	// repository, or may: each can run its pull request checks, whatever
 	// Workspace is.
 	OtherWorkspaces []statusElsewhere `json:"otherWorkspaces,omitempty"`
+}
+
+// statusLogin is the workspace the login is bound to, and that workspace's
+// plan.
+type statusLogin struct {
+	Workspace service.Workspace `json:"workspace"`
+	Plan      string            `json:"plan"`
 }
 
 // statusElsewhere is another workspace of the account and the repository's
@@ -91,6 +101,11 @@ the origin remote names is added to that workspace and active.
 "Chosen by" says why that workspace: --workspace, then $SLOPCOP_WORKSPACE,
 then the workspace this machine maps the checkout to ('slopcop workspace
 map'), then the one the login is bound to.
+
+"Plan" is that workspace's plan. The service tells a login the plan of the
+workspace it is bound to and no other, so when the workspace above is another
+one there is no "Plan" line: a "Login" line names the login's own workspace
+and its plan instead.
 
 "Also in" names the account's other workspaces that have the repository.
 Pull request checks do not follow the workspace above: each workspace turns
@@ -154,11 +169,13 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 		Account:    whoami.Account,
 		Workspace:  workspace,
 		Source:     choice.Source,
-		Plan:       whoami.Plan,
 		Repository: repository,
 	}
-	if !strings.EqualFold(workspace.ID, whoami.Workspace.ID) {
-		answer.PlanOf = whoami.Workspace.Name
+	// whoami's plan is the plan of the login's workspace, and of no other.
+	if strings.EqualFold(workspace.ID, whoami.Workspace.ID) {
+		answer.Plan = whoami.Plan
+	} else {
+		answer.Login = &statusLogin{Workspace: whoami.Workspace, Plan: whoami.Plan}
 	}
 	if repository.State != statusUnsupported && len(whoami.Workspaces) > 1 {
 		answer.OtherWorkspaces = otherWorkspaces(cmd.Context(), client, whoami.Workspaces, repoURL, workspace.ID)
@@ -290,11 +307,12 @@ func writeStatus(out io.Writer, answer statusReport) {
 			fmt.Fprintf(out, "PR checks:  %s\n", pullRequestChecksText)
 		}
 	}
-	plan := planName(answer.Plan)
-	if answer.PlanOf != "" {
-		plan += fmt.Sprintf(" (the plan of %q, this login's workspace)", answer.PlanOf)
+	if login := answer.Login; login != nil {
+		fmt.Fprintf(out, "Login:      %s (%s, %s), %s plan\n",
+			login.Workspace.Name, login.Workspace.Kind, login.Workspace.Role, planName(login.Plan))
+	} else {
+		fmt.Fprintf(out, "Plan:       %s\n", planName(answer.Plan))
 	}
-	fmt.Fprintf(out, "Plan:       %s\n", plan)
 	fmt.Fprintf(out, "Service:    %s\n", answer.Service)
 }
 
