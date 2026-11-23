@@ -604,7 +604,9 @@ reused when nothing relevant changed. A nonempty check with a clean review
 and a completed static result with no new findings at or above
 `gate.blockOn` (default `error`) records `refs/slopcop/reviewed/<tree>`.
 Warnings and notes are advisory for push approval, though they still exit `1`
-by default. The Claude Code gate checks HEAD's tree, so
+by default, and a pull request check fails on them: JSON `advisoryFindings`
+counts them, and stderr says so where the push gate is installed. Set
+`gate.blockOn` to `finding` to block what a pull request check fails on. The Claude Code gate checks HEAD's tree, so
 after checking a dirty tree, commit exactly that state. For demonstrably wrong
 complete review findings, `slopcop override <rv-id> --reason "..."` overrides
 one finding, by the `rv-` id in `review.findings`, for every later review in the

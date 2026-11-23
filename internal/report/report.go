@@ -82,6 +82,10 @@ type Options struct {
 	// ExitReason is what made the check exit 1, one of the ExitReason
 	// constants, or "" when it did not exit 1.
 	ExitReason string
+	// AdvisoryFindings counts the new static findings below the push level.
+	// They do not block push approval, but a pull request check fails on
+	// them.
+	AdvisoryFindings int
 	// ShowExisting lists the findings that were already in the code, after
 	// the new ones. They are counted either way.
 	ShowExisting bool
@@ -1039,6 +1043,10 @@ type jsonReport struct {
 	// ExitReason says which findings made the check exit 1. It is set only
 	// when the check exited 1.
 	ExitReason string `json:"exitReason,omitempty"`
+	// AdvisoryFindings counts the new static findings below the push level:
+	// they did not keep Approved from being true, but a pull request check
+	// fails on them. It is omitted when there are none.
+	AdvisoryFindings int `json:"advisoryFindings,omitempty"`
 	// Review is the local verdict, when one ran.
 	Review *reviewJSON `json:"review,omitempty"`
 	// ReviewSkipped is why the local review did not run. It is set only
@@ -1127,6 +1135,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Approved:             options.Approved,
 		StaticStatus:         options.StaticStatus,
 		ExitReason:           options.ExitReason,
+		AdvisoryFindings:     options.AdvisoryFindings,
 		Review:               reviewValue(options.Review),
 		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
@@ -1364,6 +1373,9 @@ func runProperties(properties map[string]any, options Options) map[string]any {
 	}
 	if options.ExitReason != "" {
 		properties["slopcop.exitReason"] = options.ExitReason
+	}
+	if options.AdvisoryFindings > 0 {
+		properties["slopcop.advisoryFindings"] = options.AdvisoryFindings
 	}
 	if options.ReviewSkipped != "" {
 		properties["slopcop.reviewSkipped"] = options.ReviewSkipped

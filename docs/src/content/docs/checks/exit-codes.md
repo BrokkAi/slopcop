@@ -89,6 +89,37 @@ approves it. A later check that does not approve the same nonempty tree removes
 its approval ref, including an override. Rerun `slopcop override` if the review
 findings are unchanged. JSON `approved` reports the decision directly.
 
+## The push gate and pull request checks
+
+Three thresholds judge the same new static findings, and their defaults
+differ:
+
+| Gate | Fails on | Set with |
+| --- | --- | --- |
+| The exit code of `slopcop check` | new findings at or above `--fail-on`; default `finding`, any new finding | the flag |
+| Push approval: `approved`, and the push gate | new findings at or above `gate.blockOn`; default `error` | the [user config file](/reference/configuration/#push-approval-level) |
+| A [pull request check](/checks/pull-requests/) | any new finding, as `--fail-on finding` | nothing: it has no setting |
+
+So by default a new `note` or `warning` exits `1`, is approved for push, and
+fails the pull request check. The exit code and the pull request check agree;
+push approval is the looser one. An `info` finding fails none of the three.
+
+A check that approves a tree with findings a pull request check fails on says
+so. `advisoryFindings` in `json` (`slopcop.advisoryFindings` in `sarif`)
+counts them, and where the push gate is installed stderr says, in every
+format, that a pull request check fails on them. Before you open the pull
+request, fix them or [ignore the false positives](/checks/false-positives/).
+To have the push gate block what the pull request check fails on, set
+`gate.blockOn` to `finding`; `advisoryFindings` is then never present.
+
+None of the three treats a test or fixture path differently from any other
+path. What a check leaves out is decided by
+[`[check]` in `.slopcop/config.toml`](/checks/false-positives/#exclude-paths-from-checks),
+which the service reads from the checked code, so a path excluded there is
+excluded from all three alike. For test inputs that are small or wrong on
+purpose, name the style rules in an `exclude_rules` entry for their paths:
+every other rule, the security rules among them, keeps checking those files.
+
 ## Exit 2: incomplete, or an error
 
 Two different things exit `2`:

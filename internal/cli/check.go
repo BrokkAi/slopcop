@@ -417,6 +417,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			return err
 		}
 	}
+	advisory := 0
+	if mode != modeAI && static.response != nil && static.response.KnownStatus() {
+		advisory = advisoryFindings(*static.response, blockLevel)
+	}
+	reportOptions.AdvisoryFindings = advisory
 	var writeErr error
 	switch {
 	case mode == modeAI:
@@ -456,6 +461,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			reason := approvalReason(prepared.bytes == 0 && !excludedOnly, reviewPassed, verdict, static, mode, blockLevel)
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may not be pushed yet: %s.\n", tree, reason)
 		}
+	}
+	// In every format, since an agent reads json and pushes on approved.
+	if reportOptions.Approved && advisory > 0 && agenthooks.GateInstalled(prepared.repoRoot) {
+		fmt.Fprintln(cmd.ErrOrStderr(), advisoryNotice(advisory, blockLevel))
 	}
 	return silentExit{exit}
 }
@@ -1421,25 +1430,69 @@ func shortSHA(value string) string {
 // staticBlockingCount uses the service's new findings. The service lists the
 // most severe findings first, so omitted findings cannot hide a higher rank.
 func staticBlockingCount(response service.Response, level string) int {
-	if level == "never" {
-		return 0
-	}
-	rank := map[string]int{"note": 1, "warning": 2, "error": 3}
-	threshold := rank[level]
 	count := 0
 	for _, finding := range response.Findings {
-		if !finding.New || finding.Severity == "info" {
-			continue
-		}
-		severity := rank[finding.Severity]
-		if severity == 0 {
-			severity = 3
-		}
-		if level == "finding" || severity >= threshold {
+		if blocksPush(finding, level) {
 			count++
 		}
 	}
 	return count
+}
+
+// blocksPush says whether a finding is new and at or above the push level.
+// A severity the CLI does not know counts as an error; info never blocks.
+func blocksPush(finding service.Finding, level string) bool {
+	if level == "never" || !finding.New || finding.Severity == "info" {
+		return false
+	}
+	rank := map[string]int{"note": 1, "warning": 2, "error": 3}
+	severity := rank[finding.Severity]
+	if severity == 0 {
+		severity = 3
+	}
+	return level == "finding" || severity >= rank[level]
+}
+
+// pullRequestFailOn is the threshold a SlopCop pull request check applies. It
+// is the service's, fixed, and has no setting: any new definite finding fails
+// the pull request, whatever its severity. The push level (gate.blockOn) is
+// the CLI's and defaults to error, so the two disagree about every finding in
+// between. advisoryFindings counts those, and the docs' exit-codes page states
+// both rules side by side; change it with this constant if the service's
+// rule changes.
+const pullRequestFailOn = failOnFinding
+
+// advisoryFindings counts the new findings that do not block the push at
+// level but fail a check under pullRequestFailOn: the definite ones below the
+// push level. A service from before certainty omits it, and listed only
+// definite findings. An info finding fails neither. The new findings the
+// service left out of the list (summary.omittedFindings) count too: the push
+// gate does not see them, so none blocks, and the pull request check fails
+// on them. Under --certainty all some of those may be less certain, so the
+// count can then run high, never low.
+func advisoryFindings(response service.Response, level string) int {
+	count := int(response.Summary.OmittedFindings)
+	for _, finding := range response.Findings {
+		definite := finding.Certainty == "" || finding.Certainty == certaintyDefinite
+		if finding.New && definite && finding.Severity != "info" && !blocksPush(finding, level) {
+			count++
+		}
+	}
+	return count
+}
+
+// advisoryNotice is the stderr line for a tree that was approved for push
+// with findings a pull request check fails on. Without it a change that is
+// green at the push gate goes red on the pull request with no warning.
+func advisoryNotice(count int, level string) string {
+	noun, verb := "findings", "do"
+	if count == 1 {
+		noun, verb = "finding", "does"
+	}
+	return fmt.Sprintf("slopcop: %d new static %s below the push level (%s) %s not block the push, but a SlopCop pull request check fails on any new %s. "+
+		"Before you open a pull request, fix them, run `slopcop ignore <id>` for a false positive, "+
+		"or keep deliberate test inputs out of the rule with [check] in .slopcop/config.toml.",
+		count, noun, level, verb, pullRequestFailOn)
 }
 
 // staticPasses says whether the static half allows the tree to be approved

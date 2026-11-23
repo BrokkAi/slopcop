@@ -262,6 +262,11 @@ at or above that level block push approval. Unknown severities count as
 errors. This setting has no check flag and cannot be changed through
 `slopcop config`.
 
+A [pull request check](/checks/pull-requests/) does not read this setting: it
+fails on any new finding. Under the default, a new note or warning is approved
+for push here and fails there; set `finding` to block the same findings. See
+[The push gate and pull request checks](/checks/exit-codes/#the-push-gate-and-pull-request-checks).
+
 ## Another deployment
 
 ```console
