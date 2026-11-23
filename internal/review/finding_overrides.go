@@ -370,7 +370,21 @@ func (v *Verdict) applyOverrides(overrides []FindingOverride) {
 		if v.Incomplete {
 			v.Status = StatusFailed
 		}
+		if unread := v.unreadChange(); unread != "" {
+			v.Status = StatusFailed
+			v.Error = unread + "; run the check again"
+		}
 	}
+}
+
+// unreadChange is what a reviewer with findings could not read, or "".
+func (v Verdict) unreadChange() string {
+	for _, r := range v.Reviewers {
+		if r.UnreadChange != "" {
+			return r.UnreadChange
+		}
+	}
+	return ""
 }
 
 // matchOverride returns the id of the finding override f repeats and how

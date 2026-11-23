@@ -62,12 +62,12 @@ var errForbiddenTool = errors.New("the reviewer called a tool SlopCop cannot res
 // reviewers read the rest of a truncated diff with git; this one has no git
 // history and no way to see deletions or files left out of its export, so it
 // could only approve a change it had not seen.
-var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB a Gemini reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
+var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB a Gemini or Kimi reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
 
 // errChangeNotExported marks a change to a file the reviewer's workspace does
 // not hold: one over the size limit, or one whose path cannot be written
 // safely. The reviewer could not read the code around that change.
-var errChangeNotExported = errors.New("a changed file is over 1 MiB or has a path a Gemini reviewer cannot read, so it did not review the change; configure a fallback on another provider")
+var errChangeNotExported = errors.New("a changed file is over 1 MiB or has a path a Gemini or Kimi reviewer cannot read, so it did not review the change; configure a fallback on another provider")
 
 // reviewTrees names the trees of a review. A probe, which reads nothing, has
 // neither.
@@ -88,6 +88,9 @@ type toolGuard struct {
 	asking  map[string]bool
 	trip    func(error)
 	tripped bool
+	// check, when set, replaces the Antigravity rules: it returns what the
+	// reviewer must be stopped for, or "".
+	check func(line []byte) string
 }
 
 // Write inspects each complete line and never fails, so it cannot disturb the
@@ -112,6 +115,12 @@ func (g *toolGuard) Write(p []byte) (int, error) {
 }
 
 func (g *toolGuard) inspect(line []byte) {
+	if g.check != nil {
+		if what := g.check(line); what != "" {
+			g.stop(what)
+		}
+		return
+	}
 	var m struct {
 		Method string `json:"method"`
 		Params struct {
@@ -193,7 +202,20 @@ func startAntigravity(ctx context.Context, root string, trees reviewTrees, base 
 // a git repository: Antigravity loads customizations from each parent up to
 // the repository root.
 func antigravityWorkspace(ctx context.Context, root string, trees reviewTrees) (string, string, error) {
-	tmp, err := os.MkdirTemp("", "slopcop-antigravity-")
+	return isolatedWorkspace(ctx, root, trees, "slopcop-antigravity-")
+}
+
+// isolatedAdapter reports whether an adapter reviews an export of the tree,
+// with no git history to read the rest of a truncated diff.
+func isolatedAdapter(adapter string) bool {
+	return adapter == antigravityAdapter || adapter == kimiAdapter
+}
+
+// isolatedWorkspace creates a temporary directory holding a workspace with an
+// export of the checked tree one level down, and returns both. The directory
+// must not sit inside a git repository, whose config the agent would load.
+func isolatedWorkspace(ctx context.Context, root string, trees reviewTrees, prefix string) (string, string, error) {
+	tmp, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		return "", "", err
 	}

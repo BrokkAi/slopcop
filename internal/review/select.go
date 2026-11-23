@@ -21,6 +21,8 @@ func DefaultCommand(f Family) []string {
 		return []string{"npx", "--yes", "@agentclientprotocol/claude-agent-acp@0.100.0"}
 	case Gemini:
 		return slices.Clone(antigravityDefaultCommand)
+	case Kimi:
+		return slices.Clone(kimiDefaultCommand)
 	}
 	return nil
 }
@@ -36,6 +38,8 @@ func AdapterName(f Family) string {
 		return "claude"
 	case Gemini:
 		return antigravityAdapter
+	case Kimi:
+		return kimiAdapter
 	}
 	return ""
 }
@@ -98,6 +102,8 @@ func FamilyOf(model string) (Family, bool) {
 		return Haiku, true
 	case strings.HasPrefix(m, "gemini-") && (has("flash") || has("pro")) && !has("lite") && !has("image"):
 		return Gemini, true
+	case kimiModelName.MatchString(m):
+		return Kimi, true
 	}
 	return "", false
 }
@@ -200,7 +206,8 @@ func reviewerMode(f Family) (string, string) {
 	}
 	// Antigravity's default mode asks before edits and commands; its plan
 	// mode only adds an instruction, and its auto mode approves them.
-	if f == Haiku || f == Gemini {
+	// Kimi's default mode asks before anything outside its approved tools.
+	if f == Haiku || f == Gemini || f == Kimi {
 		return "mode", "default"
 	}
 	return "mode", "read-only"

@@ -25,10 +25,13 @@ const (
 	// opt-in: Antigravity's web search cannot be turned off or refused, so it
 	// runs only when named in review.reviewers or review.fallbacks.
 	Gemini Family = "gemini"
+	// Kimi is Moonshot's Kimi K3 through Kimi Code CLI's ACP server. It is
+	// opt-in: it needs an API key, and it sends the change to Moonshot.
+	Kimi Family = "kimi"
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
-// Gemini is left out because it is opt-in.
+// Gemini and Kimi are left out because they are opt-in.
 var Families = []Family{Terra, Sol, Flash, Haiku}
 
 const (
@@ -147,6 +150,10 @@ type Reviewer struct {
 	// Warning says how the reviewer ran differently from what was asked,
 	// such as on Copilot's Auto model or at its default effort.
 	Warning string `json:"warning,omitempty"`
+	// UnreadChange says which changed file a reviewer that reported findings
+	// could not read. Its findings stand, but overriding them cannot approve
+	// the change, since the reviewer did not cover it.
+	UnreadChange string `json:"unreadChange,omitempty"`
 }
 
 // Verdict is the outcome of one review.
