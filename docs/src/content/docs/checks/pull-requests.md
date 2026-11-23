@@ -46,8 +46,26 @@ As in a [report](/checks/read-a-report/), only findings on the lines the pull
 request added or touched count. Findings already in the code are counted in
 the summary and never fail the check.
 
-**Re-run** on the check checks the head again, for example after a top-up or
-once a manager has turned the setting back on.
+## Re-run a check
+
+To check a head again without pushing, for example after a top-up or once a
+manager has turned the setting back on, open the **SlopCop** check on GitHub,
+from the pull request's **Checks** tab or the check's own page, and press
+**Re-run** or **Re-run all checks**. GitHub shows the button to anyone with
+write access to the repository.
+
+A re-run does not confirm a move to another workspace. It goes to the
+workspace that checked that push, so after you turn **Check pull requests**
+off in one workspace and on in another, a re-run of an earlier check adds no
+new check, and GitHub can leave it queued. The next push to the pull request
+is the first one the new workspace checks.
+
+Re-run from GitHub's web page, not its API. GitHub's REST endpoint for it,
+`POST /repos/{owner}/{repo}/check-runs/{id}/rerequest`, answers
+`404 Not Found` to a personal token, `gh api` included, whatever your access
+to the repository and for any App's check run: GitHub accepts that call only
+from a GitHub App. The `404` says nothing about the check or about SlopCop's
+settings.
 
 ## Block a merge on it
 
