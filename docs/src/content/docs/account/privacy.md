@@ -62,6 +62,13 @@ provider of the model you chose
 ([details](/reference/configuration/#openrouter-opt-in)).
 Review results and logs stay under `<git-dir>/slopcop/`.
 Use `--mode static` to avoid the local review and these provider requests.
+The prompt carries the captured diff. Reviewers read repository content,
+which is untrusted. Claude and DeepSeek reviewers may only read and search
+files; Slopcop refuses their requests to run commands or change files. Codex
+reviewers run in Codex's read-only sandbox. A Gemini, Kimi, Grok or Ollama reviewer
+reads a temporary copy of the reviewed tree, which is deleted when it finishes.
+An OpenRouter reviewer reads only the reviewed git tree, through SlopCop's own
+read-only tools.
 
 ### Review tracking
 
@@ -98,13 +105,6 @@ replies as written, transcripts, logs and stderr.
 
 Reporting is best-effort, with a limit of a few seconds. If it fails, the check's
 output and exit code are the same, and `--verbose` says why on stderr.
-The prompt carries the captured diff. Reviewers read repository content,
-which is untrusted. Claude and DeepSeek reviewers may only read and search
-files; Slopcop refuses their requests to run commands or change files. Codex
-reviewers run in Codex's read-only sandbox. A Gemini, Kimi, Grok or Ollama reviewer
-reads a temporary copy of the reviewed tree, which is deleted when it finishes.
-An OpenRouter reviewer reads only the reviewed git tree, through SlopCop's own
-read-only tools.
 
 ## What the service does with it
 
