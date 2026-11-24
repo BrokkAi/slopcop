@@ -114,12 +114,12 @@ func reportReview(cmd *cobra.Command, ref *review.CheckRef, client *service.Clie
 	status, err := limited.ReportReview(ctx, ref.ID, body)
 	var refused *service.Error
 	switch {
-	case errors.As(err, &refused):
-		// The service answered and did not store it, so the check holds no
-		// report of this checkout's.
+	case errors.As(err, &refused) && refused.StatusCode >= 400 && refused.StatusCode < 500:
+		// The service answered that it would not store this report. A report
+		// recorded here before still stands, so an entry for it is kept.
 		note("%v", err)
 		checked.Tracked = false
-		remember(true)
+		remember(false)
 	case err != nil:
 		note("%v", err)
 		remember(false) // It may have landed before the answer was lost.
