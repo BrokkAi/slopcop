@@ -169,6 +169,7 @@ alike, from the same check. It needs `security-events: write`.
 | `intent-from-pull-request` | `true` | tell the reviewers what the pull request is for |
 | `comment` | `true` | comment on the pull request; `false` keeps to the job summary |
 | `sarif` | `false` | upload to code scanning |
+| `comment-via` | `auto` | who comments: `auto` (the SlopCop GitHub App where SlopCop offers it, else `github-token`), `app` or `token` |
 | `github-token` | `github.token` | token that comments |
 | `working-directory` | `.` | checkout to check |
 | `args` | | further `slopcop check` arguments, such as `--policy-pack security` |

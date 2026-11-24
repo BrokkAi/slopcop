@@ -189,3 +189,122 @@ func TestCommentThatCannotPostStillWritesTheOutputs(t *testing.T) {
 		t.Errorf("outputs = %s", got)
 	}
 }
+
+const headCommit = "0123456789abcdef0123456789abcdef01234567"
+
+// appService is a SlopCop service that answers a pull request comment
+// request with status, and records what it was sent.
+func appService(t *testing.T, status string, sent *map[string]any) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/check/chk/pull-request-comments" {
+			if got := r.Header.Get("Authorization"); got != "Bearer slopcop-token" {
+				t.Errorf("authorization = %q", got)
+			}
+			_ = json.NewDecoder(r.Body).Decode(sent)
+			_, _ = w.Write([]byte(`{"checkId":"chk","status":"` + status + `","outcome":"findings","posted":1,"inline":1,"elsewhere":0,"summaryUrl":"https://github.test/o/r/pull/12#issuecomment-9"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":"not_found"}`))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// commentGitHub is a GitHub that takes the token path's writes, counting them.
+func commentGitHub(t *testing.T, writes *int) *httptest.Server {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/user":
+			w.WriteHeader(http.StatusForbidden)
+		case r.URL.Path == "/repos/o/r/pulls/12/files":
+			_, _ = w.Write([]byte(`[{"filename":"a.go","status":"modified","patch":"@@ -1,2 +1,3 @@\n one\n+two\n three"}]`))
+		case r.Method == http.MethodGet:
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			*writes++
+			_, _ = w.Write([]byte(`{"id":2,"html_url":"https://github.test/o/r/pull/12#issuecomment-2"}`))
+		}
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+func appCommentEnv(t *testing.T) {
+	isolateUserConfig(t)
+	clearGitHubEnv(t)
+	t.Setenv("SLOPCOP_TOKEN", "slopcop-token")
+	t.Setenv("SLOPCOP_NO_UPDATE_NOTICE", "1")
+	t.Setenv("GITHUB_REPOSITORY", "o/r")
+	t.Setenv("GITHUB_TOKEN", "workflow-token")
+	t.Setenv("GITHUB_EVENT_PATH", tempFile(t, "event.json", `{"pull_request":{"number":12,"head":{"sha":"`+headCommit+`"}}}`))
+}
+
+func TestCommentAsksTheAppFirst(t *testing.T) {
+	appCommentEnv(t)
+	var sent map[string]any
+	service := appService(t, "posted", &sent)
+	writes := 0
+	github := commentGitHub(t, &writes)
+
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--certainty", "all")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if writes != 0 {
+		t.Errorf("the workflow token wrote %d times", writes)
+	}
+	if !strings.Contains(stderr, "SlopCop GitHub App added 1 inline comment(s); summary at https://github.test/o/r/pull/12#issuecomment-9") {
+		t.Errorf("stderr = %s", stderr)
+	}
+	if sent["pullRequest"] != float64(12) || sent["headCommit"] != headCommit || sent["certainty"] != "all" {
+		t.Errorf("sent = %v", sent)
+	}
+	// The report's review goes as it is, and no GitHub token goes at all.
+	review, _ := sent["review"].(map[string]any)
+	if findings, _ := review["findings"].([]any); len(findings) != 1 {
+		t.Errorf("review = %v", sent["review"])
+	}
+	if data, _ := json.Marshal(sent); strings.Contains(string(data), "workflow-token") {
+		t.Errorf("the GitHub token was sent: %s", data)
+	}
+}
+
+func TestCommentFallsBackToTheWorkflowTokenWhenTheAppDoesNotPost(t *testing.T) {
+	for _, status := range []string{"off", "not_connected", "not_granted"} {
+		t.Run(status, func(t *testing.T) {
+			appCommentEnv(t)
+			var sent map[string]any
+			service := appService(t, status, &sent)
+			writes := 0
+			github := commentGitHub(t, &writes)
+			code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL)
+			if code != 0 {
+				t.Fatalf("exit = %d, stderr = %s", code, stderr)
+			}
+			if writes == 0 || !strings.Contains(stderr, "commenting with GITHUB_TOKEN instead") {
+				t.Errorf("writes = %d, stderr = %s", writes, stderr)
+			}
+		})
+	}
+}
+
+func TestCommentViaAppDoesNotFallBack(t *testing.T) {
+	appCommentEnv(t)
+	var sent map[string]any
+	service := appService(t, "not_granted", &sent)
+	writes := 0
+	github := commentGitHub(t, &writes)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--via", "app")
+	if code == 0 || writes != 0 || !strings.Contains(stderr, "has not accepted Pull requests: Read and write") {
+		t.Fatalf("exit = %d, writes = %d, stderr = %s", code, writes, stderr)
+	}
+	code, _, stderr = runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--via", "bot")
+	if code == 0 || !strings.Contains(stderr, "--via") {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+}

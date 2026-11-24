@@ -55,9 +55,13 @@ inputs:
     required: false
     default: 'true'
   comment:
-    description: Comment the findings on the pull request. Needs pull-requests write permission.
+    description: Comment the findings on the pull request. SlopCop's GitHub App writes the comments where the service offers it and the App's installation allows it; otherwise github-token does, which needs pull-requests write permission.
     required: false
     default: 'true'
+  comment-via:
+    description: 'Who writes the comments: auto (the SlopCop GitHub App, else github-token), app or token.'
+    required: false
+    default: auto
   sarif:
     description: Upload the findings to code scanning as SARIF. Needs security-events write permission.
     required: false
@@ -234,18 +238,29 @@ runs:
       if: always() && steps.check.outputs.report != ''
       continue-on-error: true
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        SLOPCOP_TOKEN: ${{ inputs.slopcop-token || env.SLOPCOP_TOKEN }}
         SLOPCOP_NO_UPDATE_NOTICE: '1'
         REPORT: ${{ steps.check.outputs.report }}
         COMMENT: ${{ inputs.comment }}
+        COMMENT_VIA: ${{ inputs.comment-via }}
+        WORKSPACE: ${{ inputs.workspace }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        CERTAINTY: ${{ inputs.certainty }}
       run: |
         if [ ! -s "$REPORT" ]; then
           echo "slopcop check wrote no report; its log above says why."
           exit 0
         fi
         if [ "$COMMENT" = "true" ]; then
-          slopcop comment --report "$REPORT"
+          # The same check options, so the App comments what the check reported.
+          args=(comment --report "$REPORT" --via "$COMMENT_VIA" --fail-on "$FAIL_ON" --certainty "$CERTAINTY")
+          if [ -n "$WORKSPACE" ]; then
+            args+=(--workspace "$WORKSPACE")
+          fi
+          slopcop "${args[@]}"
         else
           slopcop comment --report "$REPORT" --dry-run > /dev/null
         fi

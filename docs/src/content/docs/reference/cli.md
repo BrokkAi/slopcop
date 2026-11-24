@@ -366,6 +366,15 @@ slopcop comment --report slopcop.json
 | `--commit SHA` | head commit the check ran on (default: the event's pull request head) |
 | `--api-url URL` | REST API root (default `$GITHUB_API_URL`, else `https://api.github.com`) |
 | `--dry-run` | print the summary and write nothing to GitHub |
+| `--via auto\|app\|token` | who writes the comments (default `auto`) |
+| `--fail-on`, `--certainty` | the options the check ran with (default: the report's `--fail-on`) |
+| `--workspace ID` | SlopCop workspace the check ran in |
+
+With `--via auto` it first asks SlopCop, with the login that ran the check, to
+have the SlopCop GitHub App write the comments. The App posts as SlopCop and
+needs no GitHub token from you. Where SlopCop does not offer that, or the App's
+installation has not granted **Pull requests: Read and write**, it writes them
+itself. `--via app` and `--via token` choose one.
 
 The token comes from `GITHUB_TOKEN` (or `GH_TOKEN`) and needs
 `pull-requests: write`. With a read-only token, as on a pull request from a
