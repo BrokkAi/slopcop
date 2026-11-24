@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BrokkAi/slopcop/internal/config"
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 func TestGatePushCommands(t *testing.T) {
@@ -193,5 +198,102 @@ func TestGateHookToolNames(t *testing.T) {
 		if tc.blocked && strings.Count(strings.TrimSpace(errOut.String()), "\n") != 0 {
 			t.Errorf("%s: reason is not one line: %q", tc.tool, errOut.String())
 		}
+	}
+}
+
+// A pull request check fails on any new definite finding, and the push gate
+// only on findings at or above gate.blockOn. advisoryFindings counts the
+// findings on which the two disagree, so it must be zero exactly when the
+// push level is the pull request check's.
+func TestAdvisoryFindingsAreWhatOnlyThePullRequestCheckFailsOn(t *testing.T) {
+	findings := []service.Finding{
+		{New: true, Severity: "note", Certainty: "definite"},
+		{New: true, Severity: "note"},
+		{New: true, Severity: "warning", Certainty: "definite"},
+		{New: true, Severity: "error", Certainty: "definite"},
+		{New: true, Severity: "mystery", Certainty: "definite"},
+		{New: true, Severity: "info", Certainty: "definite"},
+		{New: true, Severity: "note", Certainty: "possible"},
+		{New: false, Severity: "note", Certainty: "definite"},
+	}
+	response := service.Response{Findings: findings}
+	for level, want := range map[string]int{"never": 5, "error": 3, "warning": 2, "note": 0, pullRequestFailOn: 0} {
+		if got := advisoryFindings(response, level); got != want {
+			t.Errorf("advisoryFindings at %s = %d, want %d", level, got, want)
+		}
+	}
+	// Findings the service left out of the list block no push and still fail
+	// the pull request check, even when nothing listed is advisory.
+	response = service.Response{Findings: []service.Finding{{New: true, Severity: "warning", Certainty: "possible"}}}
+	response.Summary.OmittedFindings = 4
+	if got := advisoryFindings(response, "error"); got != 4 {
+		t.Errorf("advisoryFindings with 4 omitted = %d, want 4", got)
+	}
+	if pullRequestFailOn != "finding" {
+		t.Fatalf("pullRequestFailOn = %q: the docs (checks/exit-codes.md, checks/pull-requests.md) and the skill say finding; change them together", pullRequestFailOn)
+	}
+}
+
+// The fixture case of BrokkAi/slopcop#207: notes approve the tree at the
+// default push level, and the check says a pull request check will fail.
+func TestApprovedCheckWarnsOfFindingsThePullRequestCheckFailsOn(t *testing.T) {
+	for _, tc := range []struct {
+		name, severity, level string
+		approved              bool
+		advisory              int
+	}{
+		{"note at the default level", "note", "", true, 1},
+		{"warning at the default level", "warning", "", true, 1},
+		{"note at the pull request level", "note", "finding", false, 0},
+		{"error", "error", "", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			isolateUserConfig(t)
+			installUserGate(t)
+			repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+			writeFile(t, repo, "fixtures/policy/case.py", "def f(): pass\n")
+			cfg := config.Config{Mode: "static"}
+			if tc.level != "" {
+				cfg.Gate = &config.Gate{BlockOn: tc.level}
+			}
+			if _, err := config.Save(cfg); err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = fmt.Fprintf(w, `{"status":"findings","baseCommit":"0123456789abcdef0123456789abcdef01234567","applied":true,"summary":{"files":1,"newFindings":1,"failOn":"finding"},"findings":[{"policyId":"missing-docstring","severity":%q,"certainty":"definite","new":true,"path":"fixtures/policy/case.py","title":"issue"}],"incomplete":[]}`, tc.severity)
+			}))
+			defer server.Close()
+			for _, format := range []string{"json", "sarif", "human"} {
+				code, out, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", format)
+				if code != 1 {
+					t.Fatalf("%s: exit %d: %s %s", format, code, out, stderr)
+				}
+				warned := strings.Contains(stderr, "a SlopCop pull request check fails on any new finding")
+				if warned != (tc.advisory > 0) {
+					t.Fatalf("%s: warned=%v with %d advisory: %s", format, warned, tc.advisory, stderr)
+				}
+				if warned && !strings.Contains(stderr, "1 new static finding below the push level (error) does not block the push") {
+					t.Fatalf("%s: stderr %q", format, stderr)
+				}
+				switch format {
+				case "json":
+					var doc struct {
+						Approved         bool `json:"approved"`
+						AdvisoryFindings int  `json:"advisoryFindings"`
+					}
+					if err := json.Unmarshal([]byte(out), &doc); err != nil {
+						t.Fatal(err)
+					}
+					if doc.Approved != tc.approved || doc.AdvisoryFindings != tc.advisory {
+						t.Fatalf("approved=%v advisoryFindings=%d, want %v and %d: %s", doc.Approved, doc.AdvisoryFindings, tc.approved, tc.advisory, out)
+					}
+				case "sarif":
+					if got := strings.Contains(out, `"slopcop.advisoryFindings": 1`); got != (tc.advisory > 0) {
+						t.Fatalf("sarif advisoryFindings present=%v: %s", got, out)
+					}
+				}
+			}
+		})
 	}
 }

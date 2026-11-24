@@ -46,8 +46,40 @@ As in a [report](/checks/read-a-report/), only findings on the lines the pull
 request added or touched count. Findings already in the code are counted in
 the summary and never fail the check.
 
-**Re-run** on the check checks the head again, for example after a top-up or
-once a manager has turned the setting back on.
+## Re-run a check
+
+To check a head again without pushing, for example after a top-up or once a
+manager has turned the setting back on, open the **SlopCop** check on GitHub,
+from the pull request's **Checks** tab or the check's own page, and press
+**Re-run** or **Re-run all checks**. GitHub shows the button to anyone with
+write access to the repository.
+
+A re-run does not confirm a move to another workspace. It goes to the
+workspace that checked that push, so after you turn **Check pull requests**
+off in one workspace and on in another, a re-run of an earlier check adds no
+new check, and GitHub can leave it queued. The next push to the pull request
+is the first one the new workspace checks.
+
+Re-run from GitHub's web page, not its API. GitHub's REST endpoint for it,
+`POST /repos/{owner}/{repo}/check-runs/{id}/rerequest`, answers
+`404 Not Found` to a personal token, `gh api` included, whatever your access
+to the repository and for any App's check run: GitHub accepts that call only
+from a GitHub App. The `404` says nothing about the check or about SlopCop's
+settings.
+
+## More than one workspace
+
+Each workspace has its own **Check pull requests** setting for a repository.
+When more than one workspace turns it on for the same repository, the first
+to have turned it on checks its pull requests and pays for those checks; the
+others do not post a second check. Every check's summary ends by naming the
+workspace that ran it.
+
+The workspace a checkout checks in locally (`slopcop workspace map`,
+`--workspace`, or the login's) has no say in this. To move a repository's pull
+request checks, turn the setting off in the workspace that runs them and on in
+the one that should; see
+[Pull request checks have their own workspace](/account/workspaces/#pull-request-checks-have-their-own-workspace).
 
 ## Block a merge on it
 
@@ -95,3 +127,14 @@ and the [pricing page](https://slopcop.com/pricing).
 your choice of `--fail-on`, rules, and output formats. Pull request checks need
 no workflow, token, or clone, and always use the CLI's defaults: every rule,
 `--fail-on finding`.
+
+## Compared with the push gate
+
+A pull request check fails on any new finding, a `note` included. The
+[push gate](/checks/exit-codes/#which-results-approve-the-tree) on your
+machine blocks only findings at or above `gate.blockOn`, which defaults to
+`error`. So a tree with new notes or warnings is approved for push and then
+fails its pull request check. The local check does say so: it exits `1`,
+counts them in `advisoryFindings`, and warns on stderr. See
+[The push gate and pull request checks](/checks/exit-codes/#the-push-gate-and-pull-request-checks)
+for the three thresholds side by side and how to make them agree.

@@ -15,7 +15,10 @@ slopcop repo enable acme/widgets   # turn it back on, within the workspace's act
 
 `slopcop status` shows the checkout's repository (the one `origin` names),
 whether it is added to the workspace, and its state, beside the account and
-workspace that bill checks. `--root` names another checkout, `-w`/`--workspace`
+workspace that bill checks, and names any other workspace of yours that has
+it, where its
+[pull request checks](/account/workspaces/#pull-request-checks-have-their-own-workspace)
+may run instead. `--root` names another checkout, `-w`/`--workspace`
 another workspace, and `--format human|json` the output.
 
 `repo list` takes `--format human|json`, as do `repo enable` and

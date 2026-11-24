@@ -88,7 +88,11 @@ prints the account, the login's own workspace (name, kind, role), its plan
 `workspace`, `plan` and `services`). Each service has its own login, bound to its own workspace: with
 more than one stored, `whoami` also lists them and marks the default.
 `slopcop status` shows the same for this checkout: the repository `origin`
-names, whether the workspace has it and whether it is active.
+names, whether the workspace has it and whether it is active. Its `Also in`
+line (`otherWorkspaces` in json) names the account's other workspaces that
+have the repository. Pull request checks are turned on per workspace in the
+web app and do not follow `--workspace` or a mapping, so one of those may run
+them; the CLI cannot read or change that setting.
 
 - `slopcop workspace list` lists the account's workspaces; `*` marks this
   login's. `slopcop workspace use <name|id>` moves this login to another one,
@@ -508,8 +512,15 @@ static check that ended `incomplete` does not prevent it, unless it lists
 `runFailures`: then the analyzer run failed and checked nothing, so run the
 check again. New static findings
 below the push level, warnings and notes by default, are advisory: they do not
-block the push, though they still exit `1` under the default `--fail-on`. Fix
-the real ones in this change, and tell the user about any you leave. A failed
+block the push, though they still exit `1` under the default `--fail-on`. A
+pull request check fails on every one of them, a note included: `json` counts
+them in `advisoryFindings`, and stderr says so where the push gate is
+installed. So `approved: true` with `advisoryFindings` means the push is
+allowed and the pull request check will fail. Fix
+the real ones in this change, ignore the false positives, and tell the user
+about any you leave before you open the pull request. Do not edit a
+deliberate test input only to quiet a style rule: tell the user, who can keep
+those paths out of the rule with `[check]` in `.slopcop/config.toml`. A failed
 review, a service failure, or exit `3` never approves the tree. Read a
 `possible` or `heuristic` finding before fixing it, since it may be a false
 positive. A finding's `title` is often its rule's one sentence; its `message`,

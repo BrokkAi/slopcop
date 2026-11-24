@@ -43,6 +43,9 @@ picked it; `--format json` has `workspace` and `workspaceSource` (`flag`,
 workspace, and a `Checkout` line when the checkout it runs in is mapped
 elsewhere.
 
+None of the four chooses the workspace that runs a repository's
+[pull request checks](#pull-request-checks-have-their-own-workspace).
+
 ## A workspace per repository
 
 `slopcop workspace map <name|id>` makes every checkout of the repository the
@@ -81,6 +84,34 @@ first check of such a repository, when your account has more than one
 workspace, says so once, and names any other workspace of yours that already
 has the repository, in case the check is landing in the wrong one. The check
 still runs.
+
+## Pull request checks have their own workspace
+
+[Pull request checks](/checks/pull-requests/) do not follow any of this. A
+mapping, `--workspace` and the login's workspace choose where the checks this
+machine sends run. A pull request is checked by a workspace that has **Check
+pull requests** on for the repository in the web app, and when more than one
+has, by [the first to have turned it on](/checks/pull-requests/#more-than-one-workspace).
+So a repository can check locally in your team workspace while its pull
+requests are checked, and billed, in your personal one.
+
+To see which workspace that is:
+
+- A pull request's **SlopCop** check names the workspace that ran it, at the
+  end of its summary.
+- `slopcop status` prints an `Also in` line naming your account's other
+  workspaces that have the repository, each with its state there, and
+  `otherWorkspaces` in `json` (`id`, `name`, `kind`, `role`, `state`). Those
+  and the workspace above it are the ones that can run its pull request
+  checks. A workspace the service would not answer for is listed as `could not
+  be asked`, `unknown` in `json`.
+
+To move it, a manager or owner turns **Check pull requests** off in the
+repository's **Settings** in the workspace that runs them now, and on in the
+one that should; then `slopcop workspace map <name>` in the checkout moves the
+local checks to match. The CLI cannot read or change the setting, so `status`
+does not say which of the workspaces has it on, and `workspace map` says that
+it leaves pull request checks where they are.
 
 ## Moving the login
 

@@ -221,11 +221,40 @@ func TestStatusSaysWhyAWorkspaceWasChosen(t *testing.T) {
 		"State:      active\n",
 		"Workspace:  Acme team (team, member)\n",
 		"Chosen by:  this checkout's mapping (`slopcop workspace map`)\n",
-		"Plan:       Free (the plan of \"Dave\", this login's workspace)\n",
+		"Login:      Dave (personal, owner), Free plan\n",
 	} {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("stdout = %q, want %q", stdout, want)
 		}
+	}
+	// The service tells the login's plan only, which is not the mapped
+	// workspace's: no Plan line stands beside "Acme team".
+	if strings.Contains(stdout, "Plan:") {
+		t.Errorf("stdout = %q, has a Plan line for a workspace whose plan is not known", stdout)
+	}
+
+	code, stdout, _ = runCLI(t, "status", "--root", repo, "--format", "json", "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("json exit = %d", code)
+	}
+	var decoded map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(stdout), &decoded); err != nil {
+		t.Fatalf("stdout is not json: %v\n%s", err, stdout)
+	}
+	if plan, ok := decoded["plan"]; ok {
+		t.Errorf("json plan = %s beside the mapped workspace, want none", plan)
+	}
+	var login struct {
+		Workspace struct {
+			ID string `json:"id"`
+		} `json:"workspace"`
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(decoded["login"], &login); err != nil {
+		t.Fatalf("json login = %s: %v", decoded["login"], err)
+	}
+	if login.Workspace.ID != personalID || login.Plan != "free" {
+		t.Errorf("json login = %s", decoded["login"])
 	}
 
 	t.Chdir(repo)
@@ -527,5 +556,95 @@ func TestAnAccountWithOneWorkspaceIsToldNothing(t *testing.T) {
 	}
 	if svc.whoamis != 1 {
 		t.Errorf("whoami calls = %d, want the account asked once", svc.whoamis)
+	}
+}
+
+func TestStatusNamesTheOtherWorkspacesThatHaveTheRepository(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/Acme/widgets.git")
+	svc := &mapService{repositories: map[string][]string{personalID: {"Acme/widgets"}, teamID: {"Acme/widgets"}}}
+	server := svc.start(t, "")
+	mapTo(t, server.URL, "https://github.com/Acme/widgets", teamID, "Acme team")
+
+	code, stdout, stderr := runCLI(t, "status", "--root", repo, "--service", server.URL)
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	for _, want := range []string{
+		"Workspace:  Acme team (team, member)\n",
+		"Also in:    \"Dave\" (active)\n",
+		"PR checks:  turned on per workspace in the web app, not by the workspace above; a pull request's SlopCop check names the workspace that ran it\n",
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want %q", stdout, want)
+		}
+	}
+
+	code, stdout, _ = runCLI(t, "status", "--root", repo, "--format", "json", "--service", server.URL)
+	var decoded struct {
+		OtherWorkspaces []statusElsewhere `json:"otherWorkspaces"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &decoded); code != 0 || err != nil {
+		t.Fatalf("json: exit = %d, err = %v\n%s", code, err, stdout)
+	}
+	want := statusElsewhere{ID: personalID, Name: "Dave", Kind: "personal", Role: "owner", State: statusActive}
+	if len(decoded.OtherWorkspaces) != 1 || decoded.OtherWorkspaces[0] != want {
+		t.Errorf("otherWorkspaces = %+v, want %+v", decoded.OtherWorkspaces, want)
+	}
+}
+
+func TestStatusSaysNothingOfWorkspacesWithoutTheRepository(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/Acme/widgets.git")
+	svc := &mapService{repositories: map[string][]string{personalID: {"Acme/widgets"}}}
+	server := svc.start(t, "")
+
+	code, stdout, stderr := runCLI(t, "status", "--root", repo, "--service", server.URL)
+	if code != 0 || strings.Contains(stdout, "Also in:") || strings.Contains(stdout, "PR checks:") {
+		t.Errorf("exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
+	}
+	code, stdout, _ = runCLI(t, "status", "--root", repo, "--format", "json", "--service", server.URL)
+	if code != 0 || strings.Contains(stdout, "otherWorkspaces") {
+		t.Errorf("json: exit = %d, stdout = %q", code, stdout)
+	}
+}
+
+func TestStatusNamesAWorkspaceThatCouldNotBeAsked(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/Acme/widgets.git")
+	svc := &mapService{
+		repositories: map[string][]string{personalID: {"Acme/widgets"}},
+		whoami:       strings.Replace(whoamiBody, teamID, goneID, 1),
+	}
+	server := svc.start(t, "")
+
+	code, stdout, stderr := runCLI(t, "status", "--root", repo, "--service", server.URL)
+	if code != 0 || !strings.Contains(stdout, "Also in:    \"Acme team\" (could not be asked)\n") {
+		t.Errorf("exit = %d, stdout = %q, stderr = %s", code, stdout, stderr)
+	}
+}
+
+func TestWorkspaceMapSaysPullRequestChecksAreUnaffected(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/Acme/widgets.git")
+	svc := &mapService{repositories: map[string][]string{teamID: {"Acme/widgets"}}}
+	server := svc.start(t, "")
+
+	typed(t, "y\n")
+	code, _, stderr := runCLI(t, "workspace", "map", "Acme team", "--root", repo, "--service", server.URL)
+	if code != 0 || !strings.Contains(stderr, "pull request checks are unaffected: they run in whichever workspace has Check pull requests on for Acme/widgets in the web app") {
+		t.Errorf("exit = %d, stderr = %q", code, stderr)
+	}
+	_, stdout, _ := runCLI(t, "workspace", "map", "--help")
+	if !strings.Contains(stdout, "Pull request checks are unaffected.") {
+		t.Errorf("help = %q", stdout)
+	}
+
+	// Pull request checks are GitHub's, so a GitLab repository is told nothing.
+	gitlab := newRepo(t, "https://gitlab.com/Acme/widgets.git")
+	typed(t, "y\n")
+	code, _, stderr = runCLI(t, "workspace", "map", "Acme team", "--root", gitlab, "--service", server.URL)
+	if code != 0 || strings.Contains(stderr, "pull request checks") {
+		t.Errorf("gitlab: exit = %d, stderr = %q", code, stderr)
 	}
 }
