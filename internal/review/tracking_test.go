@@ -172,3 +172,14 @@ func TestReportNamesTheTreeTheReviewersRead(t *testing.T) {
 		t.Fatalf("tree = %s", got)
 	}
 }
+
+func TestReportKeysAreTheFindingsSent(t *testing.T) {
+	var reply strings.Builder
+	for i := range 150 {
+		fmt.Fprintf(&reply, "- [P2] Finding %d `src/a.go:%d`\nBody.\n", i, i+1)
+	}
+	report := reportOf(t, Verdict{Status: StatusFindings, Reviewers: []Reviewer{{Name: "1-terra", Family: Terra, Status: StatusFindings, Text: reply.String()}}})
+	if keys := report.Keys(); len(keys) != maxReportFindings {
+		t.Fatalf("keys = %d", len(keys))
+	}
+}

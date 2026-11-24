@@ -75,7 +75,7 @@ func reportReview(cmd *cobra.Command, ref *review.CheckRef, client *service.Clie
 	}
 	checked := *ref
 	remember := func(replace bool) {
-		if err := review.RememberCheck(root, checked, verdict, replace); err != nil {
+		if err := review.RememberCheck(root, checked, verdict, body.Keys(), replace); err != nil {
 			note("could not remember the check: %v", err)
 		}
 	}

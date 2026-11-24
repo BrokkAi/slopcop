@@ -101,6 +101,19 @@ type ReportFinding struct {
 	API       string `json:"api,omitempty"`
 }
 
+// Keys are the ids of the findings the report carries.
+func (r Report) Keys() []string {
+	keys := []string{}
+	for _, row := range r.Reviewers {
+		for _, f := range row.Findings {
+			if !slices.Contains(keys, f.Key) {
+				keys = append(keys, f.Key)
+			}
+		}
+	}
+	return keys
+}
+
 // ReportOverridden is a finding a standing override left out of a review.
 type ReportOverridden struct {
 	Key         string `json:"key"`
@@ -377,16 +390,22 @@ func readTrackedChecks(dir string) ([]trackedCheck, error) {
 // list exists: it is what stops a finding it reported from being sent to an
 // older tracked check. replace is false when the service may already hold a
 // first report of this check, which stands, so an entry for it is kept.
-func RememberCheck(root string, ref CheckRef, v Verdict, replace bool) error {
+// keys are the findings the report carried; nil takes the verdict's own.
+func RememberCheck(root string, ref CheckRef, v Verdict, keys []string, replace bool) error {
 	if ref.ID == "" {
 		return nil
 	}
 	entry := trackedCheck{CheckRef: ref, Time: time.Now().UTC(), Worktree: worktreeKey(root), Relied: v.usedOverrides()}
-	// Only the findings the report carries: one a standing override left out
-	// is recorded with the check that first reported it.
-	for _, f := range v.Findings() {
-		if !slices.Contains(entry.Keys, f.ID) {
-			entry.Keys = append(entry.Keys, f.ID)
+	// Only the findings the report carried: one a standing override left out,
+	// or one cut to fit the service's bounds, belongs to a check that sent it.
+	if keys == nil {
+		for _, f := range v.Findings() {
+			keys = append(keys, f.ID)
+		}
+	}
+	for _, key := range keys {
+		if !slices.Contains(entry.Keys, key) {
+			entry.Keys = append(entry.Keys, key)
 		}
 	}
 	return withCloneLock(root, trackedChecksFile+".lock", trackedLockWait, func(dir string) error {
@@ -398,6 +417,8 @@ func RememberCheck(root string, ref CheckRef, v Verdict, replace bool) error {
 		if !ref.Tracked && len(checks) == 0 {
 			return nil
 		}
+		// The first checkout to report a check keeps it: the service kept that
+		// report, and another checkout's findings are not in it.
 		known := slices.ContainsFunc(checks, func(c trackedCheck) bool { return c.ID == ref.ID })
 		if known && !replace {
 			return nil
@@ -417,7 +438,7 @@ func RememberLocalReview(root string, v Verdict) error {
 		return nil
 	}
 	id := "local:" + v.Capture.Tree + ":" + strconv.FormatInt(v.Time.UnixNano(), 10)
-	return RememberCheck(root, CheckRef{ID: id}, v, true)
+	return RememberCheck(root, CheckRef{ID: id}, v, nil, true)
 }
 
 // trimTrackedChecks drops the oldest checks past maxTrackedChecks, keeping
@@ -457,7 +478,8 @@ func TrackedCheckOf(root, key string) (CheckRef, bool) {
 		// A check on the list holds the findings of its first report, which
 		// is the one the service kept.
 		checks := loadTrackedChecks(root)
-		i := slices.IndexFunc(checks, func(c trackedCheck) bool { return c.ID == last.Check.ID })
+		here := worktreeKey(root)
+		i := slices.IndexFunc(checks, func(c trackedCheck) bool { return c.ID == last.Check.ID && c.Worktree == here })
 		switch {
 		case i < 0, !checks[i].Tracked:
 			return CheckRef{}, false
@@ -477,12 +499,13 @@ func TrackedCheckOf(root, key string) (CheckRef, bool) {
 	return CheckRef{}, false
 }
 
-// CurrentCheck is ref as the list knows it, with the workspace its report
-// named and whether the service kept that report. A check the list does not
-// hold was never reported from here, so it is not tracked.
+// CurrentCheck is ref as the list knows it for this worktree, with the
+// workspace its report named and whether the service kept that report. A
+// check reported only from another checkout, or never, is not tracked here.
 func CurrentCheck(root string, ref CheckRef) CheckRef {
+	here := worktreeKey(root)
 	for _, c := range loadTrackedChecks(root) {
-		if c.ID == ref.ID {
+		if c.ID == ref.ID && c.Worktree == here {
 			return c.CheckRef
 		}
 	}
@@ -498,9 +521,11 @@ func worktreeKey(root string) string {
 	return root
 }
 
-// KnownCheck reports whether the list already holds the check.
+// KnownCheck reports whether this worktree's report of the check is on the
+// list.
 func KnownCheck(root, id string) bool {
-	return slices.ContainsFunc(loadTrackedChecks(root), func(c trackedCheck) bool { return c.ID == id })
+	here := worktreeKey(root)
+	return slices.ContainsFunc(loadTrackedChecks(root), func(c trackedCheck) bool { return c.ID == id && c.Worktree == here })
 }
 
 // TrackedChecksRelyingOn are the tracked checks of this worktree an undo of the finding

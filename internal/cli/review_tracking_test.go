@@ -299,7 +299,7 @@ func TestUndoReachesChecksThatReliedOnTheOverride(t *testing.T) {
 	if err != nil || len(verdict.Overridden) != 1 {
 		t.Fatalf("verdict = %+v, %v", verdict.Overridden, err)
 	}
-	if err := review.RememberCheck(repo, later, verdict, true); err != nil {
+	if err := review.RememberCheck(repo, later, verdict, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	runCLI(t, "override", "--root", repo, "--service", server.URL, "--undo", id)
@@ -345,7 +345,7 @@ func TestAlreadyRecordedKeepsTheFirstReportsFindings(t *testing.T) {
 	if !ok {
 		t.Fatal("first report not remembered")
 	}
-	if err := review.RememberCheck(repo, ref, review.Verdict{}, false); err != nil {
+	if err := review.RememberCheck(repo, ref, review.Verdict{}, nil, false); err != nil {
 		t.Fatal(err)
 	}
 	if got := review.TrackedChecksRelyingOn(repo, id); len(got) != 1 || got[0].ID != ref.ID {
@@ -485,7 +485,7 @@ func TestNewReasonGoesToTheCheckThatRecordedTheFinding(t *testing.T) {
 		t.Fatalf("verdict = %+v, %v", verdict.Overridden, err)
 	}
 	later := review.CheckRef{ID: "99999999-2222-3333-4444-555555555555", Service: server.URL, Workspace: answerWorkspace, Tracked: true}
-	if err := review.RememberCheck(repo, later, verdict, true); err != nil {
+	if err := review.RememberCheck(repo, later, verdict, nil, true); err != nil {
 		t.Fatal(err)
 	}
 	store, err := review.OpenStore(repo)
