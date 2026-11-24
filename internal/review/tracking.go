@@ -250,7 +250,9 @@ func reportFinding(f Finding) ReportFinding {
 var (
 	// fencedCode is a code block, closed or running to the end of the text.
 	fencedCode = regexp.MustCompile("(?s)```.*?(?:```|$)|~~~.*?(?:~~~|$)")
-	inlineCode = regexp.MustCompile("`[^`]*`")
+	// inlineCode is a code span in single or double backticks; a double one
+	// may hold a single backtick.
+	inlineCode = regexp.MustCompile("(?s)``.+?``|`[^`]*`")
 )
 
 // reportText is reviewer prose as sent: on one line, without fenced code or a
@@ -259,7 +261,7 @@ var (
 func reportText(text string, limit int) string {
 	text = fencedCode.ReplaceAllString(text, codeOmitted)
 	text = inlineCode.ReplaceAllStringFunc(text, func(span string) string {
-		if utf8.RuneCountInString(span)-2 > inlineCodeLimit {
+		if utf8.RuneCountInString(strings.Trim(span, "`")) > inlineCodeLimit {
 			return codeOmitted
 		}
 		return span

@@ -77,7 +77,7 @@ func TestBuildReportNothingRan(t *testing.T) {
 
 func TestReportStripsCodeAndUnsafePaths(t *testing.T) {
 	long := strings.Repeat("x", 60)
-	reply := "- [P1] Leak `src/a.go:1`\nSee ```\nsecret := 1\n``` and ~~~\ntilde := 2\n~~~ and `" + long + "` here.\n- [P2] Abs `/Users/me/a.go:3`\nHome path.\n"
+	reply := "- [P1] Leak `src/a.go:1`\nSee ```\nsecret := 1\n``` and ~~~\ntilde := 2\n~~~ and `" + long + "` here and ``" + long + "`x`` too.\n- [P2] Abs `/Users/me/a.go:3`\nHome path.\n"
 	report := reportOf(t, Verdict{Status: StatusFindings, Reviewers: []Reviewer{{Name: "1-terra", Family: Terra, Status: StatusFindings, Text: reply}}})
 	findings := report.Reviewers[0].Findings
 	if m := findings[0].Message; strings.Contains(m, "secret") || strings.Contains(m, "tilde") || strings.Contains(m, long) || !strings.Contains(m, codeOmitted) {
