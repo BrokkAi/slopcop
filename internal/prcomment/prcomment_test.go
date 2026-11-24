@@ -352,3 +352,33 @@ func TestParseReportRefusesTheHumanFormat(t *testing.T) {
 		t.Fatal("parsed a report with no status")
 	}
 }
+
+func TestSummaryStaysUnderGitHubsCommentLimit(t *testing.T) {
+	long := strings.Repeat("<&>", maxTextRunes)
+	var findings []string
+	for i := 0; i < 50; i++ {
+		findings = append(findings, fmt.Sprintf(`{"id":"rv-%d","reviewer":"1-sol","priority":"P2","path":"x.go","startLine":%d,"title":%q,"message":%q}`, i, i+1, long, long))
+	}
+	var incomplete []string
+	for i := 0; i < 60; i++ {
+		incomplete = append(incomplete, fmt.Sprintf(`{"policyId":"rule.%d","reason":%q}`, i, long))
+	}
+	r := mustParse(t, `{"status":"failed","code":"x","message":`+fmt.Sprintf("%q", long)+`,"remedy":`+fmt.Sprintf("%q", long)+
+		`,"incomplete":[`+strings.Join(incomplete, ",")+`],"review":{"status":"failed","error":`+fmt.Sprintf("%q", long)+`,"findings":[`+strings.Join(findings, ",")+`]}}`)
+	all := items(r)
+	body := summary(r, outcome(r, all), all, 0, "abc", true)
+	if n := len([]rune(body)); n > 65536 {
+		t.Fatalf("summary is %d characters", n)
+	}
+	if !strings.Contains(body, "more; the job log has the full report") {
+		t.Errorf("summary does not count the findings it left out")
+	}
+}
+
+func TestReviewLineSaysAnUnfinishedReviewIsNotFull(t *testing.T) {
+	r := mustParse(t, `{"status":"incomplete","review":{"status":"clean","incomplete":true,"reviewers":[{"name":"1-sol"}],"findings":[]}}`)
+	line := reviewLine(r, outcome(r, items(r)))
+	if !strings.Contains(line, "no findings") || !strings.Contains(line, "not every reviewer finished") {
+		t.Fatalf("review line = %q", line)
+	}
+}

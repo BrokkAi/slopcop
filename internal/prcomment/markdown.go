@@ -20,9 +20,15 @@ const (
 	maxTextRunes = 2000
 	// maxListed bounds the findings the summary lists itself; the rest are
 	// counted.
-	maxListed       = 50
-	docsExitCodes   = "https://docs.slopcop.com/checks/exit-codes/"
-	docsFalsePosURL = "https://docs.slopcop.com/checks/false-positives/"
+	maxListed = 50
+	// maxSummaryBytes bounds the summary comment under GitHub's
+	// 65,536-character limit, which bytes never undercount. The findings
+	// list gets what the rest leaves, and counts the findings it leaves out.
+	maxSummaryBytes = 60000
+	// maxIncompleteBytes bounds the list of rules that did not finish.
+	maxIncompleteBytes = 8000
+	docsExitCodes      = "https://docs.slopcop.com/checks/exit-codes/"
+	docsFalsePosURL    = "https://docs.slopcop.com/checks/false-positives/"
 )
 
 // kind says whether an item is a static or a review finding.
@@ -262,6 +268,44 @@ func findingsPhrase(static, reviewCount int) string {
 // inline counts the findings that have an inline comment, this run's or an
 // earlier one's. onPR marks the text as the pull request's summary comment.
 func summary(r Report, o Outcome, elsewhere []item, inline int, commit string, onPR bool) string {
+	head := summaryHead(r, o, inline, onPR)
+	tail := summaryTail(r, commit)
+	if len(elsewhere) == 0 {
+		return head + tail
+	}
+	var b strings.Builder
+	b.WriteString(head)
+	if onPR || inline > 0 {
+		// Off the diff, past the inline cap, or on a line GitHub refused:
+		// the list does not say which.
+		b.WriteString("**Not commented on a line**\n\n")
+	} else {
+		b.WriteString("**Findings**\n\n")
+	}
+	// The head quotes at most a few bounded texts and the tail is bounded,
+	// so the budget is always well above one entry.
+	budget := maxSummaryBytes - b.Len() - len(tail) - 100
+	listed, used := 0, 0
+	for _, it := range elsewhere {
+		entry := listEntry(it)
+		if listed == maxListed || used+len(entry) > budget {
+			break
+		}
+		b.WriteString(entry)
+		listed++
+		used += len(entry)
+	}
+	if rest := len(elsewhere) - listed; rest > 0 {
+		fmt.Fprintf(&b, "- and %d more; the job log has the full report\n", rest)
+	}
+	b.WriteString("\n")
+	b.WriteString(tail)
+	return b.String()
+}
+
+// summaryHead is the summary's marker, headline, what each half of the
+// check said, any failure, and how many findings have inline comments.
+func summaryHead(r Report, o Outcome, inline int, onPR bool) string {
 	var b strings.Builder
 	if onPR {
 		b.WriteString(summaryMarker + "\n")
@@ -276,59 +320,42 @@ func summary(r Report, o Outcome, elsewhere []item, inline int, commit string, o
 	}
 	fmt.Fprintf(&b, "### %s %s\n\n", icon, quote(o.Headline))
 	b.WriteString(staticLine(r, o))
-	if line := reviewLine(r, o); line != "" {
-		b.WriteString(line)
-	}
+	b.WriteString(reviewLine(r, o))
 	b.WriteString("\n")
-	if r.Status != "clean" && r.Status != "findings" && r.Status != "incomplete" {
-		if r.Code != "" || r.Message != "" {
-			fmt.Fprintf(&b, "> %s%s\n", codePrefix(r.Code), quote(r.Message))
-			if r.Remedy != "" {
-				fmt.Fprintf(&b, ">\n> %s\n", quote(r.Remedy))
-			}
-			b.WriteString("\n")
-		}
-	}
-	if inline > 0 {
-		noun := "findings are"
-		if inline == 1 {
-			noun = "finding is"
-		}
-		fmt.Fprintf(&b, "%d %s commented on the lines they concern.\n\n", inline, noun)
-	}
-	if len(elsewhere) > 0 {
-		if onPR || inline > 0 {
-			// Off the diff, past the inline cap, or on a line GitHub
-			// refused: the list does not say which.
-			b.WriteString("**Not commented on a line**\n\n")
-		} else {
-			b.WriteString("**Findings**\n\n")
-		}
-		for i, it := range elsewhere {
-			if i == maxListed {
-				fmt.Fprintf(&b, "- and %d more; the job log has the full report\n", len(elsewhere)-maxListed)
-				break
-			}
-			fmt.Fprintf(&b, "- **%s**", it.title())
-			if where := it.location(); where != "" {
-				fmt.Fprintf(&b, " %s", where)
-			}
-			b.WriteString("\n")
-			detail := strings.ReplaceAll(it.detail(), "\n\n", "\n")
-			for _, line := range strings.Split(detail, "\n") {
-				fmt.Fprintf(&b, "  %s\n", line)
-			}
+	if r.Status != "clean" && r.Status != "findings" && r.Status != "incomplete" && (r.Code != "" || r.Message != "") {
+		fmt.Fprintf(&b, "> %s%s\n", codePrefix(r.Code), quote(r.Message))
+		if r.Remedy != "" {
+			fmt.Fprintf(&b, ">\n> %s\n", quote(r.Remedy))
 		}
 		b.WriteString("\n")
 	}
+	if inline > 0 {
+		text := fmt.Sprintf("%d findings are commented on the lines they concern.", inline)
+		if inline == 1 {
+			text = "1 finding is commented on the line it concerns."
+		}
+		b.WriteString(text + "\n\n")
+	}
+	return b.String()
+}
+
+// summaryTail is the rules that did not finish, bounded, and the footer.
+func summaryTail(r Report, commit string) string {
+	var b strings.Builder
 	if len(r.Incomplete) > 0 {
 		b.WriteString("<details><summary>Rules that did not finish</summary>\n\n")
-		for i, inc := range r.Incomplete {
-			if i == maxListed {
-				fmt.Fprintf(&b, "- and %d more\n", len(r.Incomplete)-maxListed)
+		listed, used := 0, 0
+		for _, inc := range r.Incomplete {
+			entry := fmt.Sprintf("- `%s`: %s\n", code(bounded(inc.PolicyID)), quote(bounded(inc.Reason)))
+			if listed == maxListed || used+len(entry) > maxIncompleteBytes {
 				break
 			}
-			fmt.Fprintf(&b, "- `%s`: %s\n", code(inc.PolicyID), quote(inc.Reason))
+			b.WriteString(entry)
+			listed++
+			used += len(entry)
+		}
+		if rest := len(r.Incomplete) - listed; rest > 0 {
+			fmt.Fprintf(&b, "- and %d more\n", rest)
 		}
 		b.WriteString("\n</details>\n\n")
 	}
@@ -337,9 +364,32 @@ func summary(r Report, o Outcome, elsewhere []item, inline int, commit string, o
 		fmt.Fprintf(&b, "Commit `%s`. ", code(shortSHA(commit)))
 	}
 	if r.CheckID != "" {
-		fmt.Fprintf(&b, "Check `%s`. ", code(r.CheckID))
+		fmt.Fprintf(&b, "Check `%s`. ", code(bounded(r.CheckID)))
 	}
 	fmt.Fprintf(&b, "[What the result means](%s).</sub>\n", docsExitCodes)
+	return b.String()
+}
+
+// bounded cuts an identifier or reason a service sends to a sane length.
+func bounded(text string) string {
+	if runes := []rune(text); len(runes) > 200 {
+		return string(runes[:200]) + "…"
+	}
+	return text
+}
+
+// listEntry is one finding in the summary's list.
+func listEntry(it item) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "- **%s**", it.title())
+	if where := it.location(); where != "" {
+		fmt.Fprintf(&b, " %s", where)
+	}
+	b.WriteString("\n")
+	detail := strings.ReplaceAll(it.detail(), "\n\n", "\n")
+	for _, line := range strings.Split(detail, "\n") {
+		fmt.Fprintf(&b, "  %s\n", line)
+	}
 	return b.String()
 }
 
@@ -409,18 +459,18 @@ func reviewLine(r Report, o Outcome) string {
 			message += ": " + quote(r.Review.Error)
 		}
 		return "- **Review" + by + ":** " + message + "\n"
-	case o.ReviewFindings == 0:
-		return "- **Review" + by + ":** no findings\n"
+	}
+	incomplete := ""
+	if r.Review.Incomplete {
+		incomplete = "; not every reviewer finished, so this is not a full review"
+	}
+	switch o.ReviewFindings {
+	case 0:
+		return "- **Review" + by + ":** no findings" + incomplete + "\n"
+	case 1:
+		return "- **Review" + by + ":** 1 finding" + incomplete + "\n"
 	default:
-		noun := "findings"
-		if o.ReviewFindings == 1 {
-			noun = "finding"
-		}
-		incomplete := ""
-		if r.Review.Incomplete {
-			incomplete = "; not every reviewer finished"
-		}
-		return fmt.Sprintf("- **Review%s:** %d %s%s\n", by, o.ReviewFindings, noun, incomplete)
+		return fmt.Sprintf("- **Review%s:** %d findings%s\n", by, o.ReviewFindings, incomplete)
 	}
 }
 
