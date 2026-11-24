@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"sync"
@@ -111,7 +112,14 @@ func reportReview(cmd *cobra.Command, ref *review.CheckRef, client *service.Clie
 	}
 	limited.Workspace = checked.Workspace
 	status, err := limited.ReportReview(ctx, ref.ID, body)
+	var refused *service.Error
 	switch {
+	case errors.As(err, &refused):
+		// The service answered and did not store it, so the check holds no
+		// report of this checkout's.
+		note("%v", err)
+		checked.Tracked = false
+		remember(true)
 	case err != nil:
 		note("%v", err)
 		remember(false) // It may have landed before the answer was lost.

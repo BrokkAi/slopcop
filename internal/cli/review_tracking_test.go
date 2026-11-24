@@ -500,3 +500,20 @@ func TestNewReasonGoesToTheCheckThatRecordedTheFinding(t *testing.T) {
 		t.Fatalf("check = %+v, %v; want %s", got, ok, first.ID)
 	}
 }
+
+// A report the service refused leaves the check untracked here, so no override
+// is sent for it later.
+func TestRefusedReportSendsNoOverride(t *testing.T) {
+	repo := trackedRepo(t, "findings")
+	server := newTrackingService(t, "findings", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"code":"check_not_found","message":"no"}`))
+	})
+	runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	id := checkedFindingID(t, repo)
+	runCLI(t, "override", "--root", repo, "--service", server.URL, id, "--reason", "wrong")
+	runCLI(t, "override", "--root", repo, "--service", server.URL, "--reason", "accepted")
+	if _, got := server.counts(); got != 0 {
+		t.Fatalf("dispositions = %v", server.disposed)
+	}
+}
