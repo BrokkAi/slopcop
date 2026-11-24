@@ -248,7 +248,7 @@ func reportFinding(f Finding) ReportFinding {
 	out.Message = reportText(f.Message, maxMessageChars)
 	// An API name gets the same code filter as the rest of the text, and is
 	// left out when that removed anything: what is left is not a name.
-	if api := reportText(f.API, maxAPIChars); utf8.RuneCountInString(f.API) <= maxAPIChars && !strings.Contains(api, codeOmitted) && !strings.Contains(api, "`") {
+	if api := reportText(strings.Trim(f.API, "`"), maxAPIChars); utf8.RuneCountInString(f.API) <= maxAPIChars && !strings.Contains(api, codeOmitted) && !strings.Contains(api, "`") {
 		out.API = api
 	}
 	return out
@@ -268,7 +268,13 @@ var (
 func reportText(text string, limit int) string {
 	text = fencedCode.ReplaceAllString(text, codeOmitted)
 	text = inlineCode.ReplaceAllStringFunc(text, func(span string) string {
-		if utf8.RuneCountInString(strings.Trim(span, "`")) > inlineCodeLimit {
+		// Code inside backticks does not start or end with a space. Text that
+		// does lies between two spans, or after a lone backtick, and is prose.
+		content := strings.Trim(span, "`")
+		if strings.TrimSpace(content) != content {
+			return span
+		}
+		if utf8.RuneCountInString(content) > inlineCodeLimit {
 			return codeOmitted
 		}
 		return span

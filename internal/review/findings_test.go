@@ -144,3 +144,22 @@ func TestChangedPaths(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+func TestTitleKeepsBalancedBackticks(t *testing.T) {
+	for reply, want := range map[string]string{
+		"- [P1] `port` panics on any input that is not a valid `u16` `src/a.rs:3`\nBody.":  "`port` panics on any input that is not a valid `u16`",
+		"- [P2] `contains_index` accepts an index equal to the length `src/a.rs:9`\nBody.": "`contains_index` accepts an index equal to the length",
+		"- [P2] **Stray tick`** `src/a.rs:9`\nBody.":                                       "Stray tick",
+	} {
+		f := ParseFindings("r", reply, nil)[0]
+		if f.Title != want {
+			t.Errorf("title = %q, want %q", f.Title, want)
+		}
+		// The id is the one releases that trimmed every end backtick gave.
+		legacy := f
+		legacy.Title = legacyTitle(want)
+		if f.ID != findingID(legacy, 0) {
+			t.Errorf("id of %q changed", want)
+		}
+	}
+}

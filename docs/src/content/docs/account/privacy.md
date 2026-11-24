@@ -80,6 +80,9 @@ check:
   model, effort, status, duration, how well its reply followed the format, and
   how many findings it reported, including how many a standing finding override
   left out.
+- **Findings a standing override left out:** each one's `rv-` id, the id of the
+  override it matched, and whether it matched by text or by words; and the ids
+  of the overrides the reviewers were told not to report. Their text is not sent.
 - **Each finding that cites a file and lines:** its `rv-` id, priority, path, line
   range, title, message, and the optional category and API tags. Fenced code and
   long inline code are removed from the text first, and it is cut to 200

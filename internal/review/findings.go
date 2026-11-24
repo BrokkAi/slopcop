@@ -186,7 +186,7 @@ func IsFindingID(id string) bool { return findingIDPattern.MatchString(id) }
 // reply; it is 0 for the first.
 func findingID(f Finding, occurrence int) string {
 	normal := func(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
-	key := strings.TrimPrefix(f.Path, "./") + "\x00" + normal(f.Title) + "\x00" + normal(f.Message)
+	key := strings.TrimPrefix(f.Path, "./") + "\x00" + normal(legacyTitle(f.Title)) + "\x00" + normal(f.Message)
 	if occurrence > 0 {
 		key += "\x00" + strconv.Itoa(occurrence)
 	}
@@ -297,11 +297,41 @@ func firstLocation(header string) []int {
 }
 
 // trimDecoration strips the separators and markdown reviewers put around a
-// title or location: dashes, colons, brackets, backticks and bold markers.
+// title or location: dashes, colons, brackets, bold markers, and a backtick
+// with no partner. A backtick that closes or opens a code span in the title,
+// as in "`port` panics on `u16`", stays.
 func trimDecoration(s string) string {
+	for {
+		trimmed := strings.TrimSpace(trimDecorationWithout(s, "`"))
+		if strings.Count(trimmed, "`")%2 == 1 {
+			switch {
+			case strings.HasSuffix(trimmed, "`"):
+				trimmed = strings.TrimSuffix(trimmed, "`")
+			case strings.HasPrefix(trimmed, "`"):
+				trimmed = strings.TrimPrefix(trimmed, "`")
+			}
+		}
+		if trimmed == s {
+			return s
+		}
+		s = trimmed
+	}
+}
+
+// legacyTitle is a title as releases before balanced backticks trimmed it,
+// every backtick at either end included. A finding's id hashes it, so the id
+// of a finding, and of every override made before, does not change.
+func legacyTitle(s string) string { return trimDecorationWithout(s, "") }
+
+// trimDecorationWithout is the trim of every decoration but keep.
+func trimDecorationWithout(s, keep string) string {
+	cut := " \t`*_()[]:;,.—–-"
+	if keep != "" {
+		cut = strings.ReplaceAll(cut, keep, "")
+	}
 	s = strings.TrimSpace(s)
 	for {
-		trimmed := strings.Trim(s, " \t`*_()[]:;,.—–-")
+		trimmed := strings.Trim(s, cut)
 		trimmed = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(trimmed), " in"))
 		trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, " at"))
 		if trimmed == s {

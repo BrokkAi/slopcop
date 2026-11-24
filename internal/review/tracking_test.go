@@ -205,3 +205,23 @@ func TestAPITagGetsTheCodeFilter(t *testing.T) {
 		t.Fatalf("api = %q", f.API)
 	}
 }
+
+func TestBacktickedAPINameIsKept(t *testing.T) {
+	reply := "- [P1] Leak `src/a.go:1`\nBody.\nTags: category=resource-leak api=`os.File`\n"
+	f := reportOf(t, Verdict{Status: StatusFindings, Reviewers: []Reviewer{{Name: "1-terra", Family: Terra, Status: StatusFindings, Text: reply}}}).Reviewers[0].Findings[0]
+	if f.API != "os.File" {
+		t.Fatalf("api = %q", f.API)
+	}
+}
+
+func TestStripperLeavesProseBetweenSpans(t *testing.T) {
+	for in, want := range map[string]string{
+		"`port` panics on any input that is not a valid `u16`":        "`port` panics on any input that is not a valid `u16`",
+		"port` panics on any input that is not a valid and long `u16": "port` panics on any input that is not a valid and long `u16",
+		"see `" + strings.Repeat("z", 50) + "` here":                  "see " + codeOmitted + " here",
+	} {
+		if got := reportText(in, maxTitleChars); got != want {
+			t.Errorf("reportText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
