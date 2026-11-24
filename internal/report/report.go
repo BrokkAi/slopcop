@@ -64,6 +64,10 @@ type Options struct {
 	// because of their size. The report only describes this scope; it does not
 	// affect the check's status or approval.
 	OmittedFiles []OmittedFile
+	// BinaryFiles lists the changed binary files that stayed in scope. Like
+	// OmittedFiles, it describes the check and does not affect its status or
+	// approval.
+	BinaryFiles []BinaryFile
 	// Approved says this run recorded push approval for the checked tree.
 	Approved bool
 	// Review is the local reviewers' verdict, when one ran.
@@ -130,6 +134,32 @@ type OmittedFile struct {
 	Path   string `json:"path"`
 	Bytes  int64  `json:"bytes"`
 	Reason string `json:"reason"`
+}
+
+// BinaryFile is a changed file git calls binary. Verified says every version
+// the change touches decodes as Format with nothing after the image, which
+// means a real image, not a harmless one. An
+// unverified file's content has not been reviewed, apart from readable text
+// shown to the local reviewers.
+type BinaryFile struct {
+	Path     string `json:"path"`
+	Bytes    int64  `json:"bytes"`
+	Format   string `json:"format,omitempty"`
+	Verified bool   `json:"verified"`
+	// Deleted says the change removes the file; the other fields describe
+	// the version it removes.
+	Deleted bool `json:"deleted,omitempty"`
+}
+
+// UnverifiedBinaryFiles keeps the files that did not decode as a known image.
+func UnverifiedBinaryFiles(files []BinaryFile) []BinaryFile {
+	var unverified []BinaryFile
+	for _, file := range files {
+		if !file.Verified {
+			unverified = append(unverified, file)
+		}
+	}
+	return unverified
 }
 
 // SkillUpdate is one skills directory whose slopcop skill a run wrote.
@@ -321,10 +351,28 @@ func omittedFilesHuman(options Options) string {
 			fmt.Fprintf(&out, "  %s (%d bytes)\n", printable(file.Path), file.Bytes)
 		}
 	}
+	if unverified := UnverifiedBinaryFiles(options.BinaryFiles); len(unverified) > 0 {
+		fmt.Fprintf(&out,
+			"Changed binary files SlopCop could not verify: %d of %d. No recognized format covers every version the change touches, so review their content yourself.\n",
+			len(unverified), len(options.BinaryFiles),
+		)
+		for i, file := range unverified {
+			if i == listedExcluded {
+				fmt.Fprintf(&out, "  ... and %d more; --format json lists them all.\n", len(unverified)-i)
+				break
+			}
+			state := ""
+			if file.Deleted {
+				state = ", deleted"
+			}
+			fmt.Fprintf(&out, "  %s (%d bytes%s)\n", printable(file.Path), file.Bytes, state)
+		}
+	}
 	return out.String()
 }
 
-// listedExcluded is how many excluded files the human report names.
+// listedExcluded is how many excluded or unverified files the human report
+// names.
 const listedExcluded = 10
 
 // writeHumanOmittedAndReview preserves the usual review output while making
@@ -1032,6 +1080,7 @@ func printable(value string) string {
 // sent; summary counts both either way.
 type jsonReport struct {
 	OmittedFiles []OmittedFile         `json:"omittedFiles,omitempty"`
+	BinaryFiles  []BinaryFile          `json:"binaryFiles,omitempty"`
 	Checks       []service.CheckNotice `json:"checks,omitempty"`
 	// CheckID is the check that answered. A service from before it omits
 	// it.
@@ -1129,6 +1178,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 	inconclusive := inconclusiveChecks(response)
 	return encode(w, jsonReport{
 		OmittedFiles:         options.OmittedFiles,
+		BinaryFiles:          options.BinaryFiles,
 		CheckID:              response.CheckID,
 		Status:               status(response.Status, options),
 		Checks:               response.Checks,
@@ -1173,6 +1223,7 @@ func inconclusiveUnlisted(response service.Response, checks []inconclusiveCheck)
 // still running when --timeout ran out.
 type pendingReport struct {
 	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	BinaryFiles   []BinaryFile  `json:"binaryFiles,omitempty"`
 	Status        string        `json:"status"`
 	Approved      bool          `json:"approved"`
 	StaticStatus  string        `json:"staticStatus,omitempty"`
@@ -1194,6 +1245,7 @@ func writePendingBase(w io.Writer, pending service.Pending, format string, optio
 	case FormatJSON:
 		return encode(w, pendingReport{
 			OmittedFiles:  options.OmittedFiles,
+			BinaryFiles:   options.BinaryFiles,
 			Status:        status(service.StatusPending, options),
 			StaticStatus:  options.StaticStatus,
 			ExitReason:    options.ExitReason,
@@ -1237,6 +1289,7 @@ type Skipped struct {
 // skippedReport is the document `--format json` prints for a skipped check.
 type skippedReport struct {
 	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	BinaryFiles   []BinaryFile  `json:"binaryFiles,omitempty"`
 	Status        string        `json:"status"`
 	Approved      bool          `json:"approved"`
 	StaticStatus  string        `json:"staticStatus,omitempty"`
@@ -1261,6 +1314,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 	case FormatJSON:
 		return encode(w, skippedReport{
 			OmittedFiles:  options.OmittedFiles,
+			BinaryFiles:   options.BinaryFiles,
 			Status:        status("skipped", options),
 			StaticStatus:  options.StaticStatus,
 			ExitReason:    options.ExitReason,
@@ -1298,6 +1352,7 @@ func writeSkippedBase(w io.Writer, skipped Skipped, format string, options Optio
 // whether the same request may succeed later.
 type failureReport struct {
 	OmittedFiles  []OmittedFile `json:"omittedFiles,omitempty"`
+	BinaryFiles   []BinaryFile  `json:"binaryFiles,omitempty"`
 	Status        string        `json:"status"`
 	Approved      bool          `json:"approved"`
 	StaticStatus  string        `json:"staticStatus,omitempty"`
@@ -1326,6 +1381,7 @@ func writeFailureBase(w io.Writer, failure *service.Error, format string, option
 	case FormatJSON:
 		return encode(w, failureReport{
 			OmittedFiles:  options.OmittedFiles,
+			BinaryFiles:   options.BinaryFiles,
 			Status:        status(service.StatusFailed, options),
 			StaticStatus:  options.StaticStatus,
 			ExitReason:    options.ExitReason,
@@ -1382,6 +1438,9 @@ func runProperties(properties map[string]any, options Options) map[string]any {
 	}
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
+	}
+	if len(options.BinaryFiles) > 0 {
+		properties["slopcop.binaryFiles"] = options.BinaryFiles
 	}
 	if options.EmptyChange {
 		properties["slopcop.emptyChange"] = true
@@ -1934,7 +1993,7 @@ func WriteAI(w io.Writer, format string, options Options) error {
 	case "", FormatHuman:
 		return writeHumanOmittedAndReview(w, options)
 	case FormatJSON:
-		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, Status: status("clean", options), Approved: options.Approved, ReviewOverride: options.ReviewOverride, ExitReason: options.ExitReason, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
+		return encode(w, aiReport{OmittedFiles: options.OmittedFiles, BinaryFiles: options.BinaryFiles, Status: status("clean", options), Approved: options.Approved, ReviewOverride: options.ReviewOverride, ExitReason: options.ExitReason, EmptyChange: options.EmptyChange, Review: reviewValue(options.Review), SkillUpdated: options.SkillUpdated}, "json report")
 	case FormatSARIF:
 		return encode(w, sarifLogWithReview(options, sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "SlopCop", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: true}}, Properties: runProperties(map[string]any{"slopcop.status": status("clean", options)}, options)}), "sarif report")
 	default:
@@ -1945,6 +2004,7 @@ func WriteAI(w io.Writer, format string, options Options) error {
 // aiReport is the JSON document for a check without a static half.
 type aiReport struct {
 	OmittedFiles []OmittedFile `json:"omittedFiles,omitempty"`
+	BinaryFiles  []BinaryFile  `json:"binaryFiles,omitempty"`
 	// Status is the AI-only report's Status field.
 	Status   string `json:"status"`
 	Approved bool   `json:"approved"`
@@ -2050,6 +2110,9 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	}
 	if len(options.OmittedFiles) > 0 {
 		properties["slopcop.omittedFiles"] = options.OmittedFiles
+	}
+	if len(options.BinaryFiles) > 0 {
+		properties["slopcop.binaryFiles"] = options.BinaryFiles
 	}
 	run := sarifRun{Tool: sarifTool{Driver: sarifDriver{Name: "slopcop-review", Rules: []sarifRule{}}}, Results: []sarifResult{}, Invocations: []sarifInvocation{{ExecutionSuccessful: v.Status != review.StatusFailed && !v.Incomplete}}, Properties: properties}
 	for _, finding := range v.Findings() {

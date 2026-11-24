@@ -24,9 +24,12 @@ type panel struct {
 	trees reviewTrees
 	// diffSize is the captured diff's length in bytes.
 	diffSize int
-	dir      string
-	timeout  time.Duration
-	commands map[Family][]string
+	// binaryTextCut says a size limit left readable text of a binary file
+	// out of the prompt.
+	binaryTextCut bool
+	dir           string
+	timeout       time.Duration
+	commands      map[Family][]string
 	// adapters names each family's adapter; copilot lists the models for
 	// the families Copilot runs.
 	adapters map[Family]string
@@ -159,6 +162,9 @@ func (p *panel) start(name string, f Family) (*runner, error) {
 	if isolatedAdapter(p.adapter(f)) && p.diffSize > promptDiffLimit {
 		return nil, errDiffTooLarge
 	}
+	if isolatedAdapter(p.adapter(f)) && p.binaryTextCut {
+		return nil, errBinaryTextCut
+	}
 	p.startMu.Lock()
 	defer p.startMu.Unlock()
 	return launch(p.ctx, p.root, p.trees, p.adapter(f), p.commands[f], p.copilot, f, name, p.dir, p.timeout)
@@ -176,7 +182,7 @@ func (p *panel) adapter(f Family) string {
 // timeout would only double the wait, a canceled check wants no more work,
 // and a missing login or exhausted credits fail the same way again.
 func retryable(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errChangeNotExported) || errors.Is(err, errKimiNoKey) {
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errBinaryTextCut) || errors.Is(err, errChangeNotExported) || errors.Is(err, errKimiNoKey) {
 		return false
 	}
 	var requestErr *acp.RequestError
@@ -262,7 +268,7 @@ func explainFailure(r Reviewer, err error) string {
 	if errors.As(err, &stop) {
 		return text + ". " + stop.advice()
 	}
-	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) {
+	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errBinaryTextCut.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) {
 		return text
 	}
 	if r.FirstError != "" && r.FirstError != text {
