@@ -383,7 +383,8 @@ func TestReadKeepsWhitespaceInPaths(t *testing.T) {
 		return git(t, root, "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "hash-object", "-w", name)
 	}
 	git(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob("plain.txt", "plain\n")+",x.go")
-	git(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob("spaced.txt", "with a space\n")+",x.go ")
+	// Git for Windows refuses such a path in its index unless protectNTFS is off.
+	git(t, root, "-c", "core.protectNTFS=false", "update-index", "--add", "--cacheinfo", "100644,"+blob("spaced.txt", "with a space\n")+",x.go ")
 	s, err := loadSnapshot(context.Background(), root, git(t, root, "write-tree"), "")
 	if err != nil {
 		t.Fatal(err)
