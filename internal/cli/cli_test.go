@@ -114,9 +114,29 @@ func newRepo(t *testing.T, origin string) string {
 	return dir
 }
 
+// privateTestHome makes a home directory below the real user cache. Reviewers
+// refuse a cache below a directory other users can write to, which the default
+// temporary directory is on Linux.
+func privateTestHome(t *testing.T) string {
+	t.Helper()
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	home, err := os.MkdirTemp(cache, "slopcop-test-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(home) })
+	return home
+}
+
 func isolateUserConfig(t *testing.T) {
 	t.Helper()
-	home := t.TempDir()
+	home := privateTestHome(t)
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, "config"))
