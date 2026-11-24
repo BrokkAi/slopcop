@@ -95,9 +95,10 @@ func TestCopilotPick(t *testing.T) {
 		}
 		return out
 	}
-	paid := opts("auto", "claude-haiku-4.5", "claude-haiku-5.5", "gpt-5.6-sol", "gpt-6.2-sol", "gpt-6.1-terra", "gemini-3.8-flash")
+	paid := opts("auto", "claude-haiku-4.5", "claude-haiku-5.5", "claude-sonnet-4.6", "claude-sonnet-5.5", "claude-opus-5.5", "claude-opus-5.5-fast", "gpt-5.6-sol", "gpt-6.2-sol", "gpt-6.1-terra", "gemini-3.8-flash")
 	c := newCopilotCatalog(nil)
-	for f, want := range map[Family]string{Terra: "gpt-6.1-terra", Sol: "gpt-6.2-sol", Haiku: "claude-haiku-5.5"} {
+	// A fast mode is the same model at a higher price, so opus skips it.
+	for f, want := range map[Family]string{Terra: "gpt-6.1-terra", Sol: "gpt-6.2-sol", Haiku: "claude-haiku-5.5", Sonnet: "claude-sonnet-5.5", Opus: "claude-opus-5.5"} {
 		if got, auto, err := c.pick(f, paid); got != want || auto || err != nil {
 			t.Errorf("pick(%s) = %q %v %v, want %s", f, got, auto, err, want)
 		}

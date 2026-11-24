@@ -42,7 +42,7 @@ and Copilot may be signed in (a `GH_TOKEN`, `GITHUB_TOKEN` or
 `COPILOT_GITHUB_TOKEN`, a Copilot CLI login, or a GitHub CLI login). Each
 probe it sends uses one Copilot request.
 
-Copilot runs `terra`, `sol` and `haiku`; `flash` keeps dsh. The CLI starts
+Copilot runs `terra`, `sol`, `haiku`, `sonnet` and `opus`; `flash` keeps dsh. The CLI starts
 Copilot (`@github/copilot@1.0.114`, through npx, unless
 `review.adapters.copilot.command` names another) once to list the models your
 account may use, which sends no prompt, and then once per reviewer, with:
@@ -72,7 +72,7 @@ reasoning effort on it. One reviewer then runs on Auto, and the report warns
 that it did; other families do not run, because a second Auto reviewer could
 get the same model. With one reviewer, a clean review needs only that one.
 Copilot Free also has a small monthly request allowance that every check
-draws on. Copilot Pro unlocks the `terra`, `sol` and `haiku` models.
+draws on. Copilot Pro unlocks the `terra`, `sol`, `haiku`, `sonnet` and `opus` models.
 
 ## What the CLI reads from the session
 

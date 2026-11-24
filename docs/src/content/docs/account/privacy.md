@@ -45,7 +45,7 @@ intent from the current Claude Code transcript or Codex rollout when available,
 then from `--intent`, else labels it `not available`. Reviewer adapters use your existing
 logins to send these prompts to the chosen model providers: OpenAI through Codex
 for GPT Terra, DeepSeek through dsh for DeepSeek Flash, and Anthropic through
-Claude for Claude Haiku. If you name the opt-in `gemini` reviewer, they also go
+Claude for Claude Haiku, Sonnet and Opus. If you name the opt-in `gemini` reviewer, they also go
 to Google through Antigravity, whose web search SlopCop can detect but cannot
 block ([details](/reference/configuration/#gemini-through-antigravity-opt-in)).
 If you name the opt-in `kimi` reviewer, they also go to Moonshot through Kimi
