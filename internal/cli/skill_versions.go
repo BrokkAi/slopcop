@@ -29,7 +29,9 @@ const skillVersionUnknown = "unknown"
 // releaseNotesURL, followed by a release tag, is that release's notes.
 const releaseNotesURL = "https://github.com/BrokkAi/slopcop/releases/tag/"
 
-// releaseTag matches the version of a released build.
+// releaseTag matches the version of a released build, vX.Y.Z. A pre-release
+// (v1.2.3-rc.1) and a development build ("dev", v1.2.3-4-gabc1234) do not
+// match.
 var releaseTag = regexp.MustCompile(`^v\d+\.\d+\.\d+$`)
 
 // releasedSkillFiles are the skill files the releases before the stamp

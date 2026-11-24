@@ -211,7 +211,9 @@ safe. A check updates copies already installed, but creates none; login
 does not install the skill. An existing copy is rewritten when it differs from
 the skill bundled into the binary, so an agent follows the instructions of the
 slopcop version it runs. Each install records the version that wrote it, and
-what each file held, in `.slopcop-skill.json` in the skill folder. An update
+what each file held, in `.slopcop-skill.json` in the skill folder. Only a
+release build (`vX.Y.Z`) updates on a check: a development build or a
+pre-release leaves installed copies alone. An update
 names the version it replaces, the new one and the files that changed, for
 example:
 

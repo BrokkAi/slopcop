@@ -505,6 +505,67 @@ func (c *Client) Ignores(ctx context.Context, repoURL string, page int) (IgnoreL
 	return decoded, nil
 }
 
+// ReviewDisposition is the POST /v1/check/{checkId}/review/dispositions body:
+// a command a caller ran on a reported review.
+type ReviewDisposition struct {
+	Kind   string `json:"kind"`
+	Key    string `json:"key,omitempty"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// The dispositions the CLI sends.
+const (
+	DispositionFindingOverridden = "finding_overridden"
+	DispositionOverrideUndone    = "finding_override_undone"
+	DispositionReviewOverridden  = "overridden"
+)
+
+// BestEffort is a copy of the client for a request that must not hold up or
+// change a command: it gives up after timeout, follows no redirect, and does
+// not report a newer release.
+func (c *Client) BestEffort(timeout time.Duration) *Client {
+	limited := *c
+	limited.LatestVersion = nil
+	limited.WorkspaceRefusal = nil
+	limited.HTTP = &http.Client{
+		Timeout:       timeout,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	if c.HTTP != nil {
+		limited.HTTP.Transport = c.HTTP.Transport
+	}
+	return &limited
+}
+
+// ReportReview posts the local review of a check and returns the service's
+// status for it. See review.Report for the body.
+func (c *Client) ReportReview(ctx context.Context, checkID string, report any) (string, error) {
+	return c.postReview(ctx, checkPath+"/"+url.PathEscape(checkID)+"/review", report)
+}
+
+// RecordReviewDisposition posts a command run on a reported review and
+// returns the service's status for it.
+func (c *Client) RecordReviewDisposition(ctx context.Context, checkID string, disposition ReviewDisposition) (string, error) {
+	return c.postReview(ctx, checkPath+"/"+url.PathEscape(checkID)+"/review/dispositions", disposition)
+}
+
+func (c *Client) postReview(ctx context.Context, path string, body any) (string, error) {
+	status, _, payload, err := c.postJSON(ctx, path, body)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 {
+		return "", decodeError(status, payload)
+	}
+	var answer struct {
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(payload, &answer); err != nil {
+		return "", fmt.Errorf("decode review answer: %w", err)
+	}
+	return answer.Status, nil
+}
+
 func decodeError(status int, payload []byte) *Error {
 	var body ErrorBody
 	err := json.Unmarshal(payload, &body)

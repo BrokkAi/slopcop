@@ -1,6 +1,8 @@
 package review
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"testing"
@@ -142,5 +144,34 @@ func TestChangedPaths(t *testing.T) {
 	want := map[string]bool{"a b.go": true, "img.png": true, "new.go": true, "src/b/x.go": true, "src/y.go": true, "café.go": true}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v", got)
+	}
+}
+
+func TestTitleKeepsBalancedBackticks(t *testing.T) {
+	for reply, want := range map[string]string{
+		"- [P1] `port` panics on any input that is not a valid `u16` `src/a.rs:3`\nBody.":  "`port` panics on any input that is not a valid `u16`",
+		"- [P2] `contains_index` accepts an index equal to the length `src/a.rs:9`\nBody.": "`contains_index` accepts an index equal to the length",
+		"- [P2] **Stray tick`** `src/a.rs:9`\nBody.":                                       "Stray tick",
+	} {
+		f := ParseFindings("r", reply, nil)[0]
+		if f.Title != want {
+			t.Errorf("title = %q, want %q", f.Title, want)
+		}
+		// The id is the one releases that trimmed every end backtick gave.
+		legacy := f
+		legacy.Title = legacyTitle(want)
+		if f.ID != findingID(legacy, 0) {
+			t.Errorf("id of %q changed", want)
+		}
+	}
+}
+
+func TestMalformedFindingKeepsItsID(t *testing.T) {
+	reply := "Looks mostly fine, maybe check the loop.\nSecond line."
+	f := ParseFindings("r", reply, nil)[0]
+	key := "\x00" + "looks mostly fine, maybe check the loop." + "\x00" + "second line."
+	sum := sha256.Sum256([]byte(key))
+	if want := FindingIDPrefix + hex.EncodeToString(sum[:6]); !f.Malformed || f.ID != want {
+		t.Fatalf("id = %s, want %s", f.ID, want)
 	}
 }

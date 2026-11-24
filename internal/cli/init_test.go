@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"context"
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/skills"
 	"io/fs"
@@ -156,7 +157,7 @@ func TestInitLeavesTrackedLegacyTargetsAlone(t *testing.T) {
 	if err := os.WriteFile(skill, []byte("---\nname: slopcop\n---\nold"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	updates, err := syncBundledSkill(repo, "test")
+	updates, err := syncBundledSkill(repo, "v0.0.99")
 	if err != nil || len(updates) == 0 {
 		t.Fatalf("updates %v: %v", updates, err)
 	}
@@ -418,12 +419,12 @@ func TestCheckNamesTheSkillVersionsAndFilesItChanges(t *testing.T) {
 	dir := filepath.Join(home, ".agents/skills/slopcop")
 	writeStampedSkill(t, dir, "v0.0.9", map[string]string{"SKILL.md": "an older skill\n", "notes/stale.md": "stale\n"})
 	var out, errOut bytes.Buffer
-	updates := syncSkillAndReport(&out, &errOut, repo, "test")
+	updates := syncSkillAndReport(&out, &errOut, repo, "v0.0.99")
 	wantChanged := []string{"SKILL.md", "agents/openai.yaml", "notes/stale.md"}
 	if len(updates) != 1 || updates[0].From != "v0.0.9" || !reflect.DeepEqual(updates[0].Changed, wantChanged) {
 		t.Fatalf("updates: %+v", updates)
 	}
-	if !strings.Contains(out.String(), "from v0.0.9 to test") || !strings.Contains(out.String(), "changed: "+strings.Join(wantChanged, ", ")) {
+	if !strings.Contains(out.String(), "from v0.0.9 to v0.0.99") || !strings.Contains(out.String(), "changed: "+strings.Join(wantChanged, ", ")) {
 		t.Fatal(out.String())
 	}
 	if errOut.Len() != 0 {
@@ -437,7 +438,7 @@ func TestCheckNamesTheSkillVersionsAndFilesItChanges(t *testing.T) {
 		t.Fatalf("stale file remains: %v", err)
 	}
 	out.Reset()
-	if got := syncSkillAndReport(&out, &errOut, repo, "test"); len(got) != 0 || out.Len() != 0 {
+	if got := syncSkillAndReport(&out, &errOut, repo, "v0.0.99"); len(got) != 0 || out.Len() != 0 {
 		t.Fatalf("current skill reported: %+v %s", got, out.String())
 	}
 }
@@ -455,7 +456,7 @@ func TestCheckKeepsACopyOfASkillWithLocalEdits(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errOut bytes.Buffer
-	updates := syncSkillAndReport(&out, &errOut, repo, "test")
+	updates := syncSkillAndReport(&out, &errOut, repo, "v0.0.99")
 	if len(updates) != 1 || updates[0].Backup == "" {
 		t.Fatalf("updates: %+v", updates)
 	}
@@ -471,5 +472,119 @@ func TestCheckKeepsACopyOfASkillWithLocalEdits(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "mine.md")); !os.IsNotExist(err) {
 		t.Errorf("unbundled file remains: %v", err)
+	}
+}
+
+// TestNonReleaseBuildLeavesTheInstalledSkillAlone runs the check's sync entry
+// point as builds without a release version: none may touch a release's skill
+// or its stamp.
+func TestNonReleaseBuildLeavesTheInstalledSkillAlone(t *testing.T) {
+	home := isolateAgentHome(t)
+	repo := testInitRepo(t)
+	dirs := []string{filepath.Join(home, ".agents/skills/slopcop"), filepath.Join(home, ".claude/skills/slopcop")}
+	snapshot := func() map[string]string {
+		got := map[string]string{}
+		for _, dir := range dirs {
+			for _, name := range []string{"SKILL.md", skillStampName} {
+				data, err := os.ReadFile(filepath.Join(dir, name))
+				if err != nil {
+					t.Fatal(err)
+				}
+				got[filepath.Join(dir, name)] = string(data)
+			}
+		}
+		return got
+	}
+	for _, dir := range dirs {
+		writeStampedSkill(t, dir, "v0.0.23", map[string]string{"SKILL.md": "the released skill\n"})
+	}
+	before := snapshot()
+	for _, version := range []string{"dev", "test", "", "v0.0.23-4-gabc1234-dirty", "v1.2.3-rc.1", "0.0.24"} {
+		var out, errOut bytes.Buffer
+		if updates := syncSkillAndReport(&out, &errOut, repo, version); len(updates) != 0 || out.Len() != 0 || errOut.Len() != 0 {
+			t.Errorf("version %q: updates %+v, out %q, err %q", version, updates, out.String(), errOut.String())
+		}
+		if after := snapshot(); !reflect.DeepEqual(after, before) {
+			t.Errorf("version %q changed the installed skill: %v", version, after)
+		}
+	}
+}
+
+// TestInitFromADevBuildStillInstalls keeps the explicit install: a developer
+// who runs init from their own build gets that build's skill, stamped with
+// its version.
+func TestInitFromADevBuildStillInstalls(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	var stdout, stderr bytes.Buffer
+	if code := execute(context.Background(), []string{"init", "--no-reviewers", "--no-hooks", "--root", t.TempDir()}, "dev", &stdout, &stderr); code != 0 {
+		t.Fatalf("%d %s", code, stderr.String())
+	}
+	for _, dir := range []string{filepath.Join(home, ".agents/skills/slopcop"), filepath.Join(home, ".claude/skills/slopcop")} {
+		data, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
+		if err != nil || string(data) != readEmbeddedSkill(t, "SKILL.md") {
+			t.Errorf("%s: skill not installed: %v", dir, err)
+		}
+		if stamp, stamped := readSkillStamp(dir); !stamped || stamp.Version != "dev" {
+			t.Errorf("%s: stamp = %+v, %v, want version dev", dir, stamp, stamped)
+		}
+	}
+}
+
+// TestReleaseReplacesASkillADevBuildStamped is the recovery: a release treats
+// a dev build's untouched skill like an older release's, replacing it without
+// a backup, and takes over the stamp of one whose files already match.
+func TestReleaseReplacesASkillADevBuildStamped(t *testing.T) {
+	home := isolateAgentHome(t)
+	repo := testInitRepo(t)
+	stale := filepath.Join(home, ".agents/skills/slopcop")
+	writeStampedSkill(t, stale, "dev", map[string]string{"SKILL.md": "an unreleased skill\n"})
+	files, err := bundledSkillFiles(skillName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matching := filepath.Join(home, ".claude/skills/slopcop")
+	if err := writeSkill(matching, files, "v0.0.23-4-gabc1234"); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	updates := syncSkillAndReport(&out, &errOut, repo, "v0.0.99")
+	if len(updates) != 1 || updates[0].Dir != stale || updates[0].From != "dev" || updates[0].Backup != "" {
+		t.Fatalf("updates: %+v", updates)
+	}
+	if !strings.Contains(out.String(), "from dev to v0.0.99") || errOut.Len() != 0 {
+		t.Fatalf("out %q, err %q", out.String(), errOut.String())
+	}
+	if data, _ := os.ReadFile(filepath.Join(stale, "SKILL.md")); string(data) != readEmbeddedSkill(t, "SKILL.md") {
+		t.Error("the dev-stamped skill was not replaced")
+	}
+	for _, dir := range []string{stale, matching} {
+		if stamp, _ := readSkillStamp(dir); stamp.Version != "v0.0.99" {
+			t.Errorf("%s: stamp version = %q, want v0.0.99", dir, stamp.Version)
+		}
+	}
+}
+
+// TestReleaseKeepsACopyOfAnEditedDevStampedSkill holds the protection for
+// local edits: a file the dev build's stamp did not write is backed up before
+// the release replaces the skill.
+func TestReleaseKeepsACopyOfAnEditedDevStampedSkill(t *testing.T) {
+	home := isolateAgentHome(t)
+	repo := testInitRepo(t)
+	dir := filepath.Join(home, ".claude/skills/slopcop")
+	writeStampedSkill(t, dir, "dev", map[string]string{"SKILL.md": "an unreleased skill\n"})
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte("my edited skill\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	updates := syncSkillAndReport(&out, &errOut, repo, "v0.0.99")
+	if len(updates) != 1 || updates[0].Backup == "" {
+		t.Fatalf("updates: %+v", updates)
+	}
+	if data, err := os.ReadFile(filepath.Join(updates[0].Backup, "SKILL.md")); err != nil || string(data) != "my edited skill\n" {
+		t.Errorf("backup: %q %v", data, err)
+	}
+	if !strings.Contains(out.String(), "local edits; a copy is at "+updates[0].Backup) {
+		t.Error(out.String())
 	}
 }

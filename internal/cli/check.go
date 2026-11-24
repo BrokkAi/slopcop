@@ -266,12 +266,18 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			verdict = <-reviewDone
 		}
 	}
+	var checkRef *review.CheckRef
 	if store != nil {
 		if mode == modeBoth {
 			if err := store.SetStatic(static.exit, static.status, !staticPasses(static, mode, blockLevel)); err != nil {
 				verdict.Status = review.StatusFailed
 				verdict.Error = err.Error()
 			}
+		}
+		// Only for later overrides to find the check, so a failure here is
+		// not the check's.
+		if checkRef = reviewCheckRef(mode, static, prepared.client); checkRef != nil {
+			_ = store.SetCheck(*checkRef, verdict)
 		}
 		if err := store.Close(); err != nil {
 			verdict.Status = review.StatusFailed
@@ -476,6 +482,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if reportOptions.Approved && advisory > 0 && agenthooks.GateInstalled(prepared.repoRoot) {
 		fmt.Fprintln(cmd.ErrOrStderr(), advisoryNotice(advisory, blockLevel))
 	}
+	reportReview(cmd, checkRef, prepared.client, prepared.repoRoot, verdict, settings, version, opts.verbose)
 	return silentExit{exit}
 }
 

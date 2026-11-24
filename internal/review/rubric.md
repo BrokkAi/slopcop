@@ -64,6 +64,8 @@ OUTPUT FORMAT:
 
 Write your findings as plain text, highest priority first. Start each finding on its own line with a dash, then the `[Pn]` tag and title, then the file path and the shortest line range that locates the problem, in backticks (`path/to/file.rs:120-124`), then one paragraph explaining why it is a problem. The location must overlap the diff. Do not generate a fix.
 
+You may close a finding with one extra line naming what kind of defect it is and the API or library it concerns, leaving out what does not apply: `Tags: category=resource-leak api=tokio::fs::File`. The category is one of: api-misuse, compatibility, concurrency, correctness, data-loss, error-handling, input-validation, performance, resource-leak, security. Leave the line out when none fits.
+
 If there is no finding that a person would definitely want to fix, your entire answer must be exactly:
 
 No findings.
