@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/BrokkAi/slopcop/internal/gitx"
@@ -18,8 +19,9 @@ import (
 // command: ;, &, &&, |, ||, newlines, subshells and command substitution.
 var shellSeparator = regexp.MustCompile("[;&|\n()`]")
 
-// shellWord is one shell word, quoted or not.
-const shellWord = `(?:"[^"]*"|'[^']*'|\S+)`
+// shellWord is one shell word: quoted parts, backslash escapes such as
+// `my\ repo`, and plain characters, run together.
+const shellWord = `(?:"[^"]*"|'[^']*'|\\.|[^\s"'\\])+`
 
 // gitPush matches git whose subcommand is push, allowing git's global options
 // before it: -C dir and -c key=value, the long options that take a separate
@@ -67,6 +69,10 @@ func forgedApproval(command string) bool {
 // blocked.
 const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
 
+// unsureTargetText is the reason a push is blocked when the gate cannot read
+// which repository it would push.
+const unsureTargetText = "slopcop: push blocked: the gate cannot tell which repository this push runs in, because a directory on the command line depends on the shell ($VAR, $(...), cd -, popd). Push with a path it can read: run it from the repository, or use `cd <path> && git push` or `git -C <path> push`"
+
 // shellTools are the tool names a PreToolUse payload gives a shell command:
 // Bash from Claude Code and Codex, and run_terminal_command from Grok, which
 // runs the gate from the repository's Claude Code settings.
@@ -86,22 +92,36 @@ type gateInput struct {
 	} `json:"tool_input"`
 }
 
+// armedRoot is the checkout that holds dir, and whether SlopCop's review
+// store there arms the gate.
+func armedRoot(dir string) (string, bool) {
+	root, err := gitx.Toplevel(dir)
+	if err != nil {
+		return "", false
+	}
+	gitDir, err := gitx.Run(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", false
+	}
+	if _, err := os.Stat(filepath.Join(strings.TrimSpace(gitDir), "slopcop")); err != nil {
+		return "", false
+	}
+	return root, true
+}
+
+// gateArmed reports whether the gate guards the checkout that holds dir.
+func gateArmed(dir string) bool {
+	_, ok := armedRoot(dir)
+	return ok
+}
+
 // gateTree allows a push only when the committed HEAD tree has an approval ref.
 // User-level hooks fire in every repository, so a checkout that has never run
 // SlopCop is left alone. The review store is created before a check starts; its
 // presence arms the gate, and after that only an approved HEAD tree may push.
 func gateTree(root string) error {
-	root, err := gitx.Toplevel(root)
-	if err != nil {
-		return nil
-	}
-	gitDir, err := gitx.Run(root, "rev-parse", "--absolute-git-dir")
-	if err != nil {
-		return nil
-	}
-	if _, err := os.Stat(filepath.Join(strings.TrimSpace(gitDir), "slopcop")); errors.Is(err, os.ErrNotExist) {
-		return nil
-	} else if err != nil {
+	root, ok := armedRoot(root)
+	if !ok {
 		return nil
 	}
 	tree, err := gitx.Run(root, "rev-parse", "--verify", "HEAD^{tree}")
@@ -166,7 +186,26 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				if input.CWD == "" {
 					return gateBlock(cmd, fmt.Errorf("slopcop: %s hook input is missing cwd", hook))
 				}
-				root = input.CWD
+				// A shell push runs where its cd, git -C and --git-dir put
+				// it; an MCP push from the session's directory.
+				roots := []string{input.CWD}
+				if shellTools[input.ToolName] {
+					targets, unsure := pushTargets(input.CWD, input.ToolInput.Command)
+					// Where SlopCop guards none of the repositories in
+					// sight, a push it cannot read is none of its business.
+					if unsure && (gateArmed(input.CWD) || slices.ContainsFunc(targets, gateArmed)) {
+						return gateBlock(cmd, errors.New(unsureTargetText))
+					}
+					if len(targets) > 0 {
+						roots = targets
+					}
+				}
+				for _, target := range roots {
+					if err := gateTree(target); err != nil {
+						return gateBlock(cmd, err)
+					}
+				}
+				return nil
 			}
 			_ = cleanupInstalledLegacyRepository(legacyRepoRoot(root))
 			return gateBlock(cmd, gateTree(root))

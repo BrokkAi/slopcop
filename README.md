@@ -238,7 +238,15 @@ Claude Code, Codex and Grok, and leaves everything else in each file as it was:
 
 The push gate blocks `git push`, `gh pr create`, and the GitHub MCP tools that
 push files or open a pull request until HEAD's tree has a passing check or
-valid override. It is installed machine-wide but only enforces a repository
+valid override. A shell push is judged in each repository it may run in: the
+session's directory, moved by a `cd` the push runs after (`cd ../other && git
+push`) or by `git -C`, or named by `--git-dir` or `GIT_DIR`. Where a `cd`
+may not have run, as around `||`, every directory the push could run in is
+judged; a `cd` in a pipeline, a background job or a subshell does not move it.
+Where the directory depends on the shell (`cd $DIR`, `cd -`, `popd`), the gate
+cannot tell what would be pushed and blocks the push when it guards the
+session's repository or another the push names. It is installed machine-wide
+but only enforces a repository
 after SlopCop has created review state there. A repository that has never been
 checked is left alone.
 
