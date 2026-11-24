@@ -79,6 +79,10 @@ copies aligned with the version of slopcop that runs. Each install records
 the version that wrote it, and what each file held, in `.slopcop-skill.json` in
 the skill folder.
 
+Only a release build (`vX.Y.Z`) updates on a check. A development build or a
+pre-release leaves installed copies alone, so only `slopcop init` installs its
+skill, and the next release's check replaces that copy like any older one.
+
 An update names the version it replaces, the new one, and the files that
 changed:
 

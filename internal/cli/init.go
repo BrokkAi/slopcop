@@ -109,6 +109,11 @@ type skillInstall struct {
 // installBundledSkill writes the bundled skill into every well-known skills
 // directory whose harness is installed here. A skill that is already in place
 // is never rewritten, so local edits survive.
+//
+// Unlike the sync an ordinary run does, this is not limited to release
+// builds: a developer who runs `slopcop init` from a build of their own asked
+// for that build's skill. The copy is stamped with the build's version, so
+// the next release's check replaces it (see syncSkillAt).
 func installBundledSkill(version string) (skillInstall, error) {
 	var result skillInstall
 	targets, err := skillTargets()
@@ -181,8 +186,18 @@ func skillRepoRoot(path string) string {
 // directories. Missing copies are left for init to install, and tracked
 // repository copies stay under the user's control. Local edits are backed up
 // before replacement.
+//
+// Only a release build syncs. A build with any other version, such as the
+// "dev" of a plain `go build` or a `git describe` string, carries a skill no
+// release shipped, and a run of it for a test must not put that skill in
+// front of every agent on the machine. A pre-release such as v1.2.3-rc.1
+// counts as such a build: it leaves an installed skill alone, and
+// `slopcop init` is how to install its skill on purpose.
 func syncBundledSkill(repoRoot, version string) ([]report.SkillUpdate, error) {
 	var updates []report.SkillUpdate
+	if !releaseTag.MatchString(version) {
+		return updates, nil
+	}
 	roots, err := skillRoots()
 	if err != nil {
 		return updates, err
@@ -233,6 +248,11 @@ func syncSkillDirs(updates []report.SkillUpdate, repoRoot string, dirs []string,
 // syncSkillAt brings the skill in dir to the bundled one. The boolean
 // reports whether it wrote any skill file; a skill that already matches only
 // has its stamp brought to this version.
+//
+// What is replaced does not depend on the version in the stamp: a skill a
+// development build stamped is replaced like an older release's, so a machine
+// left on one heals on its next release check. The stamp's file hashes decide
+// only whether the copy has local edits, which are backed up first.
 func syncSkillAt(dir string, files []skillFile, version string) (report.SkillUpdate, bool, error) {
 	update := report.SkillUpdate{Dir: dir, To: version}
 	present, err := readSkillDir(dir)

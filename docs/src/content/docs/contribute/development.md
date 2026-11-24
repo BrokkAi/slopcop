@@ -18,6 +18,10 @@ make npm-test    # node --test npm/test
 make wheels      # pypi-dist/, one wheel per release target
 ```
 
+A build whose version is not a release tag (`vX.Y.Z`), such as `dev` or a
+`git describe` string past a tag, never updates the skills installed on your
+machine during a check. Only its `slopcop init` installs its skill.
+
 CI runs `make fmt-check`, `make vet`, and `make test` on every change, plus
 `goreleaser check` and a snapshot build of every release target, the npm
 packaging against a stand-in release, and the PyPI wheels installed on each
