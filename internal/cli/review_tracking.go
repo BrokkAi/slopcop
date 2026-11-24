@@ -75,7 +75,13 @@ func reportReview(cmd *cobra.Command, ref *review.CheckRef, client *service.Clie
 	}
 	checked := *ref
 	remember := func(replace bool) {
-		if err := review.RememberCheck(root, checked, verdict, body.Keys(), replace); err != nil {
+		// A tracked check holds what its report carried. One that is not holds
+		// every finding it reported, so none can be sent to an older check.
+		var keys []string
+		if checked.Tracked {
+			keys = body.Keys()
+		}
+		if err := review.RememberCheck(root, checked, verdict, keys, replace); err != nil {
 			note("could not remember the check: %v", err)
 		}
 	}
