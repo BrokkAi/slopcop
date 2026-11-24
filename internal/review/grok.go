@@ -154,22 +154,7 @@ func startGrok(ctx context.Context, root string, trees reviewTrees, base []strin
 // parent of where it starts, so npx starts in the private adapter directory
 // (an empty result) and the command it runs enters the workspace.
 func grokLaunch(base, args []string, workspace string) ([]string, string, error) {
-	switch filepath.Base(base[0]) {
-	case "npx":
-		if len(base) != 3 || base[1] != "--yes" || strings.HasPrefix(base[2], "-") {
-			break
-		}
-		quoted := make([]string, len(args))
-		for i, arg := range args {
-			quoted[i] = shellQuote(arg)
-		}
-		call := "cd " + shellQuote(workspace) + " && exec grok " + strings.Join(quoted, " ")
-		return []string{base[0], "--yes", "-p", base[2], "-c", call}, "", nil
-	case "npm":
-	default:
-		return append(slices.Clone(base), args...), workspace, nil
-	}
-	return nil, "", errors.New("review.adapters.grok.command must be `npx --yes <package>@<version>` or the path of a Grok binary, so that npm cannot read files from the reviewer's temporary directory")
+	return launchInWorkspace(base, args, workspace, "grok", "review.adapters.grok.command", "Grok")
 }
 
 // writeGrokHome fills the reviewer's GROK_HOME and returns the agent profile's

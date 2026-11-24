@@ -32,10 +32,15 @@ const (
 	// its restrictions have layers SlopCop cannot verify from outside, such
 	// as what the CLI itself sends over the network.
 	Grok Family = "grok"
+	// Ollama is a model the user installed in Ollama, through OpenCode's ACP
+	// server. It is opt-in: it needs a chosen model, and a small local model
+	// is a weaker reviewer, so it runs only when named in review.reviewers or
+	// review.fallbacks.
+	Ollama Family = "ollama"
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
-// Gemini, Kimi and Grok are left out because they are opt-in.
+// Gemini, Kimi, Grok and Ollama are left out because they are opt-in.
 var Families = []Family{Terra, Sol, Flash, Haiku}
 
 const (
@@ -88,6 +93,8 @@ type Settings struct {
 	// Provider, when ProviderCopilot, runs every family GitHub Copilot
 	// serves through the Copilot CLI instead of the family's own adapter.
 	Provider string
+	// OllamaModel is the installed Ollama model the ollama family reviews on.
+	OllamaModel string
 }
 
 // ProviderCopilot routes the families Copilot serves through Copilot CLI.

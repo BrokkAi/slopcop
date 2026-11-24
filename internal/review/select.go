@@ -25,6 +25,8 @@ func DefaultCommand(f Family) []string {
 		return slices.Clone(kimiDefaultCommand)
 	case Grok:
 		return slices.Clone(grokDefaultCommand)
+	case Ollama:
+		return slices.Clone(ollamaDefaultCommand)
 	}
 	return nil
 }
@@ -44,6 +46,8 @@ func AdapterName(f Family) string {
 		return kimiAdapter
 	case Grok:
 		return grokAdapter
+	case Ollama:
+		return ollamaAdapter
 	}
 	return ""
 }

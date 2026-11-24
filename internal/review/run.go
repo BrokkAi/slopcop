@@ -57,10 +57,10 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 			copilot = newCopilotCatalog(commands[f])
 		}
 	}
-	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands})
+	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands, ollamaIdentity(opts.Settings)})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
-	contentData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands})
+	contentData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands, ollamaIdentity(opts.Settings)})
 	contentHash := sha256.Sum256(contentData)
 	contentKey = hex.EncodeToString(contentHash[:])
 	previous, err := store.Last()
@@ -146,7 +146,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), binaryTextCut: !binaryText.Complete, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
+	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), binaryTextCut: !binaryText.Complete, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.OllamaModel, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
 		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, string(diff), f) }}
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)

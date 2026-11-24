@@ -247,6 +247,8 @@ type runner struct {
 	copilot bool
 	// verify, when set, says what the reviewer's reply did not cover.
 	verify func() error
+	// ollama, when set, bounds the turn of an Ollama reviewer.
+	ollama *ollamaLimits
 	// sessionMu guards session, which the timeout's kill reads.
 	sessionMu sync.Mutex
 	session   acp.SessionId
@@ -754,6 +756,9 @@ func (s *runner) prompt(prompt string) (Reviewer, error) {
 	r, err := s.conn.Prompt(s.ctx, acp.PromptRequest{SessionId: s.session, Prompt: []acp.ContentBlock{acp.TextBlock(prompt)}})
 	if err == nil && r.StopReason != acp.StopReasonEndTurn {
 		err = fmt.Errorf("incomplete turn: %s", r.StopReason)
+	}
+	if s.ollama != nil {
+		err = s.ollama.finish(err, r.Usage)
 	}
 	s.client.mu.Lock()
 	s.result.Text = s.client.reply()
