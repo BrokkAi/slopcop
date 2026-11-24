@@ -312,8 +312,17 @@ wrong, so write the reason for them: say why the finding does not hold.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
-open a pull request until HEAD's tree has a passing check or valid override. It also
-blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
+open a pull request until HEAD's tree has a passing check or valid override. A
+shell push is judged in each repository it may run in: the session's
+directory, moved by a `cd` the push runs after (`cd ../other && git push`) or
+by `git -C`, or named by `--git-dir` or `GIT_DIR`. Where a `cd` may not
+have run, as around `||`, every directory the push could run in is judged; a
+`cd` in a pipeline, a background job or a subshell does not move it. Where
+the directory depends on the shell (`cd $DIR`, `cd -`, `popd`) or does not
+exist yet, the gate cannot tell what would be pushed, so it blocks the push when SlopCop guards
+the session's repository, a repository the push runs in, or one the command
+names (such as the source of a `cp -r`). It also blocks any shell
+command that names `refs/slopcop/` or `.git/slopcop`.
 
 ## `slopcop review show`
 
