@@ -375,7 +375,8 @@ func TestReadKeepsWhitespaceInPaths(t *testing.T) {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
-		return git(t, root, "hash-object", "-w", name)
+		// No line-ending conversion: its warning would join the object id.
+		return git(t, root, "-c", "core.autocrlf=false", "-c", "core.safecrlf=false", "hash-object", "-w", name)
 	}
 	git(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob("plain.txt", "plain\n")+",x.go")
 	git(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob("spaced.txt", "with a space\n")+",x.go ")

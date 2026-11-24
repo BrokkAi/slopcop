@@ -469,11 +469,12 @@ func TestChatReviewsTextARepositoryMarksBinary(t *testing.T) {
 
 func TestChatDoesNotApproveAChangeToAPathJSONWouldAlter(t *testing.T) {
 	root, c, store := reviewRepo(t)
-	object, err := gitx.Run(root, "hash-object", "-w", "change.txt")
+	object, err := gitx.Run(root, "-c", "core.autocrlf=false", "hash-object", "-w", "change.txt")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = gitx.Run(root, "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(object)+",caf\xe9.txt"); err != nil {
+	// Through stdin: Windows would turn the byte into U+FFFD in an argument.
+	if _, err = gitx.RunInput(root, nil, []byte("100644 "+strings.TrimSpace(object)+"\tcaf\xe9.txt\n"), "update-index", "--index-info"); err != nil {
 		t.Fatal(err)
 	}
 	tree, err := gitx.Run(root, "write-tree")
