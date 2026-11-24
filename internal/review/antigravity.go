@@ -91,6 +91,11 @@ func mayHaveRun(check func([]byte) string) func([]byte) toolStop {
 // could only approve a change it had not seen.
 var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB this reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
 
+// errBinaryTextCut marks a change whose readable text in binary files did not
+// all fit in the prompt. For the same reason as errDiffTooLarge, a reviewer in
+// an isolated workspace could not see what was left out.
+var errBinaryTextCut = errors.New("the change has more readable text in binary files than this reviewer can be shown, so it did not review it; configure a fallback on another provider or check a smaller change")
+
 // errChangeNotExported marks a change to a file the reviewer's workspace does
 // not hold: one over the size limit, or one whose path cannot be written
 // safely. The reviewer could not read the code around that change.

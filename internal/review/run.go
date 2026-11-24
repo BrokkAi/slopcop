@@ -123,12 +123,20 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	}
 	v.LogDir = dir
 	TrimLogs(store.dir)
-	diff, err := gitx.RunBytes(opts.Root, nil, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.CheckedTree())
+	diff, err := gitx.RunWithoutRepoAttributes(opts.Root, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.CheckedTree())
 	if err != nil {
 		v.Error = "read captured diff: " + err.Error()
 		save()
 		return v
 	}
+	// It goes first so that a long diff cannot push it past the prompt's limit.
+	binaryText, err := gitx.BinaryFileText(opts.Root, capture.BaseTree, capture.CheckedTree())
+	if err != nil {
+		v.Error = "read text of changed binary files: " + err.Error()
+		save()
+		return v
+	}
+	diff = append([]byte(binaryText.Text), diff...)
 	overriddenText, shown := overriddenSection(overrides, capture)
 	v.PromptOverrides = shown
 	history := earlierRounds(opts.Root, rounds, capture) + overriddenText
@@ -138,7 +146,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
+	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), binaryTextCut: !binaryText.Complete, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
 		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, string(diff), f) }}
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)

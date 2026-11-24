@@ -148,6 +148,18 @@ lists every omitted path with its size and reason, without requiring
 `skipped`, sends nothing and records no push approval. This differs from an
 unchanged working tree.
 
+Reports also list the changed binary files that stayed in scope as
+`binaryFiles` (SARIF: `slopcop.binaryFiles`), with `deleted: true` for one the
+change removes. `verified: true` means a parser for its `format` (`png` or
+`jpeg`) decoded the image and found nothing after its end, in the new version
+and any version it replaces: the file is a real image, not proven harmless,
+since metadata and the image data can still hide extra bytes.
+`verified: false` means nothing vouches
+for its content, and it could be a script with a NUL byte or one appended to an
+image. The list never changes the status or approval, so a clean result does
+not cover these files. Look at each unverified file you did not expect, and
+name the unverified files to the user.
+
 Use repeatable `--include` paths or globs when particular data files need review,
 for example `--include config/settings.json --include 'models/**/*.json'`.
 Patterns are repository-relative and only override the size filter; they do

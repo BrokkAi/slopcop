@@ -6,7 +6,10 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -28,6 +31,35 @@ func RunBytes(root string, env []string, args ...string) ([]byte, error) {
 // RunInput is RunBytes with input written to git's stdin.
 func RunInput(root string, env []string, input []byte, args ...string) ([]byte, error) {
 	return runContext(context.Background(), root, env, input, args...)
+}
+
+// RunWithoutRepoAttributes runs a command that compares two trees, ignoring
+// every .gitattributes file the repository can supply, so the blobs alone
+// decide what is text. A change can otherwise mark an edited text file
+// `binary` or `-diff` and leave only "Binary files differ" for a reviewer.
+//
+// Git reads those files from the directory it runs in, so the command runs in
+// an empty one with an empty index. attr.tree is cleared and GIT_ATTR_SOURCE
+// dropped because either would name a tree of the repository's to read them
+// from. The user's own core.attributesFile and info/attributes still apply: a
+// repository cannot commit them. The flags work on every git version, where
+// --attr-source would need 2.41.
+func RunWithoutRepoAttributes(root string, args ...string) ([]byte, error) {
+	out, err := RunBytes(root, nil, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil, err
+	}
+	gitDir := strings.TrimSuffix(string(out), "\n")
+	dir, err := os.MkdirTemp("", "slopcop-no-attributes-")
+	if err != nil {
+		return nil, fmt.Errorf("create empty work tree: %w", err)
+	}
+	defer os.RemoveAll(dir)
+	env := slices.DeleteFunc(os.Environ(), func(entry string) bool {
+		return strings.HasPrefix(entry, "GIT_ATTR_SOURCE=")
+	})
+	env = withEnv(env, "GIT_INDEX_FILE", filepath.Join(dir, "index"))
+	return RunBytes(dir, env, append([]string{"--git-dir=" + gitDir, "--work-tree=" + dir, "-c", "attr.tree="}, args...)...)
 }
 
 // RunContext is Run, stopped when ctx ends, for git commands that reach the

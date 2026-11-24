@@ -403,8 +403,12 @@ func startRunnerWith(ctx context.Context, root string, argv []string, f Family, 
 		opts.guard.trip = s.violate
 		incoming = io.TeeReader(incoming, opts.guard)
 	}
-	s.conn = acp.NewClientSideConnection(s.client, s.stdin, incoming)
+	// The SDK starts reading as soon as the connection exists and does not
+	// synchronize its logger, so the first read waits until the logger is set.
+	loggerSet := make(chan struct{})
+	s.conn = acp.NewClientSideConnection(s.client, s.stdin, gatedReader{Reader: incoming, open: loggerSet})
 	s.conn.SetLogger(slog.New(slog.NewTextHandler(s.stderr, nil)))
+	close(loggerSet)
 	// On a timeout or interrupt, delete the session while the adapter still
 	// runs, then kill it.
 	s.watchDone = make(chan struct{})
@@ -426,6 +430,18 @@ func startRunnerWith(ctx context.Context, root string, argv []string, f Family, 
 	s.canClose = initialized.AgentCapabilities.SessionCapabilities.Close != nil
 	return s, nil
 }
+
+// gatedReader holds every read until open is closed.
+type gatedReader struct {
+	io.Reader
+	open <-chan struct{}
+}
+
+func (g gatedReader) Read(p []byte) (int, error) {
+	<-g.open
+	return g.Reader.Read(p)
+}
+
 func (s *runner) closeFiles() {
 	if s.updates != nil {
 		s.updates.Close()

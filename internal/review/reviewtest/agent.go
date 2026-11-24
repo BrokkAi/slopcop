@@ -212,6 +212,12 @@ func (a *agent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfig
 }
 func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
 	a.record("prompt")
+	// Keeps the exact text this reviewer was sent, for a test to inspect.
+	if strings.HasSuffix(a.mode, "capture-prompt") {
+		if err := os.WriteFile(a.trace+".prompt", []byte(promptText(p)), 0600); err != nil {
+			return acp.PromptResponse{}, err
+		}
+	}
 	if a.mode == "auth-required" {
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32000, Message: "Authentication required"}
 	}

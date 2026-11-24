@@ -353,8 +353,8 @@ func NewFilteredCapture(root, branch, baseCommit, tree, diffTree string) (Captur
 	if err != nil {
 		return Capture{}, err
 	}
-	stat, err := gitx.Run(root, "diff", "--no-ext-diff", "--no-textconv", "--numstat", base, diffTree)
-	capture := Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: stat, Branch: branch}
+	stat, err := gitx.RunWithoutRepoAttributes(root, "diff", "--no-ext-diff", "--no-textconv", "--numstat", base, diffTree)
+	capture := Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: strings.TrimSpace(string(stat)), Branch: branch}
 	if diffTree != tree {
 		capture.DiffTree = diffTree
 	}
