@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	acp "github.com/coder/acp-go-sdk"
@@ -50,7 +51,7 @@ func TestNamespacedFamily(t *testing.T) {
 	for _, tc := range []struct {
 		model  string
 		family Family
-	}{{"openai/gpt-6.10-terra", Terra}, {"brokkai/deepseek-flash", Flash}, {"anthropic/claude-haiku-5-5", Haiku}, {"haiku", Haiku}, {"openai/gpt-6.1-sol", Sol}} {
+	}{{"openai/gpt-6.10-terra", Terra}, {"brokkai/deepseek-flash", Flash}, {"anthropic/claude-haiku-5-5", Haiku}, {"haiku", Haiku}, {"openai/gpt-6.1-sol", Sol}, {"sonnet", Sonnet}, {"anthropic/claude-sonnet-5-5", Sonnet}, {"opus", Opus}, {"claude-opus-5.5", Opus}} {
 		family, ok := FamilyOf(tc.model)
 		if !ok || family != tc.family {
 			t.Fatalf("%q: %q", tc.model, family)
@@ -84,8 +85,37 @@ func TestBestModelUsesDisplayVersion(t *testing.T) {
 	}
 }
 
+// TestBestClaudeModel uses the model list Claude ACP 0.100.0 advertises: each
+// Claude family takes its own alias, and none takes the default or another
+// family's model.
+func TestBestClaudeModel(t *testing.T) {
+	options := []acp.SessionConfigSelectOption{
+		{Value: "default", Name: "Default (recommended)"},
+		{Value: "opus", Name: "Opus 5.5"},
+		{Value: "claude-fable-5-2[1m]", Name: "Fable 5.2"},
+		{Value: "sonnet", Name: "Sonnet 5.5"},
+		{Value: "haiku", Name: "Haiku 5.5"},
+	}
+	for f, want := range map[Family]string{Haiku: "haiku", Sonnet: "sonnet", Opus: "opus"} {
+		if got, ok := bestModel(f, options); !ok || got != want {
+			t.Errorf("%s: model %q, want %s", f, got, want)
+		}
+		if AdapterName(f) != "claude" || !slices.Equal(DefaultCommand(f), DefaultCommand(Haiku)) {
+			t.Errorf("%s does not run on Haiku's adapter", f)
+		}
+	}
+	options = []acp.SessionConfigSelectOption{
+		{Value: "claude-opus-4-6", Name: "Opus 4.6"},
+		{Value: "claude-opus-5-5", Name: "Opus 5.5"},
+		{Value: "claude-sonnet-5-5", Name: "Sonnet 5.5"},
+	}
+	if got, ok := bestModel(Opus, options); !ok || got != "claude-opus-5-5" {
+		t.Fatalf("opus: model %q, want the newest", got)
+	}
+}
+
 func TestFamilyOfRejectsOtherModels(t *testing.T) {
-	for _, m := range []string{"gpt-6-astra", "gpt-6-luna", "deepseek-v4-pro", "gpt-6-solar", "claude-haikuish"} {
+	for _, m := range []string{"gpt-6-astra", "gpt-6-luna", "deepseek-v4-pro", "gpt-6-solar", "claude-haikuish", "claude-sonnetish", "opus-5", "claude-opus-4.6-fast", "claude-sonnet-5.5-fast"} {
 		if f, ok := FamilyOf(m); ok {
 			t.Fatalf("%s: %s", m, f)
 		}
@@ -100,6 +130,8 @@ func TestReviewerModeChoices(t *testing.T) {
 	}{
 		{Terra, "mode", "read-only", `[{"id":"mode","name":"Mode","type":"select","currentValue":"default","options":[{"value":"read-only","name":"Read only"}]}]`},
 		{Haiku, "mode", "default", `[{"id":"mode","name":"Mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Manual"}]}]`},
+		{Sonnet, "mode", "default", `[{"id":"mode","name":"Mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Manual"}]}]`},
+		{Opus, "mode", "default", `[{"id":"mode","name":"Mode","type":"select","currentValue":"auto","options":[{"value":"default","name":"Manual"}]}]`},
 		{Flash, "permission_mode", "ask", `[{"id":"permission_mode","name":"Permissions","type":"select","currentValue":"allow","options":[{"value":"ask","name":"Ask"}]}]`},
 	} {
 		var opts []acp.SessionConfigOption

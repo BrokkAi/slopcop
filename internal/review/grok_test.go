@@ -390,6 +390,100 @@ func TestGrokReviewerRunsContained(t *testing.T) {
 	}
 }
 
+// TestGrokLaunch checks which commands may start and how npx gets the arguments.
+func TestGrokLaunch(t *testing.T) {
+	const workspace = "/tmp/shared dir/workspace"
+	args := []string{"--sandbox", "it's", "$HOME"}
+	argv, dir, err := grokLaunch([]string{"npx", "--yes", "@xai-official/grok@1.0.92"}, args, workspace)
+	want := []string{"npx", "--yes", "-p", "@xai-official/grok@1.0.92", "-c", `cd '/tmp/shared dir/workspace' && exec grok '--sandbox' 'it'\''s' '$HOME'`}
+	if err != nil || dir != "" || !slices.Equal(argv, want) {
+		t.Fatalf("npx: %q in %q, %v", argv, dir, err)
+	}
+	argv, dir, err = grokLaunch([]string{"/opt/grok", "--flag"}, args, workspace)
+	if err != nil || dir != workspace || !slices.Equal(argv, []string{"/opt/grok", "--flag", "--sandbox", "it's", "$HOME"}) {
+		t.Fatalf("binary: %q in %q, %v", argv, dir, err)
+	}
+	for _, base := range [][]string{
+		{"npx", "@xai-official/grok@1.0.92"},
+		{"npx", "--yes", "--package=x"},
+		{"npx", "--yes", "@xai-official/grok@1.0.92", "--extra"},
+		{"/usr/local/bin/npm", "exec", "--yes", "@xai-official/grok@1.0.92"},
+	} {
+		if _, _, err := grokLaunch(base, args, workspace); err == nil {
+			t.Errorf("%q started", base)
+		}
+	}
+}
+
+// TestGrokStartsNpxInThePrivateDirectory runs the npx form through a stand-in:
+// npm must start outside the shared directory and Grok inside the workspace.
+func TestGrokStartsNpxInThePrivateDirectory(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Grok reviewers do not run on Windows")
+	}
+	t.Setenv("XAI_API_KEY", "test-value")
+	t.Setenv("GROK_SANDBOX", "off")
+	root, c, store := reviewRepo(t)
+	shared, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TMPDIR", shared)
+	tools := t.TempDir()
+	trace, npmDir := filepath.Join(t.TempDir(), "trace"), filepath.Join(t.TempDir(), "npm-dir")
+	agent := fakeAdapter("grok-workspace", "grok-4.6", trace)
+	quoted := make([]string, len(agent))
+	for i, arg := range agent {
+		quoted[i] = shellQuote(arg)
+	}
+	for name, script := range map[string]string{
+		"npx":  "#!/bin/sh\npwd -P > " + shellQuote(npmDir) + "\nPATH=" + shellQuote(tools) + ":\"$PATH\" exec sh -c \"$5\"\n",
+		"grok": "#!/bin/sh\nexec env SLOPCOP_FAKE_ACP=1 " + strings.Join(quoted, " ") + " \"$@\"\n",
+	} {
+		if err = os.WriteFile(filepath.Join(tools, name), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	settings := Settings{Reviewers: []Family{Grok}, Adapters: map[string][]string{grokAdapter: {filepath.Join(tools, "npx"), "--yes", "@xai-official/grok@1.0.92"}}}
+	if v := Run(context.Background(), store, c, Options{Root: root, Settings: settings}); v.Status != StatusClean {
+		t.Fatalf("%+v", v)
+	}
+	data, err := os.ReadFile(npmDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapters, err := filepath.EvalSymlinks(filepath.Join(cache, "slopcop", "adapters"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started := strings.TrimSpace(string(data)); filepath.Dir(started) != adapters {
+		t.Fatalf("npx started in %s, not under %s", started, adapters)
+	}
+	recorded, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := func(key string) string {
+		for _, line := range strings.Split(string(recorded), "\n") {
+			if v, ok := strings.CutPrefix(line, key+"="); ok {
+				return v
+			}
+		}
+		return ""
+	}
+	workspace := value("session-cwd")
+	if got := value("process-cwd"); workspace == "" || got != workspace || !pathInside(shared, workspace) {
+		t.Fatalf("Grok ran in %s, session in %s, temp %s", got, workspace, shared)
+	}
+	if args := value("args"); !strings.Contains(args, "--sandbox "+grokSandboxProfile) || !strings.Contains(args, "--no-leader stdio") {
+		t.Fatalf("args: %s", args)
+	}
+}
+
 func TestGrokForbiddenToolStopsTheReviewerWithoutARetry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Grok reviewers do not run on Windows")

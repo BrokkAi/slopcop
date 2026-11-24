@@ -17,7 +17,7 @@ func DefaultCommand(f Family) []string {
 		return []string{"npx", "--yes", "@agentclientprotocol/codex-acp@2.5.0"}
 	case Flash:
 		return []string{"npx", "--yes", "@brokkai/dsh-acp@0.6.0"}
-	case Haiku:
+	case Haiku, Sonnet, Opus:
 		return []string{"npx", "--yes", "@agentclientprotocol/claude-agent-acp@0.100.0"}
 	case Gemini:
 		return slices.Clone(antigravityDefaultCommand)
@@ -25,6 +25,10 @@ func DefaultCommand(f Family) []string {
 		return slices.Clone(kimiDefaultCommand)
 	case Grok:
 		return slices.Clone(grokDefaultCommand)
+	case Ollama:
+		return slices.Clone(ollamaDefaultCommand)
+	case OpenRouter:
+		return []string{chatSelfCommand, "review-agent", "--provider=" + string(f)}
 	}
 	return nil
 }
@@ -36,7 +40,7 @@ func AdapterName(f Family) string {
 		return "codex"
 	case Flash:
 		return "dsh"
-	case Haiku:
+	case Haiku, Sonnet, Opus:
 		return "claude"
 	case Gemini:
 		return antigravityAdapter
@@ -44,6 +48,10 @@ func AdapterName(f Family) string {
 		return kimiAdapter
 	case Grok:
 		return grokAdapter
+	case Ollama:
+		return ollamaAdapter
+	case OpenRouter:
+		return string(f)
 	}
 	return ""
 }
@@ -62,6 +70,9 @@ func AdapterFor(f Family, s Settings) string {
 // override, else the pinned package.
 func CommandFor(f Family, s Settings) []string {
 	adapter := AdapterFor(f, s)
+	if IsChatAdapter(adapter) {
+		return chatCommand(f, s)
+	}
 	if cmd := s.Adapters[adapter]; len(cmd) > 0 {
 		return cmd
 	}
@@ -104,6 +115,12 @@ func FamilyOf(model string) (Family, bool) {
 		return Flash, true
 	case m == "haiku" || strings.HasPrefix(m, "claude-") && has("haiku"):
 		return Haiku, true
+	// Copilot lists a fast mode of some Claude models under its own id. It is
+	// the same model at a higher price, so it is left out.
+	case m == "sonnet" || strings.HasPrefix(m, "claude-") && has("sonnet") && !has("fast"):
+		return Sonnet, true
+	case m == "opus" || strings.HasPrefix(m, "claude-") && has("opus") && !has("fast"):
+		return Opus, true
 	case strings.HasPrefix(m, "gemini-") && (has("flash") || has("pro")) && !has("lite") && !has("image"):
 		return Gemini, true
 	case kimiModelName.MatchString(m):
@@ -191,10 +208,6 @@ func bestModel(f Family, options []acp.SessionConfigSelectOption) (string, bool)
 	for _, o := range options {
 		v := string(o.Value)
 		match, ok := FamilyOf(v)
-		if !ok && f == Haiku && v == "haiku" {
-			ok = true
-			match = Haiku
-		}
 		if !ok || match != f {
 			continue
 		}
@@ -222,7 +235,7 @@ func reviewerMode(f Family) (string, string) {
 	// Antigravity's default mode asks before edits and commands; its plan
 	// mode only adds an instruction, and its auto mode approves them.
 	// Kimi's default mode asks before anything outside its approved tools.
-	if f == Haiku || f == Gemini || f == Kimi {
+	if AdapterName(f) == "claude" || f == Gemini || f == Kimi {
 		return "mode", "default"
 	}
 	return "mode", "read-only"

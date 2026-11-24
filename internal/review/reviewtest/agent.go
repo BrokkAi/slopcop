@@ -56,6 +56,84 @@ func (a *agent) copilotOptions() []acp.SessionConfigOption {
 	}
 }
 
+func (a *agent) opencode() bool { return strings.HasPrefix(a.mode, "opencode") }
+
+// opencodeSession records how an Ollama reviewer was started and returns the
+// options OpenCode 1.18.26 sends from session/new.
+func (a *agent) opencodeSession(p acp.NewSessionRequest) acp.NewSessionResponse {
+	dir, _ := os.Getwd()
+	a.record("process-cwd=" + dir)
+	a.record("session-cwd=" + p.Cwd)
+	for _, k := range []string{"HOME", "XDG_CONFIG_HOME", "NO_PROXY", "OPENCODE_DISABLE_PROJECT_CONFIG", "OPENCODE_PURE", "OPENCODE_CONFIG_CONTENT", "SLOPCOP_TEST_SECRET", "OPENCODE_PERMISSION"} {
+		a.record("env " + k + "=" + os.Getenv(k))
+	}
+	for _, rel := range []string{".git/HEAD", "package.json", "repo/change.txt", "repo/.opencode/tools/evil.js", "repo/link", ".opencode"} {
+		_, err := os.Lstat(filepath.Join(p.Cwd, rel))
+		a.record(fmt.Sprintf("exists %s=%v", rel, err == nil))
+	}
+	_, err := os.Lstat(filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "opencode", "package-lock.json"))
+	a.record(fmt.Sprintf("exists sdk-lock=%v", err == nil))
+	model := "ollama/" + a.model
+	if a.mode == "opencode-wrong-model" {
+		model = "ollama/other"
+	}
+	agentMode := "build"
+	if a.mode == "opencode-wrong-mode" {
+		agentMode = "evil"
+	}
+	models := acp.SessionConfigSelectOptionsUngrouped{{Value: acp.SessionConfigValueId(model), Name: model}}
+	modes := acp.SessionConfigSelectOptionsUngrouped{{Value: "build", Name: "build"}, {Value: "plan", Name: "plan"}}
+	return acp.NewSessionResponse{SessionId: "fake", ConfigOptions: []acp.SessionConfigOption{
+		{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "model", Name: "Model", CurrentValue: acp.SessionConfigValueId(model), Options: acp.SessionConfigSelectOptions{Ungrouped: &models}}},
+		{Select: &acp.SessionConfigOptionSelect{Type: "select", Id: "mode", Name: "Mode", CurrentValue: acp.SessionConfigValueId(agentMode), Options: acp.SessionConfigSelectOptions{Ungrouped: &modes}}},
+	}}
+}
+
+// opencodePrompt answers as OpenCode does, with the last model call's usage.
+func (a *agent) opencodePrompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
+	usage := &acp.Usage{InputTokens: 1000, OutputTokens: 10, TotalTokens: 1010}
+	text := "No findings."
+	switch a.mode {
+	case "opencode-context-error":
+		return acp.PromptResponse{}, &acp.RequestError{Code: -32603, Message: "Internal error: the prompt is longer than the context length currently available to the model"}
+	case "opencode-no-usage":
+		usage = nil
+	case "opencode-capped":
+		usage.OutputTokens = 8192
+	case "opencode-full":
+		usage.InputTokens = 60000
+	case "opencode-cached-full":
+		cached := 60000
+		usage.InputTokens, usage.CachedReadTokens = 100, &cached
+	case "opencode-prose":
+		text = "Looks good to me."
+	case "opencode-prose-once":
+		if !strings.Contains(promptText(p), "## Retry") {
+			text = "Looks good to me."
+		}
+	case "opencode-finding":
+		text = "- [P1] fake defect"
+	case "opencode-read":
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.StartToolCall("read-1", "repo/change.txt", acp.WithStartKind(acp.ToolKindRead), acp.WithStartStatus(acp.ToolCallStatusCompleted))}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+	case "opencode-ran-edit":
+		// A tool OpenCode's config should have removed reports that it ran.
+		if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.StartToolCall("edit-1", "repo/change.txt", acp.WithStartKind(acp.ToolKindEdit), acp.WithStartStatus(acp.ToolCallStatusCompleted))}); err != nil {
+			return acp.PromptResponse{}, err
+		}
+		<-ctx.Done()
+		return acp.PromptResponse{}, ctx.Err()
+	}
+	if len(p.Prompt) == 1 && p.Prompt[0].Text != nil && p.Prompt[0].Text.Text == "Reply with exactly the word ok and nothing else. Do not use any tools." {
+		text = "ok"
+	}
+	if err := a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: p.SessionId, Update: acp.UpdateAgentMessageText(text)}); err != nil {
+		return acp.PromptResponse{}, err
+	}
+	return acp.PromptResponse{StopReason: acp.StopReasonEndTurn, Usage: usage}, nil
+}
+
 func (a *agent) Initialize(_ context.Context, p acp.InitializeRequest) (acp.InitializeResponse, error) {
 	a.record(fmt.Sprintf("pid=%d", os.Getpid()))
 	a.record("initialize")
@@ -65,6 +143,10 @@ func (a *agent) Initialize(_ context.Context, p acp.InitializeRequest) (acp.Init
 	// Codex and Claude adapters advertise session/delete; mode no-delete
 	// stands for an adapter that does not.
 	caps := acp.AgentCapabilities{}
+	if a.opencode() {
+		caps.SessionCapabilities.Close = &acp.SessionCloseCapabilities{}
+		return acp.InitializeResponse{ProtocolVersion: acp.ProtocolVersionNumber, AgentCapabilities: caps}, nil
+	}
 	if a.copilot() {
 		a.record(fmt.Sprintf("copilot model=%s effort=%s tools=%s", a.cliModel, a.cliEffort, a.tools))
 		// Copilot offers session/close, not session/delete.
@@ -113,9 +195,14 @@ func options(model, mode string) []acp.SessionConfigOption {
 }
 func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.NewSessionResponse, error) {
 	a.cwd = p.Cwd
+	if a.opencode() {
+		return a.opencodeSession(p), nil
+	}
 	if a.mode == "cwd" {
 		dir, _ := os.Getwd()
 		a.record("process-cwd=" + dir)
+		manifest, _ := os.ReadFile("package.json")
+		a.record("process-manifest=" + strings.TrimSpace(string(manifest)))
 		a.record("session-cwd=" + p.Cwd)
 	}
 	// An Antigravity reviewer's workspace: what it holds, and how it started.
@@ -132,6 +219,8 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 	// A Kimi reviewer's environment and generated config. It records whether
 	// the key arrived, never the key.
 	if a.mode == "kimi-env" {
+		dir, _ := os.Getwd()
+		a.record("process-cwd=" + dir)
 		a.record("session-cwd=" + p.Cwd)
 		a.record("args=" + strings.Join(os.Args, " "))
 		a.record(fmt.Sprintf("key-set=%v", os.Getenv("KIMI_API_KEY") != ""))
@@ -212,6 +301,15 @@ func (a *agent) SetSessionConfigOption(_ context.Context, p acp.SetSessionConfig
 }
 func (a *agent) Prompt(ctx context.Context, p acp.PromptRequest) (acp.PromptResponse, error) {
 	a.record("prompt")
+	// Keeps the exact text this reviewer was sent, for a test to inspect.
+	if strings.HasSuffix(a.mode, "capture-prompt") {
+		if err := os.WriteFile(a.trace+".prompt", []byte(promptText(p)), 0600); err != nil {
+			return acp.PromptResponse{}, err
+		}
+	}
+	if a.opencode() {
+		return a.opencodePrompt(ctx, p)
+	}
 	if a.mode == "auth-required" {
 		return acp.PromptResponse{}, &acp.RequestError{Code: -32000, Message: "Authentication required"}
 	}

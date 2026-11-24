@@ -175,6 +175,15 @@ result covers.
   (`large-json`, `large-binary` or `excluded`). Those contents were not
   analyzed; a passing check covers the retained scope. Repeatable `--include`
   paths or globs opt particular large files back in. See [Run a check](/checks/run-a-check/).
+- **`binaryFiles`**: changed files Git treats as binary that stayed in scope,
+  with `deleted: true` for one the change removes. `verified` is `true` when a
+  parser for `format` (`png` or `jpeg`) decoded the image and found nothing
+  after its end, in the new version and any version it replaces. That means the
+  file is a real image, not that it is harmless, since metadata and the image
+  data can still hide extra bytes. A file with
+  `verified: false` could hold anything, such as a script with a NUL byte or
+  one appended to an image, so review it yourself. This list does not change
+  the check's status or approval.
 - **`emptyChange`**: the patch has no in-scope changes. If the size filter
   omitted every changed file, the result is `skipped` with no analysis or push
   approval. Otherwise the working tree matches the base; rerun with `--base`

@@ -560,8 +560,9 @@ Reviewers read the captured diff after the same large-data filter used for
 the hosted patch. The full snapshot still identifies the tree approved for push.
 
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
-Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
-through Claude ACP. Each uses the newest model of its family at high effort.
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`),
+Claude Sonnet (`sonnet`) and Claude Opus (`opus`) through Claude ACP. Each uses
+the newest model of its family at high effort.
 Gemini (`gemini`) through Antigravity CLI is opt-in: init never picks it, because
 Antigravity's web search cannot be refused, only detected. See
 [Gemini through Antigravity](https://docs.slopcop.com/reference/configuration/#gemini-through-antigravity-opt-in).
@@ -569,6 +570,12 @@ Kimi K3 (`kimi`) through Kimi Code CLI is also opt-in and needs `KIMI_API_KEY`. 
 [Kimi through Kimi Code](https://docs.slopcop.com/reference/configuration/#kimi-through-kimi-code-opt-in).
 Grok (`grok`) through Grok Build is also opt-in and needs `XAI_API_KEY`. See
 [Grok through Grok Build](https://docs.slopcop.com/reference/configuration/#grok-through-grok-build-opt-in).
+Ollama (`ollama`) reviews on a model you installed, through OpenCode. It is also
+opt-in, and needs `review.models.ollama`. See
+[Ollama through OpenCode](https://docs.slopcop.com/reference/configuration/#ollama-through-opencode-opt-in).
+OpenRouter (`openrouter`) is opt-in too: you name its model in
+`review.models.openrouter`, and it runs SlopCop's own read-only agent. See
+[OpenRouter](https://docs.slopcop.com/reference/configuration/#openrouter-opt-in).
 `slopcop init` probes each family once when reviewers are not configured and
 mode is not static, then saves the first two that work (or one) as reviewers
 and the rest that work as `review.fallbacks`. Configured reviewers are left
@@ -590,7 +597,7 @@ entries; duplicates allowed) with `slopcop config set review.reviewers terra,sol
 Set `review.fallbacks` (ordered, like `review.reviewers`), `review.timeout`
 (default `20m`), `review.minCompleted` (1 up to the number of reviewers) or
 `mode` with `slopcop config set`;
-adapter commands are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok>.command`.
+adapter commands are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex

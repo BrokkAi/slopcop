@@ -148,6 +148,18 @@ lists every omitted path with its size and reason, without requiring
 `skipped`, sends nothing and records no push approval. This differs from an
 unchanged working tree.
 
+Reports also list the changed binary files that stayed in scope as
+`binaryFiles` (SARIF: `slopcop.binaryFiles`), with `deleted: true` for one the
+change removes. `verified: true` means a parser for its `format` (`png` or
+`jpeg`) decoded the image and found nothing after its end, in the new version
+and any version it replaces: the file is a real image, not proven harmless,
+since metadata and the image data can still hide extra bytes.
+`verified: false` means nothing vouches
+for its content, and it could be a script with a NUL byte or one appended to an
+image. The list never changes the status or approval, so a clean result does
+not cover these files. Look at each unverified file you did not expect, and
+name the unverified files to the user.
+
 Use repeatable `--include` paths or globs when particular data files need review,
 for example `--include config/settings.json --include 'models/**/*.json'`.
 Patterns are repository-relative and only override the size filter; they do
@@ -157,8 +169,9 @@ The service's overall payload limit still applies. Reviewers read the filtered
 captured diff; approval and overrides still bind the complete snapshot identity.
 
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
-Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
-through Claude ACP. Each uses the newest model of its family at high effort.
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`),
+Claude Sonnet (`sonnet`) and Claude Opus (`opus`) through Claude ACP. Each uses
+the newest model of its family at high effort.
 A clean reply is a last message of exactly `No findings.`; earlier messages,
 such as progress notes, do not count. `slopcop
 init` probes each family once when reviewers are not configured and the mode is
@@ -183,7 +196,7 @@ fallback, make the review `findings`. Otherwise it is clean when at least
 `2` when fewer did. The minimum only tolerates a failure when more reviewers
 can run than it requires: with `terra,sol`, no fallbacks and the default of 2,
 one failure still fails the review. Configure fallbacks on another provider
-than the reviewers (Codex for `terra`/`sol`, Claude for `haiku`, dsh for
+than the reviewers (Codex for `terra`/`sol`, Claude for `haiku`/`sonnet`/`opus`, dsh for
 `flash`), so one outage or empty account cannot take out every reviewer. With
 no reviewers configured, run `slopcop init` or set `review.reviewers`. Do not
 change reviewers or adapters to get past a failure; report it to the user. The prompt carries the captured diff. Reviewers read repository content,
@@ -645,5 +658,5 @@ copies but creates none; login does not install them. Set `mode`,
 `review.reviewers` (1–4 entries, in order; duplicates are allowed), and
 `review.timeout` (default `20m`) with `slopcop config get|set|unset`. Set
 reviewers as a comma-separated list. Adapter commands are keyed by adapter at
-`review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok>.command`. In
+`review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`. In
 CI, use `--mode static` unless the runner has Node and harness logins.

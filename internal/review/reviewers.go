@@ -5,11 +5,14 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/BrokkAi/slopcop/internal/review/chatagent"
 )
 
 // panel runs the configured reviewers. Each reviewer gets one retry, a
@@ -24,15 +27,20 @@ type panel struct {
 	trees reviewTrees
 	// diffSize is the captured diff's length in bytes.
 	diffSize int
-	dir      string
-	timeout  time.Duration
-	commands map[Family][]string
+	// binaryTextCut says a size limit left readable text of a binary file
+	// out of the prompt.
+	binaryTextCut bool
+	dir           string
+	timeout       time.Duration
+	commands      map[Family][]string
 	// adapters names each family's adapter; copilot lists the models for
 	// the families Copilot runs.
 	adapters map[Family]string
 	copilot  *copilotCatalog
-	prompt   func(Family) string
-	min      int
+	// ollamaModel is the model the ollama family reviews on.
+	ollamaModel string
+	prompt      func(Family) string
+	min         int
 
 	// startMu starts adapters one at a time, so first-run npx installs
 	// never overlap.
@@ -60,6 +68,11 @@ func (p *panel) run(order []Family) []Reviewer {
 		err error
 	}
 	starts := make([]started, len(order))
+	// A started reviewer's timeout runs until every reviewer has started, so
+	// the Ollama model, which can take minutes to load, loads first.
+	if slices.ContainsFunc(order, func(f Family) bool { return p.adapter(f) == ollamaAdapter }) {
+		preloadOllama(p.ctx, p.ollamaModel, p.timeout)
+	}
 	p.launchTook = make(map[string]time.Duration, len(order))
 	for i, f := range order {
 		launch := time.Now()
@@ -168,7 +181,14 @@ func (p *panel) attempt(name string, f Family, s *runner, startErr error, note s
 		r.Error = startErr.Error()
 		return r, startErr
 	}
-	return s.prompt(p.prompt(f) + note)
+	r, err := s.prompt(p.prompt(f) + note)
+	if err == nil && p.adapter(f) == ollamaAdapter {
+		if err = verdictFormatError(r.Text); err != nil {
+			r.Error = err.Error()
+			r.Status = StatusFailed
+		}
+	}
+	return r, err
 }
 
 // start launches and prepares an adapter. On a prepare failure it returns
@@ -177,9 +197,12 @@ func (p *panel) start(name string, f Family) (*runner, error) {
 	if isolatedAdapter(p.adapter(f)) && p.diffSize > promptDiffLimit {
 		return nil, errDiffTooLarge
 	}
+	if isolatedAdapter(p.adapter(f)) && p.binaryTextCut {
+		return nil, errBinaryTextCut
+	}
 	p.startMu.Lock()
 	defer p.startMu.Unlock()
-	return launch(p.ctx, p.root, p.trees, p.adapter(f), p.commands[f], p.copilot, f, name, p.dir, p.timeout)
+	return launch(p.ctx, p.root, p.trees, p.adapter(f), p.commands[f], p.copilot, p.ollamaModel, f, name, p.dir, p.timeout)
 }
 
 // adapter names the adapter that runs a family in this panel.
@@ -194,7 +217,10 @@ func (p *panel) adapter(f Family) string {
 // timeout would only double the wait, a canceled check wants no more work,
 // and a missing login or exhausted credits fail the same way again.
 func retryable(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errChangeNotExported) || errors.Is(err, errKimiNoKey) {
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errBinaryTextCut) || errors.Is(err, errChangeNotExported) || errors.Is(err, errOllamaSetup) || errors.Is(err, errOllamaCoverage) || errors.Is(err, errKimiNoKey) || errors.Is(err, errChangeBinary) {
+		return false
+	}
+	if err != nil && chatagent.IsLimitError(err.Error()) {
 		return false
 	}
 	var requestErr *acp.RequestError
@@ -280,7 +306,7 @@ func explainFailure(r Reviewer, err error) string {
 	if errors.As(err, &stop) {
 		return text + ". " + stop.advice()
 	}
-	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) {
+	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errBinaryTextCut.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) || strings.Contains(text, errOllamaSetup.Error()) || strings.Contains(text, errOllamaCoverage.Error()) || strings.Contains(text, errChangeBinary.Error()) || chatagent.IsLimitError(text) {
 		return text
 	}
 	if r.FirstError != "" && r.FirstError != text {
@@ -294,6 +320,9 @@ func explainFailure(r Reviewer, err error) string {
 	}
 	switch failureCause(text) {
 	case causeAuth:
+		if p, ok := chatagent.Lookup(adapter); ok && p.KeyEnv != "" {
+			return fmt.Sprintf("%s's API key is missing or was rejected: set %s to a valid %s key, then run the check again. %s", r.Family, p.KeyEnv, p.Label, text)
+		}
 		return fmt.Sprintf("%s is not signed in: sign in to its %s adapter, then run the check again. %s", r.Family, adapter, text)
 	case causeQuota:
 		return fmt.Sprintf("%s's provider account is out of credits or over its usage limit: top it up or wait for the limit to reset, or configure review.fallbacks on another provider. %s", r.Family, text)

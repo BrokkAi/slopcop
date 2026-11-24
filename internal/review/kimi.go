@@ -234,7 +234,8 @@ func kimiEnvironment(env []string, home, data, userHome string) []string {
 }
 
 // kimiChangedText lists the workspace paths of the changed text files. A
-// binary file is left out: Read refuses it, and the diff cannot show it either.
+// binary file is left out: Read refuses it, so the prompt's list of changed
+// binary files and their readable text is all this reviewer gets of it.
 func kimiChangedText(ctx context.Context, root string, trees reviewTrees, workspace string) (map[string]bool, error) {
 	out := map[string]bool{}
 	if trees.checked == "" {

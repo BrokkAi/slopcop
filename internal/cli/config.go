@@ -14,7 +14,25 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider"
+const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.models.ollama, review.models.openrouter"
+
+// modelKey returns the family of a review.models.<family> key, for a family
+// that reviews on a model the user names.
+func modelKey(key string) (review.Family, bool) {
+	name, ok := strings.CutPrefix(key, "review.models.")
+	if !ok || !review.TakesModel(review.Family(name)) {
+		return "", false
+	}
+	return review.Family(name), true
+}
+
+// movedKey reports a key that an unreleased build used, naming its new key.
+func movedKey(key string) error {
+	if key == "review.ollamaModel" {
+		return fmt.Errorf("review.ollamaModel is now review.models.ollama; run `slopcop config set review.models.ollama <model>`")
+	}
+	return nil
+}
 
 // newConfigCommand builds the user config commands.
 func newConfigCommand() *cobra.Command {
@@ -90,6 +108,15 @@ func newConfigCommand() *cobra.Command {
 
 // configValue returns the configured or default value for a key.
 func configValue(cfg config.Config, key string) (string, error) {
+	if err := movedKey(key); err != nil {
+		return "", err
+	}
+	if family, ok := modelKey(key); ok {
+		if cfg.Review != nil && cfg.Review.Models[string(family)] != "" {
+			return cfg.Review.Models[string(family)], nil
+		}
+		return "(not set)", nil
+	}
 	switch key {
 	case "gate.blockOn":
 		path, err := config.Path()
@@ -146,6 +173,20 @@ func configValue(cfg config.Config, key string) (string, error) {
 
 // setConfigValue validates and updates one supported setting.
 func setConfigValue(cfg *config.Config, key, value string) error {
+	if err := movedKey(key); err != nil {
+		return err
+	}
+	if family, ok := modelKey(key); ok {
+		if err := review.CheckModel(family, value); err != nil {
+			return fmt.Errorf("invalid %s: %w", key, err)
+		}
+		r := ensureReview(cfg)
+		if r.Models == nil {
+			r.Models = map[string]string{}
+		}
+		r.Models[string(family)] = value
+		return nil
+	}
 	switch key {
 	case "gate.blockOn":
 		path, err := config.Path()
@@ -212,6 +253,18 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 
 // unsetConfigValue removes a setting so its default applies again.
 func unsetConfigValue(cfg *config.Config, key string) error {
+	if err := movedKey(key); err != nil {
+		return err
+	}
+	if family, ok := modelKey(key); ok {
+		if cfg.Review != nil {
+			delete(cfg.Review.Models, string(family))
+			if cfg.Review.Empty() {
+				cfg.Review = nil
+			}
+		}
+		return nil
+	}
 	switch key {
 	case "gate.blockOn":
 		path, err := config.Path()

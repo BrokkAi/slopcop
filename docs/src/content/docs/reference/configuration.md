@@ -72,10 +72,10 @@ on another provider. `review.minCompleted` (default 2, at most the number of
 reviewers) is how many reviewers, primaries or fallbacks, must finish for a
 clean review. It tolerates a failure only when more reviewers can run than it
 requires: with `terra,sol`, no fallbacks and the default, one failure fails the
-review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
-`flash`) between reviewers and fallbacks, so one outage or empty account does
+review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, `sonnet`
+and `opus`, dsh for `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -89,7 +89,20 @@ each family a short prompt. It tries different adapters at the same time and
 prints each result as it arrives. It skips flash without a dsh command override
 when `DEEPSEEK_API_KEY` is not set.
 
-`review.provider copilot` runs `terra`, `sol` and `haiku` through GitHub
+The Claude families are `haiku`, `sonnet` and `opus`. Each reviews with the
+newest Claude model of its name at high effort, through the same Claude ACP
+adapter and with the same restrictions: it may only read and search files.
+Init tries them in that order, so a machine with only Claude Code gets
+`haiku,sonnet` as reviewers and `opus` as a fallback. To review with the
+stronger models, name them yourself:
+
+```bash
+slopcop config set review.reviewers sonnet,opus
+```
+
+They draw more on your Claude plan or API key than `haiku` does.
+
+`review.provider copilot` runs `terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub
 Copilot CLI instead of Codex and Claude, on your Copilot subscription; `flash`
 keeps dsh, since Copilot has no DeepSeek model. When no reviewer of its own
 works and Copilot may be signed in, `slopcop init` tries them through Copilot
@@ -242,6 +255,144 @@ home, the package unpacks its binary there for each run, which takes about
 190 MB of temporary disk until the reviewer finishes. A command override may
 change how the CLI is started, but one that sets its permission mode, sandbox,
 trust, plugins, agent profile, working directory or API endpoints is rejected.
+An override that uses npm must have the form `npx --yes <package>@<version>`,
+so that npm starts outside the reviewer's temporary directory. Any other npm
+form is rejected.
+
+### Ollama through OpenCode (opt-in)
+
+The `ollama` family reviews on a model you installed in Ollama, through
+OpenCode's ACP server. `slopcop init` never picks it. It needs Ollama 0.40.16 or
+newer, Node for the pinned `opencode-ai` package, and a model that supports tool
+calling:
+
+```bash
+ollama pull <model>
+```
+
+```bash
+OLLAMA_CONTEXT_LENGTH=64000 ollama serve
+```
+
+```bash
+slopcop config set review.models.ollama <model>
+```
+
+```bash
+slopcop config set review.reviewers terra,ollama
+```
+
+SlopCop never pulls a model. If you run the Ollama desktop app, set the context
+length in its settings instead of running `ollama serve`. To raise it for one
+model only, create a variant from a Modelfile with `PARAMETER num_ctx 64000` and
+set `review.models.ollama` to the variant's name.
+
+**Where your code goes.** With `OLLAMA_HOST` unset or pointing at loopback, the
+prompt and the files the reviewer reads stay on this machine. **If `OLLAMA_HOST`
+names another machine, your code is sent to that machine**, and each reviewer's
+result carries a warning saying so. SlopCop refuses Ollama cloud models and
+`ollama.com` as a host, because they run on someone else's servers. The first
+run downloads OpenCode from your npm registry, as the other adapters do.
+
+**How much to trust it.** A small local model misses more than a hosted one, and
+its `No findings.` is weaker evidence. Pair it with another reviewer rather than
+relying on it alone.
+
+Each Ollama reviewer runs with these limits:
+
+- It gets a temporary copy of the reviewed tree, with the same exclusions and
+  size limits as a [Gemini reviewer](#gemini-through-antigravity-opt-in), in a
+  folder below an empty workspace. OpenCode does not load the repository's
+  config, plugins, tools, MCP servers or skills.
+- It uses a private home and a minimal environment, so your OpenCode settings,
+  logins, sessions and API keys are not available to it. The copy and the home
+  are deleted when it finishes.
+- OpenCode offers the model only `read`, `glob` and `grep`, inside that
+  workspace. If a tool of any other kind reports that it ran, SlopCop stops the
+  reviewer and fails it without a retry.
+
+These limits come from OpenCode's own permission settings, not an operating
+system sandbox. They were checked against OpenCode 1.18.26, the pinned version, on macOS.
+A command override must be `npx --yes <package>@<version>` or the path of an
+OpenCode binary, so that npm starts outside the reviewer's temporary directory.
+A repository's `AGENTS.md` still reaches the model as text when it reads a file
+beside it, so a hostile repository can try to talk a weak model into approving.
+
+The reviewer fails instead of approving what it may not have seen:
+
+- when the prompt does not fit the model's context, or leaves too little room
+  for a full reply. Ollama can default to as little as 4096 tokens, and SlopCop
+  needs at least 16384.
+- when the reply reaches its token limit, or OpenCode reports no token usage.
+- when the diff is over 256 KiB, or a changed file is missing from its copy.
+- when the reply is neither exactly `No findings.` nor findings tagged `[P0]`
+  to `[P3]`. That case is retried once.
+
+### OpenRouter (opt-in)
+
+The `openrouter` family reviews with one model you choose from
+[OpenRouter's catalog](https://openrouter.ai/models). `slopcop init` never picks
+it. It needs an API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
+Enter the key without saving it to your shell history, then name the model and
+the reviewer:
+
+```bash
+read -rs OPENROUTER_API_KEY && export OPENROUTER_API_KEY
+```
+
+```bash
+slopcop config set review.models.openrouter vendor/model
+slopcop config set review.reviewers terra,openrouter
+```
+
+Keep `OPENROUTER_API_KEY` set in the shell that runs `slopcop`.
+
+The model id is `vendor/model`, optionally with `:free`, `:nitro`, `:floor` or
+`:exacto`. It must support tool calling. SlopCop refuses ids that do not name
+one fixed model or that add capabilities: `openrouter/auto` and other routers,
+`~...-latest` aliases, presets, `:online` and `:batch`. Pick a model from a
+different vendor than your other reviewers, or the reviews are not independent.
+The model runs at its default effort.
+
+It is opt-in because your code goes through a third party, OpenRouter, on its
+way to the model's provider. SlopCop does not use a general coding agent here.
+It runs its own small agent, which has only three tools: read a file, list
+files, and search files. Each reviewer runs with these limits:
+
+- The tools answer from the reviewed git tree. They never open a path on disk,
+  so symlinks, `..` and files outside the snapshot cannot be read.
+- It has no shell, no file writes and no web access. It keeps no session
+  history, and it loads no hooks, plugins, MCP servers, rules or other
+  configuration from the repository or your home directory.
+- It sends requests only to `https://openrouter.ai/api/v1`, follows no
+  redirects, and keeps the API key out of its child processes, prompts and logs.
+- Requests set `provider.data_collection` to `deny`, so OpenRouter routes only to
+  endpoints that do not retain or train on prompts. If the model has no such
+  endpoint, the reviewer fails. These policies are OpenRouter's and each
+  provider's, and SlopCop cannot verify them.
+- Requests turn OpenRouter's web plugin off. An account setting called "Prevent
+  overrides" can force it back on. If a response shows a web search or another
+  server-side tool, SlopCop stops the reviewer, fails it without a retry, and
+  says so. **The search has already run by then, so a repository that tricks the
+  model could get text from the change into that query.** Leave the web plugin
+  off in your [OpenRouter settings](https://openrouter.ai/settings/plugins).
+- A review is limited to 40 model requests, 8 MiB of tool output, and 32 MiB
+  sent to the model in all, since each request resends the conversation so far.
+  Reaching any limit fails the reviewer without a retry. A repository can still make a
+  review cost more by prompting the model to read a lot, so use a key with a
+  [credit limit](https://openrouter.ai/settings/keys).
+- It does not review a change whose diff is over 256 KiB, or that touches a
+  file over 1 MiB, a binary file such as an image, or a file that is not valid
+  UTF-8. A reply cut off at the model's output limit or stopped by a content
+  filter also fails. The reviewer fails instead of approving what it has not
+  seen, so give it a fallback on another provider.
+
+The key is read from your environment. SlopCop removes `OPENROUTER_API_KEY` from
+the environment of every other reviewer adapter it starts, so give an adapter
+that needs an OpenRouter key its key under another variable name. Like those
+adapters, the OpenRouter reviewer sends requests through
+the proxy that `HTTPS_PROXY` or `ALL_PROXY` names, so a proxy you configure,
+including one that inspects TLS, sees the review and the key.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

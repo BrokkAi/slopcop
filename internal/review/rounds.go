@@ -278,11 +278,13 @@ func linesChanged(root, from, to, path string, start, end int) (bool, error) {
 	if from == to {
 		return false, nil
 	}
-	out, err := gitx.Run(root, "diff", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "-U0", from, to, "--", ":(literal)"+path)
+	// --text gives hunks for a file with a NUL byte, whose lines a reviewer can
+	// cite from the readable text in its prompt.
+	out, err := gitx.RunWithoutRepoAttributes(root, "diff", "--text", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "-U0", from, to, "--", ":(literal)"+path)
 	if err != nil {
 		return false, err
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for _, line := range strings.Split(string(out), "\n") {
 		match := hunkHeader.FindStringSubmatch(line)
 		if match == nil {
 			continue

@@ -174,9 +174,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return checkFailure(cmd, reviewBusy(settings.Timeout), format, reportOptions)
 	}
 	reportOptions.OmittedFiles = prepared.omittedFiles
+	reportOptions.BinaryFiles = prepared.binaryFiles
 	reportOptions.Source = treeSource(prepared.repoRoot, prepared.checkedTree)
 	if notice := omittedFilesNotice(prepared.omittedFiles); notice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), notice)
+	}
+	if unverified := report.UnverifiedBinaryFiles(prepared.binaryFiles); len(unverified) > 0 {
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %d changed binary file(s) could not be verified as a known format, so their content has not been fully reviewed. The report lists them.\n", len(unverified))
 	}
 	// How the base was chosen applies to both halves, so it is said before
 	// either starts.
@@ -896,9 +900,11 @@ type preparedCheck struct {
 	// files the service analyzed.
 	checkedTree  string
 	omittedFiles []report.OmittedFile
-	staticErr    error
-	request      service.Request
-	repoRoot     string
+	// binaryFiles are the changed binary files that stayed in scope.
+	binaryFiles []report.BinaryFile
+	staticErr   error
+	request     service.Request
+	repoRoot    string
 	// workspace is the workspace the check is asked to run in, by the name
 	// or id it was given or mapped to; empty for the login's own.
 	workspace string
@@ -979,8 +985,16 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
+	inspected, err := gitx.InspectBinaryFiles(repoRoot, base, reviewTree)
+	if err != nil {
+		return prepared, err
+	}
+	var binaryFiles []report.BinaryFile
+	for _, file := range inspected {
+		binaryFiles = append(binaryFiles, report.BinaryFile{Path: file.Path, Bytes: file.Bytes, Format: file.Format, Verified: file.Format != "", Deleted: file.Deleted})
+	}
 	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, checkedTree: patchTree,
-		omittedFiles: omitted, files: change.Files, bytes: len(change.Patch), base: resolution,
+		omittedFiles: omitted, binaryFiles: binaryFiles, files: change.Files, bytes: len(change.Patch), base: resolution,
 		request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
 	if opts.mode == modeAI || opts.ai {
 		return prepared, nil

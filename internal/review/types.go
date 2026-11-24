@@ -21,6 +21,12 @@ const (
 	Flash Family = "flash"
 	// Haiku is Claude Haiku through the Claude ACP adapter.
 	Haiku Family = "haiku"
+	// Sonnet is Claude Sonnet through the Claude ACP adapter, restricted as
+	// Haiku is.
+	Sonnet Family = "sonnet"
+	// Opus is Claude Opus through the Claude ACP adapter, restricted as
+	// Haiku is.
+	Opus Family = "opus"
 	// Gemini is Google Gemini through the Antigravity CLI's ACP server. It is
 	// opt-in: Antigravity's web search cannot be turned off or refused, so it
 	// runs only when named in review.reviewers or review.fallbacks.
@@ -32,11 +38,22 @@ const (
 	// its restrictions have layers SlopCop cannot verify from outside, such
 	// as what the CLI itself sends over the network.
 	Grok Family = "grok"
+	// Ollama is a model the user installed in Ollama, through OpenCode's ACP
+	// server. It is opt-in: it needs a chosen model, and a small local model
+	// is a weaker reviewer, so it runs only when named in review.reviewers or
+	// review.fallbacks.
+	Ollama Family = "ollama"
+	// OpenRouter is a model the user names in review.models.openrouter, run
+	// by SlopCop's read-only chat agent. It is opt-in: it needs that choice
+	// and sends the review through a third party.
+	OpenRouter Family = "openrouter"
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
-// Gemini, Kimi and Grok are left out because they are opt-in.
-var Families = []Family{Terra, Sol, Flash, Haiku}
+// Sonnet and Opus follow Haiku, so a machine with Claude Code alone gets a
+// second Claude reviewer instead of one, and Opus, the costliest, comes last.
+// Gemini, Kimi, Grok, Ollama and OpenRouter are left out because they are opt-in.
+var Families = []Family{Terra, Sol, Flash, Haiku, Sonnet, Opus}
 
 const (
 	MaxReviewers         = 4
@@ -88,6 +105,9 @@ type Settings struct {
 	// Provider, when ProviderCopilot, runs every family GitHub Copilot
 	// serves through the Copilot CLI instead of the family's own adapter.
 	Provider string
+	// Models names the model of each family that does not choose its own:
+	// an installed Ollama model for Ollama, a vendor/model for a chat family.
+	Models map[Family]string
 }
 
 // ProviderCopilot routes the families Copilot serves through Copilot CLI.

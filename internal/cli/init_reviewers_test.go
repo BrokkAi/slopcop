@@ -16,6 +16,9 @@ func TestInitPicksReviewers(t *testing.T) {
 	}{
 		{"codex", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{"/missing/claude"}, "terra,sol", ""},
 		{"claude", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, "haiku", ""},
+		// Claude Code alone gives a second Claude reviewer, and Opus, the
+		// costliest, stands by.
+		{"claude models", []string{"/missing/codex"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=default,opus,sonnet,haiku"}, "haiku,sonnet", "opus"},
 		{"both", []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-models=gpt-6.1-terra,gpt-6.1-sol"}, []string{os.Args[0], "-test.run=^TestFakeAgent$", "--fake-model=claude-4-haiku"}, "terra,sol", "haiku"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -98,7 +101,7 @@ func TestInitFallsBackToCopilot(t *testing.T) {
 			if got.Review.Provider != "copilot" || strings.Join(got.Review.Reviewers, ",") != tc.want || strings.Join(got.Review.Fallbacks, ",") != tc.fallbacks || got.Review.MinCompleted != 0 {
 				t.Fatalf("%+v, %s", got.Review, out)
 			}
-			if !strings.Contains(out, "trying the same reviewers through GitHub Copilot CLI (terra, sol, haiku)") || !strings.Contains(out, "review.provider set to copilot") {
+			if !strings.Contains(out, "trying the same reviewers through GitHub Copilot CLI (terra, sol, haiku, sonnet, opus)") || !strings.Contains(out, "review.provider set to copilot") {
 				t.Fatal(out)
 			}
 			if tc.warning != "" && !strings.Contains(out, "slopcop: warning: ") || !strings.Contains(out, tc.warning) {
@@ -132,7 +135,7 @@ func TestInitOnFreshMachine(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out, _ = runCLI(t, "init", "--root", repo, "--no-skill", "--no-hooks", "--verbose")
-	if code != 0 || !strings.Contains(out, "Until then, mode both needs a reviewer, so run checks with --static.") || !strings.Contains(out, "haiku unavailable: Claude Code is not logged in") || !strings.Contains(out, "terra unavailable: Codex is not logged in") {
+	if code != 0 || !strings.Contains(out, "Until then, mode both needs a reviewer, so run checks with --static.") || !strings.Contains(out, "haiku unavailable: Claude Code is not logged in") || !strings.Contains(out, "sonnet unavailable: Claude Code is not logged in") || !strings.Contains(out, "opus unavailable: Claude Code is not logged in") || !strings.Contains(out, "terra unavailable: Codex is not logged in") {
 		t.Fatal(out)
 	}
 }
@@ -153,11 +156,11 @@ func TestInitHidesProbeErrors(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("%s: %s", out, errOut)
 	}
-	if strings.Contains(out, "Authentication") || strings.Contains(out, "unavailable:") || !strings.Contains(out, "checking which local reviewers work here (haiku)") || !strings.Contains(out, "`slopcop init --verbose` says why each failed). Hosted checks work now.") {
+	if strings.Contains(out, "Authentication") || strings.Contains(out, "unavailable:") || !strings.Contains(out, "checking which local reviewers work here (haiku, sonnet, opus)") || !strings.Contains(out, "`slopcop init --verbose` says why each failed). Hosted checks work now.") {
 		t.Fatal(out)
 	}
 	code, out, _ = runCLI(t, "init", "--root", repo, "--no-skill", "--no-hooks", "--verbose")
-	if code != 0 || !strings.Contains(out, "haiku unavailable: ") || !strings.Contains(out, "Authentication required") {
+	if code != 0 || !strings.Contains(out, "haiku unavailable: ") || !strings.Contains(out, "opus unavailable: ") || !strings.Contains(out, "Authentication required") {
 		t.Fatal(out)
 	}
 }

@@ -84,7 +84,7 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 		go func() {
 			defer wg.Done()
 			for _, i := range group {
-				report(i, probeOne(ctx, root, logDir, adapters[i], commands[i], copilot, families[i], fmt.Sprintf("%d-%s", i+1, families[i])))
+				report(i, probeOne(ctx, root, logDir, adapters[i], commands[i], copilot, settings.Models[Ollama], families[i], fmt.Sprintf("%d-%s", i+1, families[i])))
 			}
 		}()
 	}
@@ -94,9 +94,9 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 
 // probeOne starts one adapter, prepares a restricted session and sends it a
 // one-word prompt.
-func probeOne(ctx context.Context, root, logDir, adapter string, argv []string, copilot *copilotCatalog, f Family, name string) ProbeResult {
+func probeOne(ctx context.Context, root, logDir, adapter string, argv []string, copilot *copilotCatalog, ollamaModel string, f Family, name string) ProbeResult {
 	r := ProbeResult{Family: f, Adapter: adapter}
-	s, err := launch(ctx, root, reviewTrees{}, adapter, argv, copilot, f, name, logDir, probeTimeout)
+	s, err := launch(ctx, root, reviewTrees{}, adapter, argv, copilot, ollamaModel, f, name, logDir, probeTimeout)
 	if err != nil {
 		r.Reason = err.Error()
 		return r
@@ -126,8 +126,14 @@ func probeOne(ctx context.Context, root, logDir, adapter string, argv []string, 
 // do not look is still probed.
 func MissingPrerequisite(f Family, root string, settings Settings) string {
 	adapter := AdapterFor(f, settings)
+	if adapter == ollamaAdapter && settings.Models[Ollama] == "" {
+		return "review.models.ollama is not set"
+	}
 	if len(settings.Adapters[adapter]) > 0 {
 		return ""
+	}
+	if IsChatAdapter(adapter) {
+		return chatPrerequisite(f, settings)
 	}
 	switch adapter {
 	case copilotAdapter:

@@ -127,6 +127,7 @@ Running slopcop with no subcommand runs the check.`,
 		newWorkspaceCommand(&serviceURL, version),
 		newRepoCommand(&serviceURL, version),
 		newConfigCommand(),
+		newReviewAgentCommand(),
 	)
 	return root
 }

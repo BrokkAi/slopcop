@@ -91,6 +91,11 @@ func mayHaveRun(check func([]byte) string) func([]byte) toolStop {
 // could only approve a change it had not seen.
 var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB this reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
 
+// errBinaryTextCut marks a change whose readable text in binary files did not
+// all fit in the prompt. For the same reason as errDiffTooLarge, a reviewer in
+// an isolated workspace could not see what was left out.
+var errBinaryTextCut = errors.New("the change has more readable text in binary files than this reviewer can be shown, so it did not review it; configure a fallback on another provider or check a smaller change")
+
 // errChangeNotExported marks a change to a file the reviewer's workspace does
 // not hold: one over the size limit, or one whose path cannot be written
 // safely. The reviewer could not read the code around that change.
@@ -235,7 +240,33 @@ func antigravityWorkspace(ctx context.Context, root string, trees reviewTrees) (
 // isolatedAdapter reports whether an adapter reviews an export of the tree,
 // with no git history to read the rest of a truncated diff.
 func isolatedAdapter(adapter string) bool {
-	return adapter == antigravityAdapter || adapter == kimiAdapter || adapter == grokAdapter
+	return adapter == antigravityAdapter || adapter == kimiAdapter || adapter == grokAdapter || adapter == ollamaAdapter || IsChatAdapter(adapter)
+}
+
+// launchInWorkspace returns the command that runs an adapter's binary in
+// workspace, and the directory its process starts in, "" for the adapter's
+// private one. npm reads its config and puts each parent's node_modules/.bin
+// on PATH from the directory it starts in, and a workspace under a shared
+// temporary directory has parents anyone may write to. So npx starts in the
+// private directory and changes to the workspace only to run the binary. A
+// binary run directly starts in the workspace; any other npm form is refused.
+func launchInWorkspace(base, args []string, workspace, bin, setting, name string) ([]string, string, error) {
+	switch filepath.Base(base[0]) {
+	case "npx":
+		if len(base) != 3 || base[1] != "--yes" || strings.HasPrefix(base[2], "-") {
+			break
+		}
+		quoted := make([]string, len(args))
+		for i, arg := range args {
+			quoted[i] = shellQuote(arg)
+		}
+		call := "cd " + shellQuote(workspace) + " && exec " + bin + " " + strings.Join(quoted, " ")
+		return []string{base[0], "--yes", "-p", base[2], "-c", call}, "", nil
+	case "npm":
+	default:
+		return append(slices.Clone(base), args...), workspace, nil
+	}
+	return nil, "", fmt.Errorf("%s must be `npx --yes <package>@<version>` or the path of a %s binary, so that npm cannot read files from the reviewer's temporary directory", setting, name)
 }
 
 // isolatedWorkspace creates a temporary directory holding a workspace with an

@@ -60,7 +60,9 @@ func FilterCheckTree(root, base, tree string, exclude Excluder, include ...strin
 	if err != nil {
 		return FilteredTree{}, err
 	}
-	numstat, err := RunBytes(root, nil,
+	// Attributes must not decide this: a large text file marked binary would
+	// otherwise be omitted from the check as a binary artifact.
+	numstat, err := RunWithoutRepoAttributes(root,
 		"-c", "core.quotePath=false",
 		"diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
 		"--numstat", "-z", "--no-renames", base, tree,
