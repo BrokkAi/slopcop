@@ -3,7 +3,7 @@ package cli
 import (
 	"os"
 	"path/filepath"
-	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -17,9 +17,11 @@ import (
 // Where the shell could run a push in more than one directory, as around ||,
 // every one is judged. A cd in a pipeline, a background job or a subshell
 // does not move the commands after it. Where a directory that matters cannot
-// be read without running the shell ($VAR, $(...), cd -, popd), the gate
-// cannot tell what would be pushed and blocks, asking for a push it can
-// read. Like pushCommand, this guards against an agent's slip; it is not a
+// be read without running the shell ($VAR, $(...), cd -, popd), or does not
+// exist yet because the same line makes it (git worktree add, cp -r), the
+// gate cannot tell what would be pushed and blocks, asking for a push it can
+// read, when it guards a repository in sight: the session's, a push's, or one
+// the line names (the source of a cp -r). Like pushCommand, this guards against an agent's slip; it is not a
 // shell parser or a security boundary.
 
 // unknownDir stands for a directory that cannot be read from the command
@@ -33,36 +35,24 @@ type segment struct {
 	next string
 }
 
-// redirection matches the redirections whose & is not an operator: 2>&1,
-// >&2, <&0, >&-, >&file, &> and &>>. A |& pipes stderr too, and stays a pipe.
-var redirection = regexp.MustCompile(`[0-9]*[<>]&(?:[0-9]+-?|-)?|&>>?|\|&`)
-
 // segments splits a command line at the operators that end a command: &&,
 // ||, ;, &, |, newlines, subshells and command substitution. Quoted text and
 // escaped characters are not operators, and a backslash-newline continues
-// the line. Redirections are rewritten first, so `cd dir 2>&1 && …` is not
-// read as a background job and `cd dir >&file` keeps its file a
-// redirection's.
+// the line. The & of a redirection (2>&1, >&file, &>file) is not an
+// operator, and |& is a pipe; shellWords reads the redirections themselves.
 func segments(command string) []segment {
 	command = strings.ReplaceAll(command, "\\\n", "  ")
-	command = redirection.ReplaceAllStringFunc(command, func(match string) string {
-		switch {
-		case match == "|&":
-			return "| "
-		case strings.HasPrefix(match, "&"):
-			// &> and &>> name a file next.
-			return " " + match[1:]
-		case strings.HasSuffix(match, "&"):
-			// >&file names a file next, as > does.
-			return match[:len(match)-1] + " "
-		default:
-			// A descriptor copy or close names no file.
-			return strings.Repeat(" ", len(match))
-		}
-	})
 	var parts []segment
 	start := 0
 	var quote byte
+	// parens and backticks hold, for each open ( and `, the quote to return
+	// to when it closes: a command substitution inside double quotes runs
+	// commands as one outside them does.
+	var parens, backticks []byte
+	emit := func(i int, op string) {
+		parts = append(parts, segment{text: command[start:i], next: op})
+		start = i + len(op)
+	}
 	for i := 0; i < len(command); i++ {
 		c := command[i]
 		switch {
@@ -72,9 +62,19 @@ func segments(command string) []segment {
 			}
 			continue
 		case quote == '"':
-			if c == '\\' {
+			switch {
+			case c == '\\':
 				i++
-			} else if c == '"' {
+			case c == '"':
+				quote = 0
+			case c == '$' && i+1 < len(command) && command[i+1] == '(':
+				i++
+				emit(i, "(")
+				parens = append(parens, '"')
+				quote = 0
+			case c == '`':
+				emit(i, "`")
+				backticks = append(backticks, '"')
 				quote = 0
 			}
 			continue
@@ -85,32 +85,111 @@ func segments(command string) []segment {
 			quote = c
 			continue
 		}
+		redirected := i > 0 && (command[i-1] == '>' || command[i-1] == '<')
+		switch {
+		case (c == '&' || c == '|') && redirected:
+			// >&, <& and >| belong to a redirection.
+			continue
+		case c == '&' && i+1 < len(command) && command[i+1] == '>':
+			// &> and &>> redirect both outputs to a file.
+			continue
+		case c == '|' && i+1 < len(command) && command[i+1] == '&':
+			// |& is a pipe that carries stderr too.
+			emit(i, "|")
+			start = i + 2
+			i++
+			continue
+		}
 		op := ""
 		switch {
 		case strings.HasPrefix(command[i:], "&&"), strings.HasPrefix(command[i:], "||"):
 			op = command[i : i+2]
-		case strings.IndexByte(";&|\n()`", c) >= 0:
+		case c == '(':
+			op = "("
+			parens = append(parens, 0)
+		case c == ')':
+			op = ")"
+			if n := len(parens); n > 0 {
+				quote, parens = parens[n-1], parens[:n-1]
+			}
+		case c == '`':
+			op = "`"
+			if n := len(backticks); n > 0 {
+				quote, backticks = backticks[n-1], backticks[:n-1]
+			} else {
+				backticks = append(backticks, 0)
+			}
+		case strings.IndexByte(";&|\n", c) >= 0:
 			op = command[i : i+1]
 		default:
 			continue
 		}
-		parts = append(parts, segment{text: command[start:i], next: op})
+		emit(i, op)
 		i += len(op) - 1
-		start = i + 1
 	}
 	return append(parts, segment{text: command[start:]})
 }
 
+// backslashSeparates says a backslash is a path separator unless it escapes
+// a blank, a quote or a shell operator character, as in a Windows path such
+// as C:\Users\me\repo. It is a variable so tests can read both forms.
+var backslashSeparates = runtime.GOOS == "windows"
+
+// shellEscapable are the characters a backslash escapes even where it
+// otherwise separates path parts.
+const shellEscapable = " \t\"'\\$`;&|()<>"
+
 // shellWords splits a command into words as the shell does before
 // expansion: quotes and backslashes group and are removed, so `my\ repo` and
-// "my repo" are one word.
+// "my repo" are one word. On Windows a backslash before any other character
+// stays, as a path separator. Redirections are dropped with their files and
+// descriptors, glued or not: `cd dir>/dev/null 2>&1` is the words cd, dir.
 func shellWords(text string) []string {
 	var words []string
 	var word strings.Builder
 	inWord := false
+	// skipWord drops the next word: a redirection's file.
+	skipWord := false
+	flush := func() {
+		if inWord {
+			if !skipWord {
+				words = append(words, word.String())
+			}
+			skipWord = false
+		}
+		word.Reset()
+		inWord = false
+	}
 	var quote byte
 	for i := 0; i < len(text); i++ {
 		c := text[i]
+		if quote == 0 && (c == '<' || c == '>' || c == '&' && i+1 < len(text) && text[i+1] == '>') {
+			// A word of digits just before is the descriptor redirected.
+			if inWord && !skipWord && isDigits(word.String()) {
+				word.Reset()
+				inWord = false
+			}
+			flush()
+			j := i + 1
+			for j < len(text) && strings.IndexByte("<>&|", text[j]) >= 0 {
+				j++
+			}
+			op := text[i:j]
+			if strings.HasSuffix(op, "&") {
+				// >&2 and >&- copy or close a descriptor and name no file.
+				k := j
+				for k < len(text) && (text[k] >= '0' && text[k] <= '9' || text[k] == '-') {
+					k++
+				}
+				if k > j {
+					i = k - 1
+					continue
+				}
+			}
+			skipWord = true
+			i = j - 1
+			continue
+		}
 		switch {
 		case quote == '\'':
 			if c == '\'' {
@@ -129,27 +208,36 @@ func shellWords(text string) []string {
 				word.WriteByte(c)
 			}
 		case c == '\\' && i+1 < len(text):
-			i++
+			if !backslashSeparates || strings.IndexByte(shellEscapable, text[i+1]) >= 0 {
+				i++
+			}
 			word.WriteByte(text[i])
 			inWord = true
 		case c == '\'' || c == '"':
 			quote = c
 			inWord = true
 		case c == ' ' || c == '\t' || c == '\n' || c == '\r':
-			if inWord {
-				words = append(words, word.String())
-				word.Reset()
-				inWord = false
-			}
+			flush()
 		default:
 			word.WriteByte(c)
 			inWord = true
 		}
 	}
-	if inWord {
-		words = append(words, word.String())
-	}
+	flush()
 	return words
+}
+
+// isDigits reports whether s is one or more ASCII digits.
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // resolveDir is where a cd or git -C argument points from dir, or unknownDir
@@ -182,10 +270,6 @@ func resolveDir(dir, arg string) string {
 	return filepath.Clean(arg)
 }
 
-// fileRedirect matches a redirection to or from a file at the start of a
-// word, such as >, 2>> or <.
-var fileRedirect = regexp.MustCompile(`^[0-9]*(?:>>?|<)`)
-
 // commandPrefixes are words that can stand before a command in the same
 // shell: keywords of compound commands and the builtins that run another.
 var commandPrefixes = map[string]bool{
@@ -194,8 +278,9 @@ var commandPrefixes = map[string]bool{
 }
 
 // cdTarget is the directory a cd, pushd or popd command moves to, and
-// whether the segment is one. Redirections are not arguments. The target is
-// unknownDir where it cannot be read.
+// whether the segment is one. The words come from shellWords, so
+// redirections are already gone. The target is unknownDir where it cannot be
+// read.
 func cdTarget(dir string, words []string) (string, bool) {
 	for len(words) > 0 && commandPrefixes[words[0]] {
 		words = words[1:]
@@ -210,18 +295,7 @@ func cdTarget(dir string, words []string) (string, bool) {
 	default:
 		return "", false
 	}
-	var args []string
-	for i := 1; i < len(words); i++ {
-		word := words[i]
-		if op := fileRedirect.FindString(word); op != "" {
-			// > /dev/null takes the next word; >/dev/null holds its own.
-			if op == word {
-				i++
-			}
-			continue
-		}
-		args = append(args, word)
-	}
+	args := words[1:]
 	for len(args) > 0 && (args[0] == "-L" || args[0] == "-P" || args[0] == "-e" || args[0] == "--") {
 		args = args[1:]
 	}
@@ -296,12 +370,20 @@ func checkoutOfGitDir(dir, value string) string {
 	return path
 }
 
+// Why pushTargets could not read every directory a push may run in.
+const (
+	// unsureShell is a directory that depends on the shell.
+	unsureShell = "shell"
+	// unsureMissing is a directory that does not exist yet.
+	unsureMissing = "missing"
+)
+
 // pushTargets lists the directories the pushes on a command line may run in,
-// starting from cwd, and whether some push may run in a directory it cannot
-// read. Where the shell could run a push in more than one directory, it
-// lists each: after `cd dir && make || <push>`, the push runs in the old
-// directory when the cd failed and in dir when make did.
-func pushTargets(cwd, command string) ([]string, bool) {
+// starting from cwd, and why some push may run in a directory it cannot read
+// ("" when it read them all). Where the shell could run a push in more than
+// one directory, it lists each: after `cd dir && make || <push>`, the push
+// runs in the old directory when the cd failed and in dir when make did.
+func pushTargets(cwd, command string) ([]string, string) {
 	// dirs is where the next command may run. been is every directory the
 	// current and-or list (commands joined by && and ||) has run in: a
 	// command after ||, and the first command after the list, run wherever
@@ -323,12 +405,20 @@ func pushTargets(cwd, command string) ([]string, bool) {
 	}
 	var frames []frame
 	var targets []string
-	unsure := false
+	unsure := ""
 	seen := map[string]bool{}
 	add := func(target string) {
-		if target == unknownDir {
-			unsure = true
-		} else if !seen[target] {
+		switch {
+		case target == unknownDir:
+			unsure = unsureShell
+		case !isDir(target):
+			// A directory missing now may be one the same command makes
+			// (git worktree add, cp -r, git clone), which the gate cannot
+			// judge before it exists.
+			if unsure == "" {
+				unsure = unsureMissing
+			}
+		case !seen[target]:
 			seen[target] = true
 			targets = append(targets, target)
 		}
@@ -402,33 +492,44 @@ func cdDirs(dirs, words []string, next string, branched, piped bool) ([]string, 
 	if piped || next == "&" {
 		return nil, false
 	}
-	var moved []string
-	exists, unknown := true, false
+	// moved is where the cd goes from each directory; after is where the
+	// next command runs from each, read from whether that cd succeeds.
+	var moved, after []string
+	unknown := false
 	for _, dir := range dirs {
 		target, ok := cdTarget(dir, words)
 		if !ok {
 			return nil, false
 		}
-		if target == unknownDir {
-			unknown = true
-		} else if info, err := os.Stat(target); err != nil || !info.IsDir() {
-			exists = false
-		}
 		moved = union(moved, []string{target})
+		switch {
+		case target == unknownDir:
+			unknown = true
+			after = union(after, []string{dir, target})
+		case isDir(target):
+			after = union(after, []string{target})
+		default:
+			// Missing now, the cd fails and the next command runs where it
+			// was, unless an earlier command on the line makes the
+			// directory (mkdir, cp -r): both count.
+			after = union(after, []string{dir, target})
+		}
 	}
 	switch {
-	case branched || next == "||":
+	case branched || next == "||" || unknown:
 		return union(dirs, moved), true
 	case next == "&&":
-		return moved, true
-	case unknown:
-		return union(dirs, moved), true
-	case exists:
+		// The next command runs only where the cd succeeded.
 		return moved, true
 	default:
-		// The cd fails, so the commands after ; run where they were.
-		return nil, false
+		return after, true
 	}
+}
+
+// isDir reports whether path is a directory now.
+func isDir(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.IsDir()
 }
 
 // union is a followed by the directories of b it lacks.
@@ -447,4 +548,29 @@ func union(a, b []string) []string {
 		}
 	}
 	return out
+}
+
+// maxNamedDirs bounds how many directories namedDirs reports, so a long
+// command line costs a few git calls at most.
+const maxNamedDirs = 16
+
+// namedDirs lists the existing directories a command line names as
+// arguments, read from cwd, such as the source of `cp -r /repo copy`. When a
+// push's own directory cannot be read, a guarded repository among them still
+// arms the gate.
+func namedDirs(cwd, command string) []string {
+	var dirs []string
+	for _, seg := range segments(command) {
+		words := shellWords(seg.text)
+		for i := 1; i < len(words) && len(dirs) < maxNamedDirs; i++ {
+			word := words[i]
+			if strings.HasPrefix(word, "-") {
+				continue
+			}
+			if dir := resolveDir(cwd, word); dir != unknownDir && isDir(dir) {
+				dirs = union(dirs, []string{dir})
+			}
+		}
+	}
+	return dirs
 }

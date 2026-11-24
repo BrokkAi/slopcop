@@ -243,9 +243,10 @@ session's directory, moved by a `cd` the push runs after (`cd ../other && git
 push`) or by `git -C`, or named by `--git-dir` or `GIT_DIR`. Where a `cd`
 may not have run, as around `||`, every directory the push could run in is
 judged; a `cd` in a pipeline, a background job or a subshell does not move it.
-Where the directory depends on the shell (`cd $DIR`, `cd -`, `popd`), the gate
-cannot tell what would be pushed and blocks the push when it guards the
-session's repository or another the push names. It is installed machine-wide
+Where the directory depends on the shell (`cd $DIR`, `cd -`, `popd`) or does
+not exist yet, the gate cannot tell what would be pushed and blocks the push when it guards the
+session's repository, a repository the push runs in, or one the command
+names (such as the source of a `cp -r`). It is installed machine-wide
 but only enforces a repository
 after SlopCop has created review state there. A repository that has never been
 checked is left alone.

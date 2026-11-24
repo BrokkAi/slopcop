@@ -70,8 +70,11 @@ func forgedApproval(command string) bool {
 const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
 
 // unsureTargetText is the reason a push is blocked when the gate cannot read
-// which repository it would push.
-const unsureTargetText = "slopcop: push blocked: the gate cannot tell which repository this push runs in, because a directory on the command line depends on the shell ($VAR, $(...), cd -, popd). Push with a path it can read: run it from the repository, or use `cd <path> && git push` or `git -C <path> push`"
+// which repository it would push, by why.
+var unsureTargetText = map[string]string{
+	unsureShell:   "slopcop: push blocked: the gate cannot tell which repository this push runs in, because a directory on the command line depends on the shell ($VAR, $(...), cd -, popd). Push with a path it can read: run it from the repository, or use `cd <path> && git push` or `git -C <path> push`",
+	unsureMissing: "slopcop: push blocked: a directory this push runs in does not exist yet, so the gate cannot judge what it would push; the same command makes it, as git worktree add, git clone or cp -r do. Make the directory first, then push from it as a command of its own",
+}
 
 // shellTools are the tool names a PreToolUse payload gives a shell command:
 // Bash from Claude Code and Codex, and run_terminal_command from Grok, which
@@ -132,7 +135,7 @@ func gateTree(root string) error {
 	if err == nil && reviewed == tree {
 		return nil
 	}
-	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` until it approves the tree (see the slopcop skill), or for review findings that are wrong run `slopcop override --reason \"...\"`; then push", tree)
+	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong run `slopcop override --reason \"...\"` there; then push", tree, root, root)
 }
 
 // newGateCommand exposes a direct tree check and a hidden hook form. The hook
@@ -193,8 +196,11 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 					targets, unsure := pushTargets(input.CWD, input.ToolInput.Command)
 					// Where SlopCop guards none of the repositories in
 					// sight, a push it cannot read is none of its business.
-					if unsure && (gateArmed(input.CWD) || slices.ContainsFunc(targets, gateArmed)) {
-						return gateBlock(cmd, errors.New(unsureTargetText))
+					// In sight are the session's, the pushes' and any the
+					// line names, such as the source of a cp -r.
+					if unsure != "" && (gateArmed(input.CWD) || slices.ContainsFunc(targets, gateArmed) ||
+						slices.ContainsFunc(namedDirs(input.CWD, input.ToolInput.Command), gateArmed)) {
+						return gateBlock(cmd, errors.New(unsureTargetText[unsure]))
 					}
 					if len(targets) > 0 {
 						roots = targets
