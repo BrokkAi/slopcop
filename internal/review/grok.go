@@ -119,15 +119,18 @@ func startGrok(ctx context.Context, root string, trees reviewTrees, base []strin
 		_ = os.RemoveAll(tmp)
 		return nil, fmt.Errorf("prepare the Grok home: %w", err)
 	}
-	args := append(slices.Clone(base), "--sandbox", grokSandboxProfile, "--disable-web-search", "--no-auto-update", "agent", "--agent-profile", profile, "--no-leader", "stdio")
+	argv, startDir, err := grokLaunch(base, []string{"--sandbox", grokSandboxProfile, "--disable-web-search", "--no-auto-update", "agent", "--agent-profile", profile, "--no-leader", "stdio"}, workspace)
+	if err != nil {
+		_ = os.RemoveAll(tmp)
+		return nil, err
+	}
 	check := newGrokToolCheck(workspace)
-	s, err := startRunnerWith(ctx, root, args, f, name, dir, timeout, runnerOptions{
-		guard:     &toolGuard{check: check.check},
-		refuseAll: true,
-		readRoot:  workspace,
-		onRead:    check.served,
-		// Grok roots its sandbox at the process's directory.
-		dir:         workspace,
+	s, err := startRunnerWith(ctx, root, argv, f, name, dir, timeout, runnerOptions{
+		guard:       &toolGuard{check: check.check},
+		refuseAll:   true,
+		readRoot:    workspace,
+		onRead:      check.served,
+		dir:         startDir,
 		environment: func(env []string) []string { return grokEnvironment(env, home, realHome) },
 	})
 	if err != nil {
@@ -142,6 +145,31 @@ func startGrok(ctx context.Context, root string, trees reviewTrees, base []strin
 		return s, err
 	}
 	return s, nil
+}
+
+// grokLaunch returns the command that runs Grok in workspace, where it roots
+// its sandbox, and the directory to start that command in. The workspace cannot
+// be under the user's home, which the sandbox denies, so its parents can be a
+// shared temp directory. npm reads config, packages and binaries from every
+// parent of where it starts, so npx starts in the private adapter directory
+// (an empty result) and the command it runs enters the workspace.
+func grokLaunch(base, args []string, workspace string) ([]string, string, error) {
+	switch filepath.Base(base[0]) {
+	case "npx":
+		if len(base) != 3 || base[1] != "--yes" || strings.HasPrefix(base[2], "-") {
+			break
+		}
+		quoted := make([]string, len(args))
+		for i, arg := range args {
+			quoted[i] = shellQuote(arg)
+		}
+		call := "cd " + shellQuote(workspace) + " && exec grok " + strings.Join(quoted, " ")
+		return []string{base[0], "--yes", "-p", base[2], "-c", call}, "", nil
+	case "npm":
+	default:
+		return append(slices.Clone(base), args...), workspace, nil
+	}
+	return nil, "", errors.New("review.adapters.grok.command must be `npx --yes <package>@<version>` or the path of a Grok binary, so that npm cannot read files from the reviewer's temporary directory")
 }
 
 // writeGrokHome fills the reviewer's GROK_HOME and returns the agent profile's

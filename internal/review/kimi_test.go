@@ -252,6 +252,17 @@ func TestKimiReviewerRunsIsolated(t *testing.T) {
 	if workspace == "" || filepath.Dir(home) != tmp || filepath.Dir(data2) != tmp {
 		t.Fatalf("workspace %q, home %q, data %q", workspace, home, data2)
 	}
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapters, err := filepath.EvalSymlinks(filepath.Join(cache, "slopcop", "adapters"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process := value("process-cwd"); filepath.Dir(process) != adapters {
+		t.Fatalf("npx would start in %q, not under %s", process, adapters)
+	}
 	if !strings.Contains(got, tomlString(kimiReadFence(workspace))) {
 		t.Fatalf("config does not fence reads to %s:\n%s", workspace, got)
 	}

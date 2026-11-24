@@ -242,6 +242,9 @@ home, the package unpacks its binary there for each run, which takes about
 190 MB of temporary disk until the reviewer finishes. A command override may
 change how the CLI is started, but one that sets its permission mode, sandbox,
 trust, plugins, agent profile, working directory or API endpoints is rejected.
+An override that uses npm must have the form `npx --yes <package>@<version>`,
+so that npm starts outside the reviewer's temporary directory. Any other npm
+form is rejected.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

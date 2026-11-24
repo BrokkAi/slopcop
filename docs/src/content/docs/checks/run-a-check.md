@@ -30,6 +30,61 @@ which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox. A review finding is a model's judgment, while a static finding traces to a rule.
 
+### Where reviewers start
+
+Each reviewer starts in its own private directory under your user cache, so
+neither the repository under review nor files another account leaves in a
+shared temp directory can choose what `npx` runs. A review stops with an error
+if the user cache is inside that repository or below a directory another
+account can write to. To fix it, point `XDG_CACHE_HOME` on Linux, `HOME` on
+macOS, or `LocalAppData` on Windows at a private directory. A review also stops
+if another account can change a `node_modules` or `node_modules/.bin` directory
+above the cache. Remove that folder or restrict its access.
+
+These checks do not cover every setup on a machine shared with other accounts.
+They do not inspect individual files in a `node_modules/.bin` above the cache,
+or the parents of a directory that `.bin` links to. On Windows, they do not
+protect the drive of an npm that `npx.cmd` selects from another prefix. Keep
+those locations writable only by your account.
+
+### Local review on Windows
+
+By default, any signed-in Windows account can create folders in `C:\`. npm and
+Node both look in `C:\node_modules`, so a folder another account put there
+could change what a reviewer runs. The first time SlopCop starts a reviewer, it
+creates an empty `C:\node_modules` that only your account, SYSTEM, and
+Administrators can change. If your user cache or Node.js is on another drive,
+it does the same on that drive.
+
+With that folder in place, npm treats `C:\` as the project when you run it in a
+folder with no `package.json`, so `npm install <package>` there installs into
+`C:\node_modules`. Run `npm init -y` in the folder first to keep the install
+local.
+
+On a machine with more than one account, the folder belongs to the account that
+ran a review first, and SlopCop refuses to start reviewers for the others. To
+share it, have an administrator replace it with one owned by Administrators. In
+Command Prompt, run as administrator:
+
+```bat
+rmdir C:\node_modules
+mkdir C:\node_modules
+icacls C:\node_modules /setowner *S-1-5-32-544
+icacls C:\node_modules /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F *S-1-5-11:(OI)(CI)RX
+dir /a C:\node_modules
+```
+
+This gives SYSTEM and Administrators full control and every signed-in account
+read access. `rmdir` fails if the folder does not exist, which is fine, or if
+it has contents. Look at any contents before you remove them, because another
+account may have put them there. The last command should list no files or
+folders other than `.` and `..`. If your user cache or Node.js is on another
+drive, run the same commands there with that drive's letter.
+
+In a folder where other accounts can add folders, such as `C:\`, an existing
+`node_modules` is accepted only if no other account can change it or anything
+inside it. Otherwise reviewers do not start, and the error names the path.
+
 ## What is sent
 
 In modes with static analysis, one git patch travels from the base commit to the

@@ -116,6 +116,8 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 	if a.mode == "cwd" {
 		dir, _ := os.Getwd()
 		a.record("process-cwd=" + dir)
+		manifest, _ := os.ReadFile("package.json")
+		a.record("process-manifest=" + strings.TrimSpace(string(manifest)))
 		a.record("session-cwd=" + p.Cwd)
 	}
 	// An Antigravity reviewer's workspace: what it holds, and how it started.
@@ -132,6 +134,8 @@ func (a *agent) NewSession(ctx context.Context, p acp.NewSessionRequest) (acp.Ne
 	// A Kimi reviewer's environment and generated config. It records whether
 	// the key arrived, never the key.
 	if a.mode == "kimi-env" {
+		dir, _ := os.Getwd()
+		a.record("process-cwd=" + dir)
 		a.record("session-cwd=" + p.Cwd)
 		a.record("args=" + strings.Join(os.Args, " "))
 		a.record(fmt.Sprintf("key-set=%v", os.Getenv("KIMI_API_KEY") != ""))

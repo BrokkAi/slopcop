@@ -362,10 +362,11 @@ func TestReviewerWithoutRestrictiveModeFails(t *testing.T) {
 	}
 }
 
-// TestAdapterStartsOutsideTheRepository checks that the adapter process runs
-// in a directory the repository does not control, while its ACP session is
-// still rooted in the repository.
-func TestAdapterStartsOutsideTheRepository(t *testing.T) {
+// TestAdapterStartsInAPrivateDirectory checks that the adapter process runs
+// in its own directory under the user cache, which neither the repository nor
+// another user controls, while its ACP session is still rooted in the
+// repository. The directory is gone once the review ends.
+func TestAdapterStartsInAPrivateDirectory(t *testing.T) {
 	root, c, s := reviewRepo(t)
 	trace := filepath.Join(t.TempDir(), "trace")
 	o := Options{Root: root, Intent: "request", Settings: Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("cwd", "gpt-6.10-terra", trace)}}}
@@ -379,12 +380,80 @@ func TestAdapterStartsOutsideTheRepository(t *testing.T) {
 			process = v
 		}
 	}
-	// os.TempDir can be a symbolic link, as on macOS.
-	want, _ := filepath.EvalSymlinks(os.TempDir())
-	got, _ := filepath.EvalSymlinks(process)
-	if process == "" || got != want || !strings.Contains(string(data), "session-cwd="+root+"\n") {
+	cache, err := os.UserCacheDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err := filepath.EvalSymlinks(filepath.Join(cache, "slopcop", "adapters"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if process == "" || filepath.Dir(process) != parent || !strings.Contains(string(data), "process-manifest={}\n") || !strings.Contains(string(data), "session-cwd="+root+"\n") {
 		t.Fatalf("trace: %s", data)
 	}
+	if _, err := os.Stat(process); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("working directory left behind: %v", err)
+	}
+}
+
+// useCacheDir points os.UserCacheDir below dir on every platform.
+func useCacheDir(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CACHE_HOME", filepath.Join(dir, "cache"))
+	t.Setenv("LocalAppData", filepath.Join(dir, "cache"))
+}
+
+// TestAdapterWorkDirRefusesAnUnsafeCache checks that an adapter never starts
+// below a directory other users can write to, or below the reviewed
+// repository: npm would read their .npmrc, node_modules and workspaces.
+func TestAdapterWorkDirRefusesAnUnsafeCache(t *testing.T) {
+	t.Run("inside the repository", func(t *testing.T) {
+		root := t.TempDir()
+		useCacheDir(t, root)
+		if _, err := adapterWorkDir(root); err == nil || !strings.Contains(err.Error(), "inside the repository") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("inside the repository under another spelling", func(t *testing.T) {
+		parent := t.TempDir()
+		root := filepath.Join(parent, "repo")
+		if err := os.Mkdir(root, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		respelled := filepath.Join(parent, "REPO")
+		if _, err := os.Stat(respelled); err != nil {
+			t.Skip("case-sensitive filesystem")
+		}
+		useCacheDir(t, respelled)
+		if _, err := adapterWorkDir(root); err == nil || !strings.Contains(err.Error(), "inside the repository") {
+			t.Fatalf("err = %v", err)
+		}
+	})
+	t.Run("relative", func(t *testing.T) {
+		t.Setenv("HOME", "relative-home")
+		t.Setenv("XDG_CACHE_HOME", "")
+		t.Setenv("LocalAppData", "relative-home")
+		if _, err := adapterWorkDir(t.TempDir()); err == nil {
+			t.Fatal("accepted a relative cache directory")
+		}
+		if _, err := os.Stat("relative-home"); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("created a directory from the relative path: %v", err)
+		}
+	})
+	t.Run("below a directory every user can write to", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("Windows does not report access in permission bits")
+		}
+		shared := t.TempDir()
+		if err := os.Chmod(shared, 0o777); err != nil {
+			t.Fatal(err)
+		}
+		useCacheDir(t, shared)
+		if _, err := adapterWorkDir(t.TempDir()); err == nil || !strings.Contains(err.Error(), "other users can write to") {
+			t.Fatalf("err = %v", err)
+		}
+	})
 }
 
 // TestFailedReviewerNamesRefusedRequest checks that a failed reviewer's error
