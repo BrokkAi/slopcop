@@ -369,19 +369,26 @@ func TestAVerdictAfterAFailedReadOfAChangedFileFails(t *testing.T) {
 func TestReadKeepsWhitespaceInPaths(t *testing.T) {
 	root := t.TempDir()
 	git(t, root, "init", "-q")
-	for name, content := range map[string]string{"x.go": "plain\n", "x.go ": "with a space\n"} {
+	// The tree is built with plumbing: Windows cannot hold a file name that
+	// ends in a space, but a tree can.
+	blob := func(name, content string) string {
 		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0600); err != nil {
 			t.Fatal(err)
 		}
+		return git(t, root, "hash-object", "-w", name)
 	}
-	git(t, root, "add", "-A")
+	git(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob("plain.txt", "plain\n")+",x.go")
+	git(t, root, "update-index", "--add", "--cacheinfo", "100644,"+blob("spaced.txt", "with a space\n")+",x.go ")
 	s, err := loadSnapshot(context.Background(), root, git(t, root, "write-tree"), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	got, err := s.call(context.Background(), "read_file", `{"path":"x.go "}`)
-	if err != nil || !strings.Contains(got, "with a space") {
-		t.Fatalf("%q %v", got, err)
+	if strings.Contains(got, "plain") || err == nil && !strings.Contains(got, "with a space") {
+		t.Fatalf("%q %v: read another file's contents", got, err)
+	}
+	if err != nil {
+		t.Fatalf("%v", err)
 	}
 }
 

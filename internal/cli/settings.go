@@ -183,15 +183,25 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			}
 			return review.Settings{}, fmt.Errorf("invalid review.provider %q in %s: want %s", cfg.Review.Provider, path, review.ProviderCopilot)
 		}
+		if model := cfg.Review.OllamaModel; model != "" {
+			if !review.ValidOllamaModel(model) {
+				path, err = configPath()
+				if err != nil {
+					return review.Settings{}, err
+				}
+				return review.Settings{}, fmt.Errorf("invalid review.ollamaModel %q in %s: want a model name from `ollama list`", model, path)
+			}
+			settings.OllamaModel = model
+		}
 		if len(cfg.Review.Adapters) > 0 {
 			settings.Adapters = make(map[string][]string, len(cfg.Review.Adapters))
 			for name, adapter := range cfg.Review.Adapters {
-				if (name != "codex" && name != "dsh" && name != "claude" && name != review.ProviderCopilot && name != review.AdapterName(review.Gemini) && name != review.AdapterName(review.Kimi) && name != review.AdapterName(review.Grok) && !review.IsChatAdapter(name)) || len(adapter.Command) == 0 || adapter.Command[0] == "" {
+				if (name != "codex" && name != "dsh" && name != "claude" && name != review.ProviderCopilot && name != review.AdapterName(review.Gemini) && name != review.AdapterName(review.Kimi) && name != review.AdapterName(review.Grok) && name != review.AdapterName(review.Ollama) && !review.IsChatAdapter(name)) || len(adapter.Command) == 0 || adapter.Command[0] == "" {
 					path, err = configPath()
 					if err != nil {
 						return review.Settings{}, err
 					}
-					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, claude, copilot, antigravity, kimi, grok, or openrouter", name, path)
+					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, claude, copilot, antigravity, kimi, grok, opencode, or openrouter", name, path)
 				}
 				settings.Adapters[name] = append([]string(nil), adapter.Command...)
 			}

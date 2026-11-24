@@ -271,13 +271,15 @@ to be run by hand.
 duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
-must finish for a clean review), and `review.provider` (`copilot` runs
-`terra`, `sol` and `haiku` through GitHub Copilot CLI). Adapter command
-overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|openrouter>.command`.
-The opt-in `gemini`, `kimi` and `grok` families are used only when you name them; see
+must finish for a clean review), `review.provider` (`copilot` runs
+`terra`, `sol` and `haiku` through GitHub Copilot CLI), and `review.ollamaModel`
+(the installed model the opt-in `ollama` family reviews on). Adapter command
+overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
+The opt-in `gemini`, `kimi`, `grok` and `ollama` families are used only when you name them; see
 [Gemini through Antigravity](/reference/configuration/#gemini-through-antigravity-opt-in),
-[Kimi through Kimi Code](/reference/configuration/#kimi-through-kimi-code-opt-in)
-and [Grok through Grok Build](/reference/configuration/#grok-through-grok-build-opt-in).
+[Kimi through Kimi Code](/reference/configuration/#kimi-through-kimi-code-opt-in),
+[Grok through Grok Build](/reference/configuration/#grok-through-grok-build-opt-in)
+and [Ollama through OpenCode](/reference/configuration/#ollama-through-opencode-opt-in).
 The opt-in `openrouter` family reviews with the model in
 `review.models.openrouter`; see
 [OpenRouter](/reference/configuration/#openrouter-opt-in).

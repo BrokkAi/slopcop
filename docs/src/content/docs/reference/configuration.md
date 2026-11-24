@@ -75,7 +75,7 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
 `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|openrouter>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -245,6 +245,75 @@ trust, plugins, agent profile, working directory or API endpoints is rejected.
 An override that uses npm must have the form `npx --yes <package>@<version>`,
 so that npm starts outside the reviewer's temporary directory. Any other npm
 form is rejected.
+
+### Ollama through OpenCode (opt-in)
+
+The `ollama` family reviews on a model you installed in Ollama, through
+OpenCode's ACP server. `slopcop init` never picks it. It needs Ollama 0.40.16 or
+newer, Node for the pinned `opencode-ai` package, and a model that supports tool
+calling:
+
+```bash
+ollama pull <model>
+```
+
+```bash
+OLLAMA_CONTEXT_LENGTH=64000 ollama serve
+```
+
+```bash
+slopcop config set review.ollamaModel <model>
+```
+
+```bash
+slopcop config set review.reviewers terra,ollama
+```
+
+SlopCop never pulls a model. If you run the Ollama desktop app, set the context
+length in its settings instead of running `ollama serve`. To raise it for one
+model only, create a variant from a Modelfile with `PARAMETER num_ctx 64000` and
+set `review.ollamaModel` to the variant's name.
+
+**Where your code goes.** With `OLLAMA_HOST` unset or pointing at loopback, the
+prompt and the files the reviewer reads stay on this machine. **If `OLLAMA_HOST`
+names another machine, your code is sent to that machine**, and each reviewer's
+result carries a warning saying so. SlopCop refuses Ollama cloud models and
+`ollama.com` as a host, because they run on someone else's servers. The first
+run downloads OpenCode from your npm registry, as the other adapters do.
+
+**How much to trust it.** A small local model misses more than a hosted one, and
+its `No findings.` is weaker evidence. Pair it with another reviewer rather than
+relying on it alone.
+
+Each Ollama reviewer runs with these limits:
+
+- It gets a temporary copy of the reviewed tree, with the same exclusions and
+  size limits as a [Gemini reviewer](#gemini-through-antigravity-opt-in), in a
+  folder below an empty workspace. OpenCode does not load the repository's
+  config, plugins, tools, MCP servers or skills.
+- It uses a private home and a minimal environment, so your OpenCode settings,
+  logins, sessions and API keys are not available to it. The copy and the home
+  are deleted when it finishes.
+- OpenCode offers the model only `read`, `glob` and `grep`, inside that
+  workspace. If a tool of any other kind reports that it ran, SlopCop stops the
+  reviewer and fails it without a retry.
+
+These limits come from OpenCode's own permission settings, not an operating
+system sandbox. They were checked against OpenCode 1.18.26, the pinned version, on macOS.
+A command override must be `npx --yes <package>@<version>` or the path of an
+OpenCode binary, so that npm starts outside the reviewer's temporary directory.
+A repository's `AGENTS.md` still reaches the model as text when it reads a file
+beside it, so a hostile repository can try to talk a weak model into approving.
+
+The reviewer fails instead of approving what it may not have seen:
+
+- when the prompt does not fit the model's context, or leaves too little room
+  for a full reply. Ollama can default to as little as 4096 tokens, and SlopCop
+  needs at least 16384.
+- when the reply reaches its token limit, or OpenCode reports no token usage.
+- when the diff is over 256 KiB, or a changed file is missing from its copy.
+- when the reply is neither exactly `No findings.` nor findings tagged `[P0]`
+  to `[P3]`. That case is retried once.
 
 ### OpenRouter (opt-in)
 

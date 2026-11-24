@@ -25,6 +25,8 @@ func DefaultCommand(f Family) []string {
 		return slices.Clone(kimiDefaultCommand)
 	case Grok:
 		return slices.Clone(grokDefaultCommand)
+	case Ollama:
+		return slices.Clone(ollamaDefaultCommand)
 	case OpenRouter:
 		return []string{chatSelfCommand, "review-agent", "--provider=" + string(f)}
 	}
@@ -46,6 +48,8 @@ func AdapterName(f Family) string {
 		return kimiAdapter
 	case Grok:
 		return grokAdapter
+	case Ollama:
+		return ollamaAdapter
 	case OpenRouter:
 		return string(f)
 	}

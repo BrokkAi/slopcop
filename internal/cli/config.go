@@ -14,7 +14,7 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.models.openrouter"
+const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.ollamaModel, review.models.openrouter"
 
 // chatModelKey returns the family of a review.models.<family> key.
 func chatModelKey(key string) (review.Family, bool) {
@@ -154,6 +154,11 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return cfg.Review.Provider, nil
 		}
 		return "(not set; each family uses its own adapter)", nil
+	case "review.ollamaModel":
+		if cfg.Review != nil && cfg.Review.OllamaModel != "" {
+			return cfg.Review.OllamaModel, nil
+		}
+		return "(not set)", nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -230,6 +235,11 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("invalid review.provider %q (want %s)", value, review.ProviderCopilot)
 		}
 		ensureReview(cfg).Provider = value
+	case "review.ollamaModel":
+		if !review.ValidOllamaModel(value) {
+			return fmt.Errorf("invalid review.ollamaModel %q (want a model name from `ollama list`)", value)
+		}
+		ensureReview(cfg).OllamaModel = value
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -275,6 +285,10 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 	case "review.provider":
 		if cfg.Review != nil {
 			cfg.Review.Provider = ""
+		}
+	case "review.ollamaModel":
+		if cfg.Review != nil {
+			cfg.Review.OllamaModel = ""
 		}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
