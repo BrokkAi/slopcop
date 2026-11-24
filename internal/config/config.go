@@ -179,8 +179,19 @@ func (c Config) SignedIn() []string {
 
 // migrate moves the single credential an older release stored into Logins,
 // under the service it was stored with, and keeps that service the default.
-// A login already stored for that service is newer and wins.
+// A login already stored for that service is newer and wins. It also moves
+// review.ollamaModel into review.models.ollama, where a model set there
+// already is newer and wins.
 func (c *Config) migrate() {
+	if r := c.Review; r != nil && r.LegacyOllamaModel != "" {
+		if r.Models["ollama"] == "" {
+			if r.Models == nil {
+				r.Models = map[string]string{}
+			}
+			r.Models["ollama"] = r.LegacyOllamaModel
+		}
+		r.LegacyOllamaModel = ""
+	}
 	token := strings.TrimSpace(c.LegacyToken)
 	c.LegacyToken = ""
 	if token == "" {
@@ -204,16 +215,17 @@ type Review struct {
 	// Provider, when "copilot", runs the families GitHub Copilot serves
 	// through Copilot CLI.
 	Provider string `json:"provider,omitempty"`
-	// OllamaModel is the installed Ollama model the ollama reviewer uses.
-	OllamaModel string `json:"ollamaModel,omitempty"`
+	// LegacyOllamaModel is where an unreleased build kept the Ollama
+	// model; migrate moves it into Models.
+	LegacyOllamaModel string `json:"ollamaModel,omitempty"`
 	// Models names the model of each family that does not choose its own,
-	// such as "openrouter".
+	// such as "ollama" or "openrouter".
 	Models map[string]string `json:"models,omitempty"`
 }
 
 // Empty reports whether no review setting is set.
 func (r *Review) Empty() bool {
-	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == "" && r.OllamaModel == "" && len(r.Models) == 0
+	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == "" && r.LegacyOllamaModel == "" && len(r.Models) == 0
 }
 
 // Gate controls which hosted findings block push approval.

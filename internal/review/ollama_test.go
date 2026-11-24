@@ -92,7 +92,7 @@ func fakeOpencode(t *testing.T, mode, trace string) map[string][]string {
 }
 
 func ollamaSettings(t *testing.T, mode, trace string) Settings {
-	return Settings{Reviewers: []Family{Ollama}, OllamaModel: ollamaTestModel, Adapters: fakeOpencode(t, mode, trace)}
+	return Settings{Reviewers: []Family{Ollama}, Models: map[Family]string{Ollama: ollamaTestModel}, Adapters: fakeOpencode(t, mode, trace)}
 }
 
 func traceValue(t *testing.T, trace, key string) string {
@@ -120,7 +120,7 @@ func TestOllamaIsOptIn(t *testing.T) {
 	if got := AdapterFor(Ollama, Settings{Provider: ProviderCopilot}); got != ollamaAdapter {
 		t.Fatalf("adapter %q", got)
 	}
-	if got := MissingPrerequisite(Ollama, t.TempDir(), Settings{}); !strings.Contains(got, "review.ollamaModel") {
+	if got := MissingPrerequisite(Ollama, t.TempDir(), Settings{}); !strings.Contains(got, "review.models.ollama") {
 		t.Fatalf("prerequisite %q", got)
 	}
 }
@@ -481,9 +481,9 @@ func TestOllamaWithoutAModelFails(t *testing.T) {
 	root, c, store := reviewRepo(t)
 	stub := startOllamaStub(t, nil)
 	settings := ollamaSettings(t, "opencode", filepath.Join(t.TempDir(), "trace"))
-	settings.OllamaModel = ""
+	delete(settings.Models, Ollama)
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: settings})
-	if v.Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "review.ollamaModel") || stub.called("/api/show") {
+	if v.Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "review.models.ollama") || stub.called("/api/show") {
 		t.Fatalf("%+v", v)
 	}
 }
@@ -537,7 +537,7 @@ func TestOllamaVerdictIsNotReusedForAnotherModel(t *testing.T) {
 	if v := Run(context.Background(), store, c, Options{Root: root, Settings: settings}); !v.Reused {
 		t.Fatalf("same model was not reused: %+v", v)
 	}
-	settings.OllamaModel = "another:model"
+	settings.Models = map[Family]string{Ollama: "another:model"}
 	if v := Run(context.Background(), store, c, Options{Root: root, Settings: settings}); v.Reused {
 		t.Fatalf("reused another model's verdict: %+v", v)
 	}

@@ -74,8 +74,20 @@ func IsChatAdapter(name string) bool {
 	return ok
 }
 
-// CheckChatModel validates the model configured for a chat family.
-func CheckChatModel(f Family, model string) error {
+// TakesModel reports whether family f reviews on a model the user names in
+// review.models.<f>.
+func TakesModel(f Family) bool {
+	return f == Ollama || IsChatAdapter(string(f))
+}
+
+// CheckModel validates the model configured for a family that takes one.
+func CheckModel(f Family, model string) error {
+	if f == Ollama {
+		if !ValidOllamaModel(model) {
+			return fmt.Errorf("%q is not an Ollama model name; want one from `ollama list`", model)
+		}
+		return nil
+	}
 	p, ok := chatagent.Lookup(string(f))
 	if !ok {
 		return fmt.Errorf("review family %q does not take a model", f)
@@ -121,7 +133,7 @@ func startChat(ctx context.Context, root string, trees reviewTrees, argv []strin
 			model = v
 		}
 	}
-	if err := CheckChatModel(f, model); err != nil {
+	if err := CheckModel(f, model); err != nil {
 		return nil, err
 	}
 	if trees.checked != "" {

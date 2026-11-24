@@ -146,7 +146,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
-	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), binaryTextCut: !binaryText.Complete, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.OllamaModel, min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
+	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), binaryTextCut: !binaryText.Complete, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.Models[Ollama], min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
 		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, string(diff), f) }}
 	v.Reviewers = p.run(order)
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)

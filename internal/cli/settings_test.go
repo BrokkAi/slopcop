@@ -115,6 +115,13 @@ func TestReviewSettingsChatModels(t *testing.T) {
 	if err != nil || got.Models[review.OpenRouter] != "vendor/model:nitro" {
 		t.Fatalf("%+v %v", got, err)
 	}
+	if _, err := reviewSettings(config.Config{Review: &config.Review{Reviewers: []string{"ollama"}, Models: map[string]string{"ollama": "bad name"}}}, 0); err == nil || !strings.Contains(err.Error(), "review.models") {
+		t.Fatalf("accepted a bad Ollama model: %v", err)
+	}
+	got, err = reviewSettings(config.Config{Review: &config.Review{Reviewers: []string{"ollama"}, Models: map[string]string{"ollama": "qwen3-coder:30b"}}}, 0)
+	if err != nil || got.Models[review.Ollama] != "qwen3-coder:30b" {
+		t.Fatalf("%+v %v", got, err)
+	}
 }
 
 func TestConfigSetsAndUnsetsTheChatModel(t *testing.T) {

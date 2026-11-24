@@ -105,9 +105,8 @@ type Settings struct {
 	// Provider, when ProviderCopilot, runs every family GitHub Copilot
 	// serves through the Copilot CLI instead of the family's own adapter.
 	Provider string
-	// OllamaModel is the installed Ollama model the ollama family reviews on.
-	OllamaModel string
-	// Models names the model of each family that does not choose its own.
+	// Models names the model of each family that does not choose its own:
+	// an installed Ollama model for Ollama, a vendor/model for a chat family.
 	Models map[Family]string
 }
 

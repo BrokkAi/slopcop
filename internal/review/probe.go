@@ -84,7 +84,7 @@ func Probe(ctx context.Context, root, logDir string, families []Family, settings
 		go func() {
 			defer wg.Done()
 			for _, i := range group {
-				report(i, probeOne(ctx, root, logDir, adapters[i], commands[i], copilot, settings.OllamaModel, families[i], fmt.Sprintf("%d-%s", i+1, families[i])))
+				report(i, probeOne(ctx, root, logDir, adapters[i], commands[i], copilot, settings.Models[Ollama], families[i], fmt.Sprintf("%d-%s", i+1, families[i])))
 			}
 		}()
 	}
@@ -126,8 +126,8 @@ func probeOne(ctx context.Context, root, logDir, adapter string, argv []string, 
 // do not look is still probed.
 func MissingPrerequisite(f Family, root string, settings Settings) string {
 	adapter := AdapterFor(f, settings)
-	if adapter == ollamaAdapter && settings.OllamaModel == "" {
-		return "review.ollamaModel is not set"
+	if adapter == ollamaAdapter && settings.Models[Ollama] == "" {
+		return "review.models.ollama is not set"
 	}
 	if len(settings.Adapters[adapter]) > 0 {
 		return ""

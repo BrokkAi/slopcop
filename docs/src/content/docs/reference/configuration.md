@@ -275,7 +275,7 @@ OLLAMA_CONTEXT_LENGTH=64000 ollama serve
 ```
 
 ```bash
-slopcop config set review.ollamaModel <model>
+slopcop config set review.models.ollama <model>
 ```
 
 ```bash
@@ -285,7 +285,7 @@ slopcop config set review.reviewers terra,ollama
 SlopCop never pulls a model. If you run the Ollama desktop app, set the context
 length in its settings instead of running `ollama serve`. To raise it for one
 model only, create a variant from a Modelfile with `PARAMETER num_ctx 64000` and
-set `review.ollamaModel` to the variant's name.
+set `review.models.ollama` to the variant's name.
 
 **Where your code goes.** With `OLLAMA_HOST` unset or pointing at loopback, the
 prompt and the files the reviewer reads stay on this machine. **If `OLLAMA_HOST`

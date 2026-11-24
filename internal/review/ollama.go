@@ -169,7 +169,7 @@ func ollamaIdentity(s Settings) string {
 	if !slices.Contains(s.Reviewers, Ollama) && !slices.Contains(s.Fallbacks, Ollama) {
 		return ""
 	}
-	return s.OllamaModel + "@" + strings.TrimSpace(os.Getenv("OLLAMA_HOST"))
+	return s.Models[Ollama] + "@" + strings.TrimSpace(os.Getenv("OLLAMA_HOST"))
 }
 
 // ollamaAPI is a client that reaches only the configured server: it ignores
@@ -234,7 +234,7 @@ func ollamaContext(ctx context.Context, server ollamaServer, model string) (int,
 		return 0, err
 	}
 	if status == http.StatusNotFound {
-		return 0, fmt.Errorf("%w: model %s is not installed; run `ollama pull %s` or set review.ollamaModel to one that `ollama list` shows", errOllamaSetup, model, model)
+		return 0, fmt.Errorf("%w: model %s is not installed; run `ollama pull %s` or set review.models.ollama to one that `ollama list` shows", errOllamaSetup, model, model)
 	}
 	var shown struct {
 		Capabilities []string `json:"capabilities"`
@@ -508,10 +508,10 @@ func sealOpencodeWorkspace(tmp, workspace string) error {
 // started it returns the stopped runner, whose result names the log.
 func startOllama(ctx context.Context, root string, trees reviewTrees, base []string, model string, f Family, name, dir string, timeout time.Duration) (*runner, error) {
 	if model == "" {
-		return nil, fmt.Errorf("%w: no model is set; run `slopcop config set review.ollamaModel <model>` with one from `ollama list`", errOllamaSetup)
+		return nil, fmt.Errorf("%w: no model is set; run `slopcop config set review.models.ollama <model>` with one from `ollama list`", errOllamaSetup)
 	}
 	if !ValidOllamaModel(model) {
-		return nil, fmt.Errorf("%w: review.ollamaModel %q is not a valid model name", errOllamaSetup, model)
+		return nil, fmt.Errorf("%w: review.models.ollama %q is not a valid model name", errOllamaSetup, model)
 	}
 	server, err := ollamaServerFrom(os.Getenv("OLLAMA_HOST"))
 	if err != nil {
