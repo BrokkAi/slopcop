@@ -175,6 +175,10 @@ func requireTextChanges(ctx context.Context, root, other, tree string) error {
 		objects[file.Path] = file.Object
 	}
 	for _, path := range changed {
+		// JSON would alter such a path, so the model could not ask for it.
+		if !utf8.ValidString(path) {
+			return fmt.Errorf("%w: %q", errChangeNotExported, path)
+		}
 		object, ok := objects[path]
 		if !ok {
 			return fmt.Errorf("%w: %q", errChangeNotExported, path)

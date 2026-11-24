@@ -374,7 +374,9 @@ files, and search files. Each reviewer runs with these limits:
   seen, so give it a fallback on another provider.
 
 The key is read from your environment, so other reviewer adapters started by
-the same check inherit it too.
+the same check inherit it too. Like those adapters, it sends requests through
+the proxy that `HTTPS_PROXY` or `ALL_PROXY` names, so a proxy you configure,
+including one that inspects TLS, sees the review and the key.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

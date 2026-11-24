@@ -466,3 +466,29 @@ func TestChatReviewsTextARepositoryMarksBinary(t *testing.T) {
 		t.Fatalf("%+v", v.Reviewers)
 	}
 }
+
+func TestChatDoesNotApproveAChangeToAPathJSONWouldAlter(t *testing.T) {
+	root, c, store := reviewRepo(t)
+	object, err := gitx.Run(root, "hash-object", "-w", "change.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = gitx.Run(root, "update-index", "--add", "--cacheinfo", "100644,"+strings.TrimSpace(object)+",caf\xe9.txt"); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := gitx.Run(root, "write-tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c, err = NewCapture(root, c.BaseCommit, strings.TrimSpace(tree)); err != nil {
+		t.Fatal(err)
+	}
+	trace := filepath.Join(t.TempDir(), "trace")
+	v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(fakeAdapter("clean", chatTestModel, trace))})
+	if r := v.Reviewers[0]; v.Status != StatusFailed || !strings.Contains(r.Error, errChangeNotExported.Error()) {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(trace); !os.IsNotExist(err) {
+		t.Fatal("the adapter started on a path it cannot address")
+	}
+}
