@@ -21,6 +21,12 @@ const (
 	Flash Family = "flash"
 	// Haiku is Claude Haiku through the Claude ACP adapter.
 	Haiku Family = "haiku"
+	// Sonnet is Claude Sonnet through the Claude ACP adapter, restricted as
+	// Haiku is.
+	Sonnet Family = "sonnet"
+	// Opus is Claude Opus through the Claude ACP adapter, restricted as
+	// Haiku is.
+	Opus Family = "opus"
 	// Gemini is Google Gemini through the Antigravity CLI's ACP server. It is
 	// opt-in: Antigravity's web search cannot be turned off or refused, so it
 	// runs only when named in review.reviewers or review.fallbacks.
@@ -44,8 +50,10 @@ const (
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
+// Sonnet and Opus follow Haiku, so a machine with Claude Code alone gets a
+// second Claude reviewer instead of one, and Opus, the costliest, comes last.
 // Gemini, Kimi, Grok, Ollama and OpenRouter are left out because they are opt-in.
-var Families = []Family{Terra, Sol, Flash, Haiku}
+var Families = []Family{Terra, Sol, Flash, Haiku, Sonnet, Opus}
 
 const (
 	MaxReviewers         = 4

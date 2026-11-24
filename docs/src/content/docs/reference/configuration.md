@@ -72,8 +72,8 @@ on another provider. `review.minCompleted` (default 2, at most the number of
 reviewers) is how many reviewers, primaries or fallbacks, must finish for a
 clean review. It tolerates a failure only when more reviewers can run than it
 requires: with `terra,sol`, no fallbacks and the default, one failure fails the
-review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
-`flash`) between reviewers and fallbacks, so one outage or empty account does
+review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, `sonnet`
+and `opus`, dsh for `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
 are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`. For
 example, keep a DeepSeek key in a file with:
@@ -89,7 +89,20 @@ each family a short prompt. It tries different adapters at the same time and
 prints each result as it arrives. It skips flash without a dsh command override
 when `DEEPSEEK_API_KEY` is not set.
 
-`review.provider copilot` runs `terra`, `sol` and `haiku` through GitHub
+The Claude families are `haiku`, `sonnet` and `opus`. Each reviews with the
+newest Claude model of its name at high effort, through the same Claude ACP
+adapter and with the same restrictions: it may only read and search files.
+Init tries them in that order, so a machine with only Claude Code gets
+`haiku,sonnet` as reviewers and `opus` as a fallback. To review with the
+stronger models, name them yourself:
+
+```bash
+slopcop config set review.reviewers sonnet,opus
+```
+
+They draw more on your Claude plan or API key than `haiku` does.
+
+`review.provider copilot` runs `terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub
 Copilot CLI instead of Codex and Claude, on your Copilot subscription; `flash`
 keeps dsh, since Copilot has no DeepSeek model. When no reviewer of its own
 works and Copilot may be signed in, `slopcop init` tries them through Copilot

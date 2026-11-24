@@ -169,8 +169,9 @@ The service's overall payload limit still applies. Reviewers read the filtered
 captured diff; approval and overrides still bind the complete snapshot identity.
 
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
-Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
-through Claude ACP. Each uses the newest model of its family at high effort.
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`),
+Claude Sonnet (`sonnet`) and Claude Opus (`opus`) through Claude ACP. Each uses
+the newest model of its family at high effort.
 A clean reply is a last message of exactly `No findings.`; earlier messages,
 such as progress notes, do not count. `slopcop
 init` probes each family once when reviewers are not configured and the mode is
@@ -195,7 +196,7 @@ fallback, make the review `findings`. Otherwise it is clean when at least
 `2` when fewer did. The minimum only tolerates a failure when more reviewers
 can run than it requires: with `terra,sol`, no fallbacks and the default of 2,
 one failure still fails the review. Configure fallbacks on another provider
-than the reviewers (Codex for `terra`/`sol`, Claude for `haiku`, dsh for
+than the reviewers (Codex for `terra`/`sol`, Claude for `haiku`/`sonnet`/`opus`, dsh for
 `flash`), so one outage or empty account cannot take out every reviewer. With
 no reviewers configured, run `slopcop init` or set `review.reviewers`. Do not
 change reviewers or adapters to get past a failure; report it to the user. The prompt carries the captured diff. Reviewers read repository content,

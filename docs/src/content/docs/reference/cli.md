@@ -272,7 +272,7 @@ duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
 must finish for a clean review), `review.provider` (`copilot` runs
-`terra`, `sol` and `haiku` through GitHub Copilot CLI), and `review.ollamaModel`
+`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI), and `review.ollamaModel`
 (the installed model the opt-in `ollama` family reviews on). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 The opt-in `gemini`, `kimi`, `grok` and `ollama` families are used only when you name them; see

@@ -44,9 +44,12 @@ const copilotEffort = "high"
 // effort, after Copilot refused copilotEffort.
 const copilotDefaultEffort = "default"
 
-// CopilotServes reports whether Copilot offers models of a family. It has no
+// copilotFamilies are the families Copilot offers models of. It has no
 // DeepSeek models, so flash keeps its own adapter.
-func CopilotServes(f Family) bool { return f == Terra || f == Sol || f == Haiku }
+var copilotFamilies = []Family{Terra, Sol, Haiku, Sonnet, Opus}
+
+// CopilotServes reports whether Copilot offers models of a family.
+func CopilotServes(f Family) bool { return slices.Contains(copilotFamilies, f) }
 
 // copilotArgs adds the model, the effort and the read-only tool list to the
 // base command. --available-tools takes every argument after it, so it goes
@@ -150,7 +153,7 @@ func (c *copilotCatalog) pick(f Family, models []acp.SessionConfigSelectOption) 
 			}
 		}
 	}
-	named := slices.ContainsFunc([]Family{Terra, Sol, Haiku}, func(g Family) bool { _, ok := bestModel(g, enabled); return ok })
+	named := slices.ContainsFunc(copilotFamilies, func(g Family) bool { _, ok := bestModel(g, enabled); return ok })
 	if named || !slices.ContainsFunc(enabled, func(o acp.SessionConfigSelectOption) bool { return string(o.Value) == copilotAuto }) {
 		names := make([]string, 0, len(models))
 		for _, o := range models {
@@ -161,7 +164,7 @@ func (c *copilotCatalog) pick(f Family, models []acp.SessionConfigSelectOption) 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.autoFor != "" && c.autoFor != f {
-		return "", false, fmt.Errorf("Copilot offers this account only Auto, and %s already reviews on it; a second Auto reviewer could get the same model, so %s does not run. Copilot Pro unlocks the terra, sol and haiku models", c.autoFor, f)
+		return "", false, fmt.Errorf("Copilot offers this account only Auto, and %s already reviews on it; a second Auto reviewer could get the same model, so %s does not run. Copilot Pro unlocks the terra, sol, haiku, sonnet and opus models", c.autoFor, f)
 	}
 	c.autoFor = f
 	return copilotAuto, true, nil
@@ -308,7 +311,7 @@ func (s *runner) prepareCopilot(root, model string) error {
 func copilotWarning(f Family, model string, auto bool, refused error) string {
 	var parts []string
 	if auto {
-		parts = append(parts, fmt.Sprintf("Copilot offers this account only Auto, so this reviewer ran on a model Copilot picked instead of a %s model. Copilot Free also has a small monthly request allowance that every check draws on; Copilot Pro unlocks the terra, sol and haiku models.", f))
+		parts = append(parts, fmt.Sprintf("Copilot offers this account only Auto, so this reviewer ran on a model Copilot picked instead of a %s model. Copilot Free also has a small monthly request allowance that every check draws on; Copilot Pro unlocks the terra, sol, haiku, sonnet and opus models.", f))
 	}
 	if refused != nil {
 		why := refused.Error()
