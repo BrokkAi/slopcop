@@ -112,7 +112,13 @@ func reportReview(cmd *cobra.Command, ref *review.CheckRef, client *service.Clie
 	case status == "recorded":
 		remember(true)
 	case status == "already_recorded":
-		remember(false) // The first report stands, and its findings with it.
+		// The first report stands, and its findings with it. Without a record
+		// of what it held, as when another checkout sent it, nothing later can
+		// name its findings, so this check is not tracked here.
+		if !review.KnownCheck(root, checked.ID) {
+			checked.Tracked = false
+		}
+		remember(false)
 	case status == "off":
 		checked.Tracked = false
 		remember(true)

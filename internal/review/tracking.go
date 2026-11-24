@@ -381,8 +381,10 @@ func RememberCheck(root string, ref CheckRef, v Verdict, replace bool) error {
 	if ref.ID == "" {
 		return nil
 	}
-	entry := trackedCheck{CheckRef: ref, Time: time.Now().UTC(), Worktree: root, Relied: v.usedOverrides()}
-	for _, f := range v.reported() {
+	entry := trackedCheck{CheckRef: ref, Time: time.Now().UTC(), Worktree: worktreeKey(root), Relied: v.usedOverrides()}
+	// Only the findings the report carries: one a standing override left out
+	// is recorded with the check that first reported it.
+	for _, f := range v.Findings() {
 		if !slices.Contains(entry.Keys, f.ID) {
 			entry.Keys = append(entry.Keys, f.ID)
 		}
@@ -455,39 +457,60 @@ func TrackedCheckOf(root, key string) (CheckRef, bool) {
 		// A check on the list holds the findings of its first report, which
 		// is the one the service kept.
 		checks := loadTrackedChecks(root)
-		if i := slices.IndexFunc(checks, func(c trackedCheck) bool { return c.ID == last.Check.ID }); i >= 0 {
-			return checks[i].CheckRef, checks[i].Tracked && slices.Contains(checks[i].Keys, key)
+		i := slices.IndexFunc(checks, func(c trackedCheck) bool { return c.ID == last.Check.ID })
+		switch {
+		case i < 0, !checks[i].Tracked:
+			return CheckRef{}, false
+		case slices.Contains(checks[i].Keys, key):
+			return checks[i].CheckRef, true
 		}
-		return *last.Check, last.Check.Tracked
+		// The latest check did not record it: a standing override left it out
+		// there, or the service kept an earlier report. An earlier check of
+		// this worktree that recorded it is the one to tell.
 	}
 	checks := loadTrackedChecks(root)
 	for i := len(checks) - 1; i >= 0; i-- {
-		if checks[i].Worktree == root && slices.Contains(checks[i].Keys, key) {
+		if checks[i].Worktree == worktreeKey(root) && slices.Contains(checks[i].Keys, key) {
 			return checks[i].CheckRef, checks[i].Tracked
 		}
 	}
 	return CheckRef{}, false
 }
 
-// CurrentCheck is ref as the list knows it, which adds the workspace a login's
-// default resolved to and whether the service answered that tracking is off.
+// CurrentCheck is ref as the list knows it, with the workspace its report
+// named and whether the service kept that report. A check the list does not
+// hold was never reported from here, so it is not tracked.
 func CurrentCheck(root string, ref CheckRef) CheckRef {
 	for _, c := range loadTrackedChecks(root) {
 		if c.ID == ref.ID {
 			return c.CheckRef
 		}
 	}
+	ref.Tracked = false
 	return ref
 }
 
-// TrackedChecksRelyingOn are the tracked checks an undo of the finding
+// worktreeKey names a checkout the same way however its path was reached.
+func worktreeKey(root string) string {
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return root
+}
+
+// KnownCheck reports whether the list already holds the check.
+func KnownCheck(root, id string) bool {
+	return slices.ContainsFunc(loadTrackedChecks(root), func(c trackedCheck) bool { return c.ID == id })
+}
+
+// TrackedChecksRelyingOn are the tracked checks of this worktree an undo of the finding
 // override concerns, newest first: those that reported the finding and those
 // whose review relied on the override.
 func TrackedChecksRelyingOn(root, id string) []CheckRef {
 	checks := loadTrackedChecks(root)
 	var refs []CheckRef
 	for i := len(checks) - 1; i >= 0; i-- {
-		if checks[i].Tracked && (slices.Contains(checks[i].Keys, id) || slices.Contains(checks[i].Relied, id)) {
+		if checks[i].Tracked && checks[i].Worktree == worktreeKey(root) && (slices.Contains(checks[i].Keys, id) || slices.Contains(checks[i].Relied, id)) {
 			refs = append(refs, checks[i].CheckRef)
 		}
 	}

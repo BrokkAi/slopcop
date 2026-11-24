@@ -447,3 +447,56 @@ func TestNoWorkspaceIDSendsNothing(t *testing.T) {
 		t.Fatalf("reports = %d, dispositions = %d", reports, dispositions)
 	}
 }
+
+// A check another checkout already reported is not tracked from here: the
+// service kept that report, whose findings this one cannot name.
+func TestAlreadyRecordedElsewhereSendsNoOverride(t *testing.T) {
+	repo := trackedRepo(t, "findings")
+	server := newTrackingService(t, "findings", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"already_recorded"}`))
+	})
+	runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	id := checkedFindingID(t, repo)
+	runCLI(t, "override", "--root", repo, "--service", server.URL, id, "--reason", "wrong")
+	runCLI(t, "override", "--root", repo, "--service", server.URL, "--reason", "accepted")
+	if _, got := server.counts(); got != 0 {
+		t.Fatalf("dispositions = %v", server.disposed)
+	}
+}
+
+// A later check that left the finding out because of the override does not
+// take it over: a new reason goes to the check that recorded the finding.
+func TestNewReasonGoesToTheCheckThatRecordedTheFinding(t *testing.T) {
+	repo := trackedRepo(t, "findings")
+	server := newTrackingService(t, "findings", nil)
+	runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	id := checkedFindingID(t, repo)
+	first, ok := review.TrackedCheckOf(repo, id)
+	if !ok {
+		t.Fatal("first check not tracked")
+	}
+	runCLI(t, "override", "--root", repo, "--service", server.URL, id, "--reason", "wrong")
+	record, err := review.LastRecord(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	verdict, err := review.ApplyFindingOverrides(repo, record.Verdict)
+	if err != nil || len(verdict.Overridden) != 1 {
+		t.Fatalf("verdict = %+v, %v", verdict.Overridden, err)
+	}
+	later := review.CheckRef{ID: "99999999-2222-3333-4444-555555555555", Service: server.URL, Workspace: answerWorkspace, Tracked: true}
+	if err := review.RememberCheck(repo, later, verdict, true); err != nil {
+		t.Fatal(err)
+	}
+	store, err := review.OpenStore(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetCheck(later, record.Verdict); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	if got, ok := review.TrackedCheckOf(repo, id); !ok || got.ID != first.ID {
+		t.Fatalf("check = %+v, %v; want %s", got, ok, first.ID)
+	}
+}
