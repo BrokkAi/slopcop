@@ -53,14 +53,18 @@ Code ([details](/reference/configuration/#kimi-through-kimi-code-opt-in)).
 If you name the opt-in `grok` reviewer, they also go to xAI through Grok Build,
 using your `XAI_API_KEY`
 ([details](/reference/configuration/#grok-through-grok-build-opt-in)).
+If you name the opt-in `ollama` reviewer, they go to your Ollama server. That
+is this machine only while `OLLAMA_HOST` is unset or points at loopback; another
+host receives the code
+([details](/reference/configuration/#ollama-through-opencode-opt-in)).
 Review results and logs stay under
 `<git-dir>/slopcop/`; nothing from the local review goes to the SlopCop service.
 Use `--mode static` to avoid the local review and these provider requests.
 The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
-reviewers run in Codex's read-only sandbox. A Gemini, Kimi or Grok reviewer reads a
-temporary copy of the reviewed tree, which is deleted when it finishes.
+reviewers run in Codex's read-only sandbox. A Gemini, Kimi, Grok or Ollama reviewer
+reads a temporary copy of the reviewed tree, which is deleted when it finishes.
 
 ## What the service does with it
 

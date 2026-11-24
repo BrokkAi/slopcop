@@ -79,3 +79,29 @@ func TestConfigCommandGetSetUnset(t *testing.T) {
 		t.Fatalf("config after unset = %+v", got)
 	}
 }
+
+func TestConfigOllamaModel(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("HOME", t.TempDir())
+	if code, out, _ := runCLI(t, "config", "get", "review.ollamaModel"); code != 0 || strings.TrimSpace(out) != "(not set)" {
+		t.Fatalf("get unset: %d %q", code, out)
+	}
+	if code, _, errOut := runCLI(t, "config", "set", "review.ollamaModel", "bad name"); code == 0 || !strings.Contains(errOut, "invalid review.ollamaModel") {
+		t.Fatalf("set invalid: %d %q", code, errOut)
+	}
+	if code, _, errOut := runCLI(t, "config", "set", "review.ollamaModel", "qwen3-coder:30b"); code != 0 {
+		t.Fatalf("set: %s", errOut)
+	}
+	if code, out, _ := runCLI(t, "config", "get", "review.ollamaModel"); code != 0 || strings.TrimSpace(out) != "qwen3-coder:30b" {
+		t.Fatalf("get: %d %q", code, out)
+	}
+	if code, _, errOut := runCLI(t, "config", "set", "review.reviewers", "terra,ollama"); code != 0 {
+		t.Fatalf("set reviewers: %s", errOut)
+	}
+	if code, _, errOut := runCLI(t, "config", "unset", "review.ollamaModel"); code != 0 {
+		t.Fatalf("unset: %s", errOut)
+	}
+	if code, out, _ := runCLI(t, "config", "get", "review.ollamaModel"); code != 0 || strings.TrimSpace(out) != "(not set)" {
+		t.Fatalf("get after unset: %d %q", code, out)
+	}
+}

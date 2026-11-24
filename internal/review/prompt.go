@@ -66,10 +66,10 @@ func reviewPrompt(root string, capture Capture, in intent, history string, diff 
 		b.WriteString("Diff truncated at 256 KiB. Read the remaining changed files listed\n")
 		b.WriteString("in the numstat with file-reading tools.\n")
 	}
-	// A Gemini, Kimi or Grok reviewer sees only an export of the snapshot in its
+	// A Gemini, Kimi, Grok or Ollama reviewer sees only an export of the snapshot in its
 	// workspace.
 	shownRoot := root
-	if family == Gemini || family == Kimi || family == Grok {
+	if family == Gemini || family == Kimi || family == Grok || family == Ollama {
 		shownRoot = antigravityRepoDir
 	}
 	fmt.Fprintf(&b, "\nRepository root: %s\nBase tree: %s\nSnapshot tree: %s\n", shownRoot, capture.BaseTree, capture.CheckedTree())
@@ -85,6 +85,8 @@ func reviewPrompt(root string, capture Capture, in intent, history string, diff 
 		b.WriteString(kimiRules)
 	} else if family == Grok {
 		b.WriteString(grokRules)
+	} else if family == Ollama {
+		b.WriteString(ollamaRules)
 	} else {
 		b.WriteString("Read changed files with file-reading tools; do not run commands.\n")
 	}
