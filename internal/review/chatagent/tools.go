@@ -109,12 +109,16 @@ func toolDefinitions() []map[string]any {
 	}
 }
 
-// toolKind is the ACP kind reported for a tool, which SlopCop's guard checks.
-func toolKind(name string) acp.ToolKind {
-	if name == "read_file" {
-		return acp.ToolKindRead
+// toolKind is the ACP kind reported for a tool, which SlopCop's guard checks,
+// and whether the agent offers the tool.
+func toolKind(name string) (acp.ToolKind, bool) {
+	switch name {
+	case "read_file":
+		return acp.ToolKindRead, true
+	case "list_files", "search_files":
+		return acp.ToolKindSearch, true
 	}
-	return acp.ToolKindSearch
+	return acp.ToolKindOther, false
 }
 
 // call runs one tool. Its error is sent to the model, which may recover.

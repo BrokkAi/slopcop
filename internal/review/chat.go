@@ -40,8 +40,9 @@ var chatToolKinds = []string{string(acp.ToolKindRead), string(acp.ToolKindSearch
 var errChangeBinary = errors.New("a changed file is binary or is not valid UTF-8, so this reviewer could not read the change and did not review it; configure a fallback on another provider")
 
 // chatToolCheck names a tool call a chat reviewer must not make: any kind but
-// a read or a search. The agent reports a tool its provider ran by itself as a
-// fetch, so this stops that too.
+// a read or a search that did not fail. The agent reports a tool its provider
+// ran by itself as a fetch, so this stops that too, and a tool it does not
+// offer as failed, since nothing ran it.
 func chatToolCheck(line []byte) string {
 	var m struct {
 		Method string `json:"method"`
@@ -50,6 +51,7 @@ func chatToolCheck(line []byte) string {
 				SessionUpdate string `json:"sessionUpdate"`
 				Kind          string `json:"kind"`
 				Title         string `json:"title"`
+				Status        string `json:"status"`
 			} `json:"update"`
 		} `json:"params"`
 	}
@@ -57,7 +59,7 @@ func chatToolCheck(line []byte) string {
 		return ""
 	}
 	u := m.Params.Update
-	if u.SessionUpdate != "tool_call" || slices.Contains(chatToolKinds, u.Kind) {
+	if u.SessionUpdate != "tool_call" || slices.Contains(chatToolKinds, u.Kind) || u.Status == string(acp.ToolCallStatusFailed) {
 		return ""
 	}
 	if u.Title == "" {

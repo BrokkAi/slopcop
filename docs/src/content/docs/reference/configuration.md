@@ -363,8 +363,9 @@ files, and search files. Each reviewer runs with these limits:
   says so. **The search has already run by then, so a repository that tricks the
   model could get text from the change into that query.** Leave the web plugin
   off in your [OpenRouter settings](https://openrouter.ai/settings/plugins).
-- A review is limited to 40 model requests and 8 MiB of tool output. Reaching
-  either limit fails the reviewer without a retry. A repository can still make a
+- A review is limited to 40 model requests, 8 MiB of tool output, and 32 MiB
+  sent to the model in all, since each request resends the conversation so far.
+  Reaching any limit fails the reviewer without a retry. A repository can still make a
   review cost more by prompting the model to read a lot, so use a key with a
   [credit limit](https://openrouter.ai/settings/keys).
 - It does not review a change whose diff is over 256 KiB, or that touches a

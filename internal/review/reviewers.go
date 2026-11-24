@@ -302,6 +302,9 @@ func explainFailure(r Reviewer, err error) string {
 	}
 	switch failureCause(text) {
 	case causeAuth:
+		if p, ok := chatagent.Lookup(adapter); ok && p.KeyEnv != "" {
+			return fmt.Sprintf("%s's API key is missing or was rejected: set %s to a valid %s key, then run the check again. %s", r.Family, p.KeyEnv, p.Label, text)
+		}
 		return fmt.Sprintf("%s is not signed in: sign in to its %s adapter, then run the check again. %s", r.Family, adapter, text)
 	case causeQuota:
 		return fmt.Sprintf("%s's provider account is out of credits or over its usage limit: top it up or wait for the limit to reset, or configure review.fallbacks on another provider. %s", r.Family, text)

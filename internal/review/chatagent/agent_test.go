@@ -245,9 +245,13 @@ func TestToolsReadOnlyTheTree(t *testing.T) {
 			if !strings.Contains(got, tc.want) || tc.absent != "" && strings.Contains(got, tc.absent) {
 				t.Fatalf("result %q, want %q without %q", got, tc.want, tc.absent)
 			}
+			want := []string{string(acp.ToolKindRead), string(acp.ToolKindSearch)}
+			if tc.tool == "bash" {
+				want = []string{string(acp.ToolKindOther)}
+			}
 			for _, kind := range c.kinds {
-				if kind != string(acp.ToolKindRead) && kind != string(acp.ToolKindSearch) {
-					t.Fatalf("reported kind %q", kind)
+				if !slices.Contains(want, kind) {
+					t.Fatalf("reported kind %q, want one of %v", kind, want)
 				}
 			}
 		})
@@ -390,6 +394,23 @@ func TestReadKeepsWhitespaceInPaths(t *testing.T) {
 	}
 	if err != nil {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestSendBudgetBoundsTheResentConversation(t *testing.T) {
+	root, tree, _, _ := repoTree(t)
+	replies := make([]string, 10)
+	for i := range replies {
+		replies[i] = call("list_files", nil)
+	}
+	m := &model{replies: replies}
+	// Room for a few requests, each resending the listings before it.
+	_, text, err := review(t, root, tree, m, func(c *Config) { c.SendBudget = 8 << 10 })
+	if err == nil || !IsLimitError(err.Error()) || !strings.Contains(err.Error(), "sent to the model") || text != "" {
+		t.Fatalf("%q %v", text, err)
+	}
+	if n := len(m.got()); n == 0 || n >= len(replies) {
+		t.Fatalf("%d requests sent", n)
 	}
 }
 

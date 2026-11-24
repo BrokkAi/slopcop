@@ -248,7 +248,7 @@ func TestOpenRouterMissingKeyIsNotRetried(t *testing.T) {
 	argv := realChatAdapter(t, server)
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(argv)})
 	r := v.Reviewers[0]
-	if v.Status != StatusFailed || !strings.Contains(r.Error, "OPENROUTER_API_KEY") || r.FirstError != "" || len(server.got()) != 0 {
+	if v.Status != StatusFailed || !strings.Contains(r.Error, "set OPENROUTER_API_KEY to a valid OpenRouter key") || strings.Contains(r.Error, "not signed in") || r.FirstError != "" || len(server.got()) != 0 {
 		t.Fatalf("%+v", r)
 	}
 }
@@ -491,5 +491,26 @@ func TestChatDoesNotApproveAChangeToAPathJSONWouldAlter(t *testing.T) {
 	}
 	if _, err := os.Stat(trace); !os.IsNotExist(err) {
 		t.Fatal("the adapter started on a path it cannot address")
+	}
+}
+
+func TestChatToolCheck(t *testing.T) {
+	line := func(kind, status, title string) []byte {
+		return []byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s","update":{"sessionUpdate":"tool_call","toolCallId":"1","kind":"` + kind + `","status":"` + status + `","title":"` + title + `"}}}`)
+	}
+	for _, tc := range []struct {
+		kind, status, title string
+		stop                bool
+	}{
+		{"read", "completed", "read_file", false},
+		{"search", "completed", "search_files", false},
+		{"other", "failed", "bash", false},
+		{"other", "completed", "bash", true},
+		{"fetch", "completed", "OpenRouter web search", true},
+		{"execute", "in_progress", "", true},
+	} {
+		if got := chatToolCheck(line(tc.kind, tc.status, tc.title)); (got != "") != tc.stop {
+			t.Errorf("%+v: %q", tc, got)
+		}
 	}
 }

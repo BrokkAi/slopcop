@@ -29,6 +29,10 @@ import (
 const (
 	// maxRounds bounds the model requests of one review.
 	maxRounds = 40
+	// maxSentBytes bounds what one review sends in all its requests. Each
+	// request carries the whole conversation so far, so this, not
+	// maxToolBytes, is what bounds the input a repository can make it pay for.
+	maxSentBytes = 32 << 20
 	// maxToolBytes bounds what tools return in one review, and so the cost a
 	// repository can cause by asking the reviewer to read everything.
 	maxToolBytes = 8 << 20
@@ -52,8 +56,9 @@ type Config struct {
 	// Base is the tree the change is compared with, which tells the agent
 	// which files changed.
 	Base string
-	// ReadBudget overrides maxToolBytes when positive.
-	ReadBudget int
+	// ReadBudget overrides maxToolBytes, and SendBudget maxSentBytes, when
+	// positive.
+	ReadBudget, SendBudget int
 }
 
 // limitPrefix starts the error of a reviewer stopped at one of its limits.
@@ -61,6 +66,7 @@ const limitPrefix = "the reviewer reached its limit of "
 
 var (
 	errReadLimit  = errors.New(limitPrefix + "8 MiB of file reads before a verdict, so it did not finish the review; configure a fallback on another provider or check a smaller change")
+	errSendLimit  = errors.New(limitPrefix + "32 MiB sent to the model before a verdict, so it did not finish the review; configure a fallback on another provider or check a smaller change")
 	errRoundLimit = fmt.Errorf(limitPrefix+"%d model requests before a verdict, so it did not finish the review; configure a fallback on another provider or check a smaller change", maxRounds)
 )
 
@@ -223,12 +229,15 @@ func (a *agent) converse(ctx context.Context, session acp.SessionId, tree *snaps
 	if tree != nil {
 		tools = toolDefinitions()
 	}
-	budget := maxToolBytes
+	budget, sendBudget := maxToolBytes, maxSentBytes
 	if a.cfg.ReadBudget > 0 {
 		budget = a.cfg.ReadBudget
 	}
+	if a.cfg.SendBudget > 0 {
+		sendBudget = a.cfg.SendBudget
+	}
 	for round := range maxRounds {
-		raw, err := a.complete(ctx, messages, tools)
+		raw, err := a.complete(ctx, messages, tools, &sendBudget)
 		if err != nil {
 			return "", err
 		}
@@ -305,8 +314,15 @@ func (a *agent) runTool(ctx context.Context, session acp.SessionId, tree *snapsh
 	if json.Unmarshal([]byte(call.Function.Arguments), &input) != nil {
 		input = nil
 	}
+	// A tool the agent does not offer is logged as what it is, and as failed,
+	// since nothing runs it.
+	kind, known := toolKind(call.Function.Name)
+	status := acp.ToolCallStatusCompleted
+	if !known {
+		status = acp.ToolCallStatusFailed
+	}
 	_ = a.conn.SessionUpdate(ctx, acp.SessionNotification{SessionId: session, Update: acp.StartToolCall(acp.ToolCallId(id), title,
-		acp.WithStartKind(toolKind(call.Function.Name)), acp.WithStartStatus(acp.ToolCallStatusCompleted), acp.WithStartRawInput(input))})
+		acp.WithStartKind(kind), acp.WithStartStatus(status), acp.WithStartRawInput(input))})
 	result, err := tree.call(ctx, call.Function.Name, call.Function.Arguments)
 	if err != nil {
 		// An error can echo what the model sent, so it counts too.
@@ -327,8 +343,9 @@ func (a *agent) reportServerTool(ctx context.Context, session acp.SessionId, wha
 	return fmt.Errorf("%s ran %s by itself", a.cfg.Provider.Label, what)
 }
 
-// complete sends one chat request and returns the response body.
-func (a *agent) complete(ctx context.Context, messages []any, tools []map[string]any) ([]byte, error) {
+// complete sends one chat request, charging its size to sendBudget, and
+// returns the response body.
+func (a *agent) complete(ctx context.Context, messages []any, tools []map[string]any, sendBudget *int) ([]byte, error) {
 	body := make(map[string]any, len(a.cfg.Provider.Request)+4)
 	for k, v := range a.cfg.Provider.Request {
 		body[k] = v
@@ -341,6 +358,10 @@ func (a *agent) complete(ctx context.Context, messages []any, tools []map[string
 	if err != nil {
 		return nil, err
 	}
+	if len(data) > *sendBudget {
+		return nil, errSendLimit
+	}
+	*sendBudget -= len(data)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(a.cfg.Provider.BaseURL, "/")+"/chat/completions", bytes.NewReader(data))
 	if err != nil {
 		return nil, err
