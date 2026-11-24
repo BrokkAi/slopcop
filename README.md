@@ -560,8 +560,9 @@ Reviewers read the captured diff after the same large-data filter used for
 the hosted patch. The full snapshot still identifies the tree approved for push.
 
 Reviewers, in priority order, are GPT Terra (`terra`) and GPT Sol (`sol`) through
-Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`)
-through Claude ACP. Each uses the newest model of its family at high effort.
+Codex ACP, DeepSeek Flash (`flash`) through dsh ACP, and Claude Haiku (`haiku`),
+Claude Sonnet (`sonnet`) and Claude Opus (`opus`) through Claude ACP. Each uses
+the newest model of its family at high effort.
 Gemini (`gemini`) through Antigravity CLI is opt-in: init never picks it, because
 Antigravity's web search cannot be refused, only detected. See
 [Gemini through Antigravity](https://docs.slopcop.com/reference/configuration/#gemini-through-antigravity-opt-in).
