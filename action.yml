@@ -55,13 +55,13 @@ inputs:
     required: false
     default: 'true'
   comment:
-    description: Comment the findings on the pull request. SlopCop's GitHub App writes the comments where the service offers it and the App's installation allows it; otherwise github-token does, which needs pull-requests write permission.
+    description: Comment the findings on the pull request with github-token, which needs pull-requests write permission, or with SlopCop's GitHub App (comment-via).
     required: false
     default: 'true'
   comment-via:
-    description: 'Who writes the comments: auto (the SlopCop GitHub App, else github-token), app or token.'
+    description: 'Who writes the comments: token (github-token), auto (the SlopCop GitHub App where SlopCop offers it, else github-token) or app. auto and app send the review findings to SlopCop.'
     required: false
-    default: auto
+    default: token
   sarif:
     description: Upload the findings to code scanning as SARIF. Needs security-events write permission.
     required: false

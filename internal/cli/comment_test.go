@@ -251,7 +251,7 @@ func TestCommentAsksTheAppFirst(t *testing.T) {
 	writes := 0
 	github := commentGitHub(t, &writes)
 
-	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--certainty", "all")
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--certainty", "all", "--via", "auto")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
@@ -282,7 +282,7 @@ func TestCommentFallsBackToTheWorkflowTokenWhenTheAppDoesNotPost(t *testing.T) {
 			service := appService(t, status, &sent)
 			writes := 0
 			github := commentGitHub(t, &writes)
-			code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL)
+			code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--via", "auto")
 			if code != 0 {
 				t.Fatalf("exit = %d, stderr = %s", code, stderr)
 			}
@@ -306,5 +306,17 @@ func TestCommentViaAppDoesNotFallBack(t *testing.T) {
 	code, _, stderr = runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--via", "bot")
 	if code == 0 || !strings.Contains(stderr, "--via") {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+}
+
+func TestCommentDefaultsToTheWorkflowToken(t *testing.T) {
+	appCommentEnv(t)
+	sent := map[string]any{}
+	service := appService(t, "posted", &sent)
+	writes := 0
+	github := commentGitHub(t, &writes)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL)
+	if code != 0 || writes == 0 || len(sent) != 0 {
+		t.Fatalf("exit = %d, writes = %d, sent to the service = %v, stderr = %s", code, writes, sent, stderr)
 	}
 }

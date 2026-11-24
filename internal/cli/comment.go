@@ -42,12 +42,13 @@ diff can hold is listed in one summary comment, which also says in words what
 the check found. A later run updates that comment in place and does not
 comment a finding it already commented.
 
-By default SlopCop's GitHub App writes the comments, as slopcop[bot]: the
-command asks the service, with the SlopCop login that ran the check, and sends
-no GitHub token. When the service does not post them (it is off, no GitHub
-connection of the workspace covers the repository, or the App's installation
-has not accepted Pull requests: Read and write), the command writes them
-itself with GITHUB_TOKEN. --via app or --via token picks one.
+With --via auto, SlopCop's GitHub App writes the comments, as slopcop[bot]:
+the command asks the service, with the SlopCop login that ran the check, and
+sends it the report's review but no GitHub token. When the service does not
+post them (it does not offer it, no GitHub connection of the workspace covers
+the repository, or the App's installation has not accepted Pull requests:
+Read and write), the command writes them itself with GITHUB_TOKEN. --via app
+uses only the App; --via token, the default, only GITHUB_TOKEN.
 
 In GitHub Actions the repository, pull request and head commit come from the
 workflow's event, and the token from GITHUB_TOKEN, which needs
@@ -72,10 +73,10 @@ It exits 0 whatever the check found; the check's own exit code is the gate.`,
 	flags.StringVar(&opts.commit, "commit", "", "head commit the check ran on (default: the workflow event's pull request head)")
 	flags.StringVar(&opts.apiURL, "api-url", "", "GitHub REST API URL (default: $GITHUB_API_URL, else https://api.github.com)")
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "print the summary comment and write nothing to GitHub")
-	flags.StringVar(&opts.via, "via", "auto", "who writes the comments: auto (the SlopCop GitHub App, else GITHUB_TOKEN), app or token")
+	flags.StringVar(&opts.via, "via", "token", "who writes the comments: token (GITHUB_TOKEN), auto (the SlopCop GitHub App where SlopCop offers it, else GITHUB_TOKEN) or app")
 	flags.StringVar(&opts.failOn, "fail-on", "", "the --fail-on the check ran with (default: the report's)")
 	flags.StringVar(&opts.certainty, "certainty", "", "the --certainty the check ran with")
-	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the report's, else the login's)")
+	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the login's)")
 	_ = command.MarkFlagRequired("report")
 	return command
 }
