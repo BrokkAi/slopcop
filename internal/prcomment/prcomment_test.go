@@ -99,7 +99,9 @@ type fakeGitHub struct {
 	reviewComments []comment
 	refuseWrites   int
 	refuseReview   int
-	patches        []string
+	// refusePatch refuses edits, as GitHub does a comment another app wrote.
+	refusePatch bool
+	patches     []string
 }
 
 func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
@@ -160,6 +162,10 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		var body map[string]string
 		_ = json.NewDecoder(r.Body).Decode(&body)
 		f.patches = append(f.patches, r.URL.Path)
+		if f.refusePatch {
+			refuse(http.StatusForbidden)
+			return
+		}
 		for i := range f.issueComments {
 			if fmt.Sprintf("/repos/o/r/issues/comments/%d", f.issueComments[i].ID) == r.URL.Path {
 				f.issueComments[i].Body = body["body"]
@@ -278,6 +284,26 @@ func TestPublishIgnoresAPersonsCommentThatQuotesTheMarkers(t *testing.T) {
 	}
 	if result.Posted != 2 {
 		t.Errorf("a person's marker suppressed a finding: %+v", result)
+	}
+}
+
+func TestPublishAfterTheAppDoesNotRepeatItsComments(t *testing.T) {
+	fake, gh := newFake(t)
+	app := user{Login: "slopcop[bot]", Type: "Bot"}
+	fake.reviewComments = []comment{{ID: 10, Body: item{key: "rv-1"}.marker(), User: app}}
+	fake.issueComments = []comment{{ID: 11, Body: summaryMarker + " the App's", User: app}}
+	fake.refusePatch = true
+	result, err := Publish(context.Background(), gh, mustParse(t, reviewReport), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The App's inline comment stands; only the static finding is new.
+	if result.Posted != 1 || result.Inline != 2 || result.ReadOnly {
+		t.Errorf("result = %+v", result)
+	}
+	// The App's summary cannot be edited, so the token writes its own.
+	if len(fake.issueComments) != 2 || result.SummaryURL == "" {
+		t.Errorf("comments = %+v, result = %+v", fake.issueComments, result)
 	}
 }
 

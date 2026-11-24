@@ -72,7 +72,10 @@ func Publish(ctx context.Context, g *GitHub, r Report, t Target) (Result, error)
 	}
 	commented := map[string]bool{}
 	for _, c := range existing {
-		if ours(c, me) {
+		// A bot's comment counts too, such as one the SlopCop GitHub App
+		// wrote before this run fell back to the token: a person cannot
+		// write as a bot, so its markers are never a person's quote.
+		if ours(c, me) || c.User.Type == "Bot" {
 			for _, key := range markedKeys(c.Body) {
 				commented[key] = true
 			}
@@ -151,6 +154,11 @@ func Publish(ctx context.Context, g *GitHub, r Report, t Target) (Result, error)
 	switch {
 	case previous != nil:
 		written, err = g.updateComment(ctx, t.Repo, previous.ID, body)
+		if Forbidden(err) {
+			// Another app's summary, such as the SlopCop GitHub App's, which
+			// this token may not edit: write one of its own.
+			written, err = g.createComment(ctx, t.Repo, t.PR, body)
+		}
 	case quiet:
 		return result, nil
 	default:
