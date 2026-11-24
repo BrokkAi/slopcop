@@ -387,8 +387,10 @@ files, and search files. Each reviewer runs with these limits:
   filter also fails. The reviewer fails instead of approving what it has not
   seen, so give it a fallback on another provider.
 
-The key is read from your environment, so other reviewer adapters started by
-the same check inherit it too. Like those adapters, it sends requests through
+The key is read from your environment. SlopCop removes `OPENROUTER_API_KEY` from
+the environment of every other reviewer adapter it starts, so give an adapter
+that needs an OpenRouter key its key under another variable name. Like those
+adapters, the OpenRouter reviewer sends requests through
 the proxy that `HTTPS_PROXY` or `ALL_PROXY` names, so a proxy you configure,
 including one that inspects TLS, sees the review and the key.
 

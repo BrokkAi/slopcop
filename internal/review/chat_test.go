@@ -514,3 +514,15 @@ func TestChatToolCheck(t *testing.T) {
 		}
 	}
 }
+
+func TestOnlyTheChatAgentGetsItsKey(t *testing.T) {
+	env := []string{"OPENROUTER_API_KEY=sk-test", "PATH=/bin"}
+	for _, f := range []Family{Terra, Haiku, Flash, Gemini, Kimi, Grok, Ollama, ""} {
+		if got := reviewerEnvironment(f, "/repo", "/data", slices.Clone(env)); slices.Contains(got, env[0]) || !slices.Contains(got, env[1]) {
+			t.Errorf("%q: %v", f, got)
+		}
+	}
+	if got := reviewerEnvironment(OpenRouter, "/repo", "/data", slices.Clone(env)); !slices.Contains(got, env[0]) {
+		t.Errorf("the OpenRouter agent lost its key: %v", got)
+	}
+}

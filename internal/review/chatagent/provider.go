@@ -38,11 +38,25 @@ var providers = map[string]Provider{
 			// support the tools this agent sends.
 			"provider": map[string]any{"data_collection": "deny", "require_parameters": true},
 			// An account can turn the web plugin on for every request.
+			// OpenRouter documents enabled:false as turning that default off
+			// for one request; live runs with it showed no citation or
+			// server-tool use, which ServerToolUse would have caught.
 			"plugins": []any{map[string]any{"id": "web", "enabled": false}},
 		},
 		CheckModel:    checkOpenRouterModel,
 		ServerToolUse: openRouterServerToolUse,
 	},
+}
+
+// KeyEnvs lists the environment variables that hold providers' API keys.
+func KeyEnvs() []string {
+	var names []string
+	for _, p := range providers {
+		if p.KeyEnv != "" {
+			names = append(names, p.KeyEnv)
+		}
+	}
+	return names
 }
 
 // Lookup returns a provider by its adapter name.

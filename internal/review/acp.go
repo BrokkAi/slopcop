@@ -15,6 +15,8 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/BrokkAi/slopcop/internal/review/chatagent"
 )
 
 // reviewClient collects final agent text and permission failures across ACP callbacks.
@@ -203,6 +205,14 @@ func scrubEnvironment(env []string) []string {
 // reviewerEnvironment gives dsh an absolute data directory beside review logs.
 func reviewerEnvironment(f Family, root, data string, env []string) []string {
 	env = scrubEnvironment(env)
+	// A chat provider's key goes only to its own agent: another adapter's
+	// shell or repository-loaded code could otherwise read it.
+	if !IsChatAdapter(string(f)) {
+		env = slices.DeleteFunc(env, func(v string) bool {
+			k, _, _ := strings.Cut(v, "=")
+			return slices.Contains(chatagent.KeyEnvs(), k)
+		})
+	}
 	if f != Flash {
 		return env
 	}
