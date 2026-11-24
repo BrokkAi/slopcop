@@ -219,6 +219,8 @@ func TestStripperLeavesProseBetweenSpans(t *testing.T) {
 		"`port` panics on any input that is not a valid `u16`":        "`port` panics on any input that is not a valid `u16`",
 		"port` panics on any input that is not a valid and long `u16": "port` panics on any input that is not a valid and long `u16",
 		"see `" + strings.Repeat("z", 50) + "` here":                  "see " + codeOmitted + " here",
+		"Stray ` here, then `" + strings.Repeat("s", 50) + "` leaks":  "Stray ` here, then " + codeOmitted + " leaks",
+		"two ``a`" + strings.Repeat("d", 50) + "`` spans":             "two " + codeOmitted + " spans",
 	} {
 		if got := reportText(in, maxTitleChars); got != want {
 			t.Errorf("reportText(%q) = %q, want %q", in, got, want)

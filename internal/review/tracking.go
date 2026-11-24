@@ -262,9 +262,6 @@ func reportFinding(f Finding) ReportFinding {
 var (
 	// fencedCode is a code block, closed or running to the end of the text.
 	fencedCode = regexp.MustCompile("(?s)```.*?(?:```|$)|~~~.*?(?:~~~|$)")
-	// inlineCode is a code span in single or double backticks; a double one
-	// may hold a single backtick.
-	inlineCode = regexp.MustCompile("(?s)``.+?``|`[^`]*`")
 )
 
 // reportText is reviewer prose as sent: on one line, without fenced code or a
@@ -272,19 +269,48 @@ var (
 // characters.
 func reportText(text string, limit int) string {
 	text = fencedCode.ReplaceAllString(text, codeOmitted)
-	text = inlineCode.ReplaceAllStringFunc(text, func(span string) string {
-		// Code inside backticks does not start or end with a space. Text that
-		// does lies between two spans, or after a lone backtick, and is prose.
-		content := strings.Trim(span, "`")
-		if strings.TrimSpace(content) != content {
-			return span
-		}
-		if utf8.RuneCountInString(content) > inlineCodeLimit {
-			return codeOmitted
-		}
-		return span
-	})
+	text = stripInlineCode(text)
 	return cutRunes(oneLine(text), limit)
+}
+
+// stripInlineCode replaces each inline code span over inlineCodeLimit with
+// codeOmitted. A span opens with one or two backticks and closes with as many.
+// Code does not start or end with a space, so a stretch between backticks that
+// does is prose after a lone backtick: that backtick is kept as text, and the
+// scan goes on from the next character, so it cannot take the opening
+// backtick of a real span with it.
+func stripInlineCode(text string) string {
+	var out strings.Builder
+	for i := 0; i < len(text); {
+		if text[i] != '`' {
+			out.WriteByte(text[i])
+			i++
+			continue
+		}
+		fence := "`"
+		if strings.HasPrefix(text[i:], "``") {
+			fence = "``"
+		}
+		end := strings.Index(text[i+len(fence):], fence)
+		if end < 0 {
+			out.WriteString(text[i:])
+			break
+		}
+		content := text[i+len(fence) : i+len(fence)+end]
+		next := i + len(fence) + end + len(fence)
+		switch {
+		case content == "" || strings.TrimSpace(content) != content:
+			out.WriteString(fence)
+			i += len(fence)
+		case utf8.RuneCountInString(content) > inlineCodeLimit:
+			out.WriteString(codeOmitted)
+			i = next
+		default:
+			out.WriteString(text[i:next])
+			i = next
+		}
+	}
+	return out.String()
 }
 
 // DispositionReason is an override's reason as sent: one line, within the
