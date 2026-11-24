@@ -495,6 +495,28 @@ func TestAKeyCutByTheErrorLimitIsStillRemoved(t *testing.T) {
 	}
 }
 
+func TestAnEscapedKeyIsRemovedFromEveryErrorShape(t *testing.T) {
+	root, tree, _, _ := repoTree(t)
+	escaped := strings.Replace(testKey, "sk-t", `sk-\u0074`, 1)
+	for name, body := range map[string]string{
+		"string error":      `{"error":"bad key ` + escaped + `"}`,
+		"error without msg": `{"error":{"code":400,"metadata":{"key":"` + escaped + `"}}}`,
+		"no error field":    `{"detail":"bad key ` + escaped + `"}`,
+	} {
+		for _, status := range []int{http.StatusBadRequest, http.StatusOK} {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, body)
+			}))
+			_, _, err := review(t, root, tree, &model{}, func(c *Config) { c.Provider.BaseURL = server.URL })
+			server.Close()
+			if err == nil || strings.Contains(err.Error(), testKey[:len(testKey)/2]) || strings.Contains(err.Error(), escaped[:len(escaped)/2]) {
+				t.Fatalf("%s, status %d: %v", name, status, err)
+			}
+		}
+	}
+}
+
 func TestAReplyNeverCarriesTheKey(t *testing.T) {
 	root, tree, _, _ := repoTree(t)
 	escaped := strings.Replace(testKey, "sk-t", `sk-\u0074`, 1)

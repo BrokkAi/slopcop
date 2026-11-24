@@ -465,7 +465,7 @@ func (a *agent) apiErrorText(raw []byte) string {
 	if json.Unmarshal(raw, &r) == nil && len(r.Error) > 0 {
 		return a.errorText(r.Error)
 	}
-	return clip(a.scrub(string(raw)))
+	return a.plainText(raw)
 }
 
 func (a *agent) errorText(raw json.RawMessage) string {
@@ -475,7 +475,24 @@ func (a *agent) errorText(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &e) == nil && e.Message != "" {
 		return clip(a.scrub(e.Message))
 	}
-	return clip(a.scrub(string(raw)))
+	return a.plainText(raw)
+}
+
+// plainText shortens raw response text for an error. JSON is decoded and
+// written again without escapes first, so a key hidden behind escapes such as
+// \u0074 is in plain form when the scrub looks for it.
+func (a *agent) plainText(raw []byte) string {
+	text := string(raw)
+	var v any
+	if json.Unmarshal(raw, &v) == nil {
+		var b strings.Builder
+		e := json.NewEncoder(&b)
+		e.SetEscapeHTML(false)
+		if e.Encode(v) == nil {
+			text = b.String()
+		}
+	}
+	return clip(a.scrub(text))
 }
 
 func clip(s string) string {
