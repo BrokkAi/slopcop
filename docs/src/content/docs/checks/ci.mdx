@@ -1,6 +1,6 @@
 ---
 title: Gate a change in CI
-description: "Run slopcop in GitHub Actions or any CI with a stored token, pick the base the change targets, act on the exit code, and upload SARIF to code scanning."
+description: "Check pull requests with the SlopCop GitHub Action, with inline comments, an optional LLM review and SARIF upload, or run slopcop in any CI with a stored token and act on the exit code."
 sidebar:
   order: 7
 ---
@@ -13,8 +13,9 @@ A check in CI costs what any check costs: it uses one of the workspace's
 1,000 free checks each calendar month, then [credits](/account/credits/).
 
 On GitHub, [pull request checks](/checks/pull-requests/) give each pull request
-the same check with no workflow or token: the SlopCop GitHub App posts it. Run
-the CLI in CI when you want your own `--fail-on`, rules, or output formats.
+the same check with no workflow or token: the SlopCop GitHub App posts it. Use
+the [GitHub Action](#github-actions) when you also want the LLM review,
+comments on the pull request, or your own `fail-on` and rules.
 
 ## Sign in without a browser
 
@@ -46,6 +47,10 @@ reviewers run in Codex's read-only sandbox.
 
 ## GitHub Actions
 
+The SlopCop action checks a pull request, comments what it found on the
+pull request's lines, and passes or fails the job with a sentence that says
+why:
+
 ```yaml
 name: SlopCop
 
@@ -54,7 +59,7 @@ on:
 
 permissions:
   contents: read
-  security-events: write   # only for the SARIF upload
+  pull-requests: write   # the comments
 
 jobs:
   check:
@@ -62,34 +67,160 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: BrokkAi/slopcop@v0
+        with:
+          slopcop-token: ${{ secrets.SLOPCOP_TOKEN }}
+```
+
+It installs the CLI, fetches the pull request's base branch, and runs
+`slopcop check --base origin/<base> --format json` once. Then:
+
+- **Inline comments.** Each new finding on a line the pull request changes
+  gets an inline comment, in one review. A later push comments only findings
+  not commented before.
+- **One summary comment.** It says in words what the check found, for example
+  "SlopCop found 2 new findings, all from the review", and lists the findings
+  no line of the diff can hold. Every run updates it in place. A clean check
+  adds none, and turns an earlier one clean.
+- **The job summary** carries the same text, so a pull request from a fork,
+  whose token may not comment, still shows it.
+- **A clear result.** The last step passes, or fails with an annotation that
+  names the cause: new findings, a check that could not complete, a timeout, or
+  a refusal only a person can clear. A job failed by findings says the check
+  ran to completion; exit `1` is never a crash.
+
+Check out the head commit (`ref` above), as GitHub's default merge commit can
+move a line the comments point at. `fetch-depth: 0` keeps the merge base in
+the clone; the action fetches it when the checkout is shallow.
+
+### Add the LLM review
+
+The review runs in the runner, through a reviewer harness you sign in with a
+secret. For example, Copilot's `sol` model:
+
+```yaml
+      - uses: BrokkAi/slopcop@v0
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        with:
+          slopcop-token: ${{ secrets.SLOPCOP_TOKEN }}
+          review: true
+          review-provider: copilot
+          reviewers: sol
+```
+
+The reviewers are told what the pull request is for from its title and
+description (`intent-from-pull-request: false` turns that off). Their findings
+are commented like static ones, marked as from the review.
+
+By default review findings do not fail the job. A reviewer's finding is a
+judgement, and `slopcop override`, which drops a wrong one on a laptop, keeps
+its record in the clone, which a CI run throws away. Set `review-blocks: true`
+to fail on them anyway. Static findings fail the job at `fail-on` as always,
+and a false positive among them stays out of later checks with
+[`slopcop ignore`](/checks/false-positives/).
+
+Each reviewer runs through its own harness, signed in by a secret in the
+step's `env:`. `review-provider: copilot` instead runs the GPT and Claude
+families through Copilot CLI, on one login:
+
+| `reviewers` | Runs through | Secret in `env:` |
+| --- | --- | --- |
+| `haiku`, `sonnet`, `opus` | Claude Code | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
+| `terra`, `sol` | Codex | `OPENAI_API_KEY` or `CODEX_API_KEY` |
+| `terra`, `sol`, `haiku`, `sonnet`, `opus`, with `review-provider: copilot` | Copilot CLI | `COPILOT_GITHUB_TOKEN`, a token whose account has Copilot |
+| `flash` | dsh | `DEEPSEEK_API_KEY` |
+| `openrouter` | SlopCop's own read-only agent | `OPENROUTER_API_KEY`, and `review-models: openrouter=vendor/model` |
+| `kimi` | Kimi Code | `KIMI_API_KEY` |
+| `grok` | Grok Build | `XAI_API_KEY` |
+
+Reviewers can mix harnesses, such as `reviewers: sonnet,sol` with both
+secrets set. `ollama` needs a model server the runner can reach,
+and `gemini` an Antigravity login, so neither suits a hosted runner. See
+[Configuration](/reference/configuration/) for what each reviewer runs. The
+review can take minutes. The prompt carries the captured diff. Reviewers read
+repository content, which is untrusted. Claude and DeepSeek reviewers may only
+read and search files; SlopCop refuses their requests to run commands or change
+files. Codex reviewers run in Codex's read-only sandbox, and Copilot reviewers
+get only its read and search tools.
+
+### Code scanning
+
+`sarif: true` also uploads the findings to code scanning, static and review
+alike, from the same check. It needs `security-events: write`.
+
+### Inputs and outputs
+
+| Input | Default | Meaning |
+| --- | --- | --- |
+| `slopcop-token` | `$SLOPCOP_TOKEN` | the SlopCop token, from a secret |
+| `workspace` | the token's | workspace to check in, and bill |
+| `version` | the action's release, else the latest | CLI version to install |
+| `base` | the pull request's base branch | branch the change targets |
+| `fail-on` | `finding` | lowest level of a new static finding that fails the job |
+| `certainty` | `definite` | `all` also reports possible and heuristic findings |
+| `review` | `false` | also run the LLM review |
+| `review-provider` | | provider the reviewers run through, such as `copilot` |
+| `reviewers` | | reviewers, such as `sol` or `terra,sol` |
+| `review-models` | | `family=model` pairs for reviewers that do not choose their own model, such as `openrouter=vendor/model` |
+| `review-blocks` | `false` | fail the job on review findings too |
+| `intent-from-pull-request` | `true` | tell the reviewers what the pull request is for |
+| `comment` | `true` | comment on the pull request; `false` keeps to the job summary |
+| `sarif` | `false` | upload to code scanning |
+| `github-token` | `github.token` | token that comments |
+| `working-directory` | `.` | checkout to check |
+| `args` | | further `slopcop check` arguments, such as `--policy-pack security` |
+
+Outputs: `exit-code`, `status`, `exit-reason`, `static-findings`,
+`review-findings`, `headline`, `summary-url`, `report` (the JSON report's path)
+and `sarif-file`.
+
+<Aside title="The GitHub App, or the action">
+[Pull request checks](/checks/pull-requests/) from the SlopCop GitHub App need
+no workflow, and annotate static findings in **Files changed**. The action adds
+the LLM review, comments, and your own inputs. Running both checks each push
+twice.
+</Aside>
+
+### Without the action
+
+The CLI does the same in plain steps. `--sarif-file` writes SARIF beside the
+JSON report, and [`slopcop comment`](/reference/cli/#slopcop-comment) comments
+the JSON report on the pull request:
+
+```yaml
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0          # the merge base must be in the clone
 
       - name: Install slopcop
         run: npm install --global @brokkai/slopcop
 
       - name: Check the change
+        id: slopcop
         env:
           SLOPCOP_TOKEN: ${{ secrets.SLOPCOP_TOKEN }}
         run: |
-          slopcop check --mode static --base "origin/${{ github.base_ref }}" --format sarif > slopcop.sarif
+          set +e
+          slopcop check --mode static --base "origin/${{ github.base_ref }}" \
+            --format json --sarif-file slopcop.sarif > slopcop.json
           echo "exit=$?" >> "$GITHUB_OUTPUT"
-        id: slopcop
-        continue-on-error: true
 
-      - name: Upload to code scanning
+      - name: Comment the findings
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: slopcop.sarif
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: slopcop comment --report slopcop.json
 
       - name: Fail on new findings or an incomplete check
         if: steps.slopcop.outputs.exit != '0'
-        run: |
-          echo "slopcop exited ${{ steps.slopcop.outputs.exit }}"
-          exit 1
+        run: exit 1
 ```
 
-Three things matter in that workflow:
+Three things matter there:
 
 - **`fetch-depth: 0`.** The CLI needs the merge base with the target branch in
   its clone, and the service needs that commit in its own; a shallow clone
@@ -99,15 +230,10 @@ Three things matter in that workflow:
   rather than relying on the default. Like `git diff REV...HEAD`, the base is
   the merge base, so commits that landed on the target after the branch point
   are not sent as reverse edits.
-- **Act on the exit code, not the SARIF.** `1` means new findings; `2` means
+- **Act on the exit code, not the report.** `1` means new findings; `2` means
   some rule did not complete or the check failed, which is not a pass; `3`
   means run it again; `4` means a person must act. Treat anything but `0` as a
   failed gate, and read the code to know which.
-
-The SARIF upload is optional. It puts each new finding on the pull request's
-Files changed tab as a code-scanning alert, with `baselineState: new` so GitHub
-shows it as introduced by the change. Without `security-events: write` drop
-that step and read the `human` output in the job log instead.
 
 ## Other CI
 

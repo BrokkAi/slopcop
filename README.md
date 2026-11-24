@@ -501,6 +501,7 @@ Flags:
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` |
 | `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`) |
+| `--sarif-file PATH` | also write the report as SARIF to this file |
 | `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new static findings (default `finding`); a review finding exits `1` at every level but `never` |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
@@ -604,7 +605,10 @@ The prompt carries the captured diff. Reviewers read repository content,
 which is untrusted. Claude and DeepSeek reviewers may only read and search
 files; Slopcop refuses their requests to run commands or change files. Codex
 reviewers run in Codex's read-only sandbox.
-CI normally uses `--mode static`.
+CI normally uses `--mode static`. The GitHub Action (`uses: BrokkAi/slopcop@v0`)
+runs the review in the runner when asked, and `slopcop comment --report
+slopcop.json` comments a check's findings on its pull request; see
+[Gate a change in CI](https://docs.slopcop.com/checks/ci/).
 
 Review state and logs are under `<git-dir>/slopcop/`. `slopcop review show
 [--format human|json|sarif]` prints the latest review again, rebuilding each

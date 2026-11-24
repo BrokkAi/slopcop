@@ -47,6 +47,7 @@ slopcop --root ../repo --base origin/main
 | `--base-exact REV` | exact base commit or revision, used without taking a merge base |
 | `--include PATH_OR_GLOB` | opt matching files back into upload and local review when the default 500,000-byte JSON/binary filter would omit them; repository-relative, repeatable, quote globs |
 | `--format human\|json\|sarif` | report format (default `human`) |
+| `--sarif-file PATH` | also write the report as SARIF to this file, so one check gives `json` on stdout and SARIF for a code scanning upload |
 | `--fail-on never\|finding\|note\|warning\|error` | exit `1` when a new static finding is at or above this level (default `finding`), or when a reviewer reported any finding (every level but `never`) |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` policy file to evaluate (repeatable) |
@@ -340,6 +341,39 @@ approval, and `reviewOverride` carries the override:
 review has no override. SARIF carries it as the `slopcop.reviewOverride` run
 property. A later check of the tree records a new decision, so its review
 starts with no override.
+
+## `slopcop comment`
+
+Comment a check's findings on the GitHub pull request it checked. It reads the
+report `slopcop check --format json` wrote, so the check runs once. It adds one
+pull request review with an inline comment on each new finding whose lines the
+pull request changes, static and review findings alike, and one summary
+comment that says what the check found and lists the findings no line of the
+diff can hold. A later run updates the summary in place and does not comment a
+finding it already commented. A clean check writes no summary unless an
+earlier run left one, which it updates.
+
+```console
+slopcop check --base origin/main --format json > slopcop.json
+slopcop comment --report slopcop.json
+```
+
+| Flag | Meaning |
+| --- | --- |
+| `--report PATH` | the JSON report, or `-` for stdin (required) |
+| `--repo OWNER/NAME` | repository (default `$GITHUB_REPOSITORY`) |
+| `--pr NUMBER` | pull request (default: the workflow event's) |
+| `--commit SHA` | head commit the check ran on (default: the event's pull request head) |
+| `--api-url URL` | REST API root (default `$GITHUB_API_URL`, else `https://api.github.com`) |
+| `--dry-run` | print the summary and write nothing to GitHub |
+
+The token comes from `GITHUB_TOKEN` (or `GH_TOKEN`) and needs
+`pull-requests: write`. With a read-only token, as on a pull request from a
+fork, nothing is written to the pull request. In GitHub Actions the summary
+also goes to the job summary, and the step's outputs carry `status`,
+`exit-reason`, `static-findings`, `review-findings`, `headline` and
+`summary-url`. It exits `0` whatever the check found: the check's exit code is
+the gate. The [GitHub Action](/checks/ci/) runs it for you.
 
 ## `slopcop update`
 

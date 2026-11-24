@@ -1,0 +1,304 @@
+name: SlopCop
+description: Check a pull request with SlopCop's hosted static analysis and an optional LLM review, and comment the findings on its lines.
+author: Brokk
+branding:
+  icon: shield
+  color: gray-dark
+
+inputs:
+  slopcop-token:
+    description: SlopCop token (store it as a secret). Defaults to the SLOPCOP_TOKEN environment variable.
+    required: false
+    default: ''
+  workspace:
+    description: SlopCop workspace to check in and bill. Defaults to the one the token was approved in.
+    required: false
+    default: ''
+  version:
+    description: slopcop CLI version to install, such as 0.0.24. Defaults to this action's release tag, or the latest release.
+    required: false
+    default: ''
+  base:
+    description: Branch the change targets. Defaults to the pull request's base branch, or the repository's default branch outside a pull request.
+    required: false
+    default: ''
+  fail-on:
+    description: 'Lowest level of a new static finding that fails the job: never, finding, note, warning or error.'
+    required: false
+    default: finding
+  certainty:
+    description: Which static findings to report, definite or all.
+    required: false
+    default: definite
+  review:
+    description: Also run the local LLM review in the runner, with the reviewers below. Its harness login comes from the step's environment.
+    required: false
+    default: 'false'
+  review-provider:
+    description: Provider the reviewers run through, such as copilot. Empty uses each reviewer's own harness.
+    required: false
+    default: ''
+  reviewers:
+    description: Comma-separated reviewers, such as sol or terra,sol. Required with review.
+    required: false
+    default: ''
+  review-models:
+    description: 'Model of each reviewer that does not choose its own, as family=model pairs separated by commas or newlines, such as openrouter=vendor/model.'
+    required: false
+    default: ''
+  review-blocks:
+    description: Fail the job on review findings too. By default they are commented but leave the job passing, since a reviewer's finding cannot be overridden from CI.
+    required: false
+    default: 'false'
+  intent-from-pull-request:
+    description: Tell the reviewers what the change is for from the pull request's title and description.
+    required: false
+    default: 'true'
+  comment:
+    description: Comment the findings on the pull request. Needs pull-requests write permission.
+    required: false
+    default: 'true'
+  sarif:
+    description: Upload the findings to code scanning as SARIF. Needs security-events write permission.
+    required: false
+    default: 'false'
+  github-token:
+    description: Token that comments on the pull request.
+    required: false
+    default: ${{ github.token }}
+  working-directory:
+    description: Checkout to check.
+    required: false
+    default: '.'
+  args:
+    description: Further arguments for slopcop check, such as --policy-pack or --include, separated by spaces.
+    required: false
+    default: ''
+
+outputs:
+  exit-code:
+    description: slopcop check's exit code. 0 clean, 1 findings, 2 incomplete or failed, 3 still running at the timeout, 4 needs a person.
+    value: ${{ steps.check.outputs.exit-code }}
+  status:
+    description: The check's status, such as clean, findings or incomplete.
+    value: ${{ steps.comment.outputs.status }}
+  exit-reason:
+    description: What made the check exit 1, static_findings, review_findings or static_and_review_findings. Empty otherwise.
+    value: ${{ steps.comment.outputs.exit-reason }}
+  static-findings:
+    description: How many new static findings the check reported.
+    value: ${{ steps.comment.outputs.static-findings }}
+  review-findings:
+    description: How many findings the review reported.
+    value: ${{ steps.comment.outputs.review-findings }}
+  headline:
+    description: One sentence saying what the check found.
+    value: ${{ steps.comment.outputs.headline }}
+  summary-url:
+    description: Link to the summary comment on the pull request, when one was written.
+    value: ${{ steps.comment.outputs.summary-url }}
+  report:
+    description: Path of the JSON report.
+    value: ${{ steps.check.outputs.report }}
+  sarif-file:
+    description: Path of the SARIF report.
+    value: ${{ steps.check.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install slopcop
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        ACTION_REF: ${{ github.action_ref }}
+      run: |
+        version="${INPUT_VERSION#v}"
+        if [ -z "$version" ] && [[ "$ACTION_REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          version="${ACTION_REF#v}"
+        fi
+        if [ -z "$version" ]; then
+          version=latest
+        elif ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-.][0-9A-Za-z.]+)?$ ]]; then
+          echo "::error title=SlopCop::version must be a release such as 0.0.24, not '$version'"
+          exit 1
+        fi
+        npm install --global --no-fund --no-audit --loglevel=error "@brokkai/slopcop@$version"
+        slopcop version
+
+    - name: Fetch the base branch
+      id: base
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        PR_BASE: ${{ github.event.pull_request.base.ref }}
+        DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+      run: |
+        base="${INPUT_BASE:-${PR_BASE:-$DEFAULT_BRANCH}}"
+        base="${base#refs/heads/}"
+        base="${base#origin/}"
+        if [ -z "$base" ]; then
+          echo "::error title=SlopCop::set the base input to the branch this change targets"
+          exit 1
+        fi
+        if ! git check-ref-format --branch "$base" >/dev/null 2>&1; then
+          echo "::error title=SlopCop::base '$base' is not a branch name"
+          exit 1
+        fi
+        # The merge base must be in the clone; actions/checkout fetches one
+        # commit unless told otherwise.
+        if [ "$(git rev-parse --is-shallow-repository)" = "true" ]; then
+          git fetch --no-tags --quiet --unshallow origin
+        fi
+        git fetch --no-tags --quiet origin "+refs/heads/$base:refs/remotes/origin/$base"
+        echo "ref=origin/$base" >> "$GITHUB_OUTPUT"
+
+    - name: Set up the reviewers
+      if: inputs.review == 'true'
+      shell: bash
+      env:
+        REVIEW_PROVIDER: ${{ inputs.review-provider }}
+        REVIEWERS: ${{ inputs.reviewers }}
+        REVIEW_MODELS: ${{ inputs.review-models }}
+      run: |
+        if [ -z "$REVIEWERS" ]; then
+          echo "::error title=SlopCop::review is on, so set reviewers, such as sol or terra,sol"
+          exit 1
+        fi
+        if [ -n "$REVIEW_PROVIDER" ]; then
+          slopcop config set review.provider "$REVIEW_PROVIDER"
+        fi
+        slopcop config set review.reviewers "$REVIEWERS"
+        # family=model pairs; config set refuses a family it does not know.
+        while IFS= read -r pair; do
+          pair="${pair//[[:space:]]/}"
+          [ -z "$pair" ] && continue
+          if [[ "$pair" != *=* ]]; then
+            echo "::error title=SlopCop::review-models takes family=model pairs, not '$pair'"
+            exit 1
+          fi
+          slopcop config set "review.models.${pair%%=*}" "${pair#*=}"
+        done <<< "${REVIEW_MODELS//,/$'\n'}"
+
+    - name: Check the change
+      id: check
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        SLOPCOP_TOKEN: ${{ inputs.slopcop-token || env.SLOPCOP_TOKEN }}
+        SLOPCOP_NO_UPDATE_NOTICE: '1'
+        BASE_REF: ${{ steps.base.outputs.ref }}
+        WORKSPACE: ${{ inputs.workspace }}
+        FAIL_ON: ${{ inputs.fail-on }}
+        CERTAINTY: ${{ inputs.certainty }}
+        REVIEW: ${{ inputs.review }}
+        INTENT_FROM_PR: ${{ inputs.intent-from-pull-request }}
+        PR_TITLE: ${{ github.event.pull_request.title }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+        EXTRA_ARGS: ${{ inputs.args }}
+      run: |
+        report="$RUNNER_TEMP/slopcop.json"
+        sarif="$RUNNER_TEMP/slopcop.sarif"
+        rm -f "$report" "$sarif"
+        args=(check --base "$BASE_REF" --format json --sarif-file "$sarif" --fail-on "$FAIL_ON" --certainty "$CERTAINTY")
+        if [ -n "$WORKSPACE" ]; then
+          args+=(--workspace "$WORKSPACE")
+        fi
+        if [ "$REVIEW" = "true" ]; then
+          args+=(--mode both)
+          if [ "$INTENT_FROM_PR" = "true" ] && [ -n "$PR_TITLE" ]; then
+            intent="$(printf 'Pull request: %s\n\n%s' "$PR_TITLE" "$PR_BODY")"
+            intent="${intent:0:8000}"
+            args+=(--intent "$intent")
+          fi
+        else
+          args+=(--mode static)
+        fi
+        if [ -n "$EXTRA_ARGS" ]; then
+          read -r -a extra <<< "$EXTRA_ARGS"
+          args+=("${extra[@]}")
+        fi
+        set +e
+        slopcop "${args[@]}" > "$report"
+        code=$?
+        set -e
+        echo "exit-code=$code" >> "$GITHUB_OUTPUT"
+        echo "report=$report" >> "$GITHUB_OUTPUT"
+        if [ -s "$sarif" ]; then
+          echo "sarif-file=$sarif" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Comment the findings
+      id: comment
+      if: always() && steps.check.outputs.report != ''
+      continue-on-error: true
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        SLOPCOP_NO_UPDATE_NOTICE: '1'
+        REPORT: ${{ steps.check.outputs.report }}
+        COMMENT: ${{ inputs.comment }}
+      run: |
+        if [ ! -s "$REPORT" ]; then
+          echo "slopcop check wrote no report; its log above says why."
+          exit 0
+        fi
+        if [ "$COMMENT" = "true" ]; then
+          slopcop comment --report "$REPORT"
+        else
+          slopcop comment --report "$REPORT" --dry-run > /dev/null
+        fi
+
+    - name: Upload to code scanning
+      if: always() && inputs.sarif == 'true' && steps.check.outputs.sarif-file != ''
+      continue-on-error: true
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ steps.check.outputs.sarif-file }}
+        category: slopcop
+
+    - name: Pass or fail
+      if: always() && steps.check.outputs.exit-code != ''
+      shell: bash
+      env:
+        CODE: ${{ steps.check.outputs.exit-code }}
+        REASON: ${{ steps.comment.outputs.exit-reason }}
+        HEADLINE: ${{ steps.comment.outputs.headline }}
+        REVIEW_BLOCKS: ${{ inputs.review-blocks }}
+      run: |
+        # Workflow commands end at a newline and treat % specially.
+        escape() {
+          local pct='%' cr=$'\r' nl=$'\n' s="$1"
+          s="${s//$pct/%25}"; s="${s//$cr/%0D}"; printf '%s' "${s//$nl/%0A}"
+        }
+        headline="$(escape "${HEADLINE:-SlopCop exited $CODE}")"
+        case "$CODE" in
+          0)
+            echo "::notice title=SlopCop::$headline"
+            ;;
+          1)
+            if [ "$REASON" = "review_findings" ] && [ "$REVIEW_BLOCKS" != "true" ]; then
+              echo "::warning title=SlopCop::$headline. Review findings do not fail this job (review-blocks is false)."
+              exit 0
+            fi
+            echo "::error title=SlopCop found new findings::$headline. The check ran to completion; the findings fail the job."
+            exit 1
+            ;;
+          2)
+            echo "::error title=SlopCop could not complete the check::$headline. Some rule did not finish or the check failed, so this is not a pass; the log above says which."
+            exit 1
+            ;;
+          3)
+            echo "::error title=SlopCop timed out::The check was still running when its timeout ran out. Re-run the job to pick up its result."
+            exit 1
+            ;;
+          4)
+            echo "::error title=SlopCop needs a person::The service refused the check, and only a person can clear it; the log above says what to do."
+            exit 1
+            ;;
+          *)
+            echo "::error title=SlopCop stopped::slopcop exited $CODE before the check answered."
+            exit 1
+            ;;
+        esac

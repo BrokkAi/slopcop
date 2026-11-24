@@ -171,7 +171,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		return err
 	}
 	if errors.Is(storeErr, review.ErrBusy) {
-		return checkFailure(cmd, reviewBusy(settings.Timeout), format, reportOptions)
+		return checkFailure(cmd, reviewBusy(settings.Timeout), format, opts.sarifFile, reportOptions)
 	}
 	reportOptions.OmittedFiles = prepared.omittedFiles
 	reportOptions.BinaryFiles = prepared.binaryFiles
@@ -426,24 +426,30 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		advisory = advisoryFindings(*static.response, blockLevel)
 	}
 	reportOptions.AdvisoryFindings = advisory
-	var writeErr error
-	switch {
-	case mode == modeAI:
-		writeErr = report.WriteAI(cmd.OutOrStdout(), format, reportOptions)
-	case static.response != nil:
+	if static.response != nil {
 		reportOptions.AddedTo = static.addedTo
-		writeErr = report.Write(cmd.OutOrStdout(), *static.response, format, reportOptions)
-	case static.failure != nil:
-		writeErr = report.WriteFailure(cmd.OutOrStdout(), static.failure, format, reportOptions)
-	case static.pending != nil:
-		writeErr = report.WritePending(cmd.OutOrStdout(), *static.pending, format, reportOptions)
-	case static.skipped != nil:
-		writeErr = report.WriteSkipped(cmd.OutOrStdout(), *static.skipped, format, reportOptions)
-	default:
-		writeErr = report.WriteFailure(cmd.OutOrStdout(), &service.Error{Body: service.ErrorBody{Message: "static check failed"}}, format, reportOptions)
 	}
-	if writeErr != nil {
-		return writeErr
+	render := func(w io.Writer, format string) error {
+		switch {
+		case mode == modeAI:
+			return report.WriteAI(w, format, reportOptions)
+		case static.response != nil:
+			return report.Write(w, *static.response, format, reportOptions)
+		case static.failure != nil:
+			return report.WriteFailure(w, static.failure, format, reportOptions)
+		case static.pending != nil:
+			return report.WritePending(w, *static.pending, format, reportOptions)
+		case static.skipped != nil:
+			return report.WriteSkipped(w, *static.skipped, format, reportOptions)
+		default:
+			return report.WriteFailure(w, &service.Error{Body: service.ErrorBody{Message: "static check failed"}}, format, reportOptions)
+		}
+	}
+	if err := render(cmd.OutOrStdout(), format); err != nil {
+		return err
+	}
+	if err := writeSARIFFile(opts.sarifFile, render); err != nil {
+		return err
 	}
 	overridable := verdict.Overridable() && staticPasses(static, mode, blockLevel)
 	if notice := reviewFailureNotice(reportOptions.ExitReason, failingReviewFindings(verdict), failOn, format, overridable); notice != "" {
@@ -733,7 +739,7 @@ func hasNewFindings(response service.Response) bool {
 // stderr, writes the failure report for machine formats on stdout, and exits
 // 4 when only a person can clear it, otherwise 2, the exit of a check that
 // did not complete. Any other error is returned as is.
-func checkFailure(cmd *cobra.Command, err error, format string, options report.Options) error {
+func checkFailure(cmd *cobra.Command, err error, format, sarifFile string, options report.Options) error {
 	var serviceError *service.Error
 	if errors.As(err, &serviceError) {
 		text := remedyText(serviceError)
@@ -747,7 +753,13 @@ func checkFailure(cmd *cobra.Command, err error, format string, options report.O
 			text = "slopcop: " + code + ": " + text
 		}
 		fmt.Fprintln(cmd.ErrOrStderr(), text)
-		if err := report.WriteFailure(cmd.OutOrStdout(), serviceError, format, options); err != nil {
+		render := func(w io.Writer, format string) error {
+			return report.WriteFailure(w, serviceError, format, options)
+		}
+		if err := render(cmd.OutOrStdout(), format); err != nil {
+			return err
+		}
+		if err := writeSARIFFile(sarifFile, render); err != nil {
 			return err
 		}
 		if serviceError.NeedsPerson() {
@@ -756,6 +768,23 @@ func checkFailure(cmd *cobra.Command, err error, format string, options report.O
 		return silentExit{service.ExitIncomplete}
 	}
 	return err
+}
+
+// writeSARIFFile writes the report again, as SARIF, to path, for --sarif-file:
+// a CI job reads one format on stdout and uploads SARIF to code scanning from
+// the same check, without sending it twice. An empty path writes nothing.
+func writeSARIFFile(path string, render func(io.Writer, string) error) error {
+	if path == "" {
+		return nil
+	}
+	var out bytes.Buffer
+	if err := render(&out, report.FormatSARIF); err != nil {
+		return err
+	}
+	if err := os.WriteFile(path, out.Bytes(), 0o644); err != nil {
+		return fmt.Errorf("write --sarif-file: %w", err)
+	}
+	return nil
 }
 
 // checkRepository is lookupRepositoryStatus, a variable so tests can stand in

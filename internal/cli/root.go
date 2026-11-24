@@ -117,6 +117,7 @@ Running slopcop with no subcommand runs the check.`,
 		newGateCommand(),
 		newOverrideCommand(),
 		newReviewCommand(),
+		newCommentCommand(version),
 		newHookCommand(&serviceURL, version),
 		newLoginCommand(&serviceURL, version),
 		newLogoutCommand(&serviceURL),
@@ -158,14 +159,16 @@ type checkOptions struct {
 	policyPacks      []string
 	policyCategories []string
 	format           string
-	failOn           string
-	certainty        string
-	policies         []string
-	noDiscovery      bool
-	verbose          bool
-	showExisting     bool
-	timeout          time.Duration
-	workspace        string
+	// sarifFile, when set, also writes the report as SARIF to this path.
+	sarifFile    string
+	failOn       string
+	certainty    string
+	policies     []string
+	noDiscovery  bool
+	verbose      bool
+	showExisting bool
+	timeout      time.Duration
+	workspace    string
 	// addRepository is accepted and ignored: a check now adds a repository
 	// the workspace has never added by itself.
 	addRepository bool
@@ -193,6 +196,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringArrayVar(&opts.policyPacks, "policy-pack", nil, "policy pack (repeatable)")
 	flags.StringArrayVar(&opts.policyCategories, "policy-category", nil, "policy category (repeatable)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
+	flags.StringVar(&opts.sarifFile, "sarif-file", "", "also write the report as SARIF to this file, for a code scanning upload")
 	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
 	flags.StringVar(&opts.certainty, "certainty", certaintyDefinite, "which findings to report and fail on: definite (proven at their location) or all (also possible and heuristic ones)")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")

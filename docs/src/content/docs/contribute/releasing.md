@@ -23,6 +23,9 @@ The same tag push then:
   [Publishing to PyPI](/contribute/pypi-publishing/).
 - for a stable version, fast-forwards `docs-production` to the tagged commit, which
   deploys docs.slopcop.com.
+- for a stable version, once npm has it, moves the major tag (`v0`) to the
+  tagged commit, so workflows on `uses: BrokkAi/slopcop@v0` get the new
+  [GitHub Action](/checks/ci/) and the CLI it installs.
 
 Stable versions publish on npm's `latest` dist-tag and prereleases on `next`;
 PyPI takes the version from the tag.
