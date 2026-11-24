@@ -517,3 +517,19 @@ func TestRefusedReportSendsNoOverride(t *testing.T) {
 		t.Fatalf("dispositions = %v", server.disposed)
 	}
 }
+
+// An undo made in another worktree of the clone still reaches the check the
+// override was recorded with.
+func TestUndoFromAnotherWorktreeReachesTheCheck(t *testing.T) {
+	repo := trackedRepo(t, "findings")
+	server := newTrackingService(t, "findings", nil)
+	runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "json")
+	id := checkedFindingID(t, repo)
+	runCLI(t, "override", "--root", repo, "--service", server.URL, id, "--reason", "wrong")
+	other := t.TempDir() + "/other"
+	runGit(t, repo, "worktree", "add", "-q", "--detach", other)
+	runCLI(t, "override", "--root", other, "--service", server.URL, "--undo", id)
+	if _, got := server.counts(); got != 2 || server.disposed[1]["kind"] != "finding_override_undone" {
+		t.Fatalf("dispositions = %v", server.disposed)
+	}
+}

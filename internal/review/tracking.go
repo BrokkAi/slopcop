@@ -248,7 +248,12 @@ func reportFinding(f Finding) ReportFinding {
 	out.Message = reportText(f.Message, maxMessageChars)
 	// An API name gets the same code filter as the rest of the text, and is
 	// left out when that removed anything: what is left is not a name.
-	if api := reportText(strings.Trim(f.API, "`"), maxAPIChars); utf8.RuneCountInString(f.API) <= maxAPIChars && !strings.Contains(api, codeOmitted) && !strings.Contains(api, "`") {
+	// A name in backticks is code, and gets the inline code limit.
+	limit := maxAPIChars
+	if strings.HasPrefix(f.API, "`") {
+		limit = inlineCodeLimit
+	}
+	if api := reportText(strings.Trim(f.API, "`"), maxAPIChars); utf8.RuneCountInString(api) <= limit && !strings.Contains(api, codeOmitted) && !strings.Contains(api, "`") {
 		out.API = api
 	}
 	return out
@@ -543,14 +548,15 @@ func KnownCheck(root, id string) bool {
 	return slices.ContainsFunc(loadTrackedChecks(root), func(c trackedCheck) bool { return c.ID == id && c.Worktree == here })
 }
 
-// TrackedChecksRelyingOn are the tracked checks of this worktree an undo of the finding
+// TrackedChecksRelyingOn are the tracked checks an undo of the finding
 // override concerns, newest first: those that reported the finding and those
-// whose review relied on the override.
+// whose review relied on the override, from any worktree of the clone, since
+// the override is the clone's and an undo carries no reason.
 func TrackedChecksRelyingOn(root, id string) []CheckRef {
 	checks := loadTrackedChecks(root)
 	var refs []CheckRef
 	for i := len(checks) - 1; i >= 0; i-- {
-		if checks[i].Tracked && checks[i].Worktree == worktreeKey(root) && (slices.Contains(checks[i].Keys, id) || slices.Contains(checks[i].Relied, id)) {
+		if checks[i].Tracked && (slices.Contains(checks[i].Keys, id) || slices.Contains(checks[i].Relied, id)) {
 			refs = append(refs, checks[i].CheckRef)
 		}
 	}
