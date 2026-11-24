@@ -99,13 +99,20 @@ func (s Selection) IsEmpty() bool {
 type Response struct {
 	Checks []CheckNotice `json:"checks"`
 	// CheckID is the check that answered. A service from before it omits it.
-	CheckID    string             `json:"checkId,omitempty"`
-	Status     string             `json:"status"`
-	BaseCommit string             `json:"baseCommit"`
-	Applied    bool               `json:"applied"`
-	Summary    Summary            `json:"summary"`
-	Findings   []Finding          `json:"findings"`
-	Incomplete []IncompletePolicy `json:"incomplete"`
+	CheckID string `json:"checkId,omitempty"`
+	// ReviewTracking is "findings" when the workspace has turned on review
+	// tracking, so the CLI reports its local review. Anything else, absent
+	// included, means it sends nothing.
+	ReviewTracking string `json:"reviewTracking,omitempty"`
+	// WorkspaceID is the workspace the check ran in. An operator token's
+	// answer and a service from before it omit it.
+	WorkspaceID string             `json:"workspaceId,omitempty"`
+	Status      string             `json:"status"`
+	BaseCommit  string             `json:"baseCommit"`
+	Applied     bool               `json:"applied"`
+	Summary     Summary            `json:"summary"`
+	Findings    []Finding          `json:"findings"`
+	Incomplete  []IncompletePolicy `json:"incomplete"`
 	// Inconclusive names at most 50 of the Summary.Inconclusive checks, one
 	// per policy, sorted by id. A service from before it omits it.
 	Inconclusive []IncompletePolicy `json:"inconclusive"`

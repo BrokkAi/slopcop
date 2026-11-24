@@ -106,8 +106,10 @@ by whom it was ignored. It shows 25 at a time; pass `--page 2` for the next.
 ## Override a review finding
 
 `slopcop ignore` is for static findings, which the service reports and keeps.
-The local LLM review runs on your machine, and its findings never reach the
-service, so a wrong one is overridden locally instead. Each carries an id
+The local LLM review runs on your machine, so a wrong finding is overridden
+locally instead. If your workspace turned on
+[review tracking](/account/privacy/#review-tracking), the override and its
+reason are also recorded with the check. Each finding carries an id
 starting with `rv-`: `id` in `review.findings` in `json`, and beside each
 finding under the review's count in `human`.
 

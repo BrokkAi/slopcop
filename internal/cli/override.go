@@ -12,6 +12,7 @@ import (
 	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 type overrideOptions struct {
@@ -21,13 +22,14 @@ type overrideOptions struct {
 
 // newOverrideCommand accepts local review findings: the whole latest review
 // for the current working tree, or one finding for every later review.
-func newOverrideCommand() *cobra.Command {
+func newOverrideCommand(serviceURL *string, version string) *cobra.Command {
 	opts := &overrideOptions{}
 	command := &cobra.Command{
 		Use:   "override [rv-id] --reason \"why\"",
 		Short: "Accept local review findings that are wrong, with a recorded reason",
-		Long: `Accept local review findings that are wrong, with a reason. Everything here
-is local: review findings never reach the service, and neither do overrides.
+		Long: `Accept local review findings that are wrong, with a reason. An override
+takes effect locally. If the workspace turned on review tracking for the check
+that reported the finding, the override and its reason are also sent to it.
 
   slopcop override <rv-id> --reason "why it does not hold"
       Override one review finding, by the rv- id in review.findings. Later
@@ -52,7 +54,7 @@ is local: review findings never reach the service, and neither do overrides.
       List the clone's finding overrides, newest first.`,
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runOverride(cmd, opts, args)
+			return runOverride(cmd, opts, args, *serviceURL, version)
 		},
 	}
 	flags := command.Flags()
@@ -61,14 +63,14 @@ is local: review findings never reach the service, and neither do overrides.
 	flags.StringVar(&opts.undo, "undo", "", "undo the override of the review finding with this rv- id")
 	flags.BoolVar(&opts.list, "list", false, "list the clone's finding overrides")
 	addFormatFlag(command, &opts.format)
-	// An override is local and never reaches a workspace, but an agent
-	// reuses check's flags across the check -> override loop, so -w is
-	// accepted and ignored rather than refused.
-	flags.StringVarP(&opts.workspace, "workspace", "w", "", "accepted for parity with check and ignored: an override is recorded locally, in no workspace")
+	// An override goes to the workspace of the check it is about, whatever
+	// is named here, but an agent reuses check's flags across the check ->
+	// override loop, so -w is accepted and ignored rather than refused.
+	flags.StringVarP(&opts.workspace, "workspace", "w", "", "accepted for parity with check and ignored: a tracked override goes to the workspace of its check")
 	return command
 }
 
-func runOverride(cmd *cobra.Command, opts *overrideOptions, args []string) error {
+func runOverride(cmd *cobra.Command, opts *overrideOptions, args []string, serviceURL, version string) error {
 	modes := 0
 	for _, set := range []bool{len(args) > 0, opts.undo != "", opts.list} {
 		if set {
@@ -89,15 +91,38 @@ func runOverride(cmd *cobra.Command, opts *overrideOptions, args []string) error
 	case opts.list:
 		return listFindingOverrides(cmd.OutOrStdout(), repo, opts.format)
 	case opts.undo != "":
-		return undoFindingOverride(cmd.OutOrStdout(), repo, strings.TrimSpace(opts.undo))
+		removed, err := undoFindingOverride(cmd.OutOrStdout(), repo, strings.TrimSpace(opts.undo))
+		if err == nil && removed != "" {
+			sendDispositions(cmd.Context(), serviceURL, version, review.TrackedChecksRelyingOn(repo, removed),
+				service.ReviewDisposition{Kind: service.DispositionOverrideUndone, Key: removed})
+		}
+		return err
 	}
 	if strings.TrimSpace(opts.reason) == "" {
 		return errors.New("--reason is required: say why the findings do not hold; later reviewers are shown it")
 	}
 	if len(args) > 0 {
-		return overrideFinding(cmd.OutOrStdout(), repo, strings.TrimSpace(args[0]), opts.reason)
+		id := strings.TrimSpace(args[0])
+		if err := overrideFinding(cmd.OutOrStdout(), repo, id, opts.reason); err != nil {
+			return err
+		}
+		if ref, ok := review.TrackedCheckOf(repo, id); ok {
+			sendDispositions(cmd.Context(), serviceURL, version, []review.CheckRef{ref}, service.ReviewDisposition{
+				Kind: service.DispositionFindingOverridden, Key: id, Reason: review.DispositionReason(opts.reason),
+			})
+		}
+		return nil
 	}
-	return overrideReview(cmd.OutOrStdout(), repo, opts.reason)
+	ref, err := overrideReview(cmd.OutOrStdout(), repo, opts.reason)
+	if err != nil {
+		return err
+	}
+	if ref != nil {
+		sendDispositions(cmd.Context(), serviceURL, version, []review.CheckRef{*ref}, service.ReviewDisposition{
+			Kind: service.DispositionReviewOverridden, Reason: review.DispositionReason(opts.reason),
+		})
+	}
+	return nil
 }
 
 // checkReviewFindingID refuses an id that is not a review finding's.
@@ -129,21 +154,22 @@ func overrideFinding(out io.Writer, repo, id, reason string) error {
 	return nil
 }
 
-// undoFindingOverride removes one finding override.
-func undoFindingOverride(out io.Writer, repo, id string) error {
+// undoFindingOverride removes one finding override and returns the id it was
+// recorded under, or "" when nothing was overridden.
+func undoFindingOverride(out io.Writer, repo, id string) (string, error) {
 	if err := checkReviewFindingID(id); err != nil {
-		return err
+		return "", err
 	}
 	removed, found, err := review.UndoFindingOverride(repo, id)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if !found {
 		fmt.Fprintf(out, "slopcop: review finding %s is not overridden; nothing changed\n", id)
-		return nil
+		return "", nil
 	}
 	fmt.Fprintf(out, "slopcop: review finding %s is no longer overridden; later reviews may report it again, and the trees that passed because of it must be checked again before a push\n", removed.ID)
-	return nil
+	return removed.ID, nil
 }
 
 // listFindingOverrides prints the clone's finding overrides, newest first.
@@ -178,29 +204,35 @@ func listFindingOverrides(out io.Writer, repo, format string) error {
 }
 
 // overrideReview accepts every finding of the latest review for the current
-// working tree.
-func overrideReview(out io.Writer, repo, reason string) error {
+// working tree. It returns the tracked check the review ran beside, if any.
+func overrideReview(out io.Writer, repo, reason string) (*review.CheckRef, error) {
 	// Never waits: the running check is about to replace the review this
 	// override means to accept, and its result has to be read first.
 	store, err := review.OpenStore(repo)
 	if errors.Is(err, review.ErrBusy) {
-		return fmt.Errorf("%w, so nothing was accepted; when it finishes, read its result and run the override again if it still applies", err)
+		return nil, fmt.Errorf("%w, so nothing was accepted; when it finishes, read its result and run the override again if it still applies", err)
 	}
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer store.Close()
 	snapshot, err := gitx.CaptureWorkingTree(repo, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err = store.Override(reason, snapshot.Tree); err != nil {
-		return err
+		return nil, err
+	}
+	var tracked *review.CheckRef
+	if last, err := store.Last(); err == nil && last != nil && last.Check != nil && last.Check.Tracked {
+		if ref := review.CurrentCheck(repo, *last.Check); ref.Tracked {
+			tracked = &ref
+		}
 	}
 	gitDir, err := gitx.Run(repo, "rev-parse", "--absolute-git-dir")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fmt.Fprintf(out, "slopcop: accepted the review's findings for tree %s; the reason is recorded in %s and shown to the reviewers of later rounds\n", snapshot.Tree, filepath.Join(gitDir, "slopcop", "overrides.jsonl"))
-	return nil
+	return tracked, nil
 }

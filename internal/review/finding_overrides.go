@@ -19,9 +19,9 @@ import (
 // <rv-id> --reason`. Unlike an override of a whole review, which approves one
 // snapshot, it outlives the snapshot, so a false positive stops coming back
 // when the change moves on. The overrides live in the common git directory
-// every worktree of the clone shares and never reach the service, like the
-// review findings themselves. Committing them would change the reviewed tree,
-// and with it the review's reuse and approval.
+// every worktree of the clone shares. Committing them would change the
+// reviewed tree, and with it the review's reuse and approval. A workspace that
+// tracks reviews is told of each one; see tracking.go.
 
 const (
 	// overridesFile holds the clone's finding overrides.
@@ -105,6 +105,22 @@ func readOverrides(dir string) ([]FindingOverride, error) {
 // changeOverrides applies change to the clone's finding overrides under a
 // lock, and writes them back when it reports a change.
 func changeOverrides(root string, change func([]FindingOverride) ([]FindingOverride, bool)) error {
+	return withCloneLock(root, overridesFile+".lock", overridesLockWait, func(dir string) error {
+		overrides, err := readOverrides(dir)
+		if err != nil {
+			return err
+		}
+		overrides, changed := change(overrides)
+		if !changed {
+			return nil
+		}
+		return (&Store{dir: dir}).write(overridesFile, overrideList{Overrides: overrides})
+	})
+}
+
+// withCloneLock runs fn on the clone's shared slopcop directory, holding the
+// named lock file there, waiting up to wait for it.
+func withCloneLock(root, name string, wait time.Duration, fn func(dir string) error) error {
 	dir, err := overridesDir(root)
 	if err != nil {
 		return err
@@ -112,30 +128,22 @@ func changeOverrides(root string, change func([]FindingOverride) ([]FindingOverr
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	lock, err := os.OpenFile(filepath.Join(dir, overridesFile+".lock"), os.O_CREATE|os.O_RDWR, 0600)
+	lock, err := os.OpenFile(filepath.Join(dir, name), os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {
 		return err
 	}
 	defer lock.Close()
-	for deadline := time.Now().Add(overridesLockWait); ; {
+	for deadline := time.Now().Add(wait); ; {
 		if err = lockFile(lock); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("another slopcop override of a review finding is running: %w", err)
+			return fmt.Errorf("another slopcop process holds %s: %w", name, err)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	defer unlockFile(lock)
-	overrides, err := readOverrides(dir)
-	if err != nil {
-		return err
-	}
-	overrides, changed := change(overrides)
-	if !changed {
-		return nil
-	}
-	return (&Store{dir: dir}).write(overridesFile, overrideList{Overrides: overrides})
+	return fn(dir)
 }
 
 // OverrideFinding overrides the review finding with the given id, which a

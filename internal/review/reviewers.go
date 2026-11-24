@@ -51,6 +51,12 @@ type panel struct {
 	used      int
 	completed int
 	standIns  []Reviewer
+	// durations is how long each reviewer ran, by name.
+	durations map[string]int64
+	// launchTook is how long each primary's adapter took to start, one after
+	// another before the reviewers run together. It is written before they
+	// run, and counts toward that reviewer's duration alone.
+	launchTook map[string]time.Duration
 }
 
 // run starts the primaries in order, then reviews with all of them at once.
@@ -67,8 +73,11 @@ func (p *panel) run(order []Family) []Reviewer {
 	if slices.ContainsFunc(order, func(f Family) bool { return p.adapter(f) == ollamaAdapter }) {
 		preloadOllama(p.ctx, p.ollamaModel, p.timeout)
 	}
+	p.launchTook = make(map[string]time.Duration, len(order))
 	for i, f := range order {
+		launch := time.Now()
 		s, err := p.start(fmt.Sprintf("%d-%s", i+1, f), f)
+		p.launchTook[fmt.Sprintf("%d-%s", i+1, f)] = time.Since(launch)
 		starts[i] = started{s, err}
 	}
 	out := make([]Reviewer, len(order))
@@ -129,6 +138,15 @@ func (p *panel) takeFallback(replaced Family) (Family, int, bool) {
 // review runs one reviewer with one retry in a fresh adapter and session.
 // s and startErr are the reviewer's first start, or nil to start it here.
 func (p *panel) review(name string, f Family, s *runner, startErr error) Reviewer {
+	started := time.Now().Add(-p.launchTook[name])
+	defer func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if p.durations == nil {
+			p.durations = map[string]int64{}
+		}
+		p.durations[name] = time.Since(started).Milliseconds()
+	}()
 	r, err := p.attempt(name, f, s, startErr, "")
 	if parseVerdict(r) == StatusFailed && retryable(p.ctx, err) {
 		first := r
