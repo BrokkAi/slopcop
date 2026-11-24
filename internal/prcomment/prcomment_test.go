@@ -101,7 +101,10 @@ type fakeGitHub struct {
 	refuseReview   int
 	// refusePatch refuses edits, as GitHub does a comment another app wrote.
 	refusePatch bool
-	patches     []string
+	// viewer is the token's login, as a personal token has; empty answers
+	// /user with 403, as an Actions token does.
+	viewer  string
+	patches []string
 }
 
 func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
@@ -124,6 +127,8 @@ func (f *fakeGitHub) serve(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
 	}
 	switch {
+	case r.Method == http.MethodGet && r.URL.Path == "/user" && f.viewer != "":
+		write(map[string]string{"login": f.viewer})
 	case r.Method == http.MethodGet && r.URL.Path == "/user":
 		refuse(http.StatusForbidden)
 	case r.Method == http.MethodGet && r.URL.Path == "/repos/o/r/pulls/7/files":
@@ -288,22 +293,29 @@ func TestPublishIgnoresAPersonsCommentThatQuotesTheMarkers(t *testing.T) {
 }
 
 func TestPublishAfterTheAppDoesNotRepeatItsComments(t *testing.T) {
-	fake, gh := newFake(t)
-	app := user{Login: "slopcop[bot]", Type: "Bot"}
-	fake.reviewComments = []comment{{ID: 10, Body: item{key: "rv-1"}.marker(), User: app}}
-	fake.issueComments = []comment{{ID: 11, Body: summaryMarker + " the App's", User: app}}
-	fake.refusePatch = true
-	result, err := Publish(context.Background(), gh, mustParse(t, reviewReport), target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// The App's inline comment stands; only the static finding is new.
-	if result.Posted != 1 || result.Inline != 2 || result.ReadOnly {
-		t.Errorf("result = %+v", result)
-	}
-	// The App's summary cannot be edited, so the token writes its own.
-	if len(fake.issueComments) != 2 || result.SummaryURL == "" {
-		t.Errorf("comments = %+v, result = %+v", fake.issueComments, result)
+	// An Actions token has no login; a personal token does, and only the
+	// bot clause lets it see the App's comments.
+	for _, viewer := range []string{"", "david"} {
+		t.Run("viewer="+viewer, func(t *testing.T) {
+			fake, gh := newFake(t)
+			fake.viewer = viewer
+			app := user{Login: "slopcop[bot]", Type: "Bot"}
+			fake.reviewComments = []comment{{ID: 10, Body: item{key: "rv-1"}.marker(), User: app}}
+			fake.issueComments = []comment{{ID: 11, Body: summaryMarker + " the App's", User: app}}
+			fake.refusePatch = true
+			result, err := Publish(context.Background(), gh, mustParse(t, reviewReport), target)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// The App's inline comment stands; only the static finding is new.
+			if result.Posted != 1 || result.Inline != 2 || result.ReadOnly {
+				t.Errorf("result = %+v", result)
+			}
+			// The App's summary cannot be edited, so the token writes its own.
+			if len(fake.issueComments) != 2 || result.SummaryURL == "" {
+				t.Errorf("comments = %+v, result = %+v", fake.issueComments, result)
+			}
+		})
 	}
 }
 
