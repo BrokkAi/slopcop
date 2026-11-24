@@ -25,6 +25,8 @@ func DefaultCommand(f Family) []string {
 		return slices.Clone(kimiDefaultCommand)
 	case Grok:
 		return slices.Clone(grokDefaultCommand)
+	case OpenRouter:
+		return []string{chatSelfCommand, "review-agent", "--provider=" + string(f)}
 	}
 	return nil
 }
@@ -44,6 +46,8 @@ func AdapterName(f Family) string {
 		return kimiAdapter
 	case Grok:
 		return grokAdapter
+	case OpenRouter:
+		return string(f)
 	}
 	return ""
 }
@@ -62,6 +66,9 @@ func AdapterFor(f Family, s Settings) string {
 // override, else the pinned package.
 func CommandFor(f Family, s Settings) []string {
 	adapter := AdapterFor(f, s)
+	if IsChatAdapter(adapter) {
+		return chatCommand(f, s)
+	}
 	if cmd := s.Adapters[adapter]; len(cmd) > 0 {
 		return cmd
 	}

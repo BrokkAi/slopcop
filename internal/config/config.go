@@ -204,11 +204,14 @@ type Review struct {
 	// Provider, when "copilot", runs the families GitHub Copilot serves
 	// through Copilot CLI.
 	Provider string `json:"provider,omitempty"`
+	// Models names the model of each family that does not choose its own,
+	// such as "openrouter".
+	Models map[string]string `json:"models,omitempty"`
 }
 
 // Empty reports whether no review setting is set.
 func (r *Review) Empty() bool {
-	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == ""
+	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == "" && len(r.Models) == 0
 }
 
 // Gate controls which hosted findings block push approval.

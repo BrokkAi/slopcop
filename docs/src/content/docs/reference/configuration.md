@@ -75,7 +75,7 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, dsh for
 `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok>.command`. For
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|openrouter>.command`. For
 example, keep a DeepSeek key in a file with:
 
 ```json
@@ -245,6 +245,67 @@ trust, plugins, agent profile, working directory or API endpoints is rejected.
 An override that uses npm must have the form `npx --yes <package>@<version>`,
 so that npm starts outside the reviewer's temporary directory. Any other npm
 form is rejected.
+
+### OpenRouter (opt-in)
+
+The `openrouter` family reviews with one model you choose from
+[OpenRouter's catalog](https://openrouter.ai/models). `slopcop init` never picks
+it. It needs an API key from [openrouter.ai/settings/keys](https://openrouter.ai/settings/keys).
+Enter the key without saving it to your shell history, then name the model and
+the reviewer:
+
+```bash
+read -rs OPENROUTER_API_KEY && export OPENROUTER_API_KEY
+```
+
+```bash
+slopcop config set review.models.openrouter vendor/model
+slopcop config set review.reviewers terra,openrouter
+```
+
+Keep `OPENROUTER_API_KEY` set in the shell that runs `slopcop`.
+
+The model id is `vendor/model`, optionally with `:free`, `:nitro`, `:floor` or
+`:exacto`. It must support tool calling. SlopCop refuses ids that do not name
+one fixed model or that add capabilities: `openrouter/auto` and other routers,
+`~...-latest` aliases, presets, `:online` and `:batch`. Pick a model from a
+different vendor than your other reviewers, or the reviews are not independent.
+The model runs at its default effort.
+
+It is opt-in because your code goes through a third party, OpenRouter, on its
+way to the model's provider. SlopCop does not use a general coding agent here.
+It runs its own small agent, which has only three tools: read a file, list
+files, and search files. Each reviewer runs with these limits:
+
+- The tools answer from the reviewed git tree. They never open a path on disk,
+  so symlinks, `..` and files outside the snapshot cannot be read.
+- It has no shell, no file writes and no web access. It keeps no session
+  history, and it loads no hooks, plugins, MCP servers, rules or other
+  configuration from the repository or your home directory.
+- It sends requests only to `https://openrouter.ai/api/v1`, follows no
+  redirects, and keeps the API key out of its child processes, prompts and logs.
+- Requests set `provider.data_collection` to `deny`, so OpenRouter routes only to
+  endpoints that do not retain or train on prompts. If the model has no such
+  endpoint, the reviewer fails. These policies are OpenRouter's and each
+  provider's, and SlopCop cannot verify them.
+- Requests turn OpenRouter's web plugin off. An account setting called "Prevent
+  overrides" can force it back on. If a response shows a web search or another
+  server-side tool, SlopCop stops the reviewer, fails it without a retry, and
+  says so. **The search has already run by then, so a repository that tricks the
+  model could get text from the change into that query.** Leave the web plugin
+  off in your [OpenRouter settings](https://openrouter.ai/settings/plugins).
+- A review is limited to 40 model requests and 8 MiB of tool output. Reaching
+  either limit fails the reviewer without a retry. A repository can still make a
+  review cost more by prompting the model to read a lot, so use a key with a
+  [credit limit](https://openrouter.ai/settings/keys).
+- It does not review a change whose diff is over 256 KiB, or that touches a
+  file over 1 MiB, a binary file such as an image, or a file that is not valid
+  UTF-8. A reply cut off at the model's output limit or stopped by a content
+  filter also fails. The reviewer fails instead of approving what it has not
+  seen, so give it a fallback on another provider.
+
+The key is read from your environment, so other reviewer adapters started by
+the same check inherit it too.
 
 Under `<git-dir>/slopcop/`, the CLI keeps `last.json`, `rounds.json`,
 `overrides.jsonl`, and `review-*/` prompt and reviewer logs. Reviewer probe

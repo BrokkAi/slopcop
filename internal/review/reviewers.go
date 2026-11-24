@@ -10,6 +10,8 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/BrokkAi/slopcop/internal/review/chatagent"
 )
 
 // panel runs the configured reviewers. Each reviewer gets one retry, a
@@ -182,7 +184,10 @@ func (p *panel) adapter(f Family) string {
 // timeout would only double the wait, a canceled check wants no more work,
 // and a missing login or exhausted credits fail the same way again.
 func retryable(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errBinaryTextCut) || errors.Is(err, errChangeNotExported) || errors.Is(err, errKimiNoKey) {
+	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errBinaryTextCut) || errors.Is(err, errChangeNotExported) || errors.Is(err, errKimiNoKey) || errors.Is(err, errChangeBinary) {
+		return false
+	}
+	if err != nil && chatagent.IsLimitError(err.Error()) {
 		return false
 	}
 	var requestErr *acp.RequestError
@@ -268,7 +273,7 @@ func explainFailure(r Reviewer, err error) string {
 	if errors.As(err, &stop) {
 		return text + ". " + stop.advice()
 	}
-	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errBinaryTextCut.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) {
+	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errBinaryTextCut.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) || strings.Contains(text, errChangeBinary.Error()) || chatagent.IsLimitError(text) {
 		return text
 	}
 	if r.FirstError != "" && r.FirstError != text {

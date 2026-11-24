@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -185,21 +186,52 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 		if len(cfg.Review.Adapters) > 0 {
 			settings.Adapters = make(map[string][]string, len(cfg.Review.Adapters))
 			for name, adapter := range cfg.Review.Adapters {
-				if (name != "codex" && name != "dsh" && name != "claude" && name != review.ProviderCopilot && name != review.AdapterName(review.Gemini) && name != review.AdapterName(review.Kimi) && name != review.AdapterName(review.Grok)) || len(adapter.Command) == 0 || adapter.Command[0] == "" {
+				if (name != "codex" && name != "dsh" && name != "claude" && name != review.ProviderCopilot && name != review.AdapterName(review.Gemini) && name != review.AdapterName(review.Kimi) && name != review.AdapterName(review.Grok) && !review.IsChatAdapter(name)) || len(adapter.Command) == 0 || adapter.Command[0] == "" {
 					path, err = configPath()
 					if err != nil {
 						return review.Settings{}, err
 					}
-					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, claude, copilot, antigravity, kimi, or grok", name, path)
+					return review.Settings{}, fmt.Errorf("invalid review.adapters.%s in %s: command must be nonempty and use codex, dsh, claude, copilot, antigravity, kimi, grok, or openrouter", name, path)
 				}
 				settings.Adapters[name] = append([]string(nil), adapter.Command...)
 			}
+		}
+		if err = chatModels(cfg.Review, &settings, configPath); err != nil {
+			return review.Settings{}, err
 		}
 	}
 	if timeoutFlag > 0 {
 		settings.Timeout = timeoutFlag
 	}
 	return settings, nil
+}
+
+// chatModels reads review.models and requires a model for each chat family
+// the review names, since such a family has no model of its own.
+func chatModels(cfg *config.Review, settings *review.Settings, configPath func() (string, error)) error {
+	invalid := func(format string, args ...any) error {
+		path, err := configPath()
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("invalid review.models in %s: %s", path, fmt.Sprintf(format, args...))
+	}
+	for name, model := range cfg.Models {
+		family := review.Family(name)
+		if err := review.CheckChatModel(family, model); err != nil {
+			return invalid("%v", err)
+		}
+		if settings.Models == nil {
+			settings.Models = make(map[review.Family]string, len(cfg.Models))
+		}
+		settings.Models[family] = model
+	}
+	for _, family := range slices.Concat(settings.Reviewers, settings.Fallbacks) {
+		if review.IsChatAdapter(string(family)) && settings.Models[family] == "" {
+			return invalid("%s needs a model: run `slopcop config set review.models.%s vendor/model`", family, family)
+		}
+	}
+	return nil
 }
 
 // pushBlockLevel reads the human-owned approval threshold.

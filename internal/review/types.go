@@ -32,10 +32,14 @@ const (
 	// its restrictions have layers SlopCop cannot verify from outside, such
 	// as what the CLI itself sends over the network.
 	Grok Family = "grok"
+	// OpenRouter is a model the user names in review.models.openrouter, run
+	// by SlopCop's read-only chat agent. It is opt-in: it needs that choice
+	// and sends the review through a third party.
+	OpenRouter Family = "openrouter"
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
-// Gemini, Kimi and Grok are left out because they are opt-in.
+// Gemini, Kimi, Grok and OpenRouter are left out because they are opt-in.
 var Families = []Family{Terra, Sol, Flash, Haiku}
 
 const (
@@ -88,6 +92,8 @@ type Settings struct {
 	// Provider, when ProviderCopilot, runs every family GitHub Copilot
 	// serves through the Copilot CLI instead of the family's own adapter.
 	Provider string
+	// Models names the model of each family that does not choose its own.
+	Models map[Family]string
 }
 
 // ProviderCopilot routes the families Copilot serves through Copilot CLI.

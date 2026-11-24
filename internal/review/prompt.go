@@ -71,6 +71,10 @@ func reviewPrompt(root string, capture Capture, in intent, history string, diff 
 	shownRoot := root
 	if family == Gemini || family == Kimi || family == Grok {
 		shownRoot = antigravityRepoDir
+	} else if IsChatAdapter(string(family)) {
+		// A chat reviewer's paths start at the root; its location on this
+		// machine is not the provider's to know.
+		shownRoot = "."
 	}
 	fmt.Fprintf(&b, "\nRepository root: %s\nBase tree: %s\nSnapshot tree: %s\n", shownRoot, capture.BaseTree, capture.CheckedTree())
 	if capture.DiffTree != "" {
@@ -85,6 +89,8 @@ func reviewPrompt(root string, capture Capture, in intent, history string, diff 
 		b.WriteString(kimiRules)
 	} else if family == Grok {
 		b.WriteString(grokRules)
+	} else if IsChatAdapter(string(family)) {
+		b.WriteString(chatRules)
 	} else {
 		b.WriteString("Read changed files with file-reading tools; do not run commands.\n")
 	}

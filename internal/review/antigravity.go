@@ -240,7 +240,7 @@ func antigravityWorkspace(ctx context.Context, root string, trees reviewTrees) (
 // isolatedAdapter reports whether an adapter reviews an export of the tree,
 // with no git history to read the rest of a truncated diff.
 func isolatedAdapter(adapter string) bool {
-	return adapter == antigravityAdapter || adapter == kimiAdapter || adapter == grokAdapter
+	return adapter == antigravityAdapter || adapter == kimiAdapter || adapter == grokAdapter || IsChatAdapter(adapter)
 }
 
 // isolatedWorkspace creates a temporary directory holding a workspace with an

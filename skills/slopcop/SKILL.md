@@ -652,5 +652,5 @@ copies but creates none; login does not install them. Set `mode`,
 `review.reviewers` (1–4 entries, in order; duplicates are allowed), and
 `review.timeout` (default `20m`) with `slopcop config get|set|unset`. Set
 reviewers as a comma-separated list. Adapter commands are keyed by adapter at
-`review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok>.command`. In
+`review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|openrouter>.command`. In
 CI, use `--mode static` unless the runner has Node and harness logins.
