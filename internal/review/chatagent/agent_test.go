@@ -477,17 +477,31 @@ func TestErrorsAreClassifiedAndNeverCarryTheKey(t *testing.T) {
 func TestAKeyCutByTheErrorLimitIsStillRemoved(t *testing.T) {
 	root, tree, _, _ := repoTree(t)
 	// The key straddles the point where error text is shortened.
-	message := strings.Repeat("x", maxErrorText-len(testKey)/2) + testKey
-	for name, status := range map[string]int{"failed status": http.StatusBadRequest, "error in 200": http.StatusOK} {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-			w.WriteHeader(status)
-			_, _ = io.WriteString(w, `{"error":{"code":400,"message":"`+message+`"}}`)
-		}))
-		_, _, err := review(t, root, tree, &model{}, func(c *Config) { c.Provider.BaseURL = server.URL })
-		server.Close()
-		if err == nil || strings.Contains(err.Error(), testKey[:len(testKey)/2]) {
-			t.Fatalf("%s: %v", name, err)
+	// The key is written plainly, then with a JSON escape that decoding turns
+	// back into the key.
+	for _, key := range []string{testKey, strings.Replace(testKey, "sk-t", `sk-\u0074`, 1)} {
+		message := strings.Repeat("x", maxErrorText-len(testKey)/2) + key
+		for name, status := range map[string]int{"failed status": http.StatusBadRequest, "error in 200": http.StatusOK} {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = io.WriteString(w, `{"error":{"code":400,"message":"`+message+`"}}`)
+			}))
+			_, _, err := review(t, root, tree, &model{}, func(c *Config) { c.Provider.BaseURL = server.URL })
+			server.Close()
+			if err == nil || strings.Contains(err.Error(), testKey[:len(testKey)/2]) {
+				t.Fatalf("%s, %s: %v", key, name, err)
+			}
 		}
+	}
+}
+
+func TestAReplyNeverCarriesTheKey(t *testing.T) {
+	root, tree, _, _ := repoTree(t)
+	escaped := strings.Replace(testKey, "sk-t", `sk-\u0074`, 1)
+	m := &model{replies: []string{`{"choices":[{"message":{"role":"assistant","content":"- [P2] the key is ` + escaped + `"},"finish_reason":"stop"}]}`}}
+	_, text, err := review(t, root, tree, m, nil)
+	if err != nil || strings.Contains(text, testKey) || !strings.Contains(text, "[api key]") {
+		t.Fatalf("%q %v", text, err)
 	}
 }
 

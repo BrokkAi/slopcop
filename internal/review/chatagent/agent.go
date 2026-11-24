@@ -268,7 +268,7 @@ func (a *agent) converse(ctx context.Context, session acp.SessionId, tree *snaps
 					return "", fmt.Errorf("the reviewer replied after a read of changed file %q failed, so the reply is not a verdict", path)
 				}
 			}
-			return text, nil
+			return a.scrub(text), nil
 		}
 		if tree == nil {
 			return "", fmt.Errorf("the model called a tool during a probe")
@@ -378,7 +378,7 @@ func (a *agent) complete(ctx context.Context, messages []any, tools []map[string
 
 // statusError turns a failed request into text failureCause can classify.
 func (a *agent) statusError(status int, raw []byte) error {
-	detail := apiErrorText(raw)
+	detail := a.apiErrorText(raw)
 	label := a.cfg.Provider.Label
 	switch status {
 	case http.StatusUnauthorized:
@@ -415,14 +415,14 @@ func (a *agent) parse(raw []byte) (json.RawMessage, string, error) {
 		return nil, "", fmt.Errorf("%s sent an unreadable response", a.cfg.Provider.Label)
 	}
 	if len(r.Error) > 0 && string(r.Error) != "null" {
-		return nil, "", fmt.Errorf("%s reported an error: %s", a.cfg.Provider.Label, errorText(r.Error))
+		return nil, "", fmt.Errorf("%s reported an error: %s", a.cfg.Provider.Label, a.errorText(r.Error))
 	}
 	if len(r.Choices) == 0 || len(r.Choices[0].Message) == 0 {
 		return nil, "", fmt.Errorf("%s sent a response with no message", a.cfg.Provider.Label)
 	}
 	c := r.Choices[0]
 	if len(c.Error) > 0 && string(c.Error) != "null" {
-		return nil, "", fmt.Errorf("%s reported an error: %s", a.cfg.Provider.Label, errorText(c.Error))
+		return nil, "", fmt.Errorf("%s reported an error: %s", a.cfg.Provider.Label, a.errorText(c.Error))
 	}
 	finish := ""
 	if c.FinishReason != nil {
@@ -456,24 +456,26 @@ func messageText(content json.RawMessage) (string, error) {
 	return b.String(), nil
 }
 
-func apiErrorText(raw []byte) string {
+// apiErrorText and errorText scrub decoded text before shortening it: the raw
+// scrub misses a key written with JSON escapes, which decoding restores.
+func (a *agent) apiErrorText(raw []byte) string {
 	var r struct {
 		Error json.RawMessage `json:"error"`
 	}
 	if json.Unmarshal(raw, &r) == nil && len(r.Error) > 0 {
-		return errorText(r.Error)
+		return a.errorText(r.Error)
 	}
-	return clip(string(raw))
+	return clip(a.scrub(string(raw)))
 }
 
-func errorText(raw json.RawMessage) string {
+func (a *agent) errorText(raw json.RawMessage) string {
 	var e struct {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(raw, &e) == nil && e.Message != "" {
-		return clip(e.Message)
+		return clip(a.scrub(e.Message))
 	}
-	return clip(string(raw))
+	return clip(a.scrub(string(raw)))
 }
 
 func clip(s string) string {
