@@ -42,6 +42,10 @@ inputs:
     description: Comma-separated reviewers, such as sol or terra,sol. Required with review.
     required: false
     default: ''
+  review-models:
+    description: 'Model of each reviewer that does not choose its own, as family=model pairs separated by commas or newlines, such as openrouter=vendor/model.'
+    required: false
+    default: ''
   review-blocks:
     description: Fail the job on review findings too. By default they are commented but leave the job passing, since a reviewer's finding cannot be overridden from CI.
     required: false
@@ -156,6 +160,7 @@ runs:
       env:
         REVIEW_PROVIDER: ${{ inputs.review-provider }}
         REVIEWERS: ${{ inputs.reviewers }}
+        REVIEW_MODELS: ${{ inputs.review-models }}
       run: |
         if [ -z "$REVIEWERS" ]; then
           echo "::error title=SlopCop::review is on, so set reviewers, such as sol or terra,sol"
@@ -165,6 +170,16 @@ runs:
           slopcop config set review.provider "$REVIEW_PROVIDER"
         fi
         slopcop config set review.reviewers "$REVIEWERS"
+        # family=model pairs; config set refuses a family it does not know.
+        while IFS= read -r pair; do
+          pair="${pair//[[:space:]]/}"
+          [ -z "$pair" ] && continue
+          if [[ "$pair" != *=* ]]; then
+            echo "::error title=SlopCop::review-models takes family=model pairs, not '$pair'"
+            exit 1
+          fi
+          slopcop config set "review.models.${pair%%=*}" "${pair#*=}"
+        done <<< "${REVIEW_MODELS//,/$'\n'}"
 
     - name: Check the change
       id: check

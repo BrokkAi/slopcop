@@ -122,11 +122,24 @@ to fail on them anyway. Static findings fail the job at `fail-on` as always,
 and a false positive among them stays out of later checks with
 [`slopcop ignore`](/checks/false-positives/).
 
-Harness logins are environment variables on the step: `COPILOT_GITHUB_TOKEN`
-(a token whose account has Copilot) for `copilot`, `ANTHROPIC_API_KEY` or
-`CLAUDE_CODE_OAUTH_TOKEN` for Claude, `OPENAI_API_KEY` for Codex,
-`DEEPSEEK_API_KEY` for `flash`, `OPENROUTER_API_KEY` for OpenRouter. See
-[Configuration](/reference/configuration/) for the reviewers each serves. The
+Each reviewer runs through its own harness, signed in by a secret in the
+step's `env:`. `review-provider: copilot` instead runs the GPT and Claude
+families through Copilot CLI, on one login:
+
+| `reviewers` | Runs through | Secret in `env:` |
+| --- | --- | --- |
+| `haiku`, `sonnet`, `opus` | Claude Code | `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` |
+| `terra`, `sol` | Codex | `OPENAI_API_KEY` or `CODEX_API_KEY` |
+| `terra`, `sol`, `haiku`, `sonnet`, `opus`, with `review-provider: copilot` | Copilot CLI | `COPILOT_GITHUB_TOKEN`, a token whose account has Copilot |
+| `flash` | dsh | `DEEPSEEK_API_KEY` |
+| `openrouter` | SlopCop's own read-only agent | `OPENROUTER_API_KEY`, and `review-models: openrouter=vendor/model` |
+| `kimi` | Kimi Code | `KIMI_API_KEY` |
+| `grok` | Grok Build | `XAI_API_KEY` |
+
+Reviewers can mix harnesses, such as `reviewers: sonnet,sol` with both
+secrets set. `ollama` needs a model server the runner can reach,
+and `gemini` an Antigravity login, so neither suits a hosted runner. See
+[Configuration](/reference/configuration/) for what each reviewer runs. The
 review can take minutes. The prompt carries the captured diff. Reviewers read
 repository content, which is untrusted. Claude and DeepSeek reviewers may only
 read and search files; SlopCop refuses their requests to run commands or change
@@ -151,6 +164,7 @@ alike, from the same check. It needs `security-events: write`.
 | `review` | `false` | also run the LLM review |
 | `review-provider` | | provider the reviewers run through, such as `copilot` |
 | `reviewers` | | reviewers, such as `sol` or `terra,sol` |
+| `review-models` | | `family=model` pairs for reviewers that do not choose their own model, such as `openrouter=vendor/model` |
 | `review-blocks` | `false` | fail the job on review findings too |
 | `intent-from-pull-request` | `true` | tell the reviewers what the pull request is for |
 | `comment` | `true` | comment on the pull request; `false` keeps to the job summary |
