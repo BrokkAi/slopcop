@@ -274,11 +274,13 @@ func reportText(text string, limit int) string {
 }
 
 // stripInlineCode replaces each inline code span over inlineCodeLimit with
-// codeOmitted. A span opens with one or two backticks and closes with as many.
-// Code does not start or end with a space, so a stretch between backticks that
-// does is prose after a lone backtick: that backtick is kept as text, and the
-// scan goes on from the next character, so it cannot take the opening
-// backtick of a real span with it.
+// codeOmitted. A span opens with one or two backticks that do not follow a
+// letter or digit, and closes with as many. A backtick that cannot open one,
+// or has no partner, is kept as text and the scan goes on after it. A stretch
+// that starts or ends with a space and whose closing backtick runs straight
+// into a word is prose after a lone backtick, not code: the backtick before it
+// is kept as text, so the scan does not take the opening backtick of the next
+// span with it. A padded span that ends before a space or punctuation is code.
 func stripInlineCode(text string) string {
 	var out strings.Builder
 	for i := 0; i < len(text); {
@@ -287,22 +289,30 @@ func stripInlineCode(text string) string {
 			i++
 			continue
 		}
+		lone := func() {
+			out.WriteByte('`')
+			i++
+		}
+		if i > 0 && isWordByte(text[i-1]) {
+			lone()
+			continue
+		}
 		fence := "`"
 		if strings.HasPrefix(text[i:], "``") {
 			fence = "``"
 		}
 		end := strings.Index(text[i+len(fence):], fence)
 		if end < 0 {
-			out.WriteString(text[i:])
-			break
+			lone()
+			continue
 		}
 		content := text[i+len(fence) : i+len(fence)+end]
 		next := i + len(fence) + end + len(fence)
+		opensNext := next < len(text) && isWordByte(text[next])
 		switch {
-		case content == "" || strings.TrimSpace(content) != content:
-			out.WriteString(fence)
-			i += len(fence)
-		case utf8.RuneCountInString(content) > inlineCodeLimit:
+		case content == "", strings.TrimSpace(content) != content && opensNext:
+			lone()
+		case utf8.RuneCountInString(strings.TrimSpace(content)) > inlineCodeLimit:
 			out.WriteString(codeOmitted)
 			i = next
 		default:
@@ -311,6 +321,12 @@ func stripInlineCode(text string) string {
 		}
 	}
 	return out.String()
+}
+
+// isWordByte reports a letter, a digit, an underscore, or a byte of a
+// multibyte character, which is most likely a letter.
+func isWordByte(b byte) bool {
+	return b == '_' || b >= 0x80 || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
 
 // DispositionReason is an override's reason as sent: one line, within the

@@ -186,7 +186,12 @@ func IsFindingID(id string) bool { return findingIDPattern.MatchString(id) }
 // reply; it is 0 for the first.
 func findingID(f Finding, occurrence int) string {
 	normal := func(s string) string { return strings.Join(strings.Fields(strings.ToLower(s)), " ") }
-	key := strings.TrimPrefix(f.Path, "./") + "\x00" + normal(legacyTitle(f.Title)) + "\x00" + normal(f.Message)
+	title := f.Title
+	if !f.Malformed {
+		// A malformed finding's title is a line of the reply as written.
+		title = legacyTitle(title)
+	}
+	key := strings.TrimPrefix(f.Path, "./") + "\x00" + normal(title) + "\x00" + normal(f.Message)
 	if occurrence > 0 {
 		key += "\x00" + strconv.Itoa(occurrence)
 	}

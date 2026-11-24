@@ -221,6 +221,8 @@ func TestStripperLeavesProseBetweenSpans(t *testing.T) {
 		"see `" + strings.Repeat("z", 50) + "` here":                  "see " + codeOmitted + " here",
 		"Stray ` here, then `" + strings.Repeat("s", 50) + "` leaks":  "Stray ` here, then " + codeOmitted + " leaks",
 		"two ``a`" + strings.Repeat("d", 50) + "`` spans":             "two " + codeOmitted + " spans",
+		"Use `` oddly, see `" + strings.Repeat("q", 60) + "` here":    "Use `` oddly, see " + codeOmitted + " here",
+		"padded `  " + strings.Repeat("p", 50) + "  ` code":           "padded " + codeOmitted + " code",
 	} {
 		if got := reportText(in, maxTitleChars); got != want {
 			t.Errorf("reportText(%q) = %q, want %q", in, got, want)

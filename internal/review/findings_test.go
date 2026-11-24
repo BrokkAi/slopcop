@@ -1,6 +1,8 @@
 package review
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"reflect"
 	"testing"
@@ -161,5 +163,15 @@ func TestTitleKeepsBalancedBackticks(t *testing.T) {
 		if f.ID != findingID(legacy, 0) {
 			t.Errorf("id of %q changed", want)
 		}
+	}
+}
+
+func TestMalformedFindingKeepsItsID(t *testing.T) {
+	reply := "Looks mostly fine, maybe check the loop.\nSecond line."
+	f := ParseFindings("r", reply, nil)[0]
+	key := "\x00" + "looks mostly fine, maybe check the loop." + "\x00" + "second line."
+	sum := sha256.Sum256([]byte(key))
+	if want := FindingIDPrefix + hex.EncodeToString(sum[:6]); !f.Malformed || f.ID != want {
+		t.Fatalf("id = %s, want %s", f.ID, want)
 	}
 }
