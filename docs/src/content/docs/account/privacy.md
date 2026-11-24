@@ -95,8 +95,8 @@ check:
   long inline code are removed from the text first, and it is cut to 200
   characters for a title and 500 for a message. This reduces the chance of
   sending quoted code or a secret, but cannot rule it out, since a reviewer's
-  prose can quote either. A finding that cites no place is sent as a count, with
-  no text.
+  prose can quote either. A finding that cites no place is sent with only its
+  `rv-` id, priority and category tag, and no text.
 - **Later commands:** `slopcop override` of a finding or a whole review, with your
   reason, and `--undo`.
 

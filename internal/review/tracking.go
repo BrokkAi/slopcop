@@ -274,9 +274,9 @@ func reportText(text string, limit int) string {
 }
 
 // stripInlineCode replaces each inline code span over inlineCodeLimit with
-// codeOmitted. A span opens with one or two backticks that do not follow a
-// letter or digit, and closes with as many. A backtick that cannot open one,
-// or has no partner, is kept as text and the scan goes on after it. A stretch
+// codeOmitted. A span opens with one or two backticks and closes with as
+// many, as in Markdown; a run with no partner is kept as text, whole, and the
+// scan goes on after it. A stretch
 // that starts or ends with a space and whose closing backtick runs straight
 // into a word is prose after a lone backtick, not code: the backtick before it
 // is kept as text, so the scan does not take the opening backtick of the next
@@ -293,17 +293,14 @@ func stripInlineCode(text string) string {
 			out.WriteByte('`')
 			i++
 		}
-		if i > 0 && isWordByte(text[i-1]) {
-			lone()
-			continue
-		}
 		fence := "`"
 		if strings.HasPrefix(text[i:], "``") {
 			fence = "``"
 		}
 		end := strings.Index(text[i+len(fence):], fence)
 		if end < 0 {
-			lone()
+			out.WriteString(fence)
+			i += len(fence)
 			continue
 		}
 		content := text[i+len(fence) : i+len(fence)+end]
@@ -324,7 +321,8 @@ func stripInlineCode(text string) string {
 }
 
 // isWordByte reports a letter, a digit, an underscore, or a byte of a
-// multibyte character, which is most likely a letter.
+// multibyte character, which is most likely a letter: a closing backtick
+// followed by one is really the opening backtick of the next span.
 func isWordByte(b byte) bool {
 	return b == '_' || b >= 0x80 || b >= '0' && b <= '9' || b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z'
 }
