@@ -99,6 +99,49 @@ func TestReviewSettingsValidation(t *testing.T) {
 	}
 }
 
+func TestReviewSettingsChatModels(t *testing.T) {
+	for name, r := range map[string]*config.Review{
+		"no model":             {Reviewers: []string{"openrouter"}},
+		"no model as fallback": {Reviewers: []string{"terra"}, Fallbacks: []string{"openrouter"}},
+		"router":               {Reviewers: []string{"openrouter"}, Models: map[string]string{"openrouter": "openrouter/auto"}},
+		"web search variant":   {Reviewers: []string{"openrouter"}, Models: map[string]string{"openrouter": "vendor/model:online"}},
+		"family without one":   {Reviewers: []string{"terra"}, Models: map[string]string{"terra": "vendor/model"}},
+	} {
+		if _, err := reviewSettings(config.Config{Review: r}, 0); err == nil || !strings.Contains(err.Error(), "review.models") {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	got, err := reviewSettings(config.Config{Review: &config.Review{Reviewers: []string{"terra", "openrouter"}, Models: map[string]string{"openrouter": "vendor/model:nitro"}}}, 0)
+	if err != nil || got.Models[review.OpenRouter] != "vendor/model:nitro" {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestConfigSetsAndUnsetsTheChatModel(t *testing.T) {
+	var cfg config.Config
+	if err := setConfigValue(&cfg, "review.models.openrouter", "vendor/model:online"); err == nil {
+		t.Fatal("accepted a web search variant")
+	}
+	if err := setConfigValue(&cfg, "review.models.terra", "vendor/model"); err == nil {
+		t.Fatal("accepted a model for a family that picks its own")
+	}
+	if err := setConfigValue(&cfg, "review.models.openrouter", "vendor/model"); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := configValue(cfg, "review.models.openrouter"); err != nil || got != "vendor/model" {
+		t.Fatalf("%q %v", got, err)
+	}
+	if err := unsetConfigValue(&cfg, "review.models.openrouter"); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Review != nil {
+		t.Fatalf("empty review section kept: %+v", cfg.Review)
+	}
+	if got, err := configValue(cfg, "review.models.openrouter"); err != nil || got != "(not set)" {
+		t.Fatalf("%q %v", got, err)
+	}
+}
+
 // TestCheckWithNoModeAndNoReviewersRunsStatic covers a machine or CI job that
 // never ran slopcop init: a check with no mode set runs only the static half,
 // keeps its exit code, and outside CI says once why the review did not run.

@@ -43,12 +43,16 @@ const (
 	// is a weaker reviewer, so it runs only when named in review.reviewers or
 	// review.fallbacks.
 	Ollama Family = "ollama"
+	// OpenRouter is a model the user names in review.models.openrouter, run
+	// by SlopCop's read-only chat agent. It is opt-in: it needs that choice
+	// and sends the review through a third party.
+	OpenRouter Family = "openrouter"
 )
 
 // Families lists, in priority order, the families `slopcop init` may choose.
 // Sonnet and Opus follow Haiku, so a machine with Claude Code alone gets a
 // second Claude reviewer instead of one, and Opus, the costliest, comes last.
-// Gemini, Kimi, Grok and Ollama are left out because they are opt-in.
+// Gemini, Kimi, Grok, Ollama and OpenRouter are left out because they are opt-in.
 var Families = []Family{Terra, Sol, Flash, Haiku, Sonnet, Opus}
 
 const (
@@ -103,6 +107,8 @@ type Settings struct {
 	Provider string
 	// OllamaModel is the installed Ollama model the ollama family reviews on.
 	OllamaModel string
+	// Models names the model of each family that does not choose its own.
+	Models map[Family]string
 }
 
 // ProviderCopilot routes the families Copilot serves through Copilot CLI.

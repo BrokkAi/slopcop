@@ -355,6 +355,9 @@ func launch(ctx context.Context, root string, trees reviewTrees, adapter string,
 	if adapter == ollamaAdapter {
 		return startOllama(ctx, root, trees, argv, ollamaModel, f, name, dir, timeout)
 	}
+	if IsChatAdapter(adapter) {
+		return startChat(ctx, root, trees, argv, f, name, dir, timeout)
+	}
 	s, err := startRunner(ctx, root, argv, f, name, dir, timeout)
 	if err != nil {
 		return nil, err

@@ -132,6 +132,9 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 	if len(settings.Adapters[adapter]) > 0 {
 		return ""
 	}
+	if IsChatAdapter(adapter) {
+		return chatPrerequisite(f, settings)
+	}
 	switch adapter {
 	case copilotAdapter:
 		if !CopilotMayBeLoggedIn() {

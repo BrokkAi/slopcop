@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -73,6 +74,35 @@ func ExportTree(ctx context.Context, root, tree, dest string, limits ExportLimit
 		return nil, fmt.Errorf("git cat-file --batch: %s", strings.TrimSpace(stderr.String()+" "+err.Error()))
 	}
 	return paths, nil
+}
+
+// TreeFile is a regular file of a tree.
+type TreeFile struct {
+	Object, Path string
+	Size         int64
+}
+
+// TreeFiles lists the regular files of tree up to maxFile bytes, leaving out
+// what ExportTree leaves out: symlinks, submodules and unsafe paths.
+func TreeFiles(ctx context.Context, root, tree string, maxFile int64) ([]TreeFile, error) {
+	listing, err := runContext(ctx, root, nil, nil, "ls-tree", "-r", "-l", "-z", "--full-tree", tree)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := exportEntries(listing, ExportLimits{MaxFile: maxFile, MaxTotal: math.MaxInt64})
+	if err != nil {
+		return nil, err
+	}
+	files := make([]TreeFile, len(entries))
+	for i, e := range entries {
+		files[i] = TreeFile{Object: e.object, Path: e.path, Size: e.size}
+	}
+	return files, nil
+}
+
+// Blob returns the contents of a blob, without filters.
+func Blob(ctx context.Context, root, object string) ([]byte, error) {
+	return runContext(ctx, root, nil, nil, "cat-file", "blob", object)
 }
 
 // ChangedFiles returns the slash-separated paths of the regular files that are
