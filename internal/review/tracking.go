@@ -159,10 +159,15 @@ func BuildReport(v Verdict, version string, command func(Family) []string) (repo
 		if d, found := v.DurationsMs[r.Name]; found {
 			row.DurationMs = &d
 		}
-		switch row.Status {
-		case StatusClean:
+		switch {
+		case row.Status == StatusFailed && r.Adapter == ollamaAdapter && verdictFormatError(r.Text) != nil:
+			// The reviewer replied, but not in the format, so the CLI failed it.
+			// It is counted as one unparsed finding; its text is not sent.
+			row.ParseQuality = ParseUnparsed
+			row.FindingCount = 1
+		case row.Status == StatusClean:
 			row.ParseQuality = ParseParsed
-		case StatusFindings:
+		case row.Status == StatusFindings:
 			findings := ParseFindings(r.Name, r.Text, changed)
 			row.ParseQuality = parseQuality(findings)
 			row.FindingCount = len(findings)
@@ -241,8 +246,10 @@ func reportFinding(f Finding) ReportFinding {
 	out.Path, out.StartLine, out.EndLine = f.Path, f.StartLine, f.EndLine
 	out.Title = reportText(f.Title, maxTitleChars)
 	out.Message = reportText(f.Message, maxMessageChars)
-	if utf8.RuneCountInString(f.API) <= maxAPIChars {
-		out.API = oneLine(f.API)
+	// An API name gets the same code filter as the rest of the text, and is
+	// left out when that removed anything: what is left is not a name.
+	if api := reportText(f.API, maxAPIChars); utf8.RuneCountInString(f.API) <= maxAPIChars && !strings.Contains(api, codeOmitted) && !strings.Contains(api, "`") {
+		out.API = api
 	}
 	return out
 }

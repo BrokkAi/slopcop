@@ -183,3 +183,25 @@ func TestReportKeysAreTheFindingsSent(t *testing.T) {
 		t.Fatalf("keys = %d", len(keys))
 	}
 }
+
+func TestUnparsedOllamaReplyIsAnUnparsedRow(t *testing.T) {
+	v := Verdict{Status: StatusFailed, Reviewers: []Reviewer{{Name: "1-ollama", Family: Ollama, Adapter: ollamaAdapter, Status: StatusFailed,
+		Text: "Looks mostly fine, maybe check the loop.", Error: "the reviewer's reply was not a verdict"}}}
+	row := reportOf(t, v).Reviewers[0]
+	if row.ParseQuality != ParseUnparsed || row.FindingCount != 1 || len(row.Findings) != 0 || row.Status != StatusFailed {
+		t.Fatalf("row = %+v", row)
+	}
+	body, _ := json.Marshal(row)
+	if strings.Contains(string(body), "loop") {
+		t.Fatalf("reply text sent: %s", body)
+	}
+}
+
+func TestAPITagGetsTheCodeFilter(t *testing.T) {
+	long := strings.Repeat("y", 50)
+	reply := "- [P1] Leak `src/a.go:1`\nBody.\nTags: api=`" + long + "`\n"
+	f := reportOf(t, Verdict{Status: StatusFindings, Reviewers: []Reviewer{{Name: "1-terra", Family: Terra, Status: StatusFindings, Text: reply}}}).Reviewers[0].Findings[0]
+	if f.API != "" {
+		t.Fatalf("api = %q", f.API)
+	}
+}
