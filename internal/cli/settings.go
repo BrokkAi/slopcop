@@ -183,16 +183,6 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			}
 			return review.Settings{}, fmt.Errorf("invalid review.provider %q in %s: want %s", cfg.Review.Provider, path, review.ProviderCopilot)
 		}
-		if model := cfg.Review.OllamaModel; model != "" {
-			if !review.ValidOllamaModel(model) {
-				path, err = configPath()
-				if err != nil {
-					return review.Settings{}, err
-				}
-				return review.Settings{}, fmt.Errorf("invalid review.ollamaModel %q in %s: want a model name from `ollama list`", model, path)
-			}
-			settings.OllamaModel = model
-		}
 		if len(cfg.Review.Adapters) > 0 {
 			settings.Adapters = make(map[string][]string, len(cfg.Review.Adapters))
 			for name, adapter := range cfg.Review.Adapters {
@@ -217,7 +207,8 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 }
 
 // chatModels reads review.models and requires a model for each chat family
-// the review names, since such a family has no model of its own.
+// the review names, since such a family has no model of its own. Ollama
+// without a model is reported when its reviewer starts.
 func chatModels(cfg *config.Review, settings *review.Settings, configPath func() (string, error)) error {
 	invalid := func(format string, args ...any) error {
 		path, err := configPath()
@@ -228,7 +219,7 @@ func chatModels(cfg *config.Review, settings *review.Settings, configPath func()
 	}
 	for name, model := range cfg.Models {
 		family := review.Family(name)
-		if err := review.CheckChatModel(family, model); err != nil {
+		if err := review.CheckModel(family, model); err != nil {
 			return invalid("%v", err)
 		}
 		if settings.Models == nil {

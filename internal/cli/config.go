@@ -14,15 +14,24 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.ollamaModel, review.models.openrouter"
+const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.models.ollama, review.models.openrouter"
 
-// chatModelKey returns the family of a review.models.<family> key.
-func chatModelKey(key string) (review.Family, bool) {
+// modelKey returns the family of a review.models.<family> key, for a family
+// that reviews on a model the user names.
+func modelKey(key string) (review.Family, bool) {
 	name, ok := strings.CutPrefix(key, "review.models.")
-	if !ok || !review.IsChatAdapter(name) {
+	if !ok || !review.TakesModel(review.Family(name)) {
 		return "", false
 	}
 	return review.Family(name), true
+}
+
+// movedKey reports a key that an unreleased build used, naming its new key.
+func movedKey(key string) error {
+	if key == "review.ollamaModel" {
+		return fmt.Errorf("review.ollamaModel is now review.models.ollama; run `slopcop config set review.models.ollama <model>`")
+	}
+	return nil
 }
 
 // newConfigCommand builds the user config commands.
@@ -99,7 +108,10 @@ func newConfigCommand() *cobra.Command {
 
 // configValue returns the configured or default value for a key.
 func configValue(cfg config.Config, key string) (string, error) {
-	if family, ok := chatModelKey(key); ok {
+	if err := movedKey(key); err != nil {
+		return "", err
+	}
+	if family, ok := modelKey(key); ok {
 		if cfg.Review != nil && cfg.Review.Models[string(family)] != "" {
 			return cfg.Review.Models[string(family)], nil
 		}
@@ -154,11 +166,6 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return cfg.Review.Provider, nil
 		}
 		return "(not set; each family uses its own adapter)", nil
-	case "review.ollamaModel":
-		if cfg.Review != nil && cfg.Review.OllamaModel != "" {
-			return cfg.Review.OllamaModel, nil
-		}
-		return "(not set)", nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -166,8 +173,11 @@ func configValue(cfg config.Config, key string) (string, error) {
 
 // setConfigValue validates and updates one supported setting.
 func setConfigValue(cfg *config.Config, key, value string) error {
-	if family, ok := chatModelKey(key); ok {
-		if err := review.CheckChatModel(family, value); err != nil {
+	if err := movedKey(key); err != nil {
+		return err
+	}
+	if family, ok := modelKey(key); ok {
+		if err := review.CheckModel(family, value); err != nil {
 			return fmt.Errorf("invalid %s: %w", key, err)
 		}
 		r := ensureReview(cfg)
@@ -235,11 +245,6 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("invalid review.provider %q (want %s)", value, review.ProviderCopilot)
 		}
 		ensureReview(cfg).Provider = value
-	case "review.ollamaModel":
-		if !review.ValidOllamaModel(value) {
-			return fmt.Errorf("invalid review.ollamaModel %q (want a model name from `ollama list`)", value)
-		}
-		ensureReview(cfg).OllamaModel = value
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -248,7 +253,10 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 
 // unsetConfigValue removes a setting so its default applies again.
 func unsetConfigValue(cfg *config.Config, key string) error {
-	if family, ok := chatModelKey(key); ok {
+	if err := movedKey(key); err != nil {
+		return err
+	}
+	if family, ok := modelKey(key); ok {
 		if cfg.Review != nil {
 			delete(cfg.Review.Models, string(family))
 			if cfg.Review.Empty() {
@@ -285,10 +293,6 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 	case "review.provider":
 		if cfg.Review != nil {
 			cfg.Review.Provider = ""
-		}
-	case "review.ollamaModel":
-		if cfg.Review != nil {
-			cfg.Review.OllamaModel = ""
 		}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)

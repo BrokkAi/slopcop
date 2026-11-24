@@ -571,7 +571,7 @@ Kimi K3 (`kimi`) through Kimi Code CLI is also opt-in and needs `KIMI_API_KEY`. 
 Grok (`grok`) through Grok Build is also opt-in and needs `XAI_API_KEY`. See
 [Grok through Grok Build](https://docs.slopcop.com/reference/configuration/#grok-through-grok-build-opt-in).
 Ollama (`ollama`) reviews on a model you installed, through OpenCode. It is also
-opt-in, and needs `review.ollamaModel`. See
+opt-in, and needs `review.models.ollama`. See
 [Ollama through OpenCode](https://docs.slopcop.com/reference/configuration/#ollama-through-opencode-opt-in).
 OpenRouter (`openrouter`) is opt-in too: you name its model in
 `review.models.openrouter`, and it runs SlopCop's own read-only agent. See

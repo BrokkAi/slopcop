@@ -117,6 +117,50 @@ func TestLoadMigratesTheSingleLogin(t *testing.T) {
 	}
 }
 
+func TestLoadMovesTheOllamaModelIntoModels(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", home+"/config")
+	path, err := Path()
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(body string) {
+		t.Helper()
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	write(`{"review": {"reviewers": ["ollama"], "ollamaModel": "qwen3-coder:30b", "models": {"openrouter": "vendor/model"}}}`)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := cfg.Review; r.LegacyOllamaModel != "" || r.Models["ollama"] != "qwen3-coder:30b" || r.Models["openrouter"] != "vendor/model" {
+		t.Fatalf("review = %+v", r)
+	}
+	if _, err := Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "ollamaModel") || !strings.Contains(string(saved), `"ollama": "qwen3-coder:30b"`) {
+		t.Fatalf("saved = %s", saved)
+	}
+
+	// A model already set under models is newer than the leftover.
+	write(`{"review": {"ollamaModel": "stale:1b", "models": {"ollama": "fresh:7b"}}}`)
+	if cfg, err = Load(); err != nil || cfg.Review.Models["ollama"] != "fresh:7b" || cfg.Review.LegacyOllamaModel != "" {
+		t.Fatalf("config = %+v, err = %v", cfg.Review, err)
+	}
+}
+
 func TestForgetLeavesOtherLogins(t *testing.T) {
 	var cfg Config
 	cfg.SetToken("https://slopcop.com", "prod")
