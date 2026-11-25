@@ -322,6 +322,11 @@ func summaryHead(r Report, o Outcome, inline int, onPR bool) string {
 	b.WriteString(staticLine(r, o))
 	b.WriteString(reviewLine(r, o))
 	b.WriteString("\n")
+	failOn := ""
+	if r.Summary != nil {
+		failOn = r.Summary.FailOn
+	}
+	b.WriteString(thresholdSection(r.RepositoryFailOn, failOn))
 	if r.Status != "clean" && r.Status != "findings" && r.Status != "incomplete" && (r.Code != "" || r.Message != "") {
 		fmt.Fprintf(&b, "> %s%s\n", codePrefix(r.Code), quote(r.Message))
 		if r.Remedy != "" {
@@ -335,6 +340,35 @@ func summaryHead(r Report, o Outcome, inline int, onPR bool) string {
 			text = "1 finding is commented on the line it concerns."
 		}
 		b.WriteString(text + "\n\n")
+	}
+	return b.String()
+}
+
+// thresholdSection names the repository's [check] fail_on when it is set, and
+// says so under its own heading when the pull request itself moves it, since
+// a change can lower the bar it is checked against. failOn is the threshold
+// that decided the check; when a --fail-on of the job's own overrode the
+// repository's, the section names both.
+func thresholdSection(t *service.RepositoryFailOn, failOn string) string {
+	if t == nil {
+		return ""
+	}
+	level := func(value string) string {
+		if value == "" {
+			return "none (any new finding)"
+		}
+		return "`" + code(bounded(value)) + "`"
+	}
+	var b strings.Builder
+	if t.Changed {
+		fmt.Fprintf(&b, "**This change moves what fails its check**: `[check] fail_on` in `%s` goes from %s to %s.\n\n",
+			code(bounded(t.Config)), level(t.BaseLevel), level(t.Level))
+	}
+	switch {
+	case failOn != "" && failOn != t.Level:
+		fmt.Fprintf(&b, "This job fails at %s, set by its own `fail-on`; the repository's `[check] fail_on` is %s.\n\n", level(failOn), level(t.Level))
+	case !t.Changed:
+		fmt.Fprintf(&b, "Fails at %s, from `[check] fail_on` in `%s`.\n\n", level(t.Level), code(bounded(t.Config)))
 	}
 	return b.String()
 }

@@ -407,15 +407,18 @@ and valid overrides write `refs/slopcop/reviewed/<tree>`.
 
 ## Push approval level
 
-Set `gate.blockOn` by editing the user config file. It defaults to `error`;
-values are `never`, `finding`, `note`, `warning`, and `error`. New findings
+Set `gate.blockOn` by editing the user config file. It defaults to `error`,
+or to the repository's `[check] fail_on` when that is stricter; values are `never`, `finding`, `note`, `warning`, and `error`. New findings
 at or above that level block push approval. Unknown severities count as
 errors. This setting has no check flag and cannot be changed through
 `slopcop config`.
 
 A [pull request check](/checks/pull-requests/) does not read this setting: it
-fails on any new finding. Under the default, a new note or warning is approved
-for push here and fails there; set `finding` to block the same findings. See
+fails on new findings at or above the repository's `[check] fail_on`, or on
+any new finding when the repository sets none. Under the default, without a
+repository threshold, a new note or warning is approved for push here and
+fails there; commit a threshold, or set `finding` here, to block the same
+findings. A repository threshold never lowers a level set here. See
 [The push gate and pull request checks](/checks/exit-codes/#the-push-gate-and-pull-request-checks).
 
 ## Another deployment

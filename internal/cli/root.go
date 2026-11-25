@@ -197,7 +197,7 @@ func registerCheckFlags(command *cobra.Command, opts *checkOptions) {
 	flags.StringArrayVar(&opts.policyCategories, "policy-category", nil, "policy category (repeatable)")
 	flags.StringVar(&opts.format, "format", "human", "report format: human, json, or sarif")
 	flags.StringVar(&opts.sarifFile, "sarif-file", "", "also write the report as SARIF to this file, for a code scanning upload")
-	flags.StringVar(&opts.failOn, "fail-on", "finding", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error")
+	flags.StringVar(&opts.failOn, "fail-on", "", "exit 1 when a new finding is at or above this level: never, finding, note, warning, or error (default: the repository's [check] fail_on, else finding)")
 	flags.StringVar(&opts.certainty, "certainty", certaintyDefinite, "which findings to report and fail on: definite (proven at their location) or all (also possible and heuristic ones)")
 	flags.BoolVar(&opts.showExisting, "show-existing", false, "also list the findings that were already in the code (they never fail the check)")
 	// The service stopped listing findings outside the changed lines; it
