@@ -408,7 +408,8 @@ service only when this machine stores a login for it (`slopcop login --service
 URL`) and `$SLOPCOP_TOKEN` is unset, and says on stderr which service it
 asked. Otherwise it asks the default service, as before. With `$SLOPCOP_TOKEN`
 in CI, pass `--service` or set `$SLOPCOP_SERVICE`; the
-[GitHub Action](/checks/ci/) passes on a `--service` from its `args` itself.
+[GitHub Action](/checks/ci/) comments through the service its own check ran
+against.
 
 The token comes from `GITHUB_TOKEN` (or `GH_TOKEN`) and needs
 `pull-requests: write`. With a read-only token, as on a pull request from a
