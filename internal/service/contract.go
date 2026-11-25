@@ -479,6 +479,12 @@ type Finding struct {
 	// advisory and the fix. A service from before BrokkAi/bifrost-service#884
 	// omits it, and the client drops one it cannot validate.
 	Dependency *Dependency `json:"dependency,omitempty"`
+	// CommentKey names the finding across checks, where ID is new in every
+	// one: `static:` and 20 hex digits from the finding's rule and stable
+	// key. `slopcop comment` marks a finding's pull request comment with it,
+	// as the SlopCop GitHub App does, so neither comments it twice. A
+	// service from before BrokkAi/bifrost-service#1572 omits it.
+	CommentKey string `json:"commentKey,omitempty"`
 }
 
 // RelatedLocation identifies a candidate location reported alongside a finding.
