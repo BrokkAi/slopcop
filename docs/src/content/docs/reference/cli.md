@@ -360,7 +360,10 @@ pull request review with an inline comment on each new finding whose lines the
 pull request changes, static and review findings alike, and one summary
 comment that says what the check found and lists the findings no line of the
 diff can hold. A later run updates the summary in place and does not comment a
-finding it already commented. A clean check writes no summary unless an
+finding it already commented, even from a later check of a new push, or one
+the SlopCop GitHub App commented: each static finding's comment is marked with
+its `commentKey`, which stays the same from check to check. A clean check
+writes no summary unless an
 earlier run left one, which it updates.
 
 ```console

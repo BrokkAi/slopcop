@@ -42,7 +42,12 @@ const (
 // item is one finding to comment: a new static finding, or one review
 // finding with every reviewer that reported it.
 type item struct {
-	key        string
+	// key marks the item's comment.
+	key string
+	// aliases are the other keys an earlier comment of the same finding may
+	// be marked with: a static finding's id, which marked it before the
+	// service answered commentKey.
+	aliases    []string
 	kind       kind
 	path       string
 	start, end int
@@ -56,11 +61,16 @@ type item struct {
 func items(r Report) []item {
 	var all []item
 	for _, f := range r.NewStatic() {
-		key := f.ID
+		// A finding's id is new in each check, so a later check would
+		// comment it again; its comment key is not.
+		key, aliases := f.CommentKey, []string{f.ID}
+		if key == "" {
+			key, aliases = f.ID, nil
+		}
 		if key == "" {
 			key = fmt.Sprintf("%s:%s:%d", f.PolicyID, f.Path, deref(f.StartLine))
 		}
-		all = append(all, item{key: key, kind: staticKind, path: f.Path, start: deref(f.StartLine), end: deref(f.EndLine), static: f})
+		all = append(all, item{key: key, aliases: aliases, kind: staticKind, path: f.Path, start: deref(f.StartLine), end: deref(f.EndLine), static: f})
 	}
 	byID := map[string]int{}
 	for _, f := range r.ReviewFindings() {
@@ -100,6 +110,17 @@ func deref(p *int) int {
 // marker is the hidden line that identifies an item's inline comment.
 func (it item) marker() string {
 	return findingMarkerPrefix + safeMarker(it.key) + " -->"
+}
+
+// commentedIn reports whether a marker in commented already names the item,
+// by its key or by one of its aliases.
+func (it item) commentedIn(commented map[string]bool) bool {
+	for _, key := range append([]string{it.key}, it.aliases...) {
+		if key != "" && commented[safeMarker(key)] {
+			return true
+		}
+	}
+	return false
 }
 
 // safeMarker keeps a key from closing the HTML comment it sits in.

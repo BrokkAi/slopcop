@@ -79,8 +79,8 @@ func Publish(ctx context.Context, g *GitHub, r Report, t Target) (Result, error)
 			for _, key := range markedKeys(c.Body) {
 				commented[key] = true
 				// The App marks a review finding review:<id>, where this
-				// tool marks it <id>. Its static markers use the finding's
-				// stable key, which the report does not carry yet.
+				// tool marks it <id>. Its static markers are the finding's
+				// commentKey, which items marks by too.
 				if id, ok := strings.CutPrefix(key, "review:"); ok && strings.HasPrefix(id, "rv-") {
 					commented[id] = true
 				}
@@ -101,7 +101,7 @@ func Publish(ctx context.Context, g *GitHub, r Report, t Target) (Result, error)
 			elsewhere = append(elsewhere, it)
 			continue
 		}
-		if commented[safeMarker(it.key)] {
+		if it.commentedIn(commented) {
 			result.Inline++
 			continue
 		}
