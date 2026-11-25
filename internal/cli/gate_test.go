@@ -28,6 +28,8 @@ func TestGatePushCommands(t *testing.T) {
 		{"echo git push", true},
 		{"git -c core.sshCommand=ssh push", true},
 		{`git -C "my dir" -c user.name=x --no-pager push --force`, true},
+		{`git -C my\ dir push`, true},
+		{`git -C ../"my dir"/sub push`, true},
 		{"git --git-dir=.git --work-tree . push", true},
 		{"/usr/bin/git push", true},
 		{"git add . && git commit -m wip && git push", true},

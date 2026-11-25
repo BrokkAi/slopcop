@@ -273,9 +273,10 @@ duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
 must finish for a clean review), `review.provider` (`copilot` runs
-`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI), and
+`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI),
 `review.models.<ollama|openrouter>` (the model an opt-in family that takes one
-reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`). Adapter command
+reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`), and
+`review.dsh.apiKeyFile` (a file holding the DeepSeek key for `flash`). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 The opt-in `gemini`, `kimi`, `grok` and `ollama` families are used only when you name them; see
 [Gemini through Antigravity](/reference/configuration/#gemini-through-antigravity-opt-in),
@@ -312,8 +313,17 @@ wrong, so write the reason for them: say why the finding does not hold.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
-open a pull request until HEAD's tree has a passing check or valid override. It also
-blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
+open a pull request until HEAD's tree has a passing check or valid override. A
+shell push is judged in each repository it may run in: the session's
+directory, moved by a `cd` the push runs after (`cd ../other && git push`) or
+by `git -C`, or named by `--git-dir` or `GIT_DIR`. Where a `cd` may not
+have run, as around `||`, every directory the push could run in is judged; a
+`cd` in a pipeline, a background job or a subshell does not move it. Where
+the directory depends on the shell (`cd $DIR`, `cd -`, `popd`) or does not
+exist yet, the gate cannot tell what would be pushed, so it blocks the push when SlopCop guards
+the session's repository, a repository the push runs in, or one the command
+names (such as the source of a `cp -r`). It also blocks any shell
+command that names `refs/slopcop/` or `.git/slopcop`.
 
 ## `slopcop review show`
 

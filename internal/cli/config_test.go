@@ -1,6 +1,8 @@
 package cli
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -119,5 +121,63 @@ func TestConfigOldOllamaKeyNamesTheNewOne(t *testing.T) {
 		if code, _, errOut := runCLI(t, args...); code == 0 || !strings.Contains(errOut, "review.models.ollama") {
 			t.Errorf("%v: %d %q", args, code, errOut)
 		}
+	}
+}
+
+// TestConfigDSHKeyFile sets the DeepSeek key file by a relative path, which
+// is saved absolute and reaches the review settings, and refuses a file
+// that is missing or empty.
+func TestConfigDSHKeyFile(t *testing.T) {
+	isolateUserConfig(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	if code, out, _ := runCLI(t, "config", "get", "review.dsh.apiKeyFile"); code != 0 || !strings.Contains(out, "(not set") {
+		t.Fatalf("get unset: %d %q", code, out)
+	}
+	if code, _, errOut := runCLI(t, "config", "set", "review.dsh.apiKeyFile", "missing"); code == 0 || !strings.Contains(errOut, "invalid review.dsh.apiKeyFile") {
+		t.Fatalf("set missing: %d %q", code, errOut)
+	}
+	if err := os.WriteFile("key", nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := runCLI(t, "config", "set", "review.dsh.apiKeyFile", "key"); code == 0 || !strings.Contains(errOut, "empty") {
+		t.Fatalf("set empty: %d %q", code, errOut)
+	}
+	if err := os.WriteFile("key", []byte("sk-test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, errOut := runCLI(t, "config", "set", "review.dsh.apiKeyFile", "key"); code != 0 {
+		t.Fatalf("set: %d %q", code, errOut)
+	}
+	abs, err := filepath.Abs("key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out, _ := runCLI(t, "config", "get", "review.dsh.apiKeyFile"); code != 0 || strings.TrimSpace(out) != abs {
+		t.Fatalf("get: %d %q, want %q", code, out, abs)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	settings, err := reviewSettings(cfg, 0)
+	if err != nil || settings.DSHKeyFile != abs {
+		t.Fatalf("settings = %+v %v", settings, err)
+	}
+	if code, _, errOut := runCLI(t, "config", "unset", "review.dsh.apiKeyFile"); code != 0 {
+		t.Fatalf("unset: %d %q", code, errOut)
+	}
+	if cfg, err = config.Load(); err != nil || cfg.Review != nil {
+		t.Fatalf("config after unset = %+v %v", cfg, err)
+	}
+}
+
+// TestReviewSettingsRefusesARelativeDSHKeyFile covers a hand-edited config:
+// a relative key file would depend on where the check runs.
+func TestReviewSettingsRefusesARelativeDSHKeyFile(t *testing.T) {
+	isolateUserConfig(t)
+	cfg := config.Config{Review: &config.Review{DSH: &config.DSH{APIKeyFile: "key"}}}
+	if _, err := reviewSettings(cfg, 0); err == nil || !strings.Contains(err.Error(), "review.dsh.apiKeyFile") {
+		t.Fatalf("accepted a relative key file: %v", err)
 	}
 }
