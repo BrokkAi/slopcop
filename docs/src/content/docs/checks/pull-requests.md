@@ -126,15 +126,18 @@ and the [pricing page](https://slopcop.com/pricing).
 [Gate a change in CI](/checks/ci/) runs the CLI in your own workflow, with
 your choice of `--fail-on`, rules, and output formats. Pull request checks need
 no workflow, token, or clone, and always use the CLI's defaults: every rule,
-`--fail-on finding`.
+and the repository's threshold, else `--fail-on finding`.
 
 ## Compared with the push gate
 
-A pull request check fails on any new finding, a `note` included. The
+A pull request check fails on any new finding, a `note` included, unless the
+repository commits a threshold: `fail_on` in the `[check]` section of
+`.slopcop/config.toml`, such as `fail_on = "warning"`. The
 [push gate](/checks/exit-codes/#which-results-approve-the-tree) on your
 machine blocks only findings at or above `gate.blockOn`, which defaults to
-`error`. So a tree with new notes or warnings is approved for push and then
-fails its pull request check. The local check does say so: it exits `1`,
-counts them in `advisoryFindings`, and warns on stderr. See
+`error`, or to the repository's threshold when that is stricter. So without a
+repository threshold, a tree with new notes or warnings is approved for push
+and then fails its pull request check. The local check does say so: it exits
+`1`, counts them in `advisoryFindings`, and warns on stderr. See
 [The push gate and pull request checks](/checks/exit-codes/#the-push-gate-and-pull-request-checks)
 for the three thresholds side by side and how to make them agree.

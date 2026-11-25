@@ -511,7 +511,7 @@ Flags:
 | `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--sarif-file PATH` | also write the report as SARIF to this file |
-| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new static findings (default `finding`); a review finding exits `1` at every level but `never` |
+| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new static findings (default the repository's `[check] fail_on`, else `finding`); a review finding exits `1` at every level but `never` |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable) |
 | `--policy-id ID` | built-in policy ID (repeatable) |
@@ -625,11 +625,13 @@ Review state and logs are under `<git-dir>/slopcop/`. `slopcop review show
 reviewer's reply from its log, without running a reviewer. A complete review is
 reused when nothing relevant changed. A nonempty check with a clean review
 and a completed static result with no new findings at or above
-`gate.blockOn` (default `error`) records `refs/slopcop/reviewed/<tree>`.
+`gate.blockOn` (default `error`, or the repository's `[check] fail_on` when
+that is stricter) records `refs/slopcop/reviewed/<tree>`.
 Warnings and notes are advisory for push approval, though they still exit `1`
 by default, and a pull request check fails on them: JSON `advisoryFindings`
 counts them, and stderr says so where the push gate is installed. Set
-`gate.blockOn` to `finding` to block what a pull request check fails on. The Claude Code gate checks HEAD's tree, so
+`gate.blockOn` to `finding`, or commit `fail_on` in the `[check]` section of
+`.slopcop/config.toml`, which pull request checks read too, to make them agree. The Claude Code gate checks HEAD's tree, so
 after checking a dirty tree, commit exactly that state. For demonstrably wrong
 complete review findings, `slopcop override <rv-id> --reason "..."` overrides
 one finding, by the `rv-` id in `review.findings`, for every later review in the
@@ -825,7 +827,9 @@ It does not yet say which functions or lines each one concerns. A check that tim
 that Bifrost judged unreliable is incomplete and counts wherever it is.
 
 The service applies `--fail-on` and sets the status; the exit code follows it.
-The CLI always sends `--fail-on`, defaulting to `finding`: a check fails only
+The CLI always sends `--fail-on`. Without the flag it sends the repository's
+threshold, `fail_on` in the `[check]` section of `.slopcop/config.toml`, which
+pull request checks apply too, and `finding` when it sets none: a check fails only
 on findings the change introduced, so any of them, a note or an unrated one
 included, is worth fixing before the change lands. The service's own default
 for a request without `failOn` is Bifrost's `warning`; pass `--fail-on warning`

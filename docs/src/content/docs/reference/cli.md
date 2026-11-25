@@ -48,7 +48,7 @@ slopcop --root ../repo --base origin/main
 | `--include PATH_OR_GLOB` | opt matching files back into upload and local review when the default 500,000-byte JSON/binary filter would omit them; repository-relative, repeatable, quote globs |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--sarif-file PATH` | also write the report as SARIF to this file, so one check gives `json` on stdout and SARIF for a code scanning upload |
-| `--fail-on never\|finding\|note\|warning\|error` | exit `1` when a new static finding is at or above this level (default `finding`), or when a reviewer reported any finding (every level but `never`) |
+| `--fail-on never\|finding\|note\|warning\|error` | exit `1` when a new static finding is at or above this level (default the repository's `[check] fail_on`, else `finding`), or when a reviewer reported any finding (every level but `never`) |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` policy file to evaluate (repeatable) |
 | `--no-policy-discovery` | do not include `.slopcop/policies` rules automatically |

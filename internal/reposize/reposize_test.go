@@ -272,9 +272,65 @@ func TestStrictExcludeReadsOnlyWhatTheServiceReads(t *testing.T) {
 		"[check]\nexclude = \"a/**\"\n":                                             nil,
 		"[check]\nexclude = [1]\n":                                                  nil,
 		"[check\n":                                                                  nil,
+		"[check]\nexclude = [\"a/**\"]\nfail_on = \"warning\"\n":                    {"a/**"},
+		"[check]\nexclude = [\"a/**\"]\nfail_on = \"info\"\n":                       nil,
+		"[check]\nexclude = [\"a/**\"]\nfail_on = 2\n":                              nil,
 	} {
 		if got := strictExclude([]byte(config)); !reflect.DeepEqual(got, want) {
 			t.Errorf("strictExclude(%q) = %q; want %q", config, got, want)
 		}
+	}
+}
+
+func TestStrictFailOnReadsOnlyWhatTheServiceReads(t *testing.T) {
+	for config, want := range map[string]string{
+		"[check]\nfail_on = \"warning\"\n":                  "warning",
+		"[check]\nfail_on = \"never\"\nexclude = [\"a\"]\n": "never",
+		"[check]\nFail_On = \"warning\"\n":                  "",
+		"[check]\nfail_on = \"Warning\"\n":                  "",
+		"[check]\nfail_on = \"info\"\n":                     "",
+		"[check]\nfail_on = 1\n":                            "",
+		"[gate]\nfail_on = \"warning\"\n":                   "",
+		"[check\n":                                          "",
+		"":                                                  "",
+		"[check]\nfail_on = \"never\"\nexclude = \"a\"\n":   "",
+		"[check]\nfail_on = \"never\"\nunknown = 1\n":       "",
+	} {
+		if got := strictFailOn([]byte(config)); got != want {
+			t.Errorf("strictFailOn(%q) = %q; want %q", config, got, want)
+		}
+	}
+}
+
+// RepositoryFailOn reads the tree it is given, not the disk, and only a
+// regular file at the root, as the runner does.
+func TestRepositoryFailOnReadsTheTree(t *testing.T) {
+	dir := t.TempDir()
+	git(t, dir, "init", "-q", ".")
+	if err := os.MkdirAll(filepath.Join(dir, ".slopcop"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	empty := git(t, dir, "write-tree")
+	if got, err := RepositoryFailOn(context.Background(), dir, empty); err != nil || got != "" {
+		t.Fatalf("no config: %q, %v", got, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, ".slopcop", "config.toml"), []byte("[check]\nfail_on = \"note\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, dir, "add", "-A")
+	tree := git(t, dir, "write-tree")
+	if got, err := RepositoryFailOn(context.Background(), dir, tree); err != nil || got != "note" {
+		t.Fatalf("config: %q, %v", got, err)
+	}
+	// The disk moved on; the tree did not.
+	if err := os.WriteFile(filepath.Join(dir, ".slopcop", "config.toml"), []byte("[check]\nfail_on = \"error\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := RepositoryFailOn(context.Background(), dir, tree); err != nil || got != "note" {
+		t.Fatalf("after a disk edit: %q, %v", got, err)
 	}
 }

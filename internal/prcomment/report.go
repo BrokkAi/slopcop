@@ -41,6 +41,9 @@ type Report struct {
 	Remedy  string `json:"remedy"`
 	// Failure is set when the analysis ran but did not complete.
 	Failure string `json:"failure"`
+	// RepositoryFailOn is the repository's [check] fail_on, set when the
+	// checked tree or its base sets one.
+	RepositoryFailOn *service.RepositoryFailOn `json:"repositoryFailOn"`
 }
 
 // Summary is the service's counts, plus the review's.
@@ -50,6 +53,8 @@ type Summary struct {
 	OmittedFindings    int  `json:"omittedFindings"`
 	IncompletePolicies int  `json:"incompletePolicies"`
 	ReviewFindings     *int `json:"reviewFindings"`
+	// FailOn is the threshold that decided the static status.
+	FailOn string `json:"failOn"`
 }
 
 // Review is the local review's verdict.

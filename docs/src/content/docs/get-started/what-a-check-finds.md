@@ -50,7 +50,8 @@ describes each built-in pack and the rule language they are written in.
 
 **Severity** (`error`, `warning`, `note`) is the rule's judgment of how bad the
 pattern is. `--fail-on` picks which severities fail a check; the default,
-`finding`, fails on any new finding at all.
+`finding`, fails on any new finding at all, unless the repository commits its
+own threshold as `fail_on` in `.slopcop/config.toml`.
 
 **Certainty** is Bifrost's judgment of whether this location is really an
 instance of the pattern:

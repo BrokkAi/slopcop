@@ -15,6 +15,7 @@ import (
 	"os/exec"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -260,44 +261,94 @@ func ExcludedPaths(ctx context.Context, root, tree string, paths []string) (map[
 }
 
 // strictExclude is the [check] exclude list of a .slopcop/config.toml's
-// content, read only where the service would read the same list: keys match
-// exactly, as in the service's parser, and [check] holds nothing but exclude,
-// a list of strings, and exclude_rules. Anything else, or a file over the
-// size the runner reads, is nil, so the service, which sees the whole change,
+// content, read only where the service would read the same list (see
+// strictCheck); otherwise nil, so the service, which sees the whole change,
 // decides and reports.
 func strictExclude(config []byte) []string {
+	exclude, _, _ := strictCheck(config)
+	return exclude
+}
+
+// strictCheck reads [check] from a .slopcop/config.toml's content only where
+// the service would read the same table: keys match exactly, as in the
+// service's parser, and [check] holds nothing but exclude, a list of
+// strings, exclude_rules, and fail_on, one of FailOnLevels. Anything else, a
+// file over the size the runner reads, or one without [check] is not ok,
+// since the service then refuses the check or reads nothing.
+func strictCheck(config []byte) (exclude []string, failOn string, ok bool) {
 	if len(config) == 0 || len(config) > maxConfigBytes {
-		return nil
+		return nil, "", false
 	}
 	var document map[string]any
 	if _, err := toml.Decode(string(config), &document); err != nil {
-		return nil
+		return nil, "", false
 	}
-	check, ok := document["check"].(map[string]any)
-	if !ok {
-		return nil
+	check, isTable := document["check"].(map[string]any)
+	if !isTable {
+		return nil, "", false
 	}
-	var exclude []string
 	for key, value := range check {
 		switch key {
 		case "exclude_rules":
+		case "fail_on":
+			level, isString := value.(string)
+			if !isString || !slices.Contains(FailOnLevels, level) {
+				return nil, "", false
+			}
+			failOn = level
 		case "exclude":
-			list, ok := value.([]any)
-			if !ok {
-				return nil
+			list, isList := value.([]any)
+			if !isList {
+				return nil, "", false
 			}
 			for _, item := range list {
-				pattern, ok := item.(string)
-				if !ok {
-					return nil
+				pattern, isString := item.(string)
+				if !isString {
+					return nil, "", false
 				}
 				exclude = append(exclude, pattern)
 			}
 		default:
-			return nil
+			return nil, "", false
 		}
 	}
-	return exclude
+	return exclude, failOn, true
+}
+
+// FailOnLevels are the thresholds a [check] fail_on may name, as --fail-on
+// and gate.blockOn take them.
+var FailOnLevels = []string{"never", "finding", "note", "warning", "error"}
+
+// RepositoryFailOn is the [check] fail_on of tree's root
+// .slopcop/config.toml: the threshold the repository commits for every
+// reader of its checks, which pull request checks and the MCP check tool
+// apply. It is "" when tree sets none, and also when the service would not
+// read the file the same way (a symlink, over the size it reads, a file
+// that does not parse, or a value it refuses), since the service then
+// decides, refusing the check when the file is invalid.
+func RepositoryFailOn(ctx context.Context, root, tree string) (string, error) {
+	listing, err := gitOutput(ctx, root, "ls-tree", "-z", "--full-tree", tree, "--", configPath)
+	if err != nil {
+		return "", err
+	}
+	meta, _, ok := bytes.Cut(bytes.TrimSuffix(listing, []byte{0}), []byte{'\t'})
+	fields := strings.Fields(string(meta))
+	if !ok || len(fields) != 3 || (fields[0] != "100644" && fields[0] != "100755") {
+		return "", nil
+	}
+	content, err := gitOutput(ctx, root, "cat-file", "blob", fields[2])
+	if err != nil {
+		return "", err
+	}
+	return strictFailOn(content), nil
+}
+
+// strictFailOn is the [check] fail_on of a .slopcop/config.toml's content,
+// or "" when it sets none or the service would not read the table as it is
+// (see strictCheck).
+func strictFailOn(config []byte) string {
+	_, failOn, _ := strictCheck(config)
+	return failOn
 }
 
 // treeExclusionFiles reads tree's root .slopcop/config.toml, nil when there
