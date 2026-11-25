@@ -262,6 +262,9 @@ func gateBlock(cmd *cobra.Command, err error) error {
 func shellPushDestinations(command, branch string) []gitx.PushDestination {
 	var result []gitx.PushDestination
 	for _, part := range shellSeparator.Split(command, -1) {
+		if ghPRCreate.MatchString(part) {
+			result = append(result, gitx.PushDestination{AllowExemptions: false})
+		}
 		if !gitPush.MatchString(part) {
 			continue
 		}

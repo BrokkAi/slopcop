@@ -428,6 +428,7 @@ func TestGatePushDestinations(t *testing.T) {
 		{"git push origin other-branch", false}, {"git push --all", false},
 		{"git push --mirror", false}, {"git push --tags", false},
 		{"git push origin HEAD:main && git push other HEAD:main", false},
+		{"git push origin HEAD:main && gh pr create", false},
 		{"git push --delete origin main", false}, {"git push origin HEAD:refs/tags/v1", false},
 		{"git push origin HEAD:main HEAD:other", false}, {"git push --unknown origin", false},
 		{"git -c remote.pushDefault=other push", false},

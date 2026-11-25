@@ -49,9 +49,17 @@ func TestPrompt(t *testing.T) {
 	if strings.Contains(p, "Captured diff") {
 		t.Fatal("inline diff")
 	}
+	if !strings.Contains(p, "--no-textconv") || !strings.Contains(p, "--text") {
+		t.Fatalf("expected attribute-independent diff guidance for codex: %s", p)
+	}
 	p = reviewPrompt("/repo", c, intent{}, "", "/patches", "copilot")
 	if strings.Contains(p, sandboxRules) || !strings.Contains(p, "/patches/patches.txt") {
 		t.Fatal(p)
+	}
+	fallbackIntent := intent{Text: "agent summary", Source: intentFallback}
+	p = reviewPrompt("/repo", c, fallbackIntent, "", "", "codex")
+	if strings.Contains(p, "<user_messages") || strings.Contains(p, "authoritative intent") || !strings.Contains(p, "<agent_supplied_intent>") {
+		t.Fatalf("agent-supplied --intent must not be wrapped as authoritative user_messages: %s", p)
 	}
 }
 

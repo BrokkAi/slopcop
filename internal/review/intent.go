@@ -20,13 +20,22 @@ type intent struct {
 	Truncated    bool
 }
 
-const intentNone = "not available"
+const (
+	intentNone     = "not available"
+	intentFallback = "agent supplied via --intent; not independently verified user messages"
+)
 
 func discoverIntent(fallback string) intent {
 	in := findIntent(fallback)
 	if len(in.Messages) > 0 {
 		in.CurrentTask = in.Messages[len(in.Messages)-1]
-		in.Text, in.Truncated = userMessagesPacket(in.Messages)
+		if in.Source == intentFallback {
+			raw := in.Messages[0]
+			in.Text = boundReviewSection(raw, userMessagesLimit, "middle intent text")
+			in.Truncated = len(raw) > userMessagesLimit
+		} else {
+			in.Text, in.Truncated = userMessagesPacket(in.Messages)
+		}
 	}
 	return in
 }
@@ -42,7 +51,7 @@ func findIntent(fallback string) intent {
 		}
 	}
 	if strings.TrimSpace(fallback) != "" {
-		return intent{Messages: []string{strings.TrimSpace(fallback)}, Source: "agent supplied via --intent; not independently verified user messages"}
+		return intent{Messages: []string{strings.TrimSpace(fallback)}, Source: intentFallback}
 	}
 	return intent{Text: "", Source: "not available"}
 }
