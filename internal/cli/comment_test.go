@@ -333,6 +333,11 @@ func TestCommentViaAppSaysWhichWorkspaceToConnect(t *testing.T) {
 		{"member", strings.Replace(noConnectionAnswer, `"workspaceRole":"owner"`, `"workspaceRole":"member"`, 1), []string{
 			`To let the App comment, ask an owner of the "Acme" workspace to click Connect GitHub (or Reconnect GitHub) at ` + "https://slopcop.test/organization/w1/settings#workspace-integrations-heading.",
 		}},
+		// A service that still links its Repositories page, which acts on
+		// the browser's active workspace.
+		{"repositories link", strings.Replace(noConnectionAnswer, "https://slopcop.test/organization/w1/settings#workspace-integrations-heading", "https://slopcop.test/repositories", 1), []string{
+			`click Connect GitHub (or Reconnect GitHub) at https://slopcop.test/repositories with the "Acme" workspace active.`,
+		}},
 		{"not on GitHub", `{"checkId":"chk","status":"not_connected","reason":"not_github","repository":"g/r"}`, []string{
 			"the App comments only on GitHub pull requests, and g/r is not on GitHub",
 		}},

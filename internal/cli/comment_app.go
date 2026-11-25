@@ -172,6 +172,11 @@ func notConnected(answer service.NotConnected) appDeclined {
 	settings := "the workspace's settings in SlopCop"
 	if answer.ConnectURL != "" {
 		settings = answer.ConnectURL
+		// A service before the settings link sent its Repositories page,
+		// which acts on the browser's active workspace.
+		if !strings.Contains(answer.ConnectURL, "/organization/") {
+			settings += " with " + workspace + " active"
+		}
 	}
 	// A member cannot change the workspace's integrations.
 	member := answer.WorkspaceRole != "" && answer.WorkspaceRole != "owner"
