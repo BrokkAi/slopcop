@@ -273,9 +273,10 @@ duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
 must finish for a clean review), `review.provider` (`copilot` runs
-`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI), and
+`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI),
 `review.models.<ollama|openrouter>` (the model an opt-in family that takes one
-reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`). Adapter command
+reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`), and
+`review.dsh.apiKeyFile` (a file holding the DeepSeek key for `flash`). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 The opt-in `gemini`, `kimi`, `grok` and `ollama` families are used only when you name them; see
 [Gemini through Antigravity](/reference/configuration/#gemini-through-antigravity-opt-in),
@@ -312,8 +313,17 @@ wrong, so write the reason for them: say why the finding does not hold.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
-open a pull request until HEAD's tree has a passing check or valid override. It also
-blocks any shell command that names `refs/slopcop/` or `.git/slopcop`.
+open a pull request until HEAD's tree has a passing check or valid override. A
+shell push is judged in each repository it may run in: the session's
+directory, moved by a `cd` the push runs after (`cd ../other && git push`) or
+by `git -C`, or named by `--git-dir` or `GIT_DIR`. Where a `cd` may not
+have run, as around `||`, every directory the push could run in is judged; a
+`cd` in a pipeline, a background job or a subshell does not move it. Where
+the directory depends on the shell (`cd $DIR`, `cd -`, `popd`) or does not
+exist yet, the gate cannot tell what would be pushed, so it blocks the push when SlopCop guards
+the session's repository, a repository the push runs in, or one the command
+names (such as the source of a `cp -r`). It also blocks any shell
+command that names `refs/slopcop/` or `.git/slopcop`.
 
 ## `slopcop review show`
 
@@ -367,15 +377,17 @@ slopcop comment --report slopcop.json
 | `--api-url URL` | REST API root (default `$GITHUB_API_URL`, else `https://api.github.com`) |
 | `--dry-run` | print the summary and write nothing to GitHub |
 | `--via token\|auto\|app` | who writes the comments (default `token`) |
-| `--fail-on`, `--certainty` | the options the check ran with (default: the report's `--fail-on`) |
-| `--workspace ID` | SlopCop workspace the check ran in (default: the login's) |
+| `--fail-on`, `--certainty` | the options the check ran with (default: the report's) |
+| `--workspace ID` | SlopCop workspace the check ran in (default: the report's, else the login's) |
 
 With `--via auto` it first asks SlopCop, with the login that ran the check, to
 have the SlopCop GitHub App write the comments, and sends SlopCop the report's
 review findings to post. The App posts as SlopCop and needs no GitHub token
 from you. Where SlopCop does not offer that, or the App's installation has not
-granted **Pull requests: Read and write**, it writes them itself. `--via app`
-uses only the App.
+granted **Pull requests: Read and write**, it writes them itself. When SlopCop
+finds the report is not for the pull request as it is now (its head moved on,
+or it does not make the check's change), nothing is written and the command
+fails. `--via app` uses only the App.
 
 The App posts through the GitHub connection of the workspace that ran the
 check. Having the App installed on your GitHub organization is not enough:

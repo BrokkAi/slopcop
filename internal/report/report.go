@@ -93,6 +93,14 @@ type Options struct {
 	// ShowExisting lists the findings that were already in the code, after
 	// the new ones. They are counted either way.
 	ShowExisting bool
+	// Certainty is the --certainty the check ran with: "all", or "" for
+	// definite. The JSON report carries it so `slopcop comment` can ask for
+	// the findings the check listed.
+	Certainty string
+	// Workspace is the id of the workspace the check ran in when the
+	// command chose one, or "" for the login's own. Like Certainty, it is
+	// for `slopcop comment`.
+	Workspace string
 	// EmptyChange marks a check whose patch had no in-scope changes. With
 	// OmittedFiles, the size filter or the exclusions removed them all; otherwise the snapshot
 	// matched the base. The human format leaves it to the CLI's stderr note.
@@ -1100,11 +1108,17 @@ type jsonReport struct {
 	Review *reviewJSON `json:"review,omitempty"`
 	// ReviewSkipped is why the local review did not run. It is set only
 	// when it did not.
-	ReviewSkipped string                     `json:"reviewSkipped,omitempty"`
-	BaseCommit    string                     `json:"baseCommit"`
-	Summary       summaryJSON                `json:"summary"`
-	Findings      []service.Finding          `json:"findings"`
-	Incomplete    []service.IncompletePolicy `json:"incomplete"`
+	ReviewSkipped string `json:"reviewSkipped,omitempty"`
+	BaseCommit    string `json:"baseCommit"`
+	// Certainty is "all" when the check ran with --certainty all; it is
+	// omitted for definite.
+	Certainty string `json:"certainty,omitempty"`
+	// Workspace is the id of the workspace the check ran in, when the
+	// command chose one; it is omitted for the login's own.
+	Workspace  string                     `json:"workspace,omitempty"`
+	Summary    summaryJSON                `json:"summary"`
+	Findings   []service.Finding          `json:"findings"`
+	Incomplete []service.IncompletePolicy `json:"incomplete"`
 	// IncompleteUnlisted counts the incomplete checks summary.incompletePolicies
 	// counts but incomplete does not name, because the service names at most
 	// 50. It is set only when the list was cut.
@@ -1189,6 +1203,8 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		Review:               reviewValue(options.Review),
 		ReviewSkipped:        options.ReviewSkipped,
 		BaseCommit:           response.BaseCommit,
+		Certainty:            options.Certainty,
+		Workspace:            options.Workspace,
 		Summary:              summaryValue(response.Summary, options.Review),
 		Findings:             listed(response, options),
 		Incomplete:           response.Incomplete,

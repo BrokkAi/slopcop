@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -155,5 +156,41 @@ func TestMissingPrerequisite(t *testing.T) {
 		if got := MissingPrerequisite(f, root, Settings{}); got != "" {
 			t.Fatalf("%s: still lacks %q", f, got)
 		}
+	}
+}
+
+// TestDSHKeyFile checks that a key file joins the pinned dsh command, that a
+// dsh command override still wins, and that the probe skips Flash when the
+// file is missing or empty but not when it holds a key.
+func TestDSHKeyFile(t *testing.T) {
+	t.Setenv("DEEPSEEK_API_KEY", "")
+	dir := t.TempDir()
+	keyFile := filepath.Join(dir, "deepseek_api_key")
+	settings := Settings{DSHKeyFile: keyFile}
+	want := append(DefaultCommand(Flash), "--api-key-file", keyFile)
+	if got := CommandFor(Flash, settings); !slices.Equal(got, want) {
+		t.Fatalf("command = %q, want %q", got, want)
+	}
+	override := Settings{DSHKeyFile: keyFile, Adapters: map[string][]string{"dsh": {"dsh-acp"}}}
+	if got := CommandFor(Flash, override); !slices.Equal(got, []string{"dsh-acp"}) {
+		t.Fatalf("override command = %q", got)
+	}
+	if got := MissingPrerequisite(Flash, dir, Settings{}); !strings.Contains(got, "DEEPSEEK_API_KEY") || !strings.Contains(got, "review.dsh.apiKeyFile") {
+		t.Fatalf("no key at all: %q", got)
+	}
+	if got := MissingPrerequisite(Flash, dir, settings); !strings.Contains(got, "review.dsh.apiKeyFile") || !strings.Contains(got, "cannot read") {
+		t.Fatalf("missing file: %q", got)
+	}
+	if err := os.WriteFile(keyFile, []byte(" \n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := MissingPrerequisite(Flash, dir, settings); !strings.Contains(got, "empty") {
+		t.Fatalf("empty file: %q", got)
+	}
+	if err := os.WriteFile(keyFile, []byte("sk-test\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if got := MissingPrerequisite(Flash, dir, settings); got != "" {
+		t.Fatalf("readable key file still lacks %q", got)
 	}
 }

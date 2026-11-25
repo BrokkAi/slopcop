@@ -394,6 +394,17 @@ func TestJSONIsTheStructuredReport(t *testing.T) {
 	}
 }
 
+func TestJSONSaysTheCertaintyTheCheckRanWith(t *testing.T) {
+	var document map[string]any
+	got := renderWith(t, response(service.StatusClean, "error", sampleFindings()), FormatJSON, Options{Certainty: "all"})
+	if err := json.Unmarshal([]byte(got), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["certainty"] != "all" {
+		t.Errorf("certainty = %v", document["certainty"])
+	}
+}
+
 func TestJSONListsNewFindingsAndCountsTheSplit(t *testing.T) {
 	decode := func(options Options) (map[string]any, []any) {
 		var document map[string]any

@@ -300,7 +300,8 @@ func TestPublishAfterTheAppDoesNotRepeatItsComments(t *testing.T) {
 			fake, gh := newFake(t)
 			fake.viewer = viewer
 			app := user{Login: "slopcop[bot]", Type: "Bot"}
-			fake.reviewComments = []comment{{ID: 10, Body: item{key: "rv-1"}.marker(), User: app}}
+			// The marker the App writes, not this tool's own.
+			fake.reviewComments = []comment{{ID: 10, Body: "<!-- slopcop:finding:review:rv-1 -->", User: app}}
 			fake.issueComments = []comment{{ID: 11, Body: summaryMarker + " the App's", User: app}}
 			fake.refusePatch = true
 			result, err := Publish(context.Background(), gh, mustParse(t, reviewReport), target)

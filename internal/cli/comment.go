@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -51,8 +52,10 @@ or the App's installation has not accepted Pull requests: Read and write),
 the command writes them itself with GITHUB_TOKEN, and says why and, where it
 can be fixed, how: a workspace connects GitHub with Connect GitHub on the
 SlopCop Repositories page, and a repository joins an installation in the
-App's settings on GitHub. --via app uses only the App; --via token, the
-default, only GITHUB_TOKEN.
+App's settings on GitHub. When the service finds the report is not for the
+pull request as it is now (its head moved on, or it does not make the
+check's change), nothing is written and the command fails. --via app uses
+only the App; --via token, the default, only GITHUB_TOKEN.
 
 In GitHub Actions the repository, pull request and head commit come from the
 workflow's event, and the token from GITHUB_TOKEN, which needs
@@ -79,8 +82,8 @@ It exits 0 whatever the check found; the check's own exit code is the gate.`,
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "print the summary comment and write nothing to GitHub")
 	flags.StringVar(&opts.via, "via", "token", "who writes the comments: token (GITHUB_TOKEN), auto (the SlopCop GitHub App where SlopCop offers it, else GITHUB_TOKEN) or app")
 	flags.StringVar(&opts.failOn, "fail-on", "", "the --fail-on the check ran with (default: the report's)")
-	flags.StringVar(&opts.certainty, "certainty", "", "the --certainty the check ran with")
-	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the login's)")
+	flags.StringVar(&opts.certainty, "certainty", "", "the --certainty the check ran with (default: the report's)")
+	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the report's, else the login's)")
 	_ = command.MarkFlagRequired("report")
 	return command
 }
@@ -127,8 +130,9 @@ func runComment(cmd *cobra.Command, opts *commentOptions, version string) error 
 		if opts.via != "token" {
 			var declined appDeclined
 			result, handled, declined, err = publishWithApp(cmd, opts, data, parsed, target, version)
+			var refused *appRefusedTarget
 			switch {
-			case err != nil && opts.via == "app":
+			case err != nil && (opts.via == "app" || errors.As(err, &refused)):
 			case err != nil:
 				fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App could not comment (%v); commenting with GITHUB_TOKEN instead.\n", err)
 				err = nil

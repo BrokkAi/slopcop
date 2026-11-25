@@ -127,7 +127,8 @@ build that binary from source instead.
 ## Local review requirements
 
 The default check needs Node.js with `npx` and existing reviewer harness
-logins. DeepSeek ACP uses `DEEPSEEK_API_KEY` unless configured with a key file.
+logins. DeepSeek ACP uses `DEEPSEEK_API_KEY`, or the file set with
+`slopcop config set review.dsh.apiKeyFile <path>`.
 Use `--mode static` to run only the hosted check, including in CI without
 reviewer logins.
 

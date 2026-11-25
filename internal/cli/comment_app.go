@@ -39,10 +39,20 @@ type appDeclined struct {
 	fix    string
 }
 
+// appRefusedTarget reports that the service checked the pull request and
+// found the report is not for it: its head moved on, or it does not make the
+// check's change. The workflow's token must not comment it either.
+type appRefusedTarget struct{ reason string }
+
+func (e *appRefusedTarget) Error() string {
+	return "the SlopCop GitHub App did not comment: " + e.reason + "; the report is not for this pull request as it is now, so GITHUB_TOKEN does not comment it either"
+}
+
 // publishWithApp asks the service to have the SlopCop GitHub App write the
 // comments, with the SlopCop login that ran the check. handled is false, with
 // why, when the service did not post them and the workflow's token may; err
-// is a failure to ask at all.
+// is a failure to ask at all, or an *appRefusedTarget when the service found
+// the report is not for the pull request.
 func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parsed prcomment.Report, target prcomment.Target, version string) (result prcomment.Result, handled bool, declined appDeclined, err error) {
 	if parsed.CheckID == "" {
 		return result, false, appDeclined{reason: "the report has no check id, so the static check did not answer"}, nil
@@ -54,6 +64,8 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	var raw struct {
 		Review        json.RawMessage `json:"review"`
 		ReviewSkipped string          `json:"reviewSkipped"`
+		Certainty     string          `json:"certainty"`
+		Workspace     string          `json:"workspace"`
 		Summary       *struct {
 			FailOn string `json:"failOn"`
 		} `json:"summary"`
@@ -70,7 +82,13 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	if resolveToken(cfg, resolveServiceURL(cfg, serviceFlag)) == "" {
 		return result, false, appDeclined{reason: "there is no SlopCop login (set SLOPCOP_TOKEN)"}, nil
 	}
-	client, err := workspaceClient(cmd, serviceFlag, version, opts.workspace)
+	// The check's own workspace, which args can have chosen, unless the
+	// caller names one.
+	workspace := opts.workspace
+	if workspace == "" {
+		workspace = raw.Workspace
+	}
+	client, err := workspaceClient(cmd, serviceFlag, version, workspace)
 	if err != nil {
 		return result, false, declined, err
 	}
@@ -81,8 +99,13 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 		Certainty:     opts.certainty,
 		ReviewSkipped: raw.ReviewSkipped,
 	}
+	// The report says what the check ran with, which args can have changed
+	// from the action's inputs.
 	if request.FailOn == "" && raw.Summary != nil {
 		request.FailOn = raw.Summary.FailOn
+	}
+	if request.Certainty == "" {
+		request.Certainty = raw.Certainty
 	}
 	if len(raw.Review) > 0 && string(raw.Review) != "null" {
 		request.Review = raw.Review
@@ -97,7 +120,11 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	if err != nil {
 		return result, false, declined, err
 	}
-	if response.Status != "posted" {
+	switch response.Status {
+	case "posted":
+	case "stale", "change_mismatch":
+		return result, false, declined, &appRefusedTarget{reason: appReason(response).reason}
+	default:
 		return result, false, appReason(response), nil
 	}
 	result = prcomment.Render(parsed, target.Commit)
