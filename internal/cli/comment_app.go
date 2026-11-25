@@ -139,21 +139,27 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 // with $SLOPCOP_TOKEN, which may have been issued by another. Either way
 // stderr says which service the command asks.
 func commentService(stderr io.Writer, cfg config.Config, serviceFlag, reported string) string {
-	reported = strings.TrimSpace(reported)
-	if strings.TrimSpace(serviceFlag) != "" || strings.TrimSpace(os.Getenv("SLOPCOP_SERVICE")) != "" || reported == "" {
+	if strings.TrimSpace(serviceFlag) != "" || strings.TrimSpace(os.Getenv("SLOPCOP_SERVICE")) != "" {
 		return serviceFlag
 	}
-	fallback := config.Origin(resolveServiceURL(cfg, ""))
-	if config.Origin(reported) == fallback {
+	// The parse also refuses control characters, so the URL is safe to print.
+	reported = strings.TrimRight(reportedService(strings.TrimSpace(reported)), "/")
+	if reported == "" {
+		return serviceFlag
+	}
+	// The whole URL, path included: a service can sit under a path on a
+	// host that serves another one.
+	fallback := resolveServiceURL(cfg, "")
+	if reported == fallback {
 		return serviceFlag
 	}
 	switch {
 	case strings.TrimSpace(os.Getenv("SLOPCOP_TOKEN")) != "":
-		fmt.Fprintf(stderr, "slopcop: the check ran against %s, but $SLOPCOP_TOKEN may be another service's, so this asks %s; pass --service %s to ask the check's\n", config.Origin(reported), fallback, config.Origin(reported))
+		fmt.Fprintf(stderr, "slopcop: the check ran against %s, but $SLOPCOP_TOKEN may be another service's, so this asks %s; pass --service %s to ask the check's\n", reported, fallback, reported)
 	case cfg.TokenFor(reported) == "":
-		fmt.Fprintf(stderr, "slopcop: the check ran against %s, which this machine has no login for, so this asks %s\n", config.Origin(reported), fallback)
+		fmt.Fprintf(stderr, "slopcop: the check ran against %s, which this machine has no login for, so this asks %s\n", reported, fallback)
 	default:
-		fmt.Fprintf(stderr, "slopcop: asking %s, the service the check ran against\n", config.Origin(reported))
+		fmt.Fprintf(stderr, "slopcop: asking %s, the service the check ran against\n", reported)
 		return reported
 	}
 	return serviceFlag

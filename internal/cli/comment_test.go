@@ -471,3 +471,17 @@ func TestReportedServiceDropsCredentials(t *testing.T) {
 		}
 	}
 }
+
+func TestCommentKeepsTheReportedServicesPath(t *testing.T) {
+	isolateUserConfig(t)
+	const host = "https://slopcop.test"
+	cfg := config.Config{ServiceURL: host}
+	cfg.SetToken(host, "login")
+	var stderr strings.Builder
+	if got := commentService(&stderr, cfg, "", host+"/staging/"); got != host+"/staging" {
+		t.Errorf("service = %q, stderr = %s", got, stderr.String())
+	}
+	if got := commentService(&stderr, cfg, "", host+"/"); got != "" {
+		t.Errorf("the default service came back as %q", got)
+	}
+}
