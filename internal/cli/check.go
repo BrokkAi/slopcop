@@ -117,7 +117,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if repo := legacyRepoRoot(opts.root); repo != "" {
 		_ = cleanupInstalledLegacyRepository(repo)
 	}
-	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
+	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, Certainty: opts.certainty, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -364,6 +364,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
 	reportOptions.SizeBreakdown = static.sizeBreakdown
+	if prepared.client != nil {
+		reportOptions.Workspace = prepared.client.Workspace
+	}
 	// The first check 'enable' runs is how the repository gets added, and
 	// right after enabling there is usually nothing to check yet. Its line
 	// that the repository was added says all there is, so an empty, clean

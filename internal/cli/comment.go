@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -20,10 +21,16 @@ type commentOptions struct {
 	commit     string
 	apiURL     string
 	dryRun     bool
+	// via is auto, app or token: who writes the comments.
+	via        string
+	failOn     string
+	certainty  string
+	workspace  string
+	serviceURL *string
 }
 
-func newCommentCommand(version string) *cobra.Command {
-	opts := &commentOptions{}
+func newCommentCommand(serviceURL *string, version string) *cobra.Command {
+	opts := &commentOptions{serviceURL: serviceURL}
 	command := &cobra.Command{
 		Use:   "comment",
 		Short: "Comment a check's findings on the GitHub pull request it checked",
@@ -35,6 +42,17 @@ request changes, static and review findings alike. A finding no line of the
 diff can hold is listed in one summary comment, which also says in words what
 the check found. A later run updates that comment in place and does not
 comment a finding it already commented.
+
+With --via auto, SlopCop's GitHub App writes the comments, as slopcop[bot]:
+the command asks the service, with the SlopCop login that ran the check, and
+sends it the report's review but no GitHub token. When the service does not
+post them (it does not offer it, no GitHub connection of the workspace covers
+the repository, or the App's installation has not accepted Pull requests:
+Read and write), the command writes them itself with GITHUB_TOKEN. When the
+service finds the report is not for the pull request as it is now (its head
+moved on, or it does not make the check's change), nothing is written and the
+command fails. --via app uses only the App; --via token, the default, only
+GITHUB_TOKEN.
 
 In GitHub Actions the repository, pull request and head commit come from the
 workflow's event, and the token from GITHUB_TOKEN, which needs
@@ -59,11 +77,20 @@ It exits 0 whatever the check found; the check's own exit code is the gate.`,
 	flags.StringVar(&opts.commit, "commit", "", "head commit the check ran on (default: the workflow event's pull request head)")
 	flags.StringVar(&opts.apiURL, "api-url", "", "GitHub REST API URL (default: $GITHUB_API_URL, else https://api.github.com)")
 	flags.BoolVar(&opts.dryRun, "dry-run", false, "print the summary comment and write nothing to GitHub")
+	flags.StringVar(&opts.via, "via", "token", "who writes the comments: token (GITHUB_TOKEN), auto (the SlopCop GitHub App where SlopCop offers it, else GITHUB_TOKEN) or app")
+	flags.StringVar(&opts.failOn, "fail-on", "", "the --fail-on the check ran with (default: the report's)")
+	flags.StringVar(&opts.certainty, "certainty", "", "the --certainty the check ran with (default: the report's)")
+	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the report's, else the login's)")
 	_ = command.MarkFlagRequired("report")
 	return command
 }
 
 func runComment(cmd *cobra.Command, opts *commentOptions, version string) error {
+	switch opts.via {
+	case "auto", "app", "token":
+	default:
+		return fmt.Errorf("invalid argument %q for --via: use auto, app or token", opts.via)
+	}
 	data, err := readReport(cmd.InOrStdin(), opts.reportPath)
 	if err != nil {
 		return err
@@ -96,16 +123,24 @@ func runComment(cmd *cobra.Command, opts *commentOptions, version string) error 
 		result = prcomment.Render(parsed, target.Commit)
 		fmt.Fprintln(stderr, "slopcop: no pull request to comment on (pass --repo and --pr outside a pull_request workflow); the outcome goes to the job summary only.")
 	default:
-		token := firstOf(os.Getenv("GITHUB_TOKEN"), os.Getenv("GH_TOKEN"))
-		if token == "" {
-			err = fmt.Errorf("set GITHUB_TOKEN to a token that may comment on %s#%d", target.Repo, target.PR)
-		} else {
-			client := &prcomment.GitHub{
-				BaseURL:   firstOf(opts.apiURL, os.Getenv("GITHUB_API_URL"), "https://api.github.com"),
-				Token:     token,
-				UserAgent: "slopcop/" + version,
+		handled := false
+		if opts.via != "token" {
+			var reason string
+			result, handled, reason, err = publishWithApp(cmd, opts, data, parsed, target, version)
+			var refused *appRefusedTarget
+			switch {
+			case err != nil && (opts.via == "app" || errors.As(err, &refused)):
+			case err != nil:
+				fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App could not comment (%v); commenting with GITHUB_TOKEN instead.\n", err)
+				err = nil
+			case !handled && opts.via == "app":
+				err = fmt.Errorf("the SlopCop GitHub App did not comment: %s", reason)
+			case !handled:
+				fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App did not comment (%s); commenting with GITHUB_TOKEN instead.\n", reason)
 			}
-			result, err = prcomment.Publish(cmd.Context(), client, parsed, target)
+		}
+		if !handled && err == nil {
+			result, err = publishWithToken(cmd, opts, parsed, target, version)
 		}
 		if err != nil {
 			// The outcome still reaches the job summary and the step's
@@ -117,6 +152,10 @@ func runComment(cmd *cobra.Command, opts *commentOptions, version string) error 
 			return err
 		}
 		switch {
+		case handled && result.SummaryURL != "":
+			fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App added %d inline comment(s); summary at %s\n", result.Posted, result.SummaryURL)
+		case handled:
+			fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App added %d inline comment(s)\n", result.Posted)
 		case result.ReadOnly:
 			fmt.Fprintln(stderr, "slopcop: the token may not comment on this pull request (a pull request from a fork gets a read-only token, and a workflow needs `pull-requests: write`); the findings are in the job summary only.")
 		case result.SummaryURL != "":

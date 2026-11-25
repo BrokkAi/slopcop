@@ -55,9 +55,13 @@ inputs:
     required: false
     default: 'true'
   comment:
-    description: Comment the findings on the pull request. Needs pull-requests write permission.
+    description: Comment the findings on the pull request with github-token, which needs pull-requests write permission, or with SlopCop's GitHub App (comment-via).
     required: false
     default: 'true'
+  comment-via:
+    description: 'Who writes the comments: token (github-token), auto (the SlopCop GitHub App where SlopCop offers it, else github-token) or app. auto and app send the review findings to SlopCop.'
+    required: false
+    default: token
   sarif:
     description: Upload the findings to code scanning as SARIF. Needs security-events write permission.
     required: false
@@ -237,18 +241,24 @@ runs:
       if: always() && steps.check.outputs.report != ''
       continue-on-error: true
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
+        SLOPCOP_TOKEN: ${{ inputs.slopcop-token || env.SLOPCOP_TOKEN }}
         SLOPCOP_NO_UPDATE_NOTICE: '1'
         REPORT: ${{ steps.check.outputs.report }}
         COMMENT: ${{ inputs.comment }}
+        COMMENT_VIA: ${{ inputs.comment-via }}
       run: |
         if [ ! -s "$REPORT" ]; then
           echo "slopcop check wrote no report; its log above says why."
           exit 0
         fi
         if [ "$COMMENT" = "true" ]; then
-          slopcop comment --report "$REPORT"
+          # The report carries the workspace, --fail-on and --certainty the
+          # check ran with, args included, so the App comments what the
+          # check reported.
+          slopcop comment --report "$REPORT" --via "$COMMENT_VIA"
         else
           slopcop comment --report "$REPORT" --dry-run > /dev/null
         fi
