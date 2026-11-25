@@ -322,6 +322,79 @@ func TestPublishAfterTheAppDoesNotRepeatItsComments(t *testing.T) {
 	}
 }
 
+// staticReport is a check with one new static finding on a line the pull
+// request shows, answered under id and, when commentKey is set, that key.
+func staticReport(t *testing.T, id, commentKey string) Report {
+	t.Helper()
+	finding := map[string]any{"id": id, "policyId": "rule.a", "severity": "warning", "certainty": "definite", "path": "src/a.go", "startLine": 22, "endLine": 22, "title": "a static finding", "new": true}
+	if commentKey != "" {
+		finding["commentKey"] = commentKey
+	}
+	text, err := json.Marshal(map[string]any{"status": "findings", "staticStatus": "findings", "checkId": "chk-" + id, "summary": map[string]int{"newFindings": 1}, "findings": []any{finding}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return mustParse(t, string(text))
+}
+
+// appStaticKey is the App's marker key for a static finding, the
+// check's commentKey (bifrost-service's static_comment_key).
+const appStaticKey = "static:7a92cae1ec0162202485"
+
+func TestPublishMarksAStaticFindingByItsCommentKeyAcrossChecks(t *testing.T) {
+	fake, gh := newFake(t)
+	result, err := Publish(context.Background(), gh, staticReport(t, "f-1", appStaticKey), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Posted != 1 || !strings.Contains(fake.reviews[0].Comments[0].Body, findingMarkerPrefix+appStaticKey+" -->") {
+		t.Fatalf("first check: result=%+v reviews=%+v", result, fake.reviews)
+	}
+	// The next push's check answers the same finding under a new id.
+	result, err = Publish(context.Background(), gh, staticReport(t, "f-2", appStaticKey), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reviews) != 1 || result.Posted != 0 || result.Inline != 1 {
+		t.Fatalf("a later check commented the finding again: reviews=%d result=%+v", len(fake.reviews), result)
+	}
+}
+
+func TestPublishAfterTheAppDoesNotRepeatItsStaticComments(t *testing.T) {
+	fake, gh := newFake(t)
+	app := user{Login: "slopcop[bot]", Type: "Bot"}
+	fake.reviewComments = []comment{{ID: 10, Body: "**SlopCop** finding\n\n" + findingMarkerPrefix + appStaticKey + " -->", User: app}}
+	result, err := Publish(context.Background(), gh, staticReport(t, "f-9", appStaticKey), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reviews) != 0 || result.Posted != 0 || result.Inline != 1 {
+		t.Fatalf("the token repeated the App's comment: reviews=%d result=%+v", len(fake.reviews), result)
+	}
+}
+
+func TestPublishStillMatchesACommentMarkedByTheFindingsID(t *testing.T) {
+	fake, gh := newFake(t)
+	// Posted before the service answered commentKey, marked by the id.
+	bot := user{Login: "github-actions[bot]", Type: "Bot"}
+	fake.reviewComments = []comment{{ID: 10, Body: item{key: "f-1"}.marker(), User: bot}}
+	result, err := Publish(context.Background(), gh, staticReport(t, "f-1", appStaticKey), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reviews) != 0 || result.Posted != 0 || result.Inline != 1 {
+		t.Fatalf("an id-marked comment was repeated: reviews=%d result=%+v", len(fake.reviews), result)
+	}
+	// A service from before commentKey: the id marks and matches.
+	result, err = Publish(context.Background(), gh, staticReport(t, "f-1", ""), target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fake.reviews) != 0 || result.Posted != 0 {
+		t.Fatalf("without a comment key: reviews=%d result=%+v", len(fake.reviews), result)
+	}
+}
+
 func TestPublishCleanCheckLeavesAQuietPullRequestAlone(t *testing.T) {
 	fake, gh := newFake(t)
 	result, err := Publish(context.Background(), gh, mustParse(t, `{"status":"clean","summary":{"newFindings":0},"findings":[]}`), target)
