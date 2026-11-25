@@ -46,13 +46,16 @@ comment a finding it already commented.
 With --via auto, SlopCop's GitHub App writes the comments, as slopcop[bot]:
 the command asks the service, with the SlopCop login that ran the check, and
 sends it the report's review but no GitHub token. When the service does not
-post them (it does not offer it, no GitHub connection of the workspace covers
-the repository, or the App's installation has not accepted Pull requests:
-Read and write), the command writes them itself with GITHUB_TOKEN. When the
-service finds the report is not for the pull request as it is now (its head
-moved on, or it does not make the check's change), nothing is written and the
-command fails. --via app uses only the App; --via token, the default, only
-GITHUB_TOKEN.
+post them (it does not offer it, the workspace that ran the check has no
+GitHub connection or none of its App installations includes the repository,
+or the App's installation has not accepted Pull requests: Read and write),
+the command writes them itself with GITHUB_TOKEN, and says why and, where it
+can be fixed, how: a workspace connects GitHub with Connect GitHub on the
+SlopCop Repositories page, and a repository joins an installation in the
+App's settings on GitHub. When the service finds the report is not for the
+pull request as it is now (its head moved on, or it does not make the
+check's change), nothing is written and the command fails. --via app uses
+only the App; --via token, the default, only GITHUB_TOKEN.
 
 The App path asks the service --service or $SLOPCOP_SERVICE names, else the
 one the report says the check ran against. A report is a file anyone can
@@ -130,18 +133,23 @@ func runComment(cmd *cobra.Command, opts *commentOptions, version string) error 
 	default:
 		handled := false
 		if opts.via != "token" {
-			var reason string
-			result, handled, reason, err = publishWithApp(cmd, opts, data, parsed, target, version)
+			var declined appDeclined
+			result, handled, declined, err = publishWithApp(cmd, opts, data, parsed, target, version)
 			var refused *appRefusedTarget
 			switch {
 			case err != nil && (opts.via == "app" || errors.As(err, &refused)):
 			case err != nil:
 				fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App could not comment (%v); commenting with GITHUB_TOKEN instead.\n", err)
 				err = nil
+			case !handled && opts.via == "app" && declined.fix != "":
+				err = fmt.Errorf("the SlopCop GitHub App did not comment: %s. %s", declined.reason, declined.fix)
 			case !handled && opts.via == "app":
-				err = fmt.Errorf("the SlopCop GitHub App did not comment: %s", reason)
+				err = fmt.Errorf("the SlopCop GitHub App did not comment: %s", declined.reason)
 			case !handled:
-				fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App did not comment (%s); commenting with GITHUB_TOKEN instead.\n", reason)
+				fmt.Fprintf(stderr, "slopcop: the SlopCop GitHub App did not comment (%s); commenting with GITHUB_TOKEN instead.\n", declined.reason)
+				if declined.fix != "" {
+					fmt.Fprintf(stderr, "slopcop: %s\n", declined.fix)
+				}
 			}
 		}
 		if !handled && err == nil {

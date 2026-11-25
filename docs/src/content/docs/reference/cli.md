@@ -392,6 +392,15 @@ finds the report is not for the pull request as it is now (its head moved on,
 or it does not make the check's change), nothing is written and the command
 fails. `--via app` uses only the App.
 
+The App posts through the GitHub connection of the workspace that ran the
+check. Having the App installed on your GitHub organization is not enough:
+when that workspace has never connected GitHub, `slopcop comment` names the
+workspace and links the Repositories page, where you click **Connect GitHub**
+with that workspace active. When the workspace is connected but the App's
+installation does not include the repository, it says to add the repository
+to the installation on GitHub. With `--via auto` it says so once and then
+writes the comments with `GITHUB_TOKEN`.
+
 The App path asks the service named by `--service` or `$SLOPCOP_SERVICE`, else
 the one the report's `service` says the check ran against. A report is a file
 anyone can write, so it never moves your login: the command uses the report's

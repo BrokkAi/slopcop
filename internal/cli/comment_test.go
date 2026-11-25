@@ -198,6 +198,13 @@ const headCommit = "0123456789abcdef0123456789abcdef01234567"
 // request with status, and records what it was sent.
 func appService(t *testing.T, status string, sent *map[string]any) *httptest.Server {
 	t.Helper()
+	return appServiceAnswering(t, `{"checkId":"chk","status":"`+status+`","outcome":"findings","posted":1,"inline":1,"elsewhere":0,"summaryUrl":"https://github.test/o/r/pull/12#issuecomment-9"}`, sent)
+}
+
+// appServiceAnswering is a SlopCop service whose comment endpoint answers
+// body, recording what it was sent.
+func appServiceAnswering(t *testing.T, body string, sent *map[string]any) *httptest.Server {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		if r.Method == http.MethodPost && r.URL.Path == "/v1/check/chk/pull-request-comments" {
@@ -206,7 +213,7 @@ func appService(t *testing.T, status string, sent *map[string]any) *httptest.Ser
 			}
 			_ = json.NewDecoder(r.Body).Decode(sent)
 			(*sent)["_workspace"] = r.Header.Get("SlopCop-Workspace")
-			_, _ = w.Write([]byte(`{"checkId":"chk","status":"` + status + `","outcome":"findings","posted":1,"inline":1,"elsewhere":0,"summaryUrl":"https://github.test/o/r/pull/12#issuecomment-9"}`))
+			_, _ = w.Write([]byte(body))
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
@@ -296,6 +303,62 @@ func TestCommentFallsBackToTheWorkflowTokenWhenTheAppDoesNotPost(t *testing.T) {
 	}
 }
 
+const (
+	noConnectionAnswer = `{"checkId":"chk","status":"not_connected","reason":"no_github_connection",` +
+		`"workspaceId":"w1","workspaceName":"Acme","workspaceKind":"team","repository":"o/r",` +
+		`"connectUrl":"https://slopcop.test/repositories","installUrl":"https://github.com/apps/slopcop/installations/new"}`
+	notCoveredAnswer = `{"checkId":"chk","status":"not_connected","reason":"repository_not_covered",` +
+		`"workspaceId":"w1","workspaceName":"David","workspaceKind":"personal","repository":"o/r",` +
+		`"connectUrl":"https://slopcop.test/repositories","installUrl":"https://github.com/apps/slopcop/installations/new"}`
+)
+
+func TestCommentViaAppSaysWhichWorkspaceToConnect(t *testing.T) {
+	for _, tc := range []struct {
+		name, answer string
+		want         []string
+	}{
+		{"no connection", noConnectionAnswer, []string{
+			`the SlopCop GitHub App did not comment: the "Acme" workspace, which ran the check, has no GitHub connection.`,
+			`open https://slopcop.test/repositories and click Connect GitHub with the "Acme" workspace active`,
+			"Installing the App on GitHub is not enough",
+		}},
+		{"repository not covered", notCoveredAnswer, []string{
+			"no SlopCop App installation that your personal workspace's GitHub connection holds includes o/r.",
+			"Install the SlopCop App on the account that owns o/r (https://github.com/apps/slopcop/installations/new) with o/r selected",
+			"open https://slopcop.test/repositories and click Connect GitHub with your personal workspace active",
+		}},
+		{"repository not on the installation", strings.Replace(notCoveredAnswer, `"installUrl"`,
+			`"installationSettingsUrl":"https://github.com/organizations/o/settings/installations/7","installUrl"`, 1), []string{
+			"the SlopCop App's installation on o, which your personal workspace's GitHub connection holds, does not include o/r.",
+			"add o/r under Repository access at https://github.com/organizations/o/settings/installations/7. It then shows on https://slopcop.test/repositories with your personal workspace active.",
+		}},
+		{"not on GitHub", `{"checkId":"chk","status":"not_connected","reason":"not_github","repository":"g/r"}`, []string{
+			"the App comments only on GitHub pull requests, and g/r is not on GitHub",
+		}},
+		// A service from before the reason: the words it always had.
+		{"older service", `{"checkId":"chk","status":"not_connected"}`, []string{
+			"the SlopCop GitHub App did not comment: no GitHub connection of the workspace covers this repository",
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			appCommentEnv(t)
+			var sent map[string]any
+			service := appServiceAnswering(t, tc.answer, &sent)
+			writes := 0
+			github := commentGitHub(t, &writes)
+			code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--via", "app")
+			if code == 0 || writes != 0 {
+				t.Fatalf("exit = %d, writes = %d, stderr = %s", code, writes, stderr)
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stderr, want) {
+					t.Errorf("stderr lacks %q:\n%s", want, stderr)
+				}
+			}
+		})
+	}
+}
+
 // reportWorkspace is the workspace a report says its check ran in.
 const reportWorkspace = "6f1c2a8e-0b5d-4e7f-9a3c-2d4b6e8f0a1c"
 
@@ -332,6 +395,26 @@ func TestCommentDoesNotFallBackWhenTheReportIsNotForThePullRequest(t *testing.T)
 				t.Errorf("stderr = %s", stderr)
 			}
 		})
+	}
+}
+
+func TestCommentViaAutoSaysOnceHowToLetTheAppComment(t *testing.T) {
+	appCommentEnv(t)
+	var sent map[string]any
+	service := appServiceAnswering(t, noConnectionAnswer, &sent)
+	writes := 0
+	github := commentGitHub(t, &writes)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--via", "auto")
+	if code != 0 || writes == 0 {
+		t.Fatalf("exit = %d, writes = %d, stderr = %s", code, writes, stderr)
+	}
+	for _, want := range []string{
+		`slopcop: the SlopCop GitHub App did not comment (the "Acme" workspace, which ran the check, has no GitHub connection); commenting with GITHUB_TOKEN instead.`,
+		`slopcop: To let the App comment, open https://slopcop.test/repositories and click Connect GitHub with the "Acme" workspace active.`,
+	} {
+		if strings.Count(stderr, want) != 1 {
+			t.Errorf("stderr has %q %d times:\n%s", want, strings.Count(stderr, want), stderr)
+		}
 	}
 }
 
