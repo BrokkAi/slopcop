@@ -26,9 +26,10 @@ const (
 	// one fails the reviewer before it starts.
 	MaxFile = 1 << 20
 	// maxDiffBytes allows replacing a full MaxFile text file with another
-	// MaxFile text file (plus diff headers) while read_diff paginates each
-	// response to maxToolResult.
-	maxDiffBytes = 2*MaxFile + 256<<10
+	// MaxFile text file (including worst-case 1-byte lines with per-line diff
+	// prefixes and headers) while read_diff paginates each response to
+	// maxToolResult.
+	maxDiffBytes = 4*MaxFile + 256<<10
 	// maxToolResult bounds one tool result.
 	maxToolResult = 64 << 10
 	// maxReadLine is the most of one line a read returns at a time.
@@ -120,7 +121,7 @@ func toolDefinitions() []map[string]any {
 		tool("list_changes", "List all changed and deleted files in the captured diff (git diff --numstat), optionally filtered by path prefix and paginated by line.", map[string]any{
 			"prefix": text("Only paths starting with this."), "offset": number("First line to read, from 1."), "limit": number("Number of lines to read."),
 		}),
-		tool("read_diff", "Read a captured per-file diff, including deleted files and readable binary text.", map[string]any{"path": text("Path from repository root."), "offset": number("First line from 1."), "limit": number("Number of lines."), "column": number("Byte column for long lines.")}, "path"),
+		tool("read_diff", "Read a captured per-file diff, including deleted files.", map[string]any{"path": text("Path from repository root."), "offset": number("First line from 1."), "limit": number("Number of lines."), "column": number("Byte column for long lines.")}, "path"),
 		tool("read_file", "Read a file of the reviewed snapshot, with line numbers.", map[string]any{
 			"path": text("Path from the repository root."), "offset": number("First line to read, from 1."), "limit": number("Number of lines to read."),
 			"column": number("Byte position in the first line to start from, from 1, to continue a very long line."),

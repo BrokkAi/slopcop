@@ -48,12 +48,15 @@ func filePatch(ctx context.Context, root, base, tree, path string, maxFile int64
 		return nil, fmt.Errorf("%w: %q (limit %d)", ErrPatchTruncated, path, maxFile)
 	}
 	if strings.Contains(string(data), "Binary files ") || strings.Contains(string(data), "GIT binary patch") {
-		changes, _, err := changedBinaries(root, base, tree, path)
+		changes, sizes, err := changedBinaries(root, base, tree, path)
 		if err != nil {
 			return nil, err
 		}
 		for _, change := range changes {
 			if change.path == path {
+				if size := maxInt64(sizes[change.oldObject], sizes[change.newObject]); size > maxFile {
+					return nil, fmt.Errorf("%w: binary file %q (%d bytes exceeds limit %d)", ErrPatchTruncated, path, size, maxFile)
+				}
 				section, complete, err := binaryFileSection(root, change, int(maxFile))
 				if err != nil {
 					return nil, err

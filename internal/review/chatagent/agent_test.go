@@ -752,7 +752,7 @@ func TestOversizedDeletedFileDiffFailureRejectsVerdict(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("deleted line of code\n", 130000)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("deleted line of code\n", 230000)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "base"}} {
@@ -828,10 +828,10 @@ func TestReadFileDoesNotClearFailedDiffRead(t *testing.T) {
 	if out, err := s.call(context.Background(), "read_diff", `{"path":"big.txt","offset":1,"limit":10}`); err != nil || !strings.Contains(out, "-old line content") {
 		t.Fatalf("expected 1.2 MiB diff to paginate cleanly: err=%v out=%q", err, out)
 	}
-	// Now test a diff that truly exceeds maxDiffBytes (~2.6 MiB old file
+	// Now test a diff that truly exceeds maxDiffBytes (~4.6 MiB old file
 	// shrunk to a tiny new file): read_file succeeds on the small snapshot
 	// file, but must not clear the failed read_diff.
-	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("very old content 1234567890\n", 100000)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("very old content 1234567890\n", 180000)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "huge base"}} {
