@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -152,15 +153,24 @@ func notConnected(answer service.NotConnected) appDeclined {
 				connect, workspace),
 		}
 	case "repository_not_covered":
-		where := "on GitHub"
+		owner, _, _ := strings.Cut(repository, "/")
+		if answer.InstallationSettingsURL != "" {
+			return appDeclined{
+				reason: fmt.Sprintf("the SlopCop App's installation on %s, which %s's GitHub connection holds, does not include %s", owner, workspace, repository),
+				fix:    fmt.Sprintf("To let the App comment, add %s under Repository access at %s.", repository, answer.InstallationSettingsURL),
+			}
+		}
+		install := "Install the SlopCop App on the account that owns " + repository
 		if answer.InstallURL != "" {
-			where = "on GitHub (" + answer.InstallURL + ")"
+			install += " (" + answer.InstallURL + ")"
 		}
 		return appDeclined{
 			reason: fmt.Sprintf("no SlopCop App installation that %s's GitHub connection holds includes %s", workspace, repository),
-			fix: fmt.Sprintf("To let the App comment, add %s to the App's installation %s. If that installation is on an account %s has not connected, also %s with %s active.",
-				repository, where, workspace, connect, workspace),
+			fix: fmt.Sprintf("To let the App comment: %s with %s selected, or add it to the installation there if there is one; then %s with %s active.",
+				install, repository, connect, workspace),
 		}
+	case "not_github":
+		return appDeclined{reason: "the App comments only on GitHub pull requests, and " + repository + " is not on GitHub"}
 	case "no_workspace":
 		return appDeclined{reason: "the SlopCop login has no workspace, so it has no GitHub connection"}
 	default:

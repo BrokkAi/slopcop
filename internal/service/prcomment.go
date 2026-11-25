@@ -48,9 +48,11 @@ type PullRequestCommentResponse struct {
 // it.
 type NotConnected struct {
 	// Reason is "no_github_connection" (the workspace that ran the check has
-	// never connected GitHub), "repository_not_covered" (it has, but no App
-	// installation it holds includes the repository) or "no_workspace" (the
-	// login has no workspace).
+	// no usable GitHub connection: none, or one that expired or was
+	// revoked), "repository_not_covered" (it has one, but no App
+	// installation it holds includes the repository), "not_github" (the
+	// repository is on GitLab or Bitbucket) or "no_workspace" (the login has
+	// no workspace).
 	Reason        string `json:"reason"`
 	WorkspaceName string `json:"workspaceName"`
 	// WorkspaceKind is "personal" or "team".
@@ -60,9 +62,12 @@ type NotConnected struct {
 	// ConnectURL is the service's Repositories page, where Connect GitHub
 	// connects the workspace that is active in the browser.
 	ConnectURL string `json:"connectUrl"`
-	// InstallURL is the App's page on GitHub, where an installation picks
-	// its repositories.
+	// InstallURL is the App's install page on GitHub.
 	InstallURL string `json:"installUrl"`
+	// InstallationSettingsURL is the Repository access page of the
+	// installation the workspace's connection holds on the repository's
+	// owner; empty when it holds none there.
+	InstallationSettingsURL string `json:"installationSettingsUrl"`
 }
 
 // CommentPullRequest asks the service to comment check checkID on a pull

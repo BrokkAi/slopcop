@@ -321,8 +321,16 @@ func TestCommentViaAppSaysWhichWorkspaceToConnect(t *testing.T) {
 		}},
 		{"repository not covered", notCoveredAnswer, []string{
 			"no SlopCop App installation that your personal workspace's GitHub connection holds includes o/r.",
-			"add o/r to the App's installation on GitHub (https://github.com/apps/slopcop/installations/new)",
+			"Install the SlopCop App on the account that owns o/r (https://github.com/apps/slopcop/installations/new) with o/r selected",
 			"open https://slopcop.test/repositories and click Connect GitHub with your personal workspace active",
+		}},
+		{"repository not on the installation", strings.Replace(notCoveredAnswer, `"installUrl"`,
+			`"installationSettingsUrl":"https://github.com/organizations/o/settings/installations/7","installUrl"`, 1), []string{
+			"the SlopCop App's installation on o, which your personal workspace's GitHub connection holds, does not include o/r.",
+			"add o/r under Repository access at https://github.com/organizations/o/settings/installations/7.",
+		}},
+		{"not on GitHub", `{"checkId":"chk","status":"not_connected","reason":"not_github","repository":"g/r"}`, []string{
+			"the App comments only on GitHub pull requests, and g/r is not on GitHub",
 		}},
 		// A service from before the reason: the words it always had.
 		{"older service", `{"checkId":"chk","status":"not_connected"}`, []string{
