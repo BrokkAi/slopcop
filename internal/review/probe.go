@@ -140,9 +140,13 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 		if !CopilotMayBeLoggedIn() {
 			return "GitHub Copilot CLI is not logged in"
 		}
-	case "dsh":
-		if os.Getenv("DEEPSEEK_API_KEY") == "" {
-			return "DEEPSEEK_API_KEY is not set (to keep the key in a file instead, pass --api-key-file in review.adapters.dsh.command)"
+	case dshAdapter:
+		if settings.DSHKeyFile != "" {
+			if err := CheckDSHKeyFile(settings.DSHKeyFile); err != nil {
+				return "review.dsh.apiKeyFile: " + err.Error()
+			}
+		} else if os.Getenv("DEEPSEEK_API_KEY") == "" {
+			return "neither DEEPSEEK_API_KEY nor review.dsh.apiKeyFile is set"
 		}
 	case grokAdapter:
 		if strings.TrimSpace(os.Getenv("XAI_API_KEY")) == "" {
@@ -162,6 +166,22 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 		}
 	}
 	return ""
+}
+
+// dshAdapter names the adapter that runs Flash.
+const dshAdapter = "dsh"
+
+// CheckDSHKeyFile reports why a DeepSeek key file cannot serve dsh: it is
+// missing, unreadable, or holds no key.
+func CheckDSHKeyFile(path string) error {
+	key, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("cannot read the key file: %w", err)
+	}
+	if strings.TrimSpace(string(key)) == "" {
+		return fmt.Errorf("the key file %s is empty", path)
+	}
+	return nil
 }
 
 // codexMayBeLoggedIn reports whether Codex has an API key or the adapter's

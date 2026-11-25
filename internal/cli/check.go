@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/base64"
 	"errors"
@@ -173,6 +174,8 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if errors.Is(storeErr, review.ErrBusy) {
 		return checkFailure(cmd, reviewBusy(settings.Timeout), format, opts.sarifFile, reportOptions)
 	}
+	failOn = prepared.failOn
+	blockLevel = prepared.pushLevel
 	reportOptions.OmittedFiles = prepared.omittedFiles
 	reportOptions.BinaryFiles = prepared.binaryFiles
 	reportOptions.Source = treeSource(prepared.repoRoot, prepared.checkedTree)
@@ -307,9 +310,14 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			}
 		}
 	}
+	// Only a --fail-on never the caller passed keeps review findings from
+	// failing the check. The repository's [check] fail_on rates static
+	// severities, which review findings do not have, and a change could set
+	// it to never to silence its own review.
+	reviewFails := verdict.Status == review.StatusFindings && strings.ToLower(strings.TrimSpace(opts.failOn)) != "never"
 	exit := static.exit
 	if mode != modeStatic {
-		if verdict.Status == review.StatusFindings && failOn != "never" {
+		if reviewFails {
 			exit = service.ExitFindings
 		} else if static.exit != service.ExitFindings && static.exit != service.ExitNeedsPerson && static.exit != service.ExitPending && (verdict.Status == review.StatusFailed || verdict.Incomplete) {
 			// A pending static result keeps its exit: it tells the caller to
@@ -341,7 +349,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 		status = service.StatusFindings
 	}
 	reportOptions.Status = status
-	reviewFailed := mode != modeStatic && verdict.Status == review.StatusFindings && failOn != "never"
+	reviewFailed := mode != modeStatic && reviewFails
 	reportOptions.ExitReason = exitReason(exit, static.exit, reviewFailed)
 	if mode != modeAI && status != static.status {
 		reportOptions.StaticStatus = static.status
@@ -429,7 +437,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	advisory := 0
 	if mode != modeAI && static.response != nil && static.response.KnownStatus() {
-		advisory = advisoryFindings(*static.response, blockLevel)
+		advisory = advisoryFindings(*static.response, blockLevel, pullRequestLevel(prepared.repositoryFailOn))
 	}
 	reportOptions.AdvisoryFindings = advisory
 	if static.response != nil {
@@ -480,7 +488,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	// In every format, since an agent reads json and pushes on approved.
 	if reportOptions.Approved && advisory > 0 && agenthooks.GateInstalled(prepared.repoRoot) {
-		fmt.Fprintln(cmd.ErrOrStderr(), advisoryNotice(advisory, blockLevel))
+		fmt.Fprintln(cmd.ErrOrStderr(), advisoryNotice(advisory, blockLevel, prepared.repositoryFailOn))
 	}
 	reportReview(cmd, checkRef, prepared.client, prepared.repoRoot, verdict, settings, version, opts.verbose)
 	return silentExit{exit}
@@ -947,11 +955,22 @@ type preparedCheck struct {
 	files, bytes int
 	// base says how the base was chosen.
 	base baseResolution
+	// failOn is the threshold the check is sent with: --fail-on when given,
+	// else the repository's, else finding.
+	failOn string
+	// repositoryFailOn is the checked tree's [check] fail_on, "" when it
+	// sets none.
+	repositoryFailOn string
+	// pushLevel is the level at which a new finding blocks the push: the
+	// user's gate.blockOn, raised by repositoryFailOn as repositoryPushLevel
+	// says.
+	pushLevel string
 }
 
 // prepareCheck does the local work a check needs before it can be sent: it
 // finds the repository, its base and selection, builds the patch, and
-// resolves the service and credential.
+// resolves the service and credential. An empty failOn takes the checked
+// tree's [check] fail_on, else finding.
 func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, failOn string) (preparedCheck, error) {
 	var prepared preparedCheck
 	repoRoot, err := gitx.Toplevel(opts.root)
@@ -1022,8 +1041,25 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	for _, file := range inspected {
 		binaryFiles = append(binaryFiles, report.BinaryFile{Path: file.Path, Bytes: file.Bytes, Format: file.Format, Verified: file.Format != "", Deleted: file.Deleted})
 	}
+	// The service reads [check] from the base with the change applied, which
+	// is the tree the patch makes.
+	repositoryFailOn, err := reposize.RepositoryFailOn(context.Background(), repoRoot, patchTree)
+	if err != nil {
+		return prepared, err
+	}
+	if failOn == "" {
+		failOn = cmp.Or(repositoryFailOn, failOnFinding)
+	}
+	// runCheck refuses an invalid gate.blockOn before it gets here; the Stop
+	// hook, which cannot say so, takes the default.
+	pushLevel, err := pushBlockLevel(cfg)
+	if err != nil {
+		pushLevel = "error"
+	}
+	pushLevel = repositoryPushLevel(cfg, pushLevel, repositoryFailOn)
 	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, checkedTree: patchTree,
 		omittedFiles: omitted, binaryFiles: binaryFiles, files: change.Files, bytes: len(change.Patch), base: resolution,
+		failOn: failOn, repositoryFailOn: repositoryFailOn, pushLevel: pushLevel,
 		request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
 	if opts.mode == modeAI || opts.ai {
 		return prepared, nil
@@ -1159,12 +1195,10 @@ func resolveEnums(opts *checkOptions) (string, string, error) {
 	default:
 		return "", "", fmt.Errorf("unknown format %q (expected human, json, or sarif)", opts.format)
 	}
+	// An empty level is the repository's, which prepareCheck reads.
 	failOn := strings.ToLower(strings.TrimSpace(opts.failOn))
-	if failOn == "" {
-		failOn = failOnFinding
-	}
 	switch failOn {
-	case "never", failOnFinding, "note", "warning", "error":
+	case "", "never", failOnFinding, "note", "warning", "error":
 	default:
 		return "", "", fmt.Errorf(
 			"unknown fail-on level %q (expected never, finding, note, warning, or error)",
@@ -1503,28 +1537,61 @@ func blocksPush(finding service.Finding, level string) bool {
 	return level == "finding" || severity >= rank[level]
 }
 
-// pullRequestFailOn is the threshold a SlopCop pull request check applies. It
-// is the service's, fixed, and has no setting: any new definite finding fails
-// the pull request, whatever its severity. The push level (gate.blockOn) is
-// the CLI's and defaults to error, so the two disagree about every finding in
-// between. advisoryFindings counts those, and the docs' exit-codes page states
-// both rules side by side; change it with this constant if the service's
-// rule changes.
+// pullRequestFailOn is the threshold a SlopCop pull request check applies to
+// a repository whose .slopcop/config.toml sets no [check] fail_on: any new
+// definite finding fails the pull request, whatever its severity. The push
+// level (gate.blockOn) is the CLI's and defaults to error, so without a
+// repository threshold the two disagree about every finding in between.
+// advisoryFindings counts those, and the docs' exit-codes page states the
+// rules side by side; change it with this constant if the service's rule
+// changes.
 const pullRequestFailOn = failOnFinding
 
+// pullRequestLevel is the threshold a pull request check applies to a
+// repository with [check] fail_on set to repository ("" for none).
+func pullRequestLevel(repository string) string {
+	return cmp.Or(repository, pullRequestFailOn)
+}
+
+// levelStrictness orders the thresholds from the one that fails on nothing
+// to the one that fails on any finding.
+var levelStrictness = map[string]int{"never": 0, "error": 1, "warning": 2, "note": 3, failOnFinding: 4}
+
+// repositoryPushLevel is the push level for a check of a tree whose [check]
+// fail_on is repository. The repository's threshold, which its pull request
+// checks apply, raises the default push level so the two agree, but never
+// lowers it: a change can set its own fail_on, and what blocks a push stays
+// the human's to loosen. A gate.blockOn the user set stands as it is.
+func repositoryPushLevel(cfg config.Config, level, repository string) string {
+	if repository == "" || (cfg.Gate != nil && cfg.Gate.BlockOn != "") {
+		return level
+	}
+	if levelStrictness[repository] > levelStrictness[level] {
+		return repository
+	}
+	return level
+}
+
 // advisoryFindings counts the new findings that do not block the push at
-// level but fail a check under pullRequestFailOn: the definite ones below the
-// push level. A service from before certainty omits it, and listed only
-// definite findings. An info finding fails neither. The new findings the
-// service left out of the list (summary.omittedFindings) count too: the push
-// gate does not see them, so none blocks, and the pull request check fails
-// on them. Under --certainty all some of those may be less certain, so the
-// count can then run high, never low.
-func advisoryFindings(response service.Response, level string) int {
+// level but fail a pull request check at prLevel: the definite ones below the
+// push level and at or above prLevel. A service from before certainty omits
+// it, and listed only definite findings. An info finding fails neither. The
+// new findings the service left out of the list (summary.omittedFindings)
+// count too, unless prLevel is never: the push gate does not see them, so
+// none blocks, and their severity is unknown. Under --certainty all some of
+// those may be less certain, so the count can then run high, never low.
+func advisoryFindings(response service.Response, level, prLevel string) int {
+	// A push level at least as strict as the pull request's blocks every
+	// finding that fails it, omitted ones included: the service lists the
+	// most severe first, so an omitted one is no more severe than a listed
+	// one that did not block.
+	if levelStrictness[prLevel] <= levelStrictness[level] {
+		return 0
+	}
 	count := int(response.Summary.OmittedFindings)
 	for _, finding := range response.Findings {
 		definite := finding.Certainty == "" || finding.Certainty == certaintyDefinite
-		if finding.New && definite && finding.Severity != "info" && !blocksPush(finding, level) {
+		if definite && blocksPush(finding, prLevel) && !blocksPush(finding, level) {
 			count++
 		}
 	}
@@ -1534,15 +1601,19 @@ func advisoryFindings(response service.Response, level string) int {
 // advisoryNotice is the stderr line for a tree that was approved for push
 // with findings a pull request check fails on. Without it a change that is
 // green at the push gate goes red on the pull request with no warning.
-func advisoryNotice(count int, level string) string {
+func advisoryNotice(count int, level, repository string) string {
 	noun, verb := "findings", "do"
 	if count == 1 {
 		noun, verb = "finding", "does"
 	}
-	return fmt.Sprintf("slopcop: %d new static %s below the push level (%s) %s not block the push, but a SlopCop pull request check fails on any new %s. "+
+	failsOn := "any new " + pullRequestFailOn
+	if repository != "" {
+		failsOn = fmt.Sprintf("new findings at or above %s, this repository's [check] fail_on", repository)
+	}
+	return fmt.Sprintf("slopcop: %d new static %s below the push level (%s) %s not block the push, but a SlopCop pull request check fails on %s. "+
 		"Before you open a pull request, fix them, run `slopcop ignore <id>` for a false positive, "+
 		"or keep deliberate test inputs out of the rule with [check] in .slopcop/config.toml.",
-		count, noun, level, verb, pullRequestFailOn)
+		count, noun, level, verb, failsOn)
 }
 
 // staticPasses says whether the static half allows the tree to be approved

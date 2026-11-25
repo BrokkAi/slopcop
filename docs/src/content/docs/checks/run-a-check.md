@@ -196,7 +196,7 @@ work passed.
 | `--base REV` | branch or revision the change started from; the base is its merge base with `HEAD` |
 | `--base-exact REV` | exact base commit or revision, without a merge base |
 | `--format human\|json\|sarif` | report format (default `human`); see [Output formats](/checks/output-formats/) |
-| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default `finding`) |
+| `--fail-on never\|finding\|note\|warning\|error` | exit-1 threshold for new findings (default the repository's `[check] fail_on`, else `finding`) |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` file to evaluate (repeatable); see [Repository rules](/checks/repository-rules/) |
 | `--no-policy-discovery` | skip `.slopcop/policies` rules |
@@ -209,7 +209,11 @@ work passed.
 
 ### The threshold
 
-The CLI always sends `--fail-on`, defaulting to `finding`: a check fails only on
+The CLI always sends `--fail-on`. Without the flag it sends the repository's
+threshold, `fail_on` in the `[check]` section of `.slopcop/config.toml` in the
+checked tree, the one its pull request checks apply (see
+[The repository's threshold](/checks/exit-codes/#the-repositorys-threshold)).
+When the repository sets none it sends `finding`: a check fails only on
 findings the change introduced, so any of them, a note or an unrated one
 included, is worth fixing before the change lands. The service's own default
 for a request without a level is Bifrost's `warning`; pass `--fail-on warning`

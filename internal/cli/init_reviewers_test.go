@@ -126,7 +126,7 @@ func TestInitOnFreshMachine(t *testing.T) {
 		t.Fatalf("%s: %s", out, errOut)
 	}
 	want := "slopcop: left the automatic hooks alone (--no-hooks)\n" +
-		"slopcop: local review: none available yet (log in to Claude Code, Codex or GitHub Copilot CLI, or give DeepSeek a key in DEEPSEEK_API_KEY or a key file, see https://docs.slopcop.com/get-started/install/#deepseek-api-key, then run `slopcop init`). Hosted checks work now.\n"
+		"slopcop: local review: none available yet (log in to Claude Code, Codex or GitHub Copilot CLI, or set DEEPSEEK_API_KEY or review.dsh.apiKeyFile, then run `slopcop init`). Hosted checks work now.\n"
 	if !strings.HasSuffix(out, want) {
 		t.Fatalf("got %q", out)
 	}

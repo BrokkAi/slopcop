@@ -39,7 +39,7 @@ func AdapterName(f Family) string {
 	case Terra, Sol:
 		return "codex"
 	case Flash:
-		return "dsh"
+		return dshAdapter
 	case Haiku, Sonnet, Opus:
 		return "claude"
 	case Gemini:
@@ -67,7 +67,7 @@ func AdapterFor(f Family, s Settings) string {
 }
 
 // CommandFor returns the argv that starts a family's adapter: the configured
-// override, else the pinned package.
+// override, else the pinned package, with dsh's key file when one is set.
 func CommandFor(f Family, s Settings) []string {
 	adapter := AdapterFor(f, s)
 	if IsChatAdapter(adapter) {
@@ -78,6 +78,9 @@ func CommandFor(f Family, s Settings) []string {
 	}
 	if adapter == copilotAdapter {
 		return slices.Clone(copilotDefaultCommand)
+	}
+	if adapter == dshAdapter && s.DSHKeyFile != "" {
+		return append(DefaultCommand(f), "--api-key-file", s.DSHKeyFile)
 	}
 	return DefaultCommand(f)
 }

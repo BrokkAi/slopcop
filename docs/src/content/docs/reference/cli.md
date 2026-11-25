@@ -48,7 +48,7 @@ slopcop --root ../repo --base origin/main
 | `--include PATH_OR_GLOB` | opt matching files back into upload and local review when the default 500,000-byte JSON/binary filter would omit them; repository-relative, repeatable, quote globs |
 | `--format human\|json\|sarif` | report format (default `human`) |
 | `--sarif-file PATH` | also write the report as SARIF to this file, so one check gives `json` on stdout and SARIF for a code scanning upload |
-| `--fail-on never\|finding\|note\|warning\|error` | exit `1` when a new static finding is at or above this level (default `finding`), or when a reviewer reported any finding (every level but `never`) |
+| `--fail-on never\|finding\|note\|warning\|error` | exit `1` when a new static finding is at or above this level (default the repository's `[check] fail_on`, else `finding`), or when a reviewer reported any finding (every level but `never`) |
 | `--certainty definite\|all` | report and fail on only `definite` findings (default), or on `possible` and `heuristic` ones too |
 | `--policy PATH` | repository-relative `.rqlp` policy file to evaluate (repeatable) |
 | `--no-policy-discovery` | do not include `.slopcop/policies` rules automatically |
@@ -273,9 +273,10 @@ duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
 must finish for a clean review), `review.provider` (`copilot` runs
-`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI), and
+`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI),
 `review.models.<ollama|openrouter>` (the model an opt-in family that takes one
-reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`). Adapter command
+reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`), and
+`review.dsh.apiKeyFile` (a file holding the DeepSeek key for `flash`). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 The opt-in `gemini`, `kimi`, `grok` and `ollama` families are used only when you name them; see
 [Gemini through Antigravity](/reference/configuration/#gemini-through-antigravity-opt-in),

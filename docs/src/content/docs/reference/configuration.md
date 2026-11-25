@@ -75,20 +75,24 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, `sonnet`
 and `opus`, dsh for `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`. For
-example, keep a DeepSeek key in a file with:
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 
-```json
-"dsh": {"command": ["npx", "--yes", "@brokkai/dsh-acp@0.6.0", "--api-key-file", "/path/to/deepseek_api_key"]}
+dsh reads `DEEPSEEK_API_KEY`. To keep the DeepSeek key in a file instead, run:
+
+```bash
+slopcop config set review.dsh.apiKeyFile /path/to/deepseek_api_key
 ```
 
-Otherwise dsh reads `DEEPSEEK_API_KEY`. See
-[DeepSeek API key](/get-started/install/#deepseek-api-key) for the whole setup.
+The file must exist and hold the key; the path is saved absolute. The CLI
+passes it to its default dsh command with `--api-key-file`, so the dsh adapter
+version still follows CLI upgrades. A `review.adapters.dsh.command` override is
+used as written and ignores this setting.
 
 When `review.reviewers` is unset, `slopcop init` picks reviewers by sending
 each family a short prompt. It tries different adapters at the same time and
-prints each result as it arrives. It skips flash without a dsh command override
-when `DEEPSEEK_API_KEY` is not set.
+prints each result as it arrives. Without a dsh command override, it skips
+flash when neither `DEEPSEEK_API_KEY` nor a readable, non-empty
+`review.dsh.apiKeyFile` is set.
 
 The Claude families are `haiku`, `sonnet` and `opus`. Each reviews with the
 newest Claude model of its name at high effort, through the same Claude ACP
@@ -408,15 +412,18 @@ and valid overrides write `refs/slopcop/reviewed/<tree>`.
 
 ## Push approval level
 
-Set `gate.blockOn` by editing the user config file. It defaults to `error`;
-values are `never`, `finding`, `note`, `warning`, and `error`. New findings
+Set `gate.blockOn` by editing the user config file. It defaults to `error`,
+or to the repository's `[check] fail_on` when that is stricter; values are `never`, `finding`, `note`, `warning`, and `error`. New findings
 at or above that level block push approval. Unknown severities count as
 errors. This setting has no check flag and cannot be changed through
 `slopcop config`.
 
 A [pull request check](/checks/pull-requests/) does not read this setting: it
-fails on any new finding. Under the default, a new note or warning is approved
-for push here and fails there; set `finding` to block the same findings. See
+fails on new findings at or above the repository's `[check] fail_on`, or on
+any new finding when the repository sets none. Under the default, without a
+repository threshold, a new note or warning is approved for push here and
+fails there; commit a threshold, or set `finding` here, to block the same
+findings. A repository threshold never lowers a level set here. See
 [The push gate and pull request checks](/checks/exit-codes/#the-push-gate-and-pull-request-checks).
 
 ## Another deployment

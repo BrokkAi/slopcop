@@ -161,7 +161,7 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 		return hookOutput{}
 	}
 	opts := &checkOptions{root: repoRoot, timeout: agenthooks.CheckTimeout}
-	prepared, err := prepareCheck(opts, cfg, serviceURL, version, failOnFinding)
+	prepared, err := prepareCheck(opts, cfg, serviceURL, version, "")
 	if err != nil {
 		// No origin, no commits: a check by hand says why.
 		return hookOutput{}
@@ -194,7 +194,7 @@ func stopHook(ctx context.Context, input hookInput, serviceURL, version string) 
 			return output
 		}
 	}
-	output := state.answer(written, fresh, input.StopHookActive, loaded)
+	output := state.answer(written, fresh, input.StopHookActive, loaded, prepared.failOn, prepared.pushLevel)
 	if fresh {
 		output = state.namingService(prepared.client.BaseURL, output)
 	}
@@ -338,6 +338,22 @@ func hookFailure(err error, state *hookState) string {
 	return boundedHookText("slopcop: the automatic check did not run: " + err.Error())
 }
 
+// handedFindings are the findings the Stop hook hands an agent: those that
+// fail the check at failOn, the threshold it was sent with, or block the push
+// at pushLevel. One below both fails none of the repository's checks and
+// blocks nothing, so an agent is not held to change code, such as a
+// deliberate test input, only to quiet it. The levels are those in force
+// now, so a cached result follows a push level the user changed since.
+func handedFindings(findings []service.Finding, failOn, pushLevel string) []service.Finding {
+	var handed []service.Finding
+	for _, finding := range findings {
+		if blocksPush(finding, failOn) || blocksPush(finding, pushLevel) {
+			handed = append(handed, finding)
+		}
+	}
+	return handed
+}
+
 // answer turns the last completed check into the hook's answer. Only new
 // findings in files this session wrote hold the agent back, once for a given
 // tree and at most maxHolds stops in a row; then the agent is let go and the
@@ -345,14 +361,20 @@ func hookFailure(err error, state *hookState) string {
 // held the agent at the stop before, not that this one did, so the hook
 // counts its own holds; without its state it cannot, and holds only at a
 // stop that follows none.
-func (s *hookState) answer(written map[string]bool, fresh, stopHookActive, loaded bool) hookOutput {
+func (s *hookState) answer(written map[string]bool, fresh, stopHookActive, loaded bool, failOn, pushLevel string) hookOutput {
+	if levels := failOn + "/" + pushLevel; levels != s.HandedLevels {
+		s.Handed = false
+		s.HandedLevels = levels
+	}
 	var mine []service.Finding
-	for _, finding := range s.Findings {
+	others := 0
+	for _, finding := range handedFindings(s.Findings, failOn, pushLevel) {
 		if written[finding.Path] {
 			mine = append(mine, finding)
+		} else {
+			others++
 		}
 	}
-	others := len(s.Findings) - len(mine)
 	if !stopHookActive {
 		s.Holds = 0
 	}
