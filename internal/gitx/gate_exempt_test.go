@@ -3,6 +3,7 @@ package gitx
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -251,6 +252,33 @@ func TestPushDestinationHistory(t *testing.T) {
 			want := kind == "origin" || kind == "explicit" || kind == "different-ref"
 			if err != nil || ok != want {
 				t.Fatalf("allowed=%v err=%v want=%v", ok, err, want)
+			}
+		})
+	}
+}
+
+func TestDocumentationInitialPushSHA256(t *testing.T) {
+	for _, tc := range []struct {
+		path    string
+		allowed bool
+	}{
+		{"README.md", true},
+		{"code.go", false},
+	} {
+		t.Run(tc.path, func(t *testing.T) {
+			root := t.TempDir()
+			git(t, root, "init", "-q", "-b", "main", "--object-format=sha256", ".")
+			for _, setting := range fixtureConfig() {
+				key, value, _ := strings.Cut(setting, "=")
+				git(t, root, "config", key, value)
+			}
+			git(t, root, "config", "user.email", "test@example.com")
+			git(t, root, "config", "user.name", "Test")
+			git(t, root, "remote", "add", "origin", "https://example.com/repo.git")
+			head := exemptionCommit(t, root, tc.path, "content\n")
+			ok, err := IsDocumentationOnlyPush(root, head, exemptionTree(t, root), map[string]bool{}, PushDestination{AllowExemptions: true})
+			if err != nil || ok != tc.allowed {
+				t.Fatalf("allowed=%v err=%v want=%v", ok, err, tc.allowed)
 			}
 		})
 	}

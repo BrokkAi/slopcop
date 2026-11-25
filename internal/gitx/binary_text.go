@@ -116,12 +116,16 @@ func InspectBinaryFiles(root, base, tree string) ([]BinaryFile, error) {
 
 // changedBinaries is the changes to regular files git calls binary, with the
 // sizes of their blobs.
-func changedBinaries(root, base, tree string) ([]rawTreeChange, map[string]int64, error) {
-	numstat, err := RunWithoutRepoAttributes(root,
+func changedBinaries(root, base, tree string, paths ...string) ([]rawTreeChange, map[string]int64, error) {
+	pathspec := []string{"--"}
+	for _, path := range paths {
+		pathspec = append(pathspec, ":(literal)"+path)
+	}
+	numstat, err := RunWithoutRepoAttributes(root, append([]string{
 		"-c", "core.quotePath=false",
 		"diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
 		"--numstat", "-z", "--no-renames", base, tree,
-	)
+	}, pathspec...)...)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -129,11 +133,11 @@ func changedBinaries(root, base, tree string) ([]rawTreeChange, map[string]int64
 	if err != nil {
 		return nil, nil, err
 	}
-	raw, err := RunBytes(root, nil,
+	raw, err := RunBytes(root, nil, append([]string{
 		"-c", "core.quotePath=false",
 		"diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none",
 		"--raw", "--no-abbrev", "-z", "--no-renames", base, tree,
-	)
+	}, pathspec...)...)
 	if err != nil {
 		return nil, nil, err
 	}

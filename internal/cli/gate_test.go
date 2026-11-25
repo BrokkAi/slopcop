@@ -372,6 +372,28 @@ func TestGateTreeExemptions(t *testing.T) {
 			if !blocked && (stdout.Len() != 0 || stderr.Len() != 0) {
 				t.Fatalf("allow must be silent: %q %q", stdout.String(), stderr.String())
 			}
+			if !blocked {
+				for _, command := range []string{
+					"git push -f", "git push --force", "git push --force-with-lease",
+					"git push --force-with-lease=main", "git push --force-if-includes",
+					"git push origin +HEAD:main",
+				} {
+					t.Run(command, func(t *testing.T) {
+						payload, err := json.Marshal(map[string]any{"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": command}})
+						if err != nil {
+							t.Fatal(err)
+						}
+						cmd := newGateCommand()
+						var output bytes.Buffer
+						cmd.SetErr(&output)
+						cmd.SetIn(bytes.NewReader(payload))
+						cmd.SetArgs([]string{"--hook", "claude"})
+						if err := cmd.Execute(); err == nil {
+							t.Fatal("forced push must require exact tree approval")
+						}
+					})
+				}
+			}
 		})
 	}
 }
@@ -401,6 +423,7 @@ func TestGatePushDestinations(t *testing.T) {
 	}{
 		{"git push", true}, {"git push origin", true}, {"git push -u origin main", true},
 		{"git push origin HEAD:main", true}, {"gh pr create", true},
+		{"git push --no-force-with-lease", true}, {"git push --no-force-if-includes", true},
 		{"git push other HEAD:main", false}, {"git push https://example.com/repo.git HEAD:main", false},
 		{"git push origin other-branch", false}, {"git push --all", false},
 		{"git push --mirror", false}, {"git push --tags", false},

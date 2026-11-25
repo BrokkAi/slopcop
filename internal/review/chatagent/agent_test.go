@@ -3,6 +3,7 @@ package chatagent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -199,7 +200,7 @@ func TestRequestCarriesPrivacyControlsAndOnlyReadTools(t *testing.T) {
 	for _, tool := range body["tools"].([]any) {
 		names = append(names, tool.(map[string]any)["function"].(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, ",") != "read_diff,read_file,list_files,search_files" {
+	if strings.Join(names, ",") != "list_changes,read_diff,read_file,list_files,search_files" {
 		t.Fatalf("tools = %v", names)
 	}
 }
@@ -693,5 +694,45 @@ func TestReadDiffRecoversFailedBinaryRead(t *testing.T) {
 	_, text, err := review(t, root, tree, m, func(c *Config) { c.Base = base })
 	if err != nil || !strings.Contains(text, "No findings.") {
 		t.Fatalf("verdict: %s %v", text, err)
+	}
+}
+
+func TestListChanges(t *testing.T) {
+	root, base, _, _ := repoTree(t)
+	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("replacement\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "dir/b.txt")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "dir/new.txt"), []byte("added\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", "-A")
+	s, err := loadSnapshot(context.Background(), root, git(t, root, "write-tree"), base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		args, want string
+		absent     string
+	}{
+		{`{}`, "1\t1\t2\ta.txt\n2\t0\t1\tdir/b.txt\n3\t1\t0\tdir/new.txt\n", "bin.dat"},
+		{`{"prefix":"./dir/"}`, "1\t0\t1\tdir/b.txt\n2\t1\t0\tdir/new.txt\n", "a.txt"},
+		{`{"offset":2,"limit":1}`, "2\t0\t1\tdir/b.txt\n[2 of 3 lines shown; continue with offset 3]\n", "dir/new.txt"},
+		{`{"prefix":"dir/","offset":2,"limit":1}`, "2\t1\t0\tdir/new.txt\n", "dir/b.txt"},
+		{`{"prefix":"missing"}`, "(no matching changed files)", "a.txt"},
+	} {
+		out, err := s.call(context.Background(), "list_changes", tc.args)
+		if err != nil || out != tc.want || strings.Contains(out, tc.absent) {
+			t.Errorf("%s: %q, %v; want %q", tc.args, out, err, tc.want)
+		}
+	}
+	if _, err := s.call(context.Background(), "list_changes", `{"offset":4}`); !errors.Is(err, errPastEnd) {
+		t.Fatalf("past end: %v", err)
+	}
+	s.base = ""
+	if out, err := s.call(context.Background(), "list_changes", `{}`); err != nil || out != "(no base tree recorded)" {
+		t.Fatalf("%q: %v", out, err)
 	}
 }

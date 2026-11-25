@@ -123,33 +123,44 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	}
 	v.LogDir = dir
 	TrimLogs(store.dir)
-	patchDir := ""
-	for _, adapter := range adapters {
-		if adapter == "claude" || adapter == "dsh" || adapter == "copilot" {
-			patchDir, err = os.MkdirTemp("", "slopcop-patches-*")
-			if err == nil {
-				defer os.RemoveAll(patchDir)
-				_, err = gitx.ExportPerFilePatches(ctx, opts.Root, capture.BaseTree, capture.CheckedTree(), patchDir, 8<<20, 128<<20)
+	overriddenText, shown := overriddenSection(overrides, capture)
+	v.PromptOverrides = shown
+	history := earlierRounds(opts.Root, rounds, capture) + overriddenText
+	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.Models[Ollama], min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks), reviewerEfforts: opts.Settings.ReviewerEfforts, fallbackEfforts: slices.Clone(opts.Settings.FallbackEfforts)}
+	defer p.cleanupPatches()
+	binaryDiffPath := ""
+	if hasBinaryNumstat(capture.Numstat) {
+		for _, adapter := range adapters {
+			if adapter != "codex" {
+				continue
 			}
-			if err != nil {
-				v.Error = "export per-file patches: " + err.Error()
-				save()
-				return v
+			text, extractErr := gitx.BinaryFileText(opts.Root, capture.BaseTree, capture.CheckedTree())
+			if extractErr == nil {
+				body := text.Text
+				if !text.Complete {
+					body += "\n[Readable binary diffs truncated; inspect the files with git diff --text.]\n"
+				}
+				path := filepath.Join(dir, "binary-diffs.txt")
+				if os.WriteFile(path, []byte(body), 0600) == nil {
+					binaryDiffPath = path
+				}
 			}
 			break
 		}
 	}
-	overriddenText, shown := overriddenSection(overrides, capture)
-	v.PromptOverrides = shown
-	history := earlierRounds(opts.Root, rounds, capture) + overriddenText
-	prompt := reviewPrompt(opts.Root, capture, in, history, patchDir, adapters[order[0]])
+	p.prompt = func(f Family) string {
+		return reviewPrompt(opts.Root, capture, in, history, p.patchDir, adapters[f], binaryDiffPath)
+	}
+	promptPatchDir := ""
+	if needsPatchDir(adapters[order[0]]) {
+		promptPatchDir, _ = p.ensurePatches()
+	}
+	prompt := reviewPrompt(opts.Root, capture, in, history, promptPatchDir, adapters[order[0]], binaryDiffPath)
 	if err = os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(prompt), 0600); err != nil {
 		v.Error = "write review prompt: " + err.Error()
 		save()
 		return v
 	}
-	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.Models[Ollama], min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks), reviewerEfforts: opts.Settings.ReviewerEfforts, fallbackEfforts: slices.Clone(opts.Settings.FallbackEfforts),
-		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, patchDir, adapters[f]) }}
 	v.Reviewers = p.run(order)
 	v.DurationsMs = p.durations
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
@@ -196,7 +207,7 @@ func effortKeys(families []Family, efforts []string, settings Settings) []string
 	out := make([]string, len(families))
 	for i, f := range families {
 		e := slotEffort(efforts, i)
-		if a := AdapterFor(f, settings); !IsChatAdapter(a) && a != ollamaAdapter {
+		if a := AdapterFor(f, settings); !IsChatAdapter(a) && a != ollamaAdapter && a != copilotAdapter {
 			e = effectiveEffort(e)
 		}
 		out[i] = e

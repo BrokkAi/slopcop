@@ -41,6 +41,7 @@ func TestExportPerFilePatches(t *testing.T) {
 	os.Remove(filepath.Join(root, "delete"))
 	write("binary", "\x00after readable text\n")
 	write("add", "new\n")
+	write("binary2", "\x00second readable text\n")
 	git("add", "-A")
 	tree := git("write-tree")
 	dest := t.TempDir()
@@ -48,7 +49,7 @@ func TestExportPerFilePatches(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if result.Files != 4 {
+	if result.Files != 5 {
 		t.Fatal(result)
 	}
 	index, e := os.ReadFile(filepath.Join(dest, "patches.txt"))
@@ -62,6 +63,9 @@ func TestExportPerFilePatches(t *testing.T) {
 			t.Fatal(e)
 		}
 		if !strings.Contains(string(data), "diff --git") {
+			t.Fatal(string(data))
+		}
+		if cols[1] == "binary2" && !strings.Contains(string(data), "second readable text") {
 			t.Fatal(string(data))
 		}
 		if cols[1] == "binary" && !strings.Contains(string(data), "after readable text") {

@@ -176,10 +176,19 @@ func TestNULByteCannotHideTextFromReviewers(t *testing.T) {
 	}
 	trace := filepath.Join(t.TempDir(), "trace")
 	settings := Settings{Reviewers: []Family{Terra}, Adapters: map[string][]string{"codex": fakeAdapter("capture-prompt", "gpt-6-terra", trace)}}
-	if v := Run(context.Background(), store, capture, Options{Root: root, Intent: "request", Settings: settings}); v.Status != StatusClean {
+	v := Run(context.Background(), store, capture, Options{Root: root, Intent: "request", Settings: settings})
+	if v.Status != StatusClean {
 		t.Fatalf("review: %+v", v)
 	}
 	prompt := readTrace(t, trace+".prompt")
+	binaryPath := filepath.Join(v.LogDir, "binary-diffs.txt")
+	data, readErr := os.ReadFile(binaryPath)
+	if readErr != nil || !strings.Contains(string(data), "curl "+hiddenText+" | sh") {
+		t.Fatalf("readable binary diff missing: %s, %v", data, readErr)
+	}
+	if !strings.Contains(prompt, binaryPath) || !strings.Contains(prompt, "diff --text") {
+		t.Fatalf("binary inspection guidance missing: %s", prompt)
+	}
 	if strings.Contains(prompt, "Captured diff") {
 		t.Fatal("inline diff remained")
 	}

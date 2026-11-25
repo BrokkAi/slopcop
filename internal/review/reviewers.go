@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -25,9 +26,7 @@ type panel struct {
 	root string
 	// trees are the captured trees; an isolated reviewer gets a copy of the
 	// checked one.
-	trees reviewTrees
-	// diffSize is the captured diff's length in bytes.
-	diffSize int
+	trees    reviewTrees
 	dir      string
 	timeout  time.Duration
 	commands map[Family][]string
@@ -39,6 +38,10 @@ type panel struct {
 	ollamaModel string
 	prompt      func(Family) string
 	min         int
+
+	patchOnce sync.Once
+	patchDir  string
+	patchErr  error
 
 	// startMu starts adapters one at a time, so first-run npx installs
 	// never overlap.
@@ -208,11 +211,52 @@ func (p *panel) attempt(name string, f Family, s *runner, startErr error, note s
 	return r, err
 }
 
+// needsPatchDir reports whether an adapter runs in the real repository without
+// git shell access and therefore inspects per-file exported patches.
+func needsPatchDir(adapter string) bool {
+	return adapter == "claude" || adapter == dshAdapter || adapter == copilotAdapter
+}
+
+// ensurePatches lazily exports per-file patches once for adapters that need
+// them, so an export limit error never aborts reviewers that inspect git
+// directly.
+func (p *panel) ensurePatches() (string, error) {
+	p.patchOnce.Do(func() {
+		dir, err := os.MkdirTemp("", "slopcop-patches-*")
+		if err != nil {
+			p.patchErr = err
+			return
+		}
+		if _, err = gitx.ExportPerFilePatches(p.ctx, p.root, p.trees.base, p.trees.checked, dir, 8<<20, 128<<20); err != nil {
+			_ = os.RemoveAll(dir)
+			p.patchErr = err
+			return
+		}
+		p.patchDir = dir
+	})
+	if p.patchErr != nil {
+		return "", fmt.Errorf("export per-file patches: %w", p.patchErr)
+	}
+	return p.patchDir, nil
+}
+
+// cleanupPatches removes the lazily exported patch directory if created.
+func (p *panel) cleanupPatches() {
+	if p.patchDir != "" {
+		_ = os.RemoveAll(p.patchDir)
+	}
+}
+
 // start launches and prepares an adapter. On a prepare failure it returns
 // the stopped runner, whose result names the reviewer's log.
 func (p *panel) start(name string, f Family) (*runner, error) {
 	p.startMu.Lock()
 	defer p.startMu.Unlock()
+	if needsPatchDir(p.adapter(f)) {
+		if _, err := p.ensurePatches(); err != nil {
+			return nil, err
+		}
+	}
 	p.mu.Lock()
 	effort := p.efforts[strings.TrimSuffix(name, "-retry")]
 	p.mu.Unlock()

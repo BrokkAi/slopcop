@@ -98,6 +98,9 @@ func toolDefinitions() []map[string]any {
 		return map[string]any{"type": "integer", "description": description}
 	}
 	return []map[string]any{
+		tool("list_changes", "List all changed and deleted files in the captured diff (git diff --numstat), optionally filtered by path prefix and paginated by line.", map[string]any{
+			"prefix": text("Only paths starting with this."), "offset": number("First line to read, from 1."), "limit": number("Number of lines to read."),
+		}),
 		tool("read_diff", "Read a captured per-file diff, including deleted files and readable binary text.", map[string]any{"path": text("Path from repository root."), "offset": number("First line from 1."), "limit": number("Number of lines."), "column": number("Byte column for long lines.")}, "path"),
 		tool("read_file", "Read a file of the reviewed snapshot, with line numbers.", map[string]any{
 			"path": text("Path from the repository root."), "offset": number("First line to read, from 1."), "limit": number("Number of lines to read."),
@@ -116,7 +119,7 @@ func toolKind(name string) (acp.ToolKind, bool) {
 	switch name {
 	case "read_file", "read_diff":
 		return acp.ToolKindRead, true
-	case "list_files", "search_files":
+	case "list_changes", "list_files", "search_files":
 		return acp.ToolKindSearch, true
 	}
 	return acp.ToolKindOther, false
@@ -138,6 +141,8 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 		}
 	}
 	switch name {
+	case "list_changes":
+		return s.listChanges(ctx, cleanPath(in.Prefix), in.Offset, in.Limit)
 	case "read_diff":
 		if in.Path == "" {
 			return "", errors.New("path is required")
@@ -163,7 +168,38 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 	case "search_files":
 		return s.search(ctx, in.Pattern, cleanPath(in.Prefix))
 	}
-	return "", fmt.Errorf("there is no tool named %q; use read_file, list_files or search_files", name)
+	return "", fmt.Errorf("there is no tool named %q; use list_changes, read_diff, read_file, list_files or search_files", name)
+}
+
+// listChanges returns the deterministic numstat of all changed and deleted
+// files between base and tree, optionally filtered by prefix and paginated.
+func (s *snapshot) listChanges(ctx context.Context, prefix string, offset, limit int) (string, error) {
+	if s.base == "" {
+		return "(no base tree recorded)", nil
+	}
+	raw, err := gitx.RunWithoutRepoAttributes(s.root, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none", "--numstat", "-z", s.base, s.tree)
+	if err != nil {
+		return "", err
+	}
+	var lines []string
+	for _, entry := range bytes.Split(raw, []byte{0}) {
+		if len(entry) == 0 {
+			continue
+		}
+		parts := strings.SplitN(string(entry), "\t", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		if prefix != "" && !strings.HasPrefix(parts[2], prefix) {
+			continue
+		}
+		lines = append(lines, parts[0]+"\t"+parts[1]+"\t"+parts[2])
+	}
+	if len(lines) == 0 {
+		return "(no matching changed files)", nil
+	}
+	data := []byte(strings.Join(lines, "\n") + "\n")
+	return renderRead(data, "changed files", offset, limit, 0)
 }
 
 func cleanPath(p string) string {

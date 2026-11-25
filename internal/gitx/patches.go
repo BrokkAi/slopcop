@@ -36,7 +36,7 @@ func filePatch(ctx context.Context, root, base, tree, path string, maxFile int64
 		return nil, err
 	}
 	if strings.Contains(string(data), "Binary files ") || strings.Contains(string(data), "GIT binary patch") {
-		changes, _, err := changedBinaries(root, base, tree)
+		changes, _, err := changedBinaries(root, base, tree, path)
 		if err != nil {
 			return nil, err
 		}

@@ -215,7 +215,11 @@ func IsDocumentationOnlyPush(root, headCommit, headTree string, reviewedTrees ma
 		}
 	}
 	if upstream == "" && len(bases) == 0 {
-		bases = append(bases, "4b825dc642cb6eb9a060e54bf8d69288fbee4904")
+		emptyTree, err := RunInput(root, nil, nil, "hash-object", "-t", "tree", "--stdin")
+		if err != nil {
+			return false, err
+		}
+		bases = append(bases, strings.TrimSpace(string(emptyTree)))
 	}
 	for _, base := range bases {
 		ok, err := IsDocumentationOnlyDiff(root, base, headTree)

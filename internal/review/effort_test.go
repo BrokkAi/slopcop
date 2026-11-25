@@ -111,3 +111,12 @@ func TestCopilotExplicitRefusalDoesNotDowngrade(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestCopilotEffortCacheIdentity(t *testing.T) {
+	settings := Settings{Provider: ProviderCopilot}
+	implicit := effortKeys([]Family{Terra}, nil, settings)
+	explicit := effortKeys([]Family{Terra}, []string{"high"}, settings)
+	if slices.Equal(implicit, explicit) {
+		t.Fatalf("implicit and explicit policies share keys: %v", implicit)
+	}
+}

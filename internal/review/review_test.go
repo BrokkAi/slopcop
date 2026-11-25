@@ -195,3 +195,44 @@ func TestRunFakeACP(t *testing.T) {
 		}
 	}
 }
+
+func TestCodexPrimaryDoesNotExportFallbackPatches(t *testing.T) {
+	root, capture, store := reviewRepo(t)
+	if err := os.WriteFile(filepath.Join(root, "large.txt"), []byte(strings.Repeat("large line\n", 900000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.Run(root, "add", "large.txt"); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := gitx.Run(root, "write-tree")
+	if err != nil {
+		t.Fatal(err)
+	}
+	capture, err = NewCapture(root, capture.BaseTree, tree)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := gitx.ExportPerFilePatches(context.Background(), root, capture.BaseTree, capture.CheckedTree(), t.TempDir(), 8<<20, 128<<20); err == nil {
+		t.Fatal("fixture must exceed export limit")
+	}
+	settings := Settings{Reviewers: []Family{Terra}, Fallbacks: []Family{Opus}, Adapters: map[string][]string{"codex": fakeAdapter("capture-prompt", "gpt-6-terra", filepath.Join(t.TempDir(), "trace")), "claude": fakeAdapter("capture-prompt", "opus", "")}}
+	v := Run(context.Background(), store, capture, Options{Root: root, Intent: "request", Settings: settings})
+	if v.Status != StatusClean || len(v.Reviewers) != 1 {
+		t.Fatalf("%+v", v)
+	}
+	// The first prompt's attempted export may fail too: start must report
+	// that reviewer as failed and allow the git-capable fallback to finish.
+	settings.Reviewers = []Family{Opus}
+	settings.Fallbacks = []Family{Terra}
+	v = Run(context.Background(), store, capture, Options{Root: root, Intent: "request", Settings: settings})
+	if v.Status != StatusClean || len(v.Reviewers) != 2 || v.Reviewers[0].Status != StatusFailed {
+		t.Fatalf("fallback after export failure: %+v", v)
+	}
+}
+
+func TestBinaryPromptWithoutExtractedFile(t *testing.T) {
+	p := reviewPrompt("/repo", Capture{Numstat: "-\t-\trun.sh\n"}, intent{}, "", "", "codex")
+	if !strings.Contains(p, "diff --text") || !strings.Contains(p, "Binary files differ") {
+		t.Fatal(p)
+	}
+}

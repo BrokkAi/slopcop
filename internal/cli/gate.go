@@ -305,14 +305,14 @@ func shellPushDestinations(command, branch string) []gitx.PushDestination {
 					continue
 				}
 				switch w {
-				case "-u", "--set-upstream", "-v", "--verbose", "-q", "--quiet", "--porcelain", "--progress", "--no-progress", "--no-verify", "--verify", "-n", "--dry-run", "--atomic", "--no-atomic", "--signed", "--no-signed", "--follow-tags", "-4", "-6", "--ipv4", "--ipv6", "-f", "--force", "--force-with-lease", "--force-if-includes", "--no-force-if-includes":
+				case "-u", "--set-upstream", "-v", "--verbose", "-q", "--quiet", "--porcelain", "--progress", "--no-progress", "--no-verify", "--verify", "-n", "--dry-run", "--atomic", "--no-atomic", "--signed", "--no-signed", "--follow-tags", "-4", "-6", "--ipv4", "--ipv6", "--no-force-with-lease", "--no-force-if-includes":
 				case "-o", "--push-option":
 					i++
 					if i >= len(words) {
 						dest.AllowExemptions = false
 					}
 				default:
-					if !(strings.HasPrefix(w, "--force-with-lease=") || strings.HasPrefix(w, "--push-option=") || strings.HasPrefix(w, "--signed=") || strings.HasPrefix(w, "--receive-pack=") || strings.HasPrefix(w, "--exec=")) {
+					if !(strings.HasPrefix(w, "--push-option=") || strings.HasPrefix(w, "--signed=") || strings.HasPrefix(w, "--receive-pack=") || strings.HasPrefix(w, "--exec=")) {
 						dest.AllowExemptions = false
 					}
 				}
@@ -328,7 +328,11 @@ func shellPushDestinations(command, branch string) []gitx.PushDestination {
 			}
 		}
 		if len(args) == 2 {
-			spec := strings.TrimPrefix(args[1], "+")
+			spec := args[1]
+			// Forced pushes cannot rely on potentially stale remote-tracking refs.
+			if strings.HasPrefix(spec, "+") {
+				dest.AllowExemptions = false
+			}
 			src, dst, colon := strings.Cut(spec, ":")
 			if src != "HEAD" && (branch == "" || src != branch && src != "refs/heads/"+branch) {
 				dest.AllowExemptions = false

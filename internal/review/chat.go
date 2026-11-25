@@ -28,7 +28,7 @@ const chatSelfCommand = "slopcop"
 const chatModelFlag = "--model="
 
 // chatRules tells the reviewer what it has. The agent offers nothing else.
-const chatRules = "Inspect per-file diffs on demand with read_diff, and full snapshot files with read_file, list_files and search_files. Read the snapshot only with your read_file, list_files and search_files tools, using paths from the repository root. You have no shell, git, file editing or web access.\n"
+const chatRules = "Inspect changed and deleted paths with list_changes, per-file diffs on demand with read_diff, and full snapshot files with read_file, list_files and search_files, using paths from the repository root. You have no shell, git, file editing or web access.\n"
 
 // chatToolKinds are the ACP tool kinds a chat reviewer may report. Anything
 // else stops it, including a server-side tool its provider ran.
