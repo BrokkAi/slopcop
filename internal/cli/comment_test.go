@@ -327,7 +327,7 @@ func TestCommentViaAppSaysWhichWorkspaceToConnect(t *testing.T) {
 		{"repository not on the installation", strings.Replace(notCoveredAnswer, `"installUrl"`,
 			`"installationSettingsUrl":"https://github.com/organizations/o/settings/installations/7","installUrl"`, 1), []string{
 			"the SlopCop App's installation on o, which your personal workspace's GitHub connection holds, does not include o/r.",
-			"add o/r under Repository access at https://github.com/organizations/o/settings/installations/7.",
+			"add o/r under Repository access at https://github.com/organizations/o/settings/installations/7. It then shows on https://slopcop.test/repositories with your personal workspace active.",
 		}},
 		{"not on GitHub", `{"checkId":"chk","status":"not_connected","reason":"not_github","repository":"g/r"}`, []string{
 			"the App comments only on GitHub pull requests, and g/r is not on GitHub",

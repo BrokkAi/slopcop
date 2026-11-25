@@ -141,8 +141,10 @@ func notConnected(answer service.NotConnected) appDeclined {
 	if answer.Repository != "" {
 		repository = answer.Repository
 	}
+	repositoriesPage := "the SlopCop Repositories page"
 	connect := "click Connect GitHub on the Repositories page"
 	if answer.ConnectURL != "" {
+		repositoriesPage = answer.ConnectURL
 		connect = "open " + answer.ConnectURL + " and click Connect GitHub"
 	}
 	switch answer.Reason {
@@ -157,7 +159,8 @@ func notConnected(answer service.NotConnected) appDeclined {
 		if answer.InstallationSettingsURL != "" {
 			return appDeclined{
 				reason: fmt.Sprintf("the SlopCop App's installation on %s, which %s's GitHub connection holds, does not include %s", owner, workspace, repository),
-				fix:    fmt.Sprintf("To let the App comment, add %s under Repository access at %s.", repository, answer.InstallationSettingsURL),
+				fix: fmt.Sprintf("To let the App comment, add %s under Repository access at %s. It then shows on %s with %s active.",
+					repository, answer.InstallationSettingsURL, repositoriesPage, workspace),
 			}
 		}
 		install := "Install the SlopCop App on the account that owns " + repository
