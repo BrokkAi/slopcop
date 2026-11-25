@@ -387,12 +387,6 @@ func TestChatDoesNotApproveAChangeTheDiffHides(t *testing.T) {
 			trace := filepath.Join(t.TempDir(), "trace")
 			v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(fakeAdapter("clean", chatTestModel, trace))})
 			r := v.Reviewers[0]
-			if name != "latin-1 source" {
-				if v.Status != StatusClean {
-					t.Fatalf("binary diff accessible on demand: %+v", v)
-				}
-				return
-			}
 			if v.Status != StatusFailed || !strings.Contains(r.Error, errChangeBinary.Error()) || r.FirstError != "" {
 				t.Fatalf("%+v", r)
 			}
@@ -440,8 +434,11 @@ func TestChatDoesNotApproveADeletedFileItCannotRead(t *testing.T) {
 	}
 	trace := filepath.Join(t.TempDir(), "trace")
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(fakeAdapter("clean", chatTestModel, trace))})
-	if v.Status != StatusClean {
-		t.Fatalf("deleted binary available with read_diff: %+v", v)
+	if r := v.Reviewers[0]; v.Status != StatusFailed || !strings.Contains(r.Error, errChangeBinary.Error()) {
+		t.Fatalf("%+v", r)
+	}
+	if _, err := os.Stat(trace); !os.IsNotExist(err) {
+		t.Fatal("the adapter started on a deletion it cannot read")
 	}
 }
 

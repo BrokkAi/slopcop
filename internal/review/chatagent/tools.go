@@ -43,9 +43,10 @@ type snapshot struct {
 	root, tree, gitDir, base string
 	files                    map[string]gitx.TreeFile
 	paths                    []string
-	// changed holds the files the change adds or edits, and unread those of
-	// them whose last read failed.
-	changed, unread map[string]bool
+	// changed holds the files the change adds or edits, diffPaths also includes
+	// deleted paths between base and tree, and unread holds any of them whose
+	// last read or diff failed.
+	changed, diffPaths, unread map[string]bool
 }
 
 // errPastEnd marks a read that starts after a file's last line. It is not a
@@ -62,7 +63,7 @@ func loadSnapshot(ctx context.Context, root, tree, base string) (*snapshot, erro
 	if err != nil {
 		return nil, err
 	}
-	s := &snapshot{base: base, root: root, tree: tree, gitDir: gitDir, files: make(map[string]gitx.TreeFile, len(files)), changed: map[string]bool{}, unread: map[string]bool{}}
+	s := &snapshot{base: base, root: root, tree: tree, gitDir: gitDir, files: make(map[string]gitx.TreeFile, len(files)), changed: map[string]bool{}, diffPaths: map[string]bool{}, unread: map[string]bool{}}
 	if base != "" {
 		changed, err := gitx.ChangedFiles(ctx, root, base, tree)
 		if err != nil {
@@ -70,6 +71,16 @@ func loadSnapshot(ctx context.Context, root, tree, base string) (*snapshot, erro
 		}
 		for _, p := range changed {
 			s.changed[p] = true
+			s.diffPaths[p] = true
+		}
+		raw, err := gitx.RunWithoutRepoAttributes(root, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none", "--name-only", "-z", base, tree)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range bytes.Split(raw, []byte{0}) {
+			if len(entry) > 0 {
+				s.diffPaths[string(entry)] = true
+			}
 		}
 	}
 	for _, f := range files {
@@ -153,7 +164,7 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 		if err == nil {
 			out, err = renderRead(data, path, in.Offset, in.Limit, in.Column)
 		}
-		if s.changed[path] {
+		if s.diffPaths[path] {
 			if err == nil || errors.Is(err, errPastEnd) {
 				delete(s.unread, path)
 			} else {

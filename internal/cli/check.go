@@ -395,11 +395,14 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	// A change the repository's own exclusions emptied leaves the reviewers
 	// nothing to read, so an empty review passes it, as the service's
-	// "Nothing checked" does. The size filter emptying a change is not the
-	// same: those files are in scope but went unread, so it stays unapproved.
+	// "Nothing checked" does. A clean upstream merge whose synthetic review
+	// baseline absorbed all merged-in changes likewise leaves nothing new to
+	// review locally while the static half still checks the real-base patch.
+	// The size filter emptying a change is not the same: those files are in
+	// scope but went unread, so it stays unapproved.
 	excludedOnly := prepared.onlyExcluded()
 	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean ||
-		(excludedOnly && verdict.Status == review.StatusEmpty)
+		((excludedOnly || prepared.reviewMergedClean) && verdict.Status == review.StatusEmpty)
 	staticPassed := staticPasses(static, mode, blockLevel)
 	nonempty := (prepared.bytes > 0 || excludedOnly) && (static.response != nil || (reviewPassed && mode != modeStatic))
 	reportOptions.Approved = reviewPassed && staticPassed && nonempty
@@ -940,6 +943,7 @@ type preparedCheck struct {
 	reviewBaseTree     string
 	reviewMergedIn     []string
 	reviewUnattributed string
+	reviewMergedClean  bool
 	// checkedTree is the tree the uploaded patch makes of the base: the
 	// files the service analyzed.
 	checkedTree  string
@@ -1022,6 +1026,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	patchTree, reviewTree := snapshot.PatchTree, snapshot.Tree
 	exclude := excludeOutsideSelection(repoRoot, snapshot.PatchTree, selection.Files)
 	var omitted []report.OmittedFile
+	reviewMergedClean := false
 	{
 		filtered, err := gitx.FilterCheckTree(repoRoot, base, patchTree, exclude, opts.include...)
 		if err != nil {
@@ -1039,6 +1044,16 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 				return prepared, err
 			}
 			reviewTree = filteredReview.Tree
+			if len(reviewMergedIn) > 0 && reviewBaseTree != "" && reviewBaseTree == reviewTree {
+				sizeOmitted := false
+				for _, file := range filteredReview.OmittedFiles {
+					if file.Reason != gitx.OmittedExcluded {
+						sizeOmitted = true
+						break
+					}
+				}
+				reviewMergedClean = !sizeOmitted
+			}
 		}
 	}
 	change, err = gitx.TreePatch(repoRoot, base, patchTree)
@@ -1069,7 +1084,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		pushLevel = "error"
 	}
 	pushLevel = repositoryPushLevel(cfg, pushLevel, repositoryFailOn)
-	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, reviewBaseTree: reviewBaseTree, reviewMergedIn: reviewMergedIn, reviewUnattributed: reviewUnattributed, checkedTree: patchTree,
+	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, reviewBaseTree: reviewBaseTree, reviewMergedIn: reviewMergedIn, reviewUnattributed: reviewUnattributed, reviewMergedClean: reviewMergedClean, checkedTree: patchTree,
 		omittedFiles: omitted, binaryFiles: binaryFiles, files: change.Files, bytes: len(change.Patch), base: resolution,
 		failOn: failOn, repositoryFailOn: repositoryFailOn, pushLevel: pushLevel,
 		request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}

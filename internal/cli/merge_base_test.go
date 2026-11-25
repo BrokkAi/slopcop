@@ -71,3 +71,51 @@ func TestPrepareCheckSyntheticMergeBaseline(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckApprovesCleanUpstreamMergeAbsorbedBySyntheticBaseline(t *testing.T) {
+	isolateUserConfig(t)
+	if _, err := config.Save(config.Config{Review: &config.Review{Reviewers: []string{"terra"}}}); err != nil {
+		t.Fatal(err)
+	}
+	root := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	supported, err := gitx.SupportsMergeTreeWriteTree(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported {
+		t.Skip("requires Git >= 2.39.5")
+	}
+	initial := runGit(t, root, "rev-parse", "HEAD")
+	runGit(t, root, "checkout", "-qb", "work")
+	writeFile(t, root, "work.txt", "work\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "work")
+	base := runGit(t, root, "rev-parse", "HEAD")
+	runGit(t, root, "update-ref", "refs/remotes/origin/work", base)
+	runGit(t, root, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	runGit(t, root, "config", "branch.work.remote", "origin")
+	runGit(t, root, "config", "branch.work.merge", "refs/heads/work")
+	runGit(t, root, "checkout", "-qb", "incoming", initial)
+	writeFile(t, root, "incoming.txt", "incoming\n")
+	runGit(t, root, "add", "-A")
+	runGit(t, root, "commit", "-qm", "incoming")
+	merged := runGit(t, root, "rev-parse", "HEAD")
+	runGit(t, root, "update-ref", "refs/remotes/origin/main", merged)
+	runGit(t, root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+	runGit(t, root, "checkout", "work")
+	runGit(t, root, "merge", "--no-edit", "incoming")
+	prepared, err := prepareCheck(&checkOptions{root: root, mode: modeAI}, config.Config{}, "", "test", "finding")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !prepared.reviewMergedClean {
+		t.Fatalf("expected reviewMergedClean=true for clean merge absorbed by synthetic baseline (baseTree=%s reviewTree=%s mergedIn=%v)", prepared.reviewBaseTree, prepared.reviewTree, prepared.reviewMergedIn)
+	}
+	code, out, stderr := runCLI(t, "check", "--root", root, "--ai", "--format", "json")
+	if code != 0 {
+		t.Fatalf("exit %d: %s %s", code, out, stderr)
+	}
+	if !strings.Contains(out, `"approved": true`) {
+		t.Fatalf("expected clean upstream merge to be approved, got: %s", out)
+	}
+}

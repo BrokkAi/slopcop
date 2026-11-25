@@ -18,6 +18,8 @@ import (
 	"time"
 
 	acp "github.com/coder/acp-go-sdk"
+
+	"github.com/BrokkAi/slopcop/internal/gitx"
 )
 
 const testKey = "sk-test-not-a-real-key"
@@ -734,5 +736,48 @@ func TestListChanges(t *testing.T) {
 	s.base = ""
 	if out, err := s.call(context.Background(), "list_changes", `{}`); err != nil || out != "(no base tree recorded)" {
 		t.Fatalf("%q: %v", out, err)
+	}
+}
+
+func TestOversizedDeletedFileDiffFailureRejectsVerdict(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "t"}, {"config", "user.email", "t@t"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("deleted line of code\n", 60000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "base"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(root, "huge.txt")); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "delete huge"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSnapshot(context.Background(), root, tree, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.call(context.Background(), "read_diff", `{"path":"huge.txt"}`); err == nil {
+		t.Fatal("expected oversized deleted file diff to fail")
+	}
+	if !s.unread["huge.txt"] {
+		t.Fatalf("expected huge.txt to be marked unread after read_diff failure: %+v", s.unread)
 	}
 }

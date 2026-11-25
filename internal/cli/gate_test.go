@@ -461,3 +461,37 @@ func TestGatePushDestinations(t *testing.T) {
 		}
 	}
 }
+
+func TestGateExplicitHEADPushUsesCurrentBranchDestination(t *testing.T) {
+	repo := newRepo(t, "https://example.com/repo.git")
+	runGit(t, repo, "config", "remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")
+	writeFile(t, repo, "app.go", "package app\n")
+	runGit(t, repo, "add", "app.go")
+	runGit(t, repo, "commit", "-qm", "initial code")
+	oldCode := runGit(t, repo, "rev-parse", "HEAD")
+	// origin/topic is behind on code; origin/main has the new code.
+	runGit(t, repo, "update-ref", "refs/remotes/origin/topic", oldCode)
+	writeFile(t, repo, "app.go", "package app\nfunc f() {}\n")
+	runGit(t, repo, "add", "app.go")
+	runGit(t, repo, "commit", "-qm", "new code on main")
+	mainHead := runGit(t, repo, "rev-parse", "HEAD")
+	runGit(t, repo, "update-ref", "refs/remotes/origin/main", mainHead)
+	runGit(t, repo, "checkout", "-qb", "topic", mainHead)
+	runGit(t, repo, "config", "branch.topic.remote", "origin")
+	runGit(t, repo, "config", "branch.topic.merge", "refs/heads/main")
+	writeFile(t, repo, "README.md", "docs update\n")
+	runGit(t, repo, "add", "README.md")
+	runGit(t, repo, "commit", "-qm", "docs on topic")
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	payload, _ := json.Marshal(map[string]any{"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": "git push origin HEAD"}})
+	cmd := newGateCommand()
+	var output bytes.Buffer
+	cmd.SetErr(&output)
+	cmd.SetIn(bytes.NewReader(payload))
+	cmd.SetArgs([]string{"--hook", "claude"})
+	if err := cmd.Execute(); err == nil {
+		t.Fatalf("git push origin HEAD should have been blocked against origin/topic (code diff), not exempted via origin/main")
+	}
+}

@@ -207,7 +207,7 @@ func requireTextChanges(ctx context.Context, root, other, tree string) error {
 		}
 		// JSON replaces invalid UTF-8, so two different changes could reach
 		// the model as the same text.
-		if !chatagent.IsBinary(data) && !utf8.Valid(data) {
+		if chatagent.IsBinary(data) || !utf8.Valid(data) {
 			return fmt.Errorf("%w: %q", errChangeBinary, path)
 		}
 	}

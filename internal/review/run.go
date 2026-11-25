@@ -149,7 +149,11 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		}
 	}
 	p.prompt = func(f Family) string {
-		return reviewPrompt(opts.Root, capture, in, history, p.patchDir, adapters[f], binaryDiffPath)
+		patchDir := ""
+		if needsPatchDir(adapters[f]) {
+			patchDir, _ = p.ensurePatches()
+		}
+		return reviewPrompt(opts.Root, capture, in, history, patchDir, adapters[f], binaryDiffPath)
 	}
 	promptPatchDir := ""
 	if needsPatchDir(adapters[order[0]]) {

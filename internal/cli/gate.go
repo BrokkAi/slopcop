@@ -340,7 +340,10 @@ func shellPushDestinations(command, branch string) []gitx.PushDestination {
 			if !colon {
 				dst = src
 				if src == "HEAD" {
-					dst = ""
+					if branch == "" {
+						dest.AllowExemptions = false
+					}
+					dst = branch
 				}
 			}
 			if strings.HasPrefix(dst, "refs/") && !strings.HasPrefix(dst, "refs/heads/") {
