@@ -362,10 +362,15 @@ func TestAVerdictAfterAFailedReadOfAChangedFileFails(t *testing.T) {
 	if _, text, err := review(t, root, tree, m, withBase); err == nil || !strings.Contains(err.Error(), "changed file") || !strings.Contains(err.Error(), "bin.dat") || text != "" {
 		t.Fatalf("%q %v", text, err)
 	}
-	// Reading past the end of a file is not a failure to read it.
-	m = &model{replies: []string{call("read_file", map[string]any{"path": "a.txt", "offset": 99}), stop("No findings.")}}
+	// Reading past the end of a file is not a failure to read it (after a real read).
+	m = &model{replies: []string{call("read_file", map[string]any{"path": "a.txt"}), call("read_file", map[string]any{"path": "a.txt", "offset": 99}), stop("No findings.")}}
 	if _, text, err := review(t, root, tree, m, withBase); err != nil || text != "No findings." {
 		t.Fatalf("%q %v", text, err)
+	}
+	// Returning No findings. without reading any changed file or diff fails.
+	m = &model{replies: []string{stop("No findings.")}}
+	if _, text, err := review(t, root, tree, m, withBase); err == nil || !strings.Contains(err.Error(), "without reading") || text != "" {
+		t.Fatalf("expected clean reply without reads to fail: %q %v", text, err)
 	}
 	// Without a base, as for an unchanged file, a failed read is the model's to handle.
 	m = &model{replies: []string{call("read_file", map[string]any{"path": "bin.dat"}), stop("No findings.")}}

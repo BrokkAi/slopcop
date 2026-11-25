@@ -322,7 +322,7 @@ func shellPushDestinations(command, branch string) []gitx.PushDestination {
 						dest.AllowExemptions = false
 					}
 				default:
-					if !(strings.HasPrefix(w, "--push-option=") || strings.HasPrefix(w, "--signed=") || strings.HasPrefix(w, "--receive-pack=") || strings.HasPrefix(w, "--exec=")) {
+					if !(strings.HasPrefix(w, "--push-option=") || strings.HasPrefix(w, "--signed=")) {
 						dest.AllowExemptions = false
 					}
 				}

@@ -281,6 +281,9 @@ func (a *agent) converse(ctx context.Context, session acp.SessionId, tree *snaps
 				if path := tree.unreadChange(); path != "" {
 					return "", fmt.Errorf("the reviewer replied after a read of changed file %q failed, so the reply is not a verdict", path)
 				}
+				if len(tree.diffPaths) > 0 && !tree.sawContent && strings.EqualFold(strings.TrimSpace(text), "No findings.") {
+					return "", errors.New("the reviewer returned No findings. without reading any changed file or diff, so the reply is not a verdict")
+				}
 			}
 			return a.scrub(text), nil
 		}

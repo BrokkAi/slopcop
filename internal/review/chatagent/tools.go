@@ -50,9 +50,11 @@ type snapshot struct {
 	paths                    []string
 	// changed holds the files the change adds or edits, diffPaths also includes
 	// deleted paths between base and tree, unread holds changed files whose
-	// last read_file failed, and unreadDiff holds diffPaths whose last read_diff
-	// failed (which a subsequent read_file cannot clear).
+	// last read_file failed, unreadDiff holds diffPaths whose last read_diff
+	// failed (which a subsequent read_file cannot clear), and sawContent tracks
+	// whether the reviewer read at least one changed file or diff.
 	changed, diffPaths, unread, unreadDiff map[string]bool
+	sawContent                             bool
 }
 
 // errPastEnd marks a read that starts after a file's last line. It is not a
@@ -174,6 +176,7 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 			if err == nil {
 				delete(s.unread, path)
 				delete(s.unreadDiff, path)
+				s.sawContent = true
 			} else if !errors.Is(err, errPastEnd) {
 				s.unreadDiff[path] = true
 			}
@@ -261,6 +264,7 @@ func (s *snapshot) read(ctx context.Context, path string, offset, limit, column 
 	if s.changed[path] {
 		if err == nil {
 			delete(s.unread, path)
+			s.sawContent = true
 		} else if !errors.Is(err, errPastEnd) {
 			s.unread[path] = true
 		}
