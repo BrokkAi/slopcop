@@ -106,11 +106,12 @@ func gateDestination(root string, dest PushDestination) (upstream, remote string
 	if remote == "" {
 		remote = "origin"
 	}
-	// Broad configured push refspecs cannot establish a single HEAD destination.
+	// Configured push refspecs can remap even a colon-less branch push to a
+	// different destination than its tracking ref.
+	if specs, _ := Run(root, "config", "--get-all", "remote."+remote+".push"); specs != "" {
+		return "", remote, false, false
+	}
 	if dest.DestRef == "" {
-		if specs, _ := Run(root, "config", "--get-all", "remote."+remote+".push"); specs != "" {
-			return "", remote, false, false
-		}
 		mode, _ := Run(root, "config", "--get", "push.default")
 		if mode != "" && mode != "simple" && mode != "current" && mode != "upstream" {
 			return "", remote, false, false

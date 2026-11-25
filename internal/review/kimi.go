@@ -267,6 +267,18 @@ func kimiChangedText(ctx context.Context, root string, trees reviewTrees, worksp
 			out[rel] = true
 		}
 	}
+	// Track the exported patch index and per-file patches too: for deletions
+	// and binary changes, patches/ is the only copy of the diff in workspace.
+	if _, err := os.Stat(filepath.Join(workspace, "patches.txt")); err == nil {
+		out["patches.txt"] = true
+	}
+	if entries, err := os.ReadDir(filepath.Join(workspace, "patches")); err == nil {
+		for _, entry := range entries {
+			if !entry.IsDir() {
+				out["patches/"+entry.Name()] = true
+			}
+		}
+	}
 	return out, nil
 }
 
