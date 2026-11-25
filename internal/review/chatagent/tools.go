@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -44,9 +45,10 @@ type snapshot struct {
 	files                    map[string]gitx.TreeFile
 	paths                    []string
 	// changed holds the files the change adds or edits, diffPaths also includes
-	// deleted paths between base and tree, and unread holds any of them whose
-	// last read or diff failed.
-	changed, diffPaths, unread map[string]bool
+	// deleted paths between base and tree, unread holds changed files whose
+	// last read_file failed, and unreadDiff holds diffPaths whose last read_diff
+	// failed (which a subsequent read_file cannot clear).
+	changed, diffPaths, unread, unreadDiff map[string]bool
 }
 
 // errPastEnd marks a read that starts after a file's last line. It is not a
@@ -63,7 +65,7 @@ func loadSnapshot(ctx context.Context, root, tree, base string) (*snapshot, erro
 	if err != nil {
 		return nil, err
 	}
-	s := &snapshot{base: base, root: root, tree: tree, gitDir: gitDir, files: make(map[string]gitx.TreeFile, len(files)), changed: map[string]bool{}, diffPaths: map[string]bool{}, unread: map[string]bool{}}
+	s := &snapshot{base: base, root: root, tree: tree, gitDir: gitDir, files: make(map[string]gitx.TreeFile, len(files)), changed: map[string]bool{}, diffPaths: map[string]bool{}, unread: map[string]bool{}, unreadDiff: map[string]bool{}}
 	if base != "" {
 		changed, err := gitx.ChangedFiles(ctx, root, base, tree)
 		if err != nil {
@@ -167,8 +169,9 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 		if s.diffPaths[path] {
 			if err == nil || errors.Is(err, errPastEnd) {
 				delete(s.unread, path)
+				delete(s.unreadDiff, path)
 			} else {
-				s.unread[path] = true
+				s.unreadDiff[path] = true
 			}
 		}
 		return out, err
@@ -204,7 +207,11 @@ func (s *snapshot) listChanges(ctx context.Context, prefix string, offset, limit
 		if prefix != "" && !strings.HasPrefix(parts[2], prefix) {
 			continue
 		}
-		lines = append(lines, parts[0]+"\t"+parts[1]+"\t"+parts[2])
+		path := parts[2]
+		if strings.ContainsAny(path, "\t\r\n") {
+			path = strconv.Quote(path)
+		}
+		lines = append(lines, parts[0]+"\t"+parts[1]+"\t"+path)
 	}
 	if len(lines) == 0 {
 		return "(no matching changed files)", nil
@@ -223,15 +230,23 @@ func IsBinary(data []byte) bool {
 	return bytes.IndexByte(data[:min(len(data), 8000)], 0) >= 0
 }
 
-// unreadChange names a changed file whose last read failed, or returns "".
+// unreadChange names a changed file whose last read or diff failed, or returns "".
 func (s *snapshot) unreadChange() string {
 	for _, p := range s.paths {
-		if s.unread[p] {
+		if s.unread[p] || s.unreadDiff[p] {
 			return p
 		}
 	}
+	var extra []string
 	for p := range s.unread {
-		return p
+		extra = append(extra, p)
+	}
+	for p := range s.unreadDiff {
+		extra = append(extra, p)
+	}
+	if len(extra) > 0 {
+		sort.Strings(extra)
+		return extra[0]
 	}
 	return ""
 }

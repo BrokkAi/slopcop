@@ -283,3 +283,17 @@ func TestDocumentationInitialPushSHA256(t *testing.T) {
 		})
 	}
 }
+
+func TestDocumentationCustomFetchRefspecRejected(t *testing.T) {
+	root := initRepo(t)
+	git(t, root, "remote", "add", "origin", "https://example.com/repo.git")
+	// Map remote's prod branch into refs/remotes/origin/main instead of refs/heads/main.
+	git(t, root, "config", "--replace-all", "remote.origin.fetch", "+refs/heads/prod:refs/remotes/origin/main")
+	code := exemptionCommit(t, root, "app.go", "package app\n")
+	git(t, root, "update-ref", "refs/remotes/origin/main", code)
+	head := exemptionCommit(t, root, "README.md", "docs\n")
+	ok, err := IsDocumentationOnlyPush(root, head, exemptionTree(t, root), nil, PushDestination{Remote: "origin", DestRef: "main", AllowExemptions: true})
+	if err != nil || ok {
+		t.Fatalf("custom fetch refspec should not exempt push to main: ok=%v err=%v", ok, err)
+	}
+}

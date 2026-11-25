@@ -138,22 +138,125 @@ func gateDestination(root string, dest PushDestination) (upstream, remote string
 		if _, err := Run(root, "check-ref-format", "refs/heads/"+dest.DestRef); err != nil {
 			return "", remote, trusted, false
 		}
-		ref = "refs/remotes/" + remote + "/" + dest.DestRef
+		mapped, ok := trackingRefForRemoteBranch(root, remote, dest.DestRef)
+		if !ok {
+			return "", remote, trusted, false
+		}
+		ref = mapped
 	} else {
 		upstreamRef, e := Run(root, "rev-parse", "--symbolic-full-name", "@{upstream}")
 		if e == nil && strings.HasPrefix(upstreamRef, "refs/remotes/"+remote+"/") {
+			merge, _ := Run(root, "config", "--get", "branch."+branch+".merge")
+			remoteBranch := strings.TrimPrefix(merge, "refs/heads/")
+			if merge == "" || remoteBranch == merge {
+				return "", remote, trusted, false
+			}
+			mapped, ok := trackingRefForRemoteBranch(root, remote, remoteBranch)
+			if !ok || mapped != upstreamRef {
+				return "", remote, trusted, false
+			}
 			ref = upstreamRef
 		} else {
-			ref = "refs/remotes/" + remote + "/" + branch
 			configuredRemote, _ := Run(root, "config", "--get", "branch."+branch+".remote")
 			merge, _ := Run(root, "config", "--get", "branch."+branch+".merge")
 			if configuredRemote == remote && merge != "" {
 				return "", remote, trusted, false
 			}
+			mapped, ok := trackingRefForRemoteBranch(root, remote, branch)
+			if !ok {
+				return "", remote, trusted, false
+			}
+			ref = mapped
 		}
 	}
 	upstream, _ = ResolveCommit(root, ref)
 	return upstream, remote, trusted, true
+}
+
+// trackingRefForRemoteBranch resolves the local remote-tracking ref mapped to
+// refs/heads/<remoteBranch> by remote.<remote>.fetch, rejecting unmapped,
+// ambiguous, excluded, or colliding fetch refspecs.
+func trackingRefForRemoteBranch(root, remote, remoteBranch string) (string, bool) {
+	if remoteBranch == "" {
+		return "", false
+	}
+	raw, err := Run(root, "config", "--get-all", "remote."+remote+".fetch")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return "", false
+	}
+	remoteFull := "refs/heads/" + remoteBranch
+	type posSpec struct{ src, dst string }
+	var positives []posSpec
+	for _, line := range strings.Split(raw, "\n") {
+		spec := strings.TrimSpace(line)
+		if spec == "" {
+			continue
+		}
+		if strings.HasPrefix(spec, "^") {
+			if refspecMatchesPattern(remoteFull, strings.TrimPrefix(spec, "^")) {
+				return "", false
+			}
+			continue
+		}
+		spec = strings.TrimPrefix(spec, "+")
+		src, dst, ok := strings.Cut(spec, ":")
+		if !ok || src == "" || dst == "" {
+			continue
+		}
+		positives = append(positives, posSpec{src: src, dst: dst})
+	}
+	var mapped string
+	for _, sp := range positives {
+		target, ok := applyRefspec(remoteFull, sp.src, sp.dst)
+		if !ok {
+			continue
+		}
+		if mapped != "" && mapped != target {
+			return "", false
+		}
+		mapped = target
+	}
+	if mapped == "" {
+		return "", false
+	}
+	// Ensure no other fetch refspec maps a different remote ref onto mapped.
+	for _, sp := range positives {
+		revSrc, ok := applyRefspec(mapped, sp.dst, sp.src)
+		if ok && revSrc != remoteFull {
+			return "", false
+		}
+	}
+	return mapped, true
+}
+
+func refspecMatchesPattern(ref, pattern string) bool {
+	if pattern == ref {
+		return true
+	}
+	if strings.Count(pattern, "*") != 1 {
+		return false
+	}
+	pre, suf, _ := strings.Cut(pattern, "*")
+	return strings.HasPrefix(ref, pre) && strings.HasSuffix(ref, suf) && len(ref) >= len(pre)+len(suf)
+}
+
+func applyRefspec(ref, from, to string) (string, bool) {
+	if strings.Count(from, "*") == 0 && strings.Count(to, "*") == 0 {
+		if ref == from {
+			return to, true
+		}
+		return "", false
+	}
+	if strings.Count(from, "*") != 1 || strings.Count(to, "*") != 1 {
+		return "", false
+	}
+	fPre, fSuf, _ := strings.Cut(from, "*")
+	if !strings.HasPrefix(ref, fPre) || !strings.HasSuffix(ref, fSuf) || len(ref) < len(fPre)+len(fSuf) {
+		return "", false
+	}
+	mid := ref[len(fPre) : len(ref)-len(fSuf)]
+	tPre, tSuf, _ := strings.Cut(to, "*")
+	return tPre + mid + tSuf, true
 }
 
 func reviewedAncestors(root string, trees map[string]bool, revisions ...string) ([]string, error) {

@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -777,7 +778,104 @@ func TestOversizedDeletedFileDiffFailureRejectsVerdict(t *testing.T) {
 	if _, err := s.call(context.Background(), "read_diff", `{"path":"huge.txt"}`); err == nil {
 		t.Fatal("expected oversized deleted file diff to fail")
 	}
-	if !s.unread["huge.txt"] {
-		t.Fatalf("expected huge.txt to be marked unread after read_diff failure: %+v", s.unread)
+	if s.unreadChange() != "huge.txt" {
+		t.Fatalf("expected huge.txt to be reported unread after read_diff failure: %q", s.unreadChange())
+	}
+}
+
+func TestReadFileDoesNotClearFailedDiffRead(t *testing.T) {
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "t"}, {"config", "user.email", "t@t"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Old file is ~600 KiB and replaced by a different ~600 KiB file: the new
+	// snapshot file fits under 1 MiB for read_file, while the combined diff
+	// exceeds 1 MiB for read_diff.
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(strings.Repeat("old line content 1234567890\n", 22000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "base"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(strings.Repeat("new line content 0987654321\n", 22000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "replace"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSnapshot(context.Background(), root, tree, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.call(context.Background(), "read_diff", `{"path":"big.txt"}`); err == nil {
+		t.Fatal("expected oversized diff to fail")
+	}
+	if _, err := s.call(context.Background(), "read_file", `{"path":"big.txt","offset":1,"limit":5}`); err != nil {
+		t.Fatalf("read_file failed: %v", err)
+	}
+	if got := s.unreadChange(); got != "big.txt" {
+		t.Fatalf("read_file cleared failed read_diff: unreadChange=%q", got)
+	}
+}
+
+func TestListChangesQuotesRecordSeparators(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("newline in filename not supported on Windows")
+	}
+	root := t.TempDir()
+	for _, args := range [][]string{{"init", "-q"}, {"config", "user.name", "t"}, {"config", "user.email", "t@t"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "plain.txt"), []byte("a\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "base"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	weird := "line1\nline2.txt"
+	if err := os.WriteFile(filepath.Join(root, weird), []byte("hello\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "weird"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := loadSnapshot(context.Background(), root, tree, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.call(context.Background(), "list_changes", `{}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"line1\nline2.txt"`) {
+		t.Fatalf("expected quoted filename in list_changes output, got:\n%s", out)
 	}
 }
