@@ -116,7 +116,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if repo := legacyRepoRoot(opts.root); repo != "" {
 		_ = cleanupInstalledLegacyRepository(repo)
 	}
-	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
+	reportOptions := report.Options{ShowExisting: opts.showExisting, Verbose: opts.verbose, Certainty: opts.certainty, SkillUpdated: syncSkillAndReport(cmd.ErrOrStderr(), cmd.ErrOrStderr(), skillRepoRoot(opts.root), version)}
 	cfg, err := config.Load()
 	if err != nil {
 		return err

@@ -293,6 +293,42 @@ func TestCommentFallsBackToTheWorkflowTokenWhenTheAppDoesNotPost(t *testing.T) {
 	}
 }
 
+func TestCommentTakesTheChecksOptionsFromTheReport(t *testing.T) {
+	appCommentEnv(t)
+	var sent map[string]any
+	service := appService(t, "posted", &sent)
+	writes := 0
+	github := commentGitHub(t, &writes)
+	// As a check run with args overriding the action's inputs writes it.
+	report := strings.Replace(commentReport, `"summary":{`, `"certainty":"all","summary":{"failOn":"warning",`, 1)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", report), "--service", service.URL, "--api-url", github.URL, "--via", "app")
+	if code != 0 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if sent["certainty"] != "all" || sent["failOn"] != "warning" {
+		t.Errorf("sent = %v", sent)
+	}
+}
+
+func TestCommentDoesNotFallBackWhenTheReportIsNotForThePullRequest(t *testing.T) {
+	for _, status := range []string{"stale", "change_mismatch"} {
+		t.Run(status, func(t *testing.T) {
+			appCommentEnv(t)
+			var sent map[string]any
+			service := appService(t, status, &sent)
+			writes := 0
+			github := commentGitHub(t, &writes)
+			code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL, "--via", "auto")
+			if code == 0 || writes != 0 {
+				t.Errorf("exit = %d, writes = %d", code, writes)
+			}
+			if !strings.Contains(stderr, "GITHUB_TOKEN does not comment it either") {
+				t.Errorf("stderr = %s", stderr)
+			}
+		})
+	}
+}
+
 func TestCommentViaAppDoesNotFallBack(t *testing.T) {
 	appCommentEnv(t)
 	var sent map[string]any

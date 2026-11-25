@@ -78,6 +78,12 @@ func Publish(ctx context.Context, g *GitHub, r Report, t Target) (Result, error)
 		if ours(c, me) || c.User.Type == "Bot" {
 			for _, key := range markedKeys(c.Body) {
 				commented[key] = true
+				// The App marks a review finding review:<id>, where this
+				// tool marks it <id>. Its static markers use the finding's
+				// stable key, which the report does not carry yet.
+				if id, ok := strings.CutPrefix(key, "review:"); ok && strings.HasPrefix(id, "rv-") {
+					commented[id] = true
+				}
 			}
 		}
 	}

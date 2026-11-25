@@ -247,16 +247,15 @@ runs:
         COMMENT: ${{ inputs.comment }}
         COMMENT_VIA: ${{ inputs.comment-via }}
         WORKSPACE: ${{ inputs.workspace }}
-        FAIL_ON: ${{ inputs.fail-on }}
-        CERTAINTY: ${{ inputs.certainty }}
       run: |
         if [ ! -s "$REPORT" ]; then
           echo "slopcop check wrote no report; its log above says why."
           exit 0
         fi
         if [ "$COMMENT" = "true" ]; then
-          # The same check options, so the App comments what the check reported.
-          args=(comment --report "$REPORT" --via "$COMMENT_VIA" --fail-on "$FAIL_ON" --certainty "$CERTAINTY")
+          # The report carries the --fail-on and --certainty the check ran
+          # with, args included, so the App comments what the check reported.
+          args=(comment --report "$REPORT" --via "$COMMENT_VIA")
           if [ -n "$WORKSPACE" ]; then
             args+=(--workspace "$WORKSPACE")
           fi
