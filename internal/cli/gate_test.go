@@ -455,9 +455,8 @@ func TestGatePushDestinations(t *testing.T) {
 		cmd.SetErr(&output)
 		cmd.SetIn(bytes.NewReader(payload))
 		cmd.SetArgs([]string{"--hook", "claude"})
-		err := cmd.Execute()
-		if (err == nil) != (tool == "mcp__github__create_pull_request") {
-			t.Fatalf("%s: %v %s", tool, err, output.String())
+		if err := cmd.Execute(); err == nil {
+			t.Fatalf("%s: expected MCP tool to require exact reviewed-tree approval", tool)
 		}
 	}
 }

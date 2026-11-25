@@ -747,7 +747,7 @@ func TestOversizedDeletedFileDiffFailureRejectsVerdict(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("deleted line of code\n", 60000)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("deleted line of code\n", 130000)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "base"}} {
@@ -790,9 +790,8 @@ func TestReadFileDoesNotClearFailedDiffRead(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	// Old file is ~600 KiB and replaced by a different ~600 KiB file: the new
-	// snapshot file fits under 1 MiB for read_file, while the combined diff
-	// exceeds 1 MiB for read_diff.
+	// Replacing a ~600 KiB file with a different ~600 KiB file produces a
+	// ~1.2 MiB combined diff, which must still be pageable via read_diff.
 	if err := os.WriteFile(filepath.Join(root, "big.txt"), []byte(strings.Repeat("old line content 1234567890\n", 22000)), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -821,13 +820,47 @@ func TestReadFileDoesNotClearFailedDiffRead(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.call(context.Background(), "read_diff", `{"path":"big.txt"}`); err == nil {
+	if out, err := s.call(context.Background(), "read_diff", `{"path":"big.txt","offset":1,"limit":10}`); err != nil || !strings.Contains(out, "-old line content") {
+		t.Fatalf("expected 1.2 MiB diff to paginate cleanly: err=%v out=%q", err, out)
+	}
+	// Now test a diff that truly exceeds maxDiffBytes (~2.6 MiB old file
+	// shrunk to a tiny new file): read_file succeeds on the small snapshot
+	// file, but must not clear the failed read_diff.
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte(strings.Repeat("very old content 1234567890\n", 100000)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "huge base"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base2, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "huge.txt"), []byte("tiny replacement\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-qm", "shrink"}} {
+		if _, err := gitx.Run(root, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree2, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, err := loadSnapshot(context.Background(), root, tree2, base2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.call(context.Background(), "read_diff", `{"path":"huge.txt"}`); err == nil {
 		t.Fatal("expected oversized diff to fail")
 	}
-	if _, err := s.call(context.Background(), "read_file", `{"path":"big.txt","offset":1,"limit":5}`); err != nil {
+	if _, err := s2.call(context.Background(), "read_file", `{"path":"huge.txt","offset":1,"limit":5}`); err != nil {
 		t.Fatalf("read_file failed: %v", err)
 	}
-	if got := s.unreadChange(); got != "big.txt" {
+	if got := s2.unreadChange(); got != "huge.txt" {
 		t.Fatalf("read_file cleared failed read_diff: unreadChange=%q", got)
 	}
 }

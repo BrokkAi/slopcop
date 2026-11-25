@@ -24,6 +24,11 @@ func FilePatch(ctx context.Context, root, base, tree, path string) ([]byte, erro
 	return filePatch(ctx, root, base, tree, path, 1<<20)
 }
 
+// FilePatchLimit reads a literal path's captured diff up to maxBytes.
+func FilePatchLimit(ctx context.Context, root, base, tree, path string, maxBytes int64) ([]byte, error) {
+	return filePatch(ctx, root, base, tree, path, maxBytes)
+}
+
 func filePatch(ctx context.Context, root, base, tree, path string, maxFile int64) ([]byte, error) {
 	if maxFile <= 0 {
 		maxFile = 1 << 20

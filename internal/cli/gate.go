@@ -221,7 +221,9 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 					}
 				}
 				for _, target := range roots {
-					destinations := []gitx.PushDestination{{AllowExemptions: !strings.HasSuffix(input.ToolName, "__push_files")}}
+					// MCP push/PR tools take target repo/head parameters outside
+					// the local checkout, so require exact reviewed-tree approval.
+					destinations := []gitx.PushDestination{{AllowExemptions: false}}
 					if shellTools[input.ToolName] {
 						destinations = shellPushDestinations(input.ToolInput.Command, gitx.CurrentBranch(target))
 					}

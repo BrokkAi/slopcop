@@ -25,6 +25,10 @@ const (
 	// MaxFile is the largest file a reviewer can read. A change to a larger
 	// one fails the reviewer before it starts.
 	MaxFile = 1 << 20
+	// maxDiffBytes allows replacing a full MaxFile text file with another
+	// MaxFile text file (plus diff headers) while read_diff paginates each
+	// response to maxToolResult.
+	maxDiffBytes = 2*MaxFile + 256<<10
 	// maxToolResult bounds one tool result.
 	maxToolResult = 64 << 10
 	// maxReadLine is the most of one line a read returns at a time.
@@ -161,7 +165,7 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 			return "", errors.New("path is required")
 		}
 		path := cleanPath(in.Path)
-		data, err := gitx.FilePatch(ctx, s.root, s.base, s.tree, path)
+		data, err := gitx.FilePatchLimit(ctx, s.root, s.base, s.tree, path, maxDiffBytes)
 		var out string
 		if err == nil {
 			out, err = renderRead(data, path, in.Offset, in.Limit, in.Column)
