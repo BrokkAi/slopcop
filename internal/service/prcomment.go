@@ -40,6 +40,29 @@ type PullRequestCommentResponse struct {
 	Inline     int    `json:"inline"`
 	Elsewhere  int    `json:"elsewhere"`
 	SummaryURL string `json:"summaryUrl"`
+	NotConnected
+}
+
+// NotConnected is what a "not_connected" answer adds, so the caller can say
+// which workspace to fix and where. A service from before it sends none of
+// it.
+type NotConnected struct {
+	// Reason is "no_github_connection" (the workspace that ran the check has
+	// never connected GitHub), "repository_not_covered" (it has, but no App
+	// installation it holds includes the repository) or "no_workspace" (the
+	// login has no workspace).
+	Reason        string `json:"reason"`
+	WorkspaceName string `json:"workspaceName"`
+	// WorkspaceKind is "personal" or "team".
+	WorkspaceKind string `json:"workspaceKind"`
+	// Repository is the check's repository as owner/name.
+	Repository string `json:"repository"`
+	// ConnectURL is the service's Repositories page, where Connect GitHub
+	// connects the workspace that is active in the browser.
+	ConnectURL string `json:"connectUrl"`
+	// InstallURL is the App's page on GitHub, where an installation picks
+	// its repositories.
+	InstallURL string `json:"installUrl"`
 }
 
 // CommentPullRequest asks the service to comment check checkID on a pull

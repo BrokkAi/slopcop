@@ -31,16 +31,23 @@ func publishWithToken(cmd *cobra.Command, opts *commentOptions, parsed prcomment
 	return prcomment.Publish(cmd.Context(), client, parsed, target)
 }
 
+// appDeclined is why the service did not post, and, when the person can
+// change that, what to do.
+type appDeclined struct {
+	reason string
+	fix    string
+}
+
 // publishWithApp asks the service to have the SlopCop GitHub App write the
 // comments, with the SlopCop login that ran the check. handled is false, with
-// the reason, when the service did not post them and the workflow's token
-// may; err is a failure to ask at all.
-func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parsed prcomment.Report, target prcomment.Target, version string) (result prcomment.Result, handled bool, reason string, err error) {
+// why, when the service did not post them and the workflow's token may; err
+// is a failure to ask at all.
+func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parsed prcomment.Report, target prcomment.Target, version string) (result prcomment.Result, handled bool, declined appDeclined, err error) {
 	if parsed.CheckID == "" {
-		return result, false, "the report has no check id, so the static check did not answer", nil
+		return result, false, appDeclined{reason: "the report has no check id, so the static check did not answer"}, nil
 	}
 	if !fullCommitPattern.MatchString(target.Commit) {
-		return result, false, "the pull request's head commit is unknown (pass --commit)", nil
+		return result, false, appDeclined{reason: "the pull request's head commit is unknown (pass --commit)"}, nil
 	}
 	// The parts of the report the service takes as they are.
 	var raw struct {
@@ -53,18 +60,18 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	_ = json.Unmarshal(data, &raw)
 	cfg, err := config.Load()
 	if err != nil {
-		return result, false, "", err
+		return result, false, declined, err
 	}
 	serviceFlag := ""
 	if opts.serviceURL != nil {
 		serviceFlag = *opts.serviceURL
 	}
 	if resolveToken(cfg, resolveServiceURL(cfg, serviceFlag)) == "" {
-		return result, false, "there is no SlopCop login (set SLOPCOP_TOKEN)", nil
+		return result, false, appDeclined{reason: "there is no SlopCop login (set SLOPCOP_TOKEN)"}, nil
 	}
 	client, err := workspaceClient(cmd, serviceFlag, version, opts.workspace)
 	if err != nil {
-		return result, false, "", err
+		return result, false, declined, err
 	}
 	request := service.PullRequestCommentRequest{
 		PullRequest:   target.PR,
@@ -84,36 +91,79 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	if errors.As(err, &refused) && refused.StatusCode == http.StatusNotFound {
 		// A service from before the endpoint, or a check this login did not
 		// start.
-		return result, false, "the service cannot comment this check", nil
+		return result, false, appDeclined{reason: "the service cannot comment this check"}, nil
 	}
 	if err != nil {
-		return result, false, "", err
+		return result, false, declined, err
 	}
 	if response.Status != "posted" {
-		return result, false, appReason(response.Status), nil
+		return result, false, appReason(response), nil
 	}
 	result = prcomment.Render(parsed, target.Commit)
 	result.Posted = response.Posted
 	result.Inline = response.Inline
 	result.Elsewhere = response.Elsewhere
 	result.SummaryURL = response.SummaryURL
-	return result, true, "", nil
+	return result, true, declined, nil
 }
 
-// appReason says why the service did not post.
-func appReason(status string) string {
-	switch status {
+// appReason says why the service did not post, and what would let it.
+func appReason(response service.PullRequestCommentResponse) appDeclined {
+	switch response.Status {
 	case "off":
-		return "the service does not post comments from the App"
+		return appDeclined{reason: "the service does not post comments from the App"}
 	case "not_connected":
-		return "no GitHub connection of the workspace covers this repository"
+		return notConnected(response.NotConnected)
 	case "not_granted":
-		return "the App's installation has not accepted Pull requests: Read and write"
+		return appDeclined{reason: "the App's installation has not accepted Pull requests: Read and write"}
 	case "stale":
-		return "the pull request's head is not the commit the check ran on"
+		return appDeclined{reason: "the pull request's head is not the commit the check ran on"}
 	case "change_mismatch":
-		return "the pull request does not change the files the check did"
+		return appDeclined{reason: "the pull request does not change the files the check did"}
 	default:
-		return "the service answered " + status
+		return appDeclined{reason: "the service answered " + response.Status}
+	}
+}
+
+// notConnected says which workspace has no installation for the App to post
+// through, and how to give it one. The web app's Repositories page acts on
+// the browser's active workspace, so the fix names the workspace to be in.
+func notConnected(answer service.NotConnected) appDeclined {
+	workspace := "the workspace that ran the check"
+	switch {
+	case answer.WorkspaceKind == "personal":
+		workspace = "your personal workspace"
+	case answer.WorkspaceName != "":
+		workspace = fmt.Sprintf("the %q workspace", answer.WorkspaceName)
+	}
+	repository := "this repository"
+	if answer.Repository != "" {
+		repository = answer.Repository
+	}
+	connect := "click Connect GitHub on the Repositories page"
+	if answer.ConnectURL != "" {
+		connect = "open " + answer.ConnectURL + " and click Connect GitHub"
+	}
+	switch answer.Reason {
+	case "no_github_connection":
+		return appDeclined{
+			reason: workspace + ", which ran the check, has no GitHub connection",
+			fix: fmt.Sprintf("To let the App comment, %s with %s active. Installing the App on GitHub is not enough: the workspace needs its own connection.",
+				connect, workspace),
+		}
+	case "repository_not_covered":
+		where := "on GitHub"
+		if answer.InstallURL != "" {
+			where = "on GitHub (" + answer.InstallURL + ")"
+		}
+		return appDeclined{
+			reason: fmt.Sprintf("no SlopCop App installation that %s's GitHub connection holds includes %s", workspace, repository),
+			fix: fmt.Sprintf("To let the App comment, add %s to the App's installation %s. If that installation is on an account %s has not connected, also %s with %s active.",
+				repository, where, workspace, connect, workspace),
+		}
+	case "no_workspace":
+		return appDeclined{reason: "the SlopCop login has no workspace, so it has no GitHub connection"}
+	default:
+		return appDeclined{reason: "no GitHub connection of the workspace covers this repository"}
 	}
 }

@@ -377,6 +377,15 @@ from you. Where SlopCop does not offer that, or the App's installation has not
 granted **Pull requests: Read and write**, it writes them itself. `--via app`
 uses only the App.
 
+The App posts through the GitHub connection of the workspace that ran the
+check. Having the App installed on your GitHub organization is not enough:
+when that workspace has never connected GitHub, `slopcop comment` names the
+workspace and links the Repositories page, where you click **Connect GitHub**
+with that workspace active. When the workspace is connected but the App's
+installation does not include the repository, it says to add the repository
+to the installation on GitHub. With `--via auto` it says so once and then
+writes the comments with `GITHUB_TOKEN`.
+
 The token comes from `GITHUB_TOKEN` (or `GH_TOKEN`) and needs
 `pull-requests: write`. With a read-only token, as on a pull request from a
 fork, nothing is written to the pull request. In GitHub Actions the summary
