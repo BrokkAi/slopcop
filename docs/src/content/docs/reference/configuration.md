@@ -75,19 +75,24 @@ requires: with `terra,sol`, no fallbacks and the default, one failure fails the
 review. Mix providers (Codex for `terra` and `sol`, Claude for `haiku`, `sonnet`
 and `opus`, dsh for `flash`) between reviewers and fallbacks, so one outage or empty account does
 not fail every check. Adapter command overrides
-are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`. For
-example, keep a DeepSeek key in a file with:
+are keyed by adapter at `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 
-```json
-"dsh": {"command": ["npx", "--yes", "@brokkai/dsh-acp@0.6.0", "--api-key-file", "/path/to/deepseek_api_key"]}
+dsh reads `DEEPSEEK_API_KEY`. To keep the DeepSeek key in a file instead, run:
+
+```bash
+slopcop config set review.dsh.apiKeyFile /path/to/deepseek_api_key
 ```
 
-Otherwise dsh reads `DEEPSEEK_API_KEY`.
+The file must exist and hold the key; the path is saved absolute. The CLI
+passes it to its default dsh command with `--api-key-file`, so the dsh adapter
+version still follows CLI upgrades. A `review.adapters.dsh.command` override is
+used as written and ignores this setting.
 
 When `review.reviewers` is unset, `slopcop init` picks reviewers by sending
 each family a short prompt. It tries different adapters at the same time and
-prints each result as it arrives. It skips flash without a dsh command override
-when `DEEPSEEK_API_KEY` is not set.
+prints each result as it arrives. Without a dsh command override, it skips
+flash when neither `DEEPSEEK_API_KEY` nor a readable, non-empty
+`review.dsh.apiKeyFile` is set.
 
 The Claude families are `haiku`, `sonnet` and `opus`. Each reviews with the
 newest Claude model of its name at high effort, through the same Claude ACP
