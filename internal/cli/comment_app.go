@@ -4,9 +4,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -58,6 +60,7 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 		ReviewSkipped string          `json:"reviewSkipped"`
 		Certainty     string          `json:"certainty"`
 		Workspace     string          `json:"workspace"`
+		Service       string          `json:"service"`
 		Summary       *struct {
 			FailOn string `json:"failOn"`
 		} `json:"summary"`
@@ -71,6 +74,7 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	if opts.serviceURL != nil {
 		serviceFlag = *opts.serviceURL
 	}
+	serviceFlag = commentService(cmd.ErrOrStderr(), cfg, serviceFlag, raw.Service)
 	if resolveToken(cfg, resolveServiceURL(cfg, serviceFlag)) == "" {
 		return result, false, "there is no SlopCop login (set SLOPCOP_TOKEN)", nil
 	}
@@ -125,6 +129,34 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	result.Elsewhere = response.Elsewhere
 	result.SummaryURL = response.SummaryURL
 	return result, true, "", nil
+}
+
+// commentService is the --service to comment through. --service and
+// $SLOPCOP_SERVICE win; without them it is the service the report's check
+// ran against, so the App path asks the service that knows the check. A
+// report is a file anyone can write, so it never moves a login: it is used
+// only when this machine stores a login for that exact service, and never
+// with $SLOPCOP_TOKEN, which may have been issued by another. Either way
+// stderr says which service the command asks.
+func commentService(stderr io.Writer, cfg config.Config, serviceFlag, reported string) string {
+	reported = strings.TrimSpace(reported)
+	if strings.TrimSpace(serviceFlag) != "" || strings.TrimSpace(os.Getenv("SLOPCOP_SERVICE")) != "" || reported == "" {
+		return serviceFlag
+	}
+	fallback := config.Origin(resolveServiceURL(cfg, ""))
+	if config.Origin(reported) == fallback {
+		return serviceFlag
+	}
+	switch {
+	case strings.TrimSpace(os.Getenv("SLOPCOP_TOKEN")) != "":
+		fmt.Fprintf(stderr, "slopcop: the check ran against %s, but $SLOPCOP_TOKEN may be another service's, so this asks %s; pass --service %s to ask the check's\n", config.Origin(reported), fallback, config.Origin(reported))
+	case cfg.TokenFor(reported) == "":
+		fmt.Fprintf(stderr, "slopcop: the check ran against %s, which this machine has no login for, so this asks %s\n", config.Origin(reported), fallback)
+	default:
+		fmt.Fprintf(stderr, "slopcop: asking %s, the service the check ran against\n", config.Origin(reported))
+		return reported
+	}
+	return serviceFlag
 }
 
 // appReason says why the service did not post.

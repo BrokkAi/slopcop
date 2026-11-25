@@ -225,6 +225,18 @@ runs:
         if [ -n "$EXTRA_ARGS" ]; then
           read -r -a extra <<< "$EXTRA_ARGS"
           args+=("${extra[@]}")
+          # The comment step asks the service args chose: it holds only
+          # $SLOPCOP_TOKEN, so it does not take the report's word for it.
+          service=""
+          for i in "${!extra[@]}"; do
+            case "${extra[$i]}" in
+              --service=*) service="${extra[$i]#--service=}" ;;
+              --service) service="${extra[$((i + 1))]:-}" ;;
+            esac
+          done
+          if [ -n "$service" ]; then
+            echo "service=$service" >> "$GITHUB_OUTPUT"
+          fi
         fi
         set +e
         slopcop "${args[@]}" > "$report"
@@ -249,7 +261,11 @@ runs:
         REPORT: ${{ steps.check.outputs.report }}
         COMMENT: ${{ inputs.comment }}
         COMMENT_VIA: ${{ inputs.comment-via }}
+        ARGS_SERVICE: ${{ steps.check.outputs.service }}
       run: |
+        if [ -n "$ARGS_SERVICE" ]; then
+          export SLOPCOP_SERVICE="$ARGS_SERVICE"
+        fi
         if [ ! -s "$REPORT" ]; then
           echo "slopcop check wrote no report; its log above says why."
           exit 0

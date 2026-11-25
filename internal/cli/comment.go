@@ -54,6 +54,11 @@ moved on, or it does not make the check's change), nothing is written and the
 command fails. --via app uses only the App; --via token, the default, only
 GITHUB_TOKEN.
 
+The App path asks the service --service or $SLOPCOP_SERVICE names, else the
+one the report says the check ran against. A report is a file anyone can
+write, so the report's service is used only when this machine stores a login
+for it and $SLOPCOP_TOKEN is unset; stderr says which service was asked.
+
 In GitHub Actions the repository, pull request and head commit come from the
 workflow's event, and the token from GITHUB_TOKEN, which needs
 'pull-requests: write'. With a read-only token, as on a pull request from a

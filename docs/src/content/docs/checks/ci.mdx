@@ -175,7 +175,7 @@ alike, from the same check. It needs `security-events: write`.
 | `comment-via` | `token` | who comments: `token` (`github-token`), `auto` (the SlopCop GitHub App where SlopCop offers it, else `github-token`) or `app`; `auto` and `app` send the review findings to SlopCop |
 | `github-token` | `github.token` | token that comments |
 | `working-directory` | `.` | checkout to check |
-| `args` | | further `slopcop check` arguments, such as `--policy-pack security` |
+| `args` | | further `slopcop check` arguments, such as `--policy-pack security`; a `--service` here also reaches the comment step |
 
 Outputs: `exit-code`, `status`, `exit-reason`, `static-findings`,
 `review-findings`, `headline`, `summary-url`, `report` (the JSON report's path)

@@ -101,6 +101,10 @@ type Options struct {
 	// command chose one, or "" for the login's own. Like Certainty, it is
 	// for `slopcop comment`.
 	Workspace string
+	// Service is the URL of the service the check ran against, without
+	// credentials, or "" when it reached none. `slopcop comment` comments
+	// through it when this machine holds a login for it.
+	Service string
 	// EmptyChange marks a check whose patch had no in-scope changes. With
 	// OmittedFiles, the size filter or the exclusions removed them all; otherwise the snapshot
 	// matched the base. The human format leaves it to the CLI's stderr note.
@@ -1136,7 +1140,10 @@ type jsonReport struct {
 	Certainty string `json:"certainty,omitempty"`
 	// Workspace is the id of the workspace the check ran in, when the
 	// command chose one; it is omitted for the login's own.
-	Workspace  string                     `json:"workspace,omitempty"`
+	Workspace string `json:"workspace,omitempty"`
+	// Service is the URL of the service the check ran against. It is
+	// omitted when the check reached none.
+	Service    string                     `json:"service,omitempty"`
 	Summary    summaryJSON                `json:"summary"`
 	Findings   []service.Finding          `json:"findings"`
 	Incomplete []service.IncompletePolicy `json:"incomplete"`
@@ -1229,6 +1236,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		BaseCommit:           response.BaseCommit,
 		Certainty:            options.Certainty,
 		Workspace:            options.Workspace,
+		Service:              options.Service,
 		Summary:              summaryValue(response.Summary, options.Review),
 		Findings:             listed(response, options),
 		Incomplete:           response.Incomplete,

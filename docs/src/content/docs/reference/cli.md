@@ -392,6 +392,15 @@ finds the report is not for the pull request as it is now (its head moved on,
 or it does not make the check's change), nothing is written and the command
 fails. `--via app` uses only the App.
 
+The App path asks the service named by `--service` or `$SLOPCOP_SERVICE`, else
+the one the report's `service` says the check ran against. A report is a file
+anyone can write, so it never moves your login: the command uses the report's
+service only when this machine stores a login for it (`slopcop login --service
+URL`) and `$SLOPCOP_TOKEN` is unset, and says on stderr which service it
+asked. Otherwise it asks the default service, as before. With `$SLOPCOP_TOKEN`
+in CI, pass `--service` or set `$SLOPCOP_SERVICE`; the
+[GitHub Action](/checks/ci/) passes on a `--service` from its `args` itself.
+
 The token comes from `GITHUB_TOKEN` (or `GH_TOKEN`) and needs
 `pull-requests: write`. With a read-only token, as on a pull request from a
 fork, nothing is written to the pull request. In GitHub Actions the summary
