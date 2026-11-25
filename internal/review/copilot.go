@@ -188,7 +188,7 @@ func (c *copilotCatalog) release(f Family) {
 // it, which it does for a model without effort settings or a CLI that does
 // not know the flag, the reviewer starts again without it. On a failure it
 // returns the stopped runner when there is one, so the result names its log.
-func startCopilot(ctx context.Context, root string, catalog *copilotCatalog, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+func startCopilot(ctx context.Context, root string, catalog *copilotCatalog, f Family, name, dir string, timeout time.Duration, efforts ...string) (*runner, error) {
 	models, err := catalog.load(ctx, root, dir, timeout)
 	if err != nil {
 		return nil, err
@@ -197,7 +197,7 @@ func startCopilot(ctx context.Context, root string, catalog *copilotCatalog, f F
 	if err != nil {
 		return nil, err
 	}
-	s, err := startCopilotModel(ctx, root, catalog.base, f, model, auto, name, dir, timeout)
+	s, err := startCopilotModel(ctx, root, catalog.base, f, model, auto, name, dir, timeout, efforts...)
 	if err != nil && auto {
 		catalog.release(f)
 	}
@@ -206,7 +206,7 @@ func startCopilot(ctx context.Context, root string, catalog *copilotCatalog, f F
 
 // startCopilotModel starts a reviewer on a chosen model, falling back to the
 // model's default effort as startCopilot describes.
-func startCopilotModel(ctx context.Context, root string, base []string, f Family, model string, auto bool, name, dir string, timeout time.Duration) (*runner, error) {
+func startCopilotModel(ctx context.Context, root string, base []string, f Family, model string, auto bool, name, dir string, timeout time.Duration, efforts ...string) (*runner, error) {
 	try := func(effort, attempt string) (*runner, error) {
 		s, err := startRunner(ctx, root, copilotArgs(base, model, effort), f, attempt, dir, timeout)
 		if err != nil {
@@ -225,6 +225,9 @@ func startCopilotModel(ctx context.Context, root string, base []string, f Family
 	}
 	// Copilot refuses any reasoning effort on Auto.
 	if auto {
+		if slotEffort(efforts, 0) != "" {
+			return nil, fmt.Errorf("%w: Copilot auto does not support configuring reasoning effort", errEffort)
+		}
 		s, err := try("", name)
 		if err != nil {
 			return s, err
@@ -233,10 +236,13 @@ func startCopilotModel(ctx context.Context, root string, base []string, f Family
 		s.result.Warning = copilotWarning(f, model, auto, nil)
 		return s, nil
 	}
-	s, err := try(copilotEffort, name)
+	s, err := try(effectiveEffort(slotEffort(efforts, 0)), name)
 	if err == nil {
 		s.result.Warning = copilotWarning(f, model, auto, nil)
 		return s, nil
+	}
+	if slotEffort(efforts, 0) != "" {
+		return s, fmt.Errorf("%w: Copilot refused %s effort: %v", errEffort, efforts[0], err)
 	}
 	// A timeout would only double the wait.
 	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
@@ -336,34 +342,37 @@ func copilotErrorReply(text string) bool {
 
 // launch starts a family's adapter and prepares its session. On a prepare
 // failure it returns the stopped runner, whose result names the log.
-func launch(ctx context.Context, root string, trees reviewTrees, adapter string, argv []string, catalog *copilotCatalog, ollamaModel string, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+func launch(ctx context.Context, root string, trees reviewTrees, adapter string, argv []string, catalog *copilotCatalog, ollamaModel string, f Family, name, dir string, timeout time.Duration, efforts ...string) (*runner, error) {
 	if adapter == copilotAdapter {
 		if catalog == nil {
 			catalog = newCopilotCatalog(argv)
 		}
-		return startCopilot(ctx, root, catalog, f, name, dir, timeout)
+		return startCopilot(ctx, root, catalog, f, name, dir, timeout, efforts...)
 	}
 	if adapter == antigravityAdapter {
-		return startAntigravity(ctx, root, trees, argv, f, name, dir, timeout)
+		return startAntigravity(ctx, root, trees, argv, f, name, dir, timeout, efforts...)
 	}
 	if adapter == kimiAdapter {
-		return startKimi(ctx, root, trees, argv, f, name, dir, timeout)
+		return startKimi(ctx, root, trees, argv, f, name, dir, timeout, efforts...)
 	}
 	if adapter == grokAdapter {
-		return startGrok(ctx, root, trees, argv, f, name, dir, timeout)
+		return startGrok(ctx, root, trees, argv, f, name, dir, timeout, efforts...)
+	}
+	if adapter == ollamaAdapter && slotEffort(efforts, 0) != "" {
+		return nil, fmt.Errorf("%w: ollama does not support configuring reasoning effort", errEffort)
 	}
 	if adapter == ollamaAdapter {
 		return startOllama(ctx, root, trees, argv, ollamaModel, f, name, dir, timeout)
 	}
 	if IsChatAdapter(adapter) {
-		return startChat(ctx, root, trees, argv, f, name, dir, timeout)
+		return startChat(ctx, root, trees, argv, f, name, dir, timeout, efforts...)
 	}
 	s, err := startRunner(ctx, root, argv, f, name, dir, timeout)
 	if err != nil {
 		return nil, err
 	}
 	s.result.Adapter = adapter
-	if err = s.prepare(root); err != nil {
+	if err = s.prepare(root, efforts...); err != nil {
 		err = startError(s.ctx, err)
 		s.stop()
 		return s, err

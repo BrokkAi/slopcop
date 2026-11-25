@@ -118,11 +118,15 @@ func gateArmed(dir string) bool {
 	return ok
 }
 
-// gateTree allows a push only when the committed HEAD tree has an approval ref.
+// gateTree allows approved trees, plain documentation, and proven clean upstream merges.
 // User-level hooks fire in every repository, so a checkout that has never run
 // SlopCop is left alone. The review store is created before a check starts; its
-// presence arms the gate, and after that only an approved HEAD tree may push.
-func gateTree(root string) error {
+// presence arms the gate; exemptions are proved against local Git history.
+func gateTree(root string, destinations ...gitx.PushDestination) error {
+	dest := gitx.PushDestination{AllowExemptions: true}
+	if len(destinations) > 0 {
+		dest = destinations[0]
+	}
 	root, ok := armedRoot(root)
 	if !ok {
 		return nil
@@ -134,6 +138,16 @@ func gateTree(root string) error {
 	reviewed, err := gitx.Run(root, "rev-parse", "--verify", "refs/slopcop/reviewed/"+tree)
 	if err == nil && reviewed == tree {
 		return nil
+	}
+	head, headErr := gitx.HeadCommit(root)
+	trees, treesErr := gitx.ReviewedTrees(root)
+	if headErr == nil && treesErr == nil {
+		if allowed, err := gitx.IsCleanUpstreamMergePush(root, head, tree, trees, dest); err == nil && allowed {
+			return nil
+		}
+		if allowed, err := gitx.IsDocumentationOnlyPush(root, head, tree, trees, dest); err == nil && allowed {
+			return nil
+		}
 	}
 	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong run `slopcop override --reason \"...\"` there; then push", tree, root, root)
 }
@@ -207,8 +221,14 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 					}
 				}
 				for _, target := range roots {
-					if err := gateTree(target); err != nil {
-						return gateBlock(cmd, err)
+					destinations := []gitx.PushDestination{{AllowExemptions: !strings.HasSuffix(input.ToolName, "__push_files")}}
+					if shellTools[input.ToolName] {
+						destinations = shellPushDestinations(input.ToolInput.Command, gitx.CurrentBranch(target))
+					}
+					for _, dest := range destinations {
+						if err := gateTree(target, dest); err != nil {
+							return gateBlock(cmd, err)
+						}
 					}
 				}
 				return nil
@@ -233,4 +253,104 @@ func gateBlock(cmd *cobra.Command, err error) error {
 	}
 	fmt.Fprintln(cmd.ErrOrStderr(), err)
 	return silentExit{2}
+}
+
+// shellPushDestinations checks every push segment. Applying every destination to
+// every possible checkout is conservative when shell control flow is ambiguous.
+func shellPushDestinations(command, branch string) []gitx.PushDestination {
+	var result []gitx.PushDestination
+	for _, part := range shellSeparator.Split(command, -1) {
+		if !gitPush.MatchString(part) {
+			continue
+		}
+		words := shellWords(part)
+		start := -1
+		unsafe := false
+		for i := 0; i < len(words); i++ {
+			if words[i] != "git" {
+				continue
+			}
+			for j := i + 1; j < len(words); j++ {
+				w := words[j]
+				if w == "push" {
+					start = j + 1
+					break
+				}
+				switch {
+				case w == "-C" || w == "--git-dir" || w == "--work-tree":
+					j++
+				case w == "-c" || w == "--config-env":
+					unsafe = true
+					j++
+				case strings.HasPrefix(w, "--git-dir=") || strings.HasPrefix(w, "--work-tree="):
+				case w == "--no-pager" || w == "--paginate" || w == "-p" || w == "-P":
+				default:
+					unsafe = true
+				}
+			}
+			break
+		}
+		dest := gitx.PushDestination{AllowExemptions: start >= 0 && !unsafe}
+		var args []string
+		if start >= 0 {
+			options := true
+			for i := start; i < len(words); i++ {
+				w := words[i]
+				if options && w == "--" {
+					options = false
+					continue
+				}
+				if !options || !strings.HasPrefix(w, "-") {
+					args = append(args, w)
+					continue
+				}
+				switch w {
+				case "-u", "--set-upstream", "-v", "--verbose", "-q", "--quiet", "--porcelain", "--progress", "--no-progress", "--no-verify", "--verify", "-n", "--dry-run", "--atomic", "--no-atomic", "--signed", "--no-signed", "--follow-tags", "-4", "-6", "--ipv4", "--ipv6", "-f", "--force", "--force-with-lease", "--force-if-includes", "--no-force-if-includes":
+				case "-o", "--push-option":
+					i++
+					if i >= len(words) {
+						dest.AllowExemptions = false
+					}
+				default:
+					if !(strings.HasPrefix(w, "--force-with-lease=") || strings.HasPrefix(w, "--push-option=") || strings.HasPrefix(w, "--signed=") || strings.HasPrefix(w, "--receive-pack=") || strings.HasPrefix(w, "--exec=")) {
+						dest.AllowExemptions = false
+					}
+				}
+			}
+		}
+		if len(args) > 2 {
+			dest.AllowExemptions = false
+		}
+		if len(args) > 0 {
+			dest.Remote = args[0]
+			if strings.ContainsAny(dest.Remote, ":/\\@$") || strings.HasPrefix(dest.Remote, ".") {
+				dest.AllowExemptions = false
+			}
+		}
+		if len(args) == 2 {
+			spec := strings.TrimPrefix(args[1], "+")
+			src, dst, colon := strings.Cut(spec, ":")
+			if src != "HEAD" && (branch == "" || src != branch && src != "refs/heads/"+branch) {
+				dest.AllowExemptions = false
+			}
+			if !colon {
+				dst = src
+				if src == "HEAD" {
+					dst = ""
+				}
+			}
+			if strings.HasPrefix(dst, "refs/") && !strings.HasPrefix(dst, "refs/heads/") {
+				dest.AllowExemptions = false
+			}
+			if colon && dst == "" {
+				dest.AllowExemptions = false
+			}
+			dest.DestRef = strings.TrimPrefix(dst, "refs/heads/")
+		}
+		result = append(result, dest)
+	}
+	if len(result) == 0 {
+		result = append(result, gitx.PushDestination{AllowExemptions: true})
+	}
+	return result
 }

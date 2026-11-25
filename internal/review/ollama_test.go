@@ -264,7 +264,7 @@ func TestVerdictFormatError(t *testing.T) {
 }
 
 func TestOllamaPromptNamesTheExportedRepository(t *testing.T) {
-	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", Ollama)
+	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", AdapterFor(Ollama, Settings{}))
 	if strings.Contains(p, "/home/someone/private-repo") || !strings.Contains(p, "Repository root: repo\n") || !strings.Contains(p, "read, glob and grep") || strings.Contains(p, "git -C") {
 		t.Fatal(p)
 	}
@@ -500,7 +500,7 @@ func TestOllamaUnreachableFails(t *testing.T) {
 	}
 }
 
-func TestOllamaRefusesADiffItCannotRead(t *testing.T) {
+func TestOllamaReadsLargeDiffViaOnDemandPatches(t *testing.T) {
 	root, c, store := reviewRepo(t)
 	if err := os.WriteFile(filepath.Join(root, "change.txt"), []byte(strings.Repeat("line of changed code\n", 20000)), 0600); err != nil {
 		t.Fatal(err)
@@ -518,11 +518,11 @@ func TestOllamaRefusesADiffItCannotRead(t *testing.T) {
 	startOllamaStub(t, nil)
 	trace := filepath.Join(t.TempDir(), "trace")
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: ollamaSettings(t, "opencode", trace)})
-	if v.Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "over the 256 KiB") {
+	if v.Status != StatusClean || len(v.Reviewers) != 1 {
 		t.Fatalf("%+v", v)
 	}
-	if _, err := os.Stat(trace); err == nil {
-		t.Fatal("the adapter started")
+	if _, err := os.Stat(trace); err != nil {
+		t.Fatalf("the adapter did not start: %v", err)
 	}
 }
 

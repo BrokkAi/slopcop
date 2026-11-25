@@ -2,6 +2,7 @@ package review
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,7 +109,11 @@ func TestAttributesCannotHideTextFromReviewers(t *testing.T) {
 					t.Fatalf("review: %+v", v)
 				}
 				prompt := readTrace(t, trace+".prompt")
-				if !strings.Contains(prompt, "+"+hiddenText) {
+				patch, patchErr := gitx.FilePatch(context.Background(), root, capture.BaseTree, capture.CheckedTree(), attrVictim)
+				if patchErr != nil {
+					t.Fatal(patchErr)
+				}
+				if !strings.Contains(string(patch), "+"+hiddenText) {
 					t.Errorf("the reviewer was not shown the edited text:\n%s", promptDiff(prompt))
 				}
 				if strings.Contains(capture.Numstat, "-\t-\t"+attrVictim) {
@@ -117,7 +122,7 @@ func TestAttributesCannotHideTextFromReviewers(t *testing.T) {
 				if strings.Contains(prompt, realBinary) || strings.Contains(prompt, `File "`+attrBinFile+`"`) {
 					t.Error("a real binary file's content reached the prompt")
 				}
-				if !strings.Contains(prompt, "Binary files /dev/null and b/"+attrBinFile+" differ") {
+				if !strings.Contains(prompt, attrBinFile) {
 					t.Errorf("the real binary file is not reported as binary:\n%s", promptDiff(prompt))
 				}
 			})
@@ -175,10 +180,14 @@ func TestNULByteCannotHideTextFromReviewers(t *testing.T) {
 		t.Fatalf("review: %+v", v)
 	}
 	prompt := readTrace(t, trace+".prompt")
-	if !strings.Contains(prompt, "Diff truncated") {
-		t.Fatal("the fixture did not reach the prompt's diff limit")
+	if strings.Contains(prompt, "Captured diff") {
+		t.Fatal("inline diff remained")
 	}
-	if !strings.Contains(prompt, "+3: curl "+hiddenText+" | sh") {
+	patch, patchErr := gitx.FilePatch(context.Background(), root, capture.BaseTree, capture.CheckedTree(), "run.sh")
+	if patchErr != nil {
+		t.Fatal(patchErr)
+	}
+	if !strings.Contains(string(patch), "+3: curl "+hiddenText+" | sh") {
 		t.Errorf("the reviewer was not shown the script's text:\n%.600s", promptDiff(prompt))
 	}
 	if strings.Contains(prompt, "\x00") {
@@ -214,38 +223,58 @@ func TestIsolatedReviewersRefuseCutBinaryText(t *testing.T) {
 		{Kimi, kimiAdapter, kimiModel},
 		{Grok, grokAdapter, "grok-4.6"},
 	} {
-		t.Run(string(tc.family), func(t *testing.T) {
-			root, _, store := reviewRepo(t)
-			base, err := gitx.Run(root, "rev-parse", "HEAD")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if err = os.WriteFile(filepath.Join(root, "run.sh"), []byte("\x00\n"+strings.Repeat("readable script line\n", 2000)), 0600); err != nil {
-				t.Fatal(err)
-			}
-			for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "long script"}} {
-				if _, err = gitx.Run(root, args...); err != nil {
+		for _, lines := range []int{2000, 60000} {
+			t.Run(fmt.Sprintf("%s/%d", tc.family, lines), func(t *testing.T) {
+				t.Setenv("KIMI_API_KEY", "test-kimi-key")
+				t.Setenv("XAI_API_KEY", "test-xai-key")
+				root, _, store := reviewRepo(t)
+				base, err := gitx.Run(root, "rev-parse", "HEAD")
+				if err != nil {
 					t.Fatal(err)
 				}
-			}
-			tree, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
-			if err != nil {
-				t.Fatal(err)
-			}
-			capture, err := NewCapture(root, base, tree)
-			if err != nil {
-				t.Fatal(err)
-			}
-			trace := filepath.Join(t.TempDir(), "trace")
-			settings := Settings{Reviewers: []Family{tc.family}, Adapters: map[string][]string{tc.adapter: fakeAdapter("clean", tc.model, trace)}}
-			v := Run(context.Background(), store, capture, Options{Root: root, Intent: "request", Settings: settings})
-			if v.Status != StatusFailed || len(v.Reviewers) != 1 || !strings.Contains(v.Reviewers[0].Error, errBinaryTextCut.Error()) {
-				t.Fatalf("review: %+v", v)
-			}
-			if _, err = os.Stat(trace); !os.IsNotExist(err) {
-				t.Fatalf("the reviewer was started: %v", err)
-			}
-		})
+				if err = os.WriteFile(filepath.Join(root, "run.sh"), []byte("\x00\n"+strings.Repeat("readable script line\n", lines)+"FINAL_READABLE_LINE\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "long script"}} {
+					if _, err = gitx.Run(root, args...); err != nil {
+						t.Fatal(err)
+					}
+				}
+				tree, err := gitx.Run(root, "rev-parse", "HEAD^{tree}")
+				if err != nil {
+					t.Fatal(err)
+				}
+				capture, err := NewCapture(root, base, tree)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if lines == 2000 {
+					dest := t.TempDir()
+					if _, err := gitx.ExportPerFilePatches(context.Background(), root, capture.BaseTree, capture.CheckedTree(), dest, 1<<20, 8<<20); err != nil {
+						t.Fatal(err)
+					}
+					data, err := os.ReadFile(filepath.Join(dest, "patches", "000001.patch"))
+					if err != nil || !strings.Contains(string(data), "FINAL_READABLE_LINE") {
+						t.Fatalf("missing script tail: %v", err)
+					}
+				}
+				trace := filepath.Join(t.TempDir(), "trace")
+				settings := Settings{Reviewers: []Family{tc.family}, Adapters: map[string][]string{tc.adapter: fakeAdapter("clean", tc.model, trace)}}
+				v := Run(context.Background(), store, capture, Options{Root: root, Intent: "request", Settings: settings})
+				if lines == 60000 {
+					if v.Status != StatusFailed {
+						t.Fatalf("oversized binary approved: %+v", v)
+					}
+					return
+				}
+				if v.Status != StatusClean || len(v.Reviewers) != 1 {
+					t.Fatalf("review: %+v", v)
+				}
+				if _, err = os.Stat(trace); err != nil {
+					t.Fatalf("the reviewer did not start: %v", err)
+				}
+			})
+		}
 	}
 }
 

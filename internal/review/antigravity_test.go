@@ -94,7 +94,7 @@ func TestToolGuard(t *testing.T) {
 }
 
 func TestGeminiPromptNamesTheExportedRepository(t *testing.T) {
-	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", Gemini)
+	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", AdapterFor(Gemini, Settings{}))
 	if strings.Contains(p, "/home/someone/private-repo") || !strings.Contains(p, "Repository root: repo\n") || !strings.Contains(p, "read_file") || strings.Contains(p, "git -C") {
 		t.Fatal(p)
 	}
@@ -204,7 +204,7 @@ func TestGeminiReadOutsideTheWorkspaceIsRefused(t *testing.T) {
 
 func TestGeminiDoesNotApproveADiffItCannotSee(t *testing.T) {
 	root, c, store := reviewRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", promptDiffLimit/5)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", (256*1024)/5)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(root, "add", "-A"); err != nil {
@@ -224,18 +224,11 @@ func TestGeminiDoesNotApproveADiffItCannotSee(t *testing.T) {
 		antigravityAdapter: fakeAdapter("clean", "gemini-3.8-flash", trace),
 		"claude":           fakeAdapter("clean", "claude-haiku-5-5", fallback),
 	}}})
-	if v.Status != StatusClean || len(v.Reviewers) != 2 {
-		t.Fatalf("want the fallback to review it: %+v", v)
+	if v.Status != StatusClean || len(v.Reviewers) != 1 {
+		t.Fatalf("on-demand diff review: %+v", v)
 	}
-	gemini := v.Reviewers[0]
-	if gemini.Status != StatusFailed || !strings.Contains(gemini.Error, "over the 256 KiB") || gemini.FirstError != "" {
-		t.Fatalf("%+v", gemini)
-	}
-	if _, err := os.Stat(trace); !os.IsNotExist(err) {
-		t.Fatal("the Gemini adapter started on a diff it cannot see")
-	}
-	if v.Reviewers[1].Family != Haiku || v.Reviewers[1].Status != StatusClean {
-		t.Fatalf("%+v", v.Reviewers[1])
+	if _, err := os.Stat(trace); err != nil {
+		t.Fatal("adapter did not start", err)
 	}
 }
 

@@ -213,10 +213,12 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 		if len(names) > review.MaxReviewers {
 			return fmt.Errorf("invalid review.reviewers %q (want 1-%d known families)", value, review.MaxReviewers)
 		}
-		for _, name := range names {
-			if _, err := review.ParseFamily(name); err != nil {
+		for i, name := range names {
+			family, effort, err := review.ParseReviewerSpec(name)
+			if err != nil {
 				return fmt.Errorf("invalid review.reviewers %q: %w", value, err)
 			}
+			names[i] = review.FormatReviewerSpec(family, effort)
 		}
 		if cfg.Review != nil && cfg.Review.MinCompleted > len(names) {
 			return fmt.Errorf("invalid review.reviewers %q: review.minCompleted is %d; lower or unset it first", value, cfg.Review.MinCompleted)
@@ -227,10 +229,12 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 		if len(names) > review.MaxReviewers {
 			return fmt.Errorf("invalid review.fallbacks %q (want 1-%d known families)", value, review.MaxReviewers)
 		}
-		for _, name := range names {
-			if _, err := review.ParseFamily(name); err != nil {
+		for i, name := range names {
+			family, effort, err := review.ParseReviewerSpec(name)
+			if err != nil {
 				return fmt.Errorf("invalid review.fallbacks %q: %w", value, err)
 			}
+			names[i] = review.FormatReviewerSpec(family, effort)
 		}
 		ensureReview(cfg).Fallbacks = names
 	case "review.timeout":

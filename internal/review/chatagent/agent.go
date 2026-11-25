@@ -49,6 +49,7 @@ const (
 type Config struct {
 	Provider Provider
 	Model    string
+	Effort   string
 	Key      string
 	// Tree is the git tree the tools read. Without one, as in a probe, the
 	// model is offered no tools.
@@ -81,7 +82,7 @@ var treeID = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 // Main runs the agent for the hidden review-agent command. It takes the API
 // key out of the environment, so the git commands it runs never hold it, and
 // turns off git's on-demand fetch, so a read stays on this machine.
-func Main(ctx context.Context, provider, model, tree, base string, in io.Reader, out io.Writer) error {
+func Main(ctx context.Context, provider, model, tree, base string, in io.Reader, out io.Writer, efforts ...string) error {
 	p, ok := Lookup(provider)
 	if !ok {
 		return fmt.Errorf("unknown review provider %q", provider)
@@ -106,7 +107,11 @@ func Main(ctx context.Context, provider, model, tree, base string, in io.Reader,
 			return err
 		}
 	}
-	return Serve(ctx, Config{Provider: p, Model: model, Key: key, Tree: tree, Base: base}, in, out)
+	effort := ""
+	if len(efforts) > 0 {
+		effort = efforts[0]
+	}
+	return Serve(ctx, Config{Effort: effort, Provider: p, Model: model, Key: key, Tree: tree, Base: base}, in, out)
 }
 
 // Serve speaks ACP on in and out until the client disconnects.
@@ -349,6 +354,9 @@ func (a *agent) complete(ctx context.Context, messages []any, tools []map[string
 	body := make(map[string]any, len(a.cfg.Provider.Request)+4)
 	for k, v := range a.cfg.Provider.Request {
 		body[k] = v
+	}
+	if a.cfg.Effort != "" {
+		body["reasoning"] = map[string]any{"effort": a.cfg.Effort}
 	}
 	body["model"], body["messages"], body["stream"] = a.cfg.Model, messages, false
 	if len(tools) > 0 {

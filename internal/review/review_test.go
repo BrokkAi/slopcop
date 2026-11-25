@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"unicode/utf8"
 
 	acp "github.com/coder/acp-go-sdk"
 
@@ -40,55 +39,27 @@ func TestConnectionReply(t *testing.T) {
 	}
 }
 func TestPrompt(t *testing.T) {
-	p := reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{Source: "not available"}, "", "+added line\n", Terra)
-	for _, v := range []string{"snapshot of the working tree", "Base tree: base", "Snapshot tree: snap", "+added line", "git -C '/repo' diff --no-ext-diff base snap", "No findings."} {
-		if !strings.Contains(p, v) {
-			t.Fatal(v)
+	c := Capture{BaseTree: "base", Tree: "snap", Numstat: "2\t1\tx", ChangedLines: 3, MergedIn: []string{"other"}, Unattributed: "unknown"}
+	p := reviewPrompt("/repo", c, intent{Source: intentNone}, "", "/patches", "codex")
+	for _, want := range []string{`changed_lines="3"`, "Base tree: base", "other", "unknown", "--ignore-submodules=none", "User intent (unavailable)"} {
+		if !strings.Contains(p, want) {
+			t.Fatal(want)
 		}
 	}
-	for _, family := range []Family{Sol, Flash} {
-		p = reviewPrompt("/repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", family)
-		if strings.Contains(p, "git -C") != (family == Sol) || strings.Contains(p, sandboxRules) != (family == Sol) {
-			t.Fatal(family)
-		}
+	if strings.Contains(p, "Captured diff") {
+		t.Fatal("inline diff")
 	}
-	p = reviewPrompt("/repo", Capture{}, intent{}, "", strings.Repeat("a\n", 131073), Flash)
-	if !strings.Contains(p, "Diff truncated at 256 KiB") || strings.Contains(p, strings.Repeat("a\n", 131073)) {
-		t.Fatal("truncation")
+	p = reviewPrompt("/repo", c, intent{}, "", "/patches", "copilot")
+	if strings.Contains(p, sandboxRules) || !strings.Contains(p, "/patches/patches.txt") {
+		t.Fatal(p)
 	}
 }
 
-// TestIntentKeepsTheMostRecentMessages checks the intent cap and its marker.
-func TestIntentKeepsTheMostRecentMessages(t *testing.T) {
-	short := intent{Text: "first\n\nsecond", Source: "s"}
-	if got := capIntent(short, 64); got != short {
-		t.Fatalf("short intent changed: %+v", got)
-	}
-	if p := reviewPrompt("/repo", Capture{}, short, "", "", Flash); strings.Contains(p, "omitted") {
-		t.Fatal("untruncated intent marked")
-	}
-	old := strings.Repeat("o", 40)
-	recent := strings.Repeat("r", 20)
-	got := capIntent(intent{Text: old + "\n\n" + old + "\n\n" + recent, Source: "s"}, 50)
-	if !got.Truncated || got.Text != recent {
-		t.Fatalf("message boundary: %+v", got)
-	}
-	got = capIntent(intent{Text: old + "\n" + recent}, 30)
-	if !got.Truncated || got.Text != recent {
-		t.Fatalf("line boundary: %+v", got)
-	}
-	got = capIntent(intent{Text: strings.Repeat("é", 40)}, 25)
-	if !got.Truncated || !utf8.ValidString(got.Text) || len(got.Text) > 25 {
-		t.Fatalf("character boundary: %q", got.Text)
-	}
-	long := strings.Repeat("old message\n\n", 10000) + "the latest request"
-	in := capIntent(intent{Text: long, Source: "s"}, intentLimit)
-	if len(in.Text) > intentLimit || !strings.HasSuffix(in.Text, "the latest request") || !strings.HasPrefix(in.Text, "old message") {
-		t.Fatalf("capped to %d bytes", len(in.Text))
-	}
-	p := reviewPrompt("/repo", Capture{}, in, "", "", Flash)
-	if !strings.Contains(p, "<user_intent>\n[Earlier user messages omitted; only the most recent 64 KiB are shown.]\nold message") {
-		t.Fatal("truncation not marked")
+func TestChronologicalIntent(t *testing.T) {
+	messages := []string{"first request", strings.Repeat("middle", userMessagesLimit), "latest request"}
+	packet, cut := userMessagesPacket(messages)
+	if !cut || len(packet) > userMessagesLimit || !strings.Contains(packet, "first request") || !strings.Contains(packet, `index="3" current_outer_turn="true"`) || !strings.Contains(packet, "latest request") {
+		t.Fatal("packet lost governing messages")
 	}
 }
 
@@ -203,5 +174,24 @@ func TestRunFakeACP(t *testing.T) {
 	v = Run(context.Background(), s, c, o)
 	if !v.Reused || v.Status != StatusClean {
 		t.Fatalf("reuse: %+v", v)
+	}
+	for _, attribution := range []Capture{
+		{MergedIn: []string{"first", "second"}},
+		{MergedIn: []string{"firstsecond"}},
+		{Unattributed: "unattributed commit"},
+	} {
+		before, err := s.Last()
+		if err != nil {
+			t.Fatal(err)
+		}
+		c.MergedIn, c.Unattributed = attribution.MergedIn, attribution.Unattributed
+		v = Run(context.Background(), s, c, o)
+		after, err := s.Last()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v.Reused || v.Status != StatusClean || before.ReuseKey == after.ReuseKey || before.ContentKey == after.ContentKey {
+			t.Fatalf("attribution reused: %+v", v)
+		}
 	}
 }

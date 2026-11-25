@@ -28,7 +28,7 @@ const chatSelfCommand = "slopcop"
 const chatModelFlag = "--model="
 
 // chatRules tells the reviewer what it has. The agent offers nothing else.
-const chatRules = "Read the snapshot only with your read_file, list_files and search_files tools, using paths from the repository root. You have no shell, git, file editing or web access.\n"
+const chatRules = "Inspect per-file diffs on demand with read_diff, and full snapshot files with read_file, list_files and search_files. Read the snapshot only with your read_file, list_files and search_files tools, using paths from the repository root. You have no shell, git, file editing or web access.\n"
 
 // chatToolKinds are the ACP tool kinds a chat reviewer may report. Anything
 // else stops it, including a server-side tool its provider ran.
@@ -118,8 +118,11 @@ func chatPrerequisite(f Family, settings Settings) string {
 
 // startChat starts a chat reviewer on the checked tree. It fails before
 // starting when the change touches a file the reviewer could not read.
-func startChat(ctx context.Context, root string, trees reviewTrees, argv []string, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+func startChat(ctx context.Context, root string, trees reviewTrees, argv []string, f Family, name, dir string, timeout time.Duration, efforts ...string) (*runner, error) {
 	args := slices.Clone(argv)
+	if effort := slotEffort(efforts, 0); effort != "" {
+		args = append(args, "--effort="+effort)
+	}
 	if args[0] == chatSelfCommand {
 		self, err := os.Executable()
 		if err != nil {
@@ -164,6 +167,7 @@ func startChat(ctx context.Context, root string, trees reviewTrees, argv []strin
 	if err != nil {
 		return nil, err
 	}
+	s.result.Effort = slotEffort(efforts, 0)
 	s.result.Adapter = string(f)
 	if err = s.prepareChat(root, model); err != nil {
 		err = startError(s.ctx, err)
@@ -203,7 +207,7 @@ func requireTextChanges(ctx context.Context, root, other, tree string) error {
 		}
 		// JSON replaces invalid UTF-8, so two different changes could reach
 		// the model as the same text.
-		if chatagent.IsBinary(data) || !utf8.Valid(data) {
+		if !chatagent.IsBinary(data) && !utf8.Valid(data) {
 			return fmt.Errorf("%w: %q", errChangeBinary, path)
 		}
 	}

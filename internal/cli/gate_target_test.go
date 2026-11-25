@@ -141,7 +141,11 @@ func TestPushTargetsCannotReadEveryDirectory(t *testing.T) {
 func armedRepo(t *testing.T, approved bool) string {
 	t.Helper()
 	repo := testInitRepo(t)
-	gitAt(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
+	if err := os.WriteFile(filepath.Join(repo, "app.go"), []byte("package app\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitAt(t, repo, "add", "app.go")
+	gitAt(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "init")
 	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0o700); err != nil {
 		t.Fatal(err)
 	}

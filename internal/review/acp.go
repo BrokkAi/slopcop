@@ -699,7 +699,7 @@ func (s *runner) setSession(id acp.SessionId) {
 	s.sessionMu.Unlock()
 }
 
-func (s *runner) prepare(root string) error {
+func (s *runner) prepare(root string, efforts ...string) error {
 	session, err := s.conn.NewSession(s.ctx, acp.NewSessionRequest{Cwd: root, McpServers: []acp.McpServer{}})
 	if err != nil {
 		return fmt.Errorf("session/new: %w", err)
@@ -719,24 +719,27 @@ func (s *runner) prepare(root string) error {
 	if len(effortOptions) == 0 {
 		effortOptions = session.ConfigOptions
 	}
-	effort := configOption(effortOptions, "effort")
-	if effort == nil {
-		return fmt.Errorf("no effort option")
-	}
-	found := false
-	for _, v := range choices(effort) {
-		if string(v.Value) == "high" {
-			found = true
+	want := effectiveEffort(slotEffort(efforts, 0))
+	if s.result.Family != Kimi || want != "none" {
+		effort := configOption(effortOptions, "effort")
+		if effort == nil {
+			return fmt.Errorf("%w: %s effort unavailable (no effort option)", errEffort, want)
+		}
+		found := false
+		for _, v := range choices(effort) {
+			if string(v.Value) == want {
+				found = true
+			}
+		}
+		if !found {
+			return fmt.Errorf("%w: %s effort unavailable", errEffort, want)
+		}
+		response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: effort.Id, Value: acp.SessionConfigValueId(want)}})
+		if err != nil {
+			return fmt.Errorf("%w: select %s effort: %v", errEffort, want, err)
 		}
 	}
-	if !found {
-		return fmt.Errorf("high effort unavailable")
-	}
-	response, err = s.conn.SetSessionConfigOption(s.ctx, acp.SetSessionConfigOptionRequest{ValueId: &acp.SetSessionConfigOptionValueId{SessionId: session.SessionId, ConfigId: effort.Id, Value: acp.SessionConfigValueId("high")}})
-	if err != nil {
-		return fmt.Errorf("select high effort: %w", err)
-	}
-	s.result.Effort = "high"
+	s.result.Effort = want
 	modeOptions := response.ConfigOptions
 	key, value := reviewerMode(s.result.Family)
 	if key == "" {

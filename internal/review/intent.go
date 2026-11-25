@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"unicode/utf8"
@@ -11,58 +12,39 @@ import (
 	"github.com/BrokkAi/slopcop/internal/attribution"
 )
 
-// intent is the user's request as given to reviewers. Truncated says that
-// earlier text was dropped to keep the prompt within intentLimit.
+// intent keeps chronological user messages and their bounded review packet.
 type intent struct {
+	Messages     []string
+	CurrentTask  string
 	Text, Source string
 	Truncated    bool
 }
 
-// intentLimit bounds the intent text in a review prompt. A long session's
-// transcript can hold megabytes of user messages; the most recent ones say
-// best what the change under review is for.
-const intentLimit = 64 * 1024
+const intentNone = "not available"
 
 func discoverIntent(fallback string) intent {
-	return capIntent(findIntent(fallback), intentLimit)
+	in := findIntent(fallback)
+	if len(in.Messages) > 0 {
+		in.CurrentTask = in.Messages[len(in.Messages)-1]
+		in.Text, in.Truncated = userMessagesPacket(in.Messages)
+	}
+	return in
 }
 func findIntent(fallback string) intent {
 	if p, ok := attribution.ClaudeTranscript(os.Getenv); ok {
-		if t, err := readClaudeIntent(p); err == nil && t != "" {
-			return intent{Text: t, Source: "actual user messages from the identified Claude Code transcript; a line starting `[agent asked: …]` is the agent's question that the message after it answers, not user words"}
+		if t, err := readClaudeIntent(p); err == nil && len(t) > 0 {
+			return intent{Messages: t, Source: "actual user messages from the identified Claude Code transcript; a line starting `[agent asked: …]` is the agent's question that the message after it answers, not user words"}
 		}
 	}
 	if p, ok := attribution.CodexRollout(os.Getenv); ok {
-		if t, err := readCodexIntent(p); err == nil && t != "" {
-			return intent{Text: t, Source: "actual user messages from the identified Codex rollout"}
+		if t, err := readCodexIntent(p); err == nil && len(t) > 0 {
+			return intent{Messages: t, Source: "actual user messages from the identified Codex rollout"}
 		}
 	}
 	if strings.TrimSpace(fallback) != "" {
-		return intent{Text: fallback, Source: "agent supplied via --intent; not independently verified user messages"}
+		return intent{Messages: []string{strings.TrimSpace(fallback)}, Source: "agent supplied via --intent; not independently verified user messages"}
 	}
 	return intent{Text: "", Source: "not available"}
-}
-
-// capIntent keeps at most limit bytes from the end of the intent text. It
-// starts the kept text at a message boundary (a blank line) when there is
-// one, else at a line boundary, else at a character boundary.
-func capIntent(in intent, limit int) intent {
-	if len(in.Text) <= limit {
-		return in
-	}
-	tail := in.Text[len(in.Text)-limit:]
-	if i := strings.Index(tail, "\n\n"); i >= 0 {
-		tail = tail[i+2:]
-	} else if i := strings.IndexByte(tail, '\n'); i >= 0 {
-		tail = tail[i+1:]
-	} else {
-		for len(tail) > 0 && !utf8.RuneStart(tail[0]) {
-			tail = tail[1:]
-		}
-	}
-	in.Text = tail
-	in.Truncated = true
-	return in
 }
 
 // claudeRow is the part of a Claude Code transcript row that intent reads.
@@ -104,10 +86,10 @@ const questionLimit = 600
 // readClaudeIntent returns the user's messages from a Claude Code transcript.
 // Each reply to a question the agent asked follows that question, labelled
 // with askedLabel; answers given through AskUserQuestion are kept the same way.
-func readClaudeIntent(path string) (string, error) {
+func readClaudeIntent(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer f.Close()
 	r := bufio.NewReader(f)
@@ -176,7 +158,7 @@ func readClaudeIntent(path string) (string, error) {
 			break
 		}
 	}
-	return strings.Join(out, "\n\n"), nil
+	return out, nil
 }
 
 // harnessTags name the blocks Claude Code writes into user rows itself: the
@@ -344,10 +326,10 @@ func clip(q string) string {
 	r := []rune(q)
 	return "…" + string(r[len(r)-questionLimit:])
 }
-func readCodexIntent(path string) (string, error) {
+func readCodexIntent(path string) ([]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer f.Close()
 	scan := bufio.NewScanner(f)
@@ -376,5 +358,18 @@ func readCodexIntent(path string) (string, error) {
 			out = append(out, t)
 		}
 	}
-	return strings.Join(out, "\n\n"), scan.Err()
+	return out, scan.Err()
+}
+
+func userMessagesPacket(messages []string) (string, bool) {
+	var parts []string
+	for i, message := range messages {
+		attr := ""
+		if i == len(messages)-1 {
+			attr = ` current_outer_turn="true"`
+		}
+		parts = append(parts, fmt.Sprintf("<user_message index=\"%d\"%s>\n%s\n</user_message>", i+1, attr, message))
+	}
+	rendered := strings.Join(parts, "\n\n")
+	return boundReviewSection(rendered, userMessagesLimit, "middle user messages"), len(rendered) > userMessagesLimit
 }

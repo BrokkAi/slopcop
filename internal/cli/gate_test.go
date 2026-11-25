@@ -170,6 +170,8 @@ func TestGateBlocksForgedApprovals(t *testing.T) {
 // approval; other tools pass.
 func TestGateHookToolNames(t *testing.T) {
 	repo := testInitRepo(t)
+	writeFile(t, repo, "main.go", "package main\n")
+	gitAt(t, repo, "add", "main.go")
 	gitAt(t, repo, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-q", "-m", "init")
 	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0700); err != nil {
 		t.Fatal(err)
@@ -309,5 +311,130 @@ func TestApprovedCheckWarnsOfFindingsThePullRequestCheckFailsOn(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGateTreeExemptions(t *testing.T) {
+	for _, kind := range []string{"initial-docs", "reviewed-docs", "remote-docs", "clean-merge", "code", "instructions"} {
+		t.Run(kind, func(t *testing.T) {
+			repo := testInitRepo(t)
+			gitAt(t, repo, "config", "user.name", "Test")
+			gitAt(t, repo, "config", "user.email", "test@example.com")
+			commit := func(path, content string) {
+				writeFile(t, repo, path, content)
+				gitAt(t, repo, "add", ".")
+				gitAt(t, repo, "commit", "-qm", "change")
+			}
+			if kind == "initial-docs" {
+				gitAt(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+			}
+			if kind != "initial-docs" {
+				commit("main.go", "package main\n")
+				base := gitAt(t, repo, "rev-parse", "HEAD")
+				gitAt(t, repo, "remote", "add", "origin", "https://example.com/repo.git")
+				gitAt(t, repo, "update-ref", "refs/remotes/origin/main", base)
+				if kind == "reviewed-docs" || kind == "clean-merge" {
+					commit("feature.go", "package main\n")
+					tree := gitAt(t, repo, "rev-parse", "HEAD^{tree}")
+					gitAt(t, repo, "update-ref", "refs/slopcop/reviewed/"+tree, tree)
+				}
+				if kind == "clean-merge" {
+					gitAt(t, repo, "checkout", "-qb", "upstream", base)
+					commit("upstream.go", "package main\n")
+					upstream := gitAt(t, repo, "rev-parse", "HEAD")
+					gitAt(t, repo, "update-ref", "refs/remotes/origin/main", upstream)
+					gitAt(t, repo, "checkout", "-")
+					gitAt(t, repo, "merge", "--no-edit", "upstream")
+				}
+			}
+			switch kind {
+			case "code":
+				commit("new.go", "package main\n")
+			case "instructions":
+				commit("AGENTS.md", "instructions\n")
+			case "clean-merge":
+			default:
+				commit("README.md", "docs\n")
+			}
+			if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			var stdout, stderr bytes.Buffer
+			cmd := newGateCommand()
+			cmd.SetOut(&stdout)
+			cmd.SetErr(&stderr)
+			cmd.SetArgs([]string{"--root", repo})
+			err := cmd.Execute()
+			blocked := kind == "code" || kind == "instructions"
+			if (err != nil) != blocked {
+				t.Fatalf("err=%v stderr=%s", err, stderr.String())
+			}
+			if !blocked && (stdout.Len() != 0 || stderr.Len() != 0) {
+				t.Fatalf("allow must be silent: %q %q", stdout.String(), stderr.String())
+			}
+		})
+	}
+}
+
+func TestGatePushDestinations(t *testing.T) {
+	repo := testInitRepo(t)
+	gitAt(t, repo, "config", "user.name", "Test")
+	gitAt(t, repo, "config", "user.email", "test@example.com")
+	gitAt(t, repo, "checkout", "-B", "main")
+	writeFile(t, repo, "main.go", "package main\n")
+	gitAt(t, repo, "add", ".")
+	gitAt(t, repo, "commit", "-qm", "base")
+	base := gitAt(t, repo, "rev-parse", "HEAD")
+	gitAt(t, repo, "remote", "add", "origin", "https://example.com/origin.git")
+	gitAt(t, repo, "remote", "add", "other", "https://example.com/other.git")
+	gitAt(t, repo, "update-ref", "refs/remotes/origin/main", base)
+	gitAt(t, repo, "branch", "--set-upstream-to=origin/main")
+	writeFile(t, repo, "README.md", "docs\n")
+	gitAt(t, repo, "add", ".")
+	gitAt(t, repo, "commit", "-qm", "docs")
+	if err := os.MkdirAll(filepath.Join(repo, ".git", "slopcop"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		command string
+		allowed bool
+	}{
+		{"git push", true}, {"git push origin", true}, {"git push -u origin main", true},
+		{"git push origin HEAD:main", true}, {"gh pr create", true},
+		{"git push other HEAD:main", false}, {"git push https://example.com/repo.git HEAD:main", false},
+		{"git push origin other-branch", false}, {"git push --all", false},
+		{"git push --mirror", false}, {"git push --tags", false},
+		{"git push origin HEAD:main && git push other HEAD:main", false},
+		{"git push --delete origin main", false}, {"git push origin HEAD:refs/tags/v1", false},
+		{"git push origin HEAD:main HEAD:other", false}, {"git push --unknown origin", false},
+		{"git -c remote.pushDefault=other push", false},
+	} {
+		t.Run(tc.command, func(t *testing.T) {
+			payload, err := json.Marshal(map[string]any{"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": tc.command}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cmd := newGateCommand()
+			var output bytes.Buffer
+			cmd.SetErr(&output)
+			cmd.SetIn(bytes.NewReader(payload))
+			cmd.SetArgs([]string{"--hook", "claude"})
+			err = cmd.Execute()
+			if (err == nil) != tc.allowed {
+				t.Fatalf("err=%v output=%s want allowed=%v", err, output.String(), tc.allowed)
+			}
+		})
+	}
+	for _, tool := range []string{"mcp__github__push_files", "mcp__github__create_pull_request"} {
+		payload, _ := json.Marshal(map[string]any{"cwd": repo, "tool_name": tool})
+		cmd := newGateCommand()
+		var output bytes.Buffer
+		cmd.SetErr(&output)
+		cmd.SetIn(bytes.NewReader(payload))
+		cmd.SetArgs([]string{"--hook", "claude"})
+		err := cmd.Execute()
+		if (err == nil) != (tool == "mcp__github__create_pull_request") {
+			t.Fatalf("%s: %v %s", tool, err, output.String())
+		}
 	}
 }

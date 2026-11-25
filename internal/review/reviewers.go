@@ -12,6 +12,7 @@ import (
 
 	acp "github.com/coder/acp-go-sdk"
 
+	"github.com/BrokkAi/slopcop/internal/gitx"
 	"github.com/BrokkAi/slopcop/internal/review/chatagent"
 )
 
@@ -27,12 +28,9 @@ type panel struct {
 	trees reviewTrees
 	// diffSize is the captured diff's length in bytes.
 	diffSize int
-	// binaryTextCut says a size limit left readable text of a binary file
-	// out of the prompt.
-	binaryTextCut bool
-	dir           string
-	timeout       time.Duration
-	commands      map[Family][]string
+	dir      string
+	timeout  time.Duration
+	commands map[Family][]string
 	// adapters names each family's adapter; copilot lists the models for
 	// the families Copilot runs.
 	adapters map[Family]string
@@ -46,11 +44,14 @@ type panel struct {
 	// never overlap.
 	startMu sync.Mutex
 
-	mu        sync.Mutex
-	fallbacks []Family
-	used      int
-	completed int
-	standIns  []Reviewer
+	mu              sync.Mutex
+	fallbacks       []Family
+	reviewerEfforts []string
+	fallbackEfforts []string
+	efforts         map[string]string
+	used            int
+	completed       int
+	standIns        []Reviewer
 	// durations is how long each reviewer ran, by name.
 	durations map[string]int64
 	// launchTook is how long each primary's adapter took to start, one after
@@ -68,6 +69,10 @@ func (p *panel) run(order []Family) []Reviewer {
 		err error
 	}
 	starts := make([]started, len(order))
+	p.efforts = make(map[string]string)
+	for i, f := range order {
+		p.efforts[fmt.Sprintf("%d-%s", i+1, f)] = slotEffort(p.reviewerEfforts, i)
+	}
 	// A started reviewer's timeout runs until every reviewer has started, so
 	// the Ollama model, which can take minutes to load, loads first.
 	if slices.ContainsFunc(order, func(f Family) bool { return p.adapter(f) == ollamaAdapter }) {
@@ -128,6 +133,18 @@ func (p *panel) takeFallback(replaced Family) (Family, int, bool) {
 		}
 	}
 	f := p.fallbacks[pick]
+	effort := slotEffort(p.fallbackEfforts, pick)
+	if len(p.fallbackEfforts) < len(p.fallbacks) {
+		e := make([]string, len(p.fallbacks))
+		copy(e, p.fallbackEfforts)
+		p.fallbackEfforts = e
+	}
+	copy(p.fallbackEfforts[p.used+1:pick+1], p.fallbackEfforts[p.used:pick])
+	p.fallbackEfforts[p.used] = effort
+	if p.efforts == nil {
+		p.efforts = map[string]string{}
+	}
+	p.efforts[fmt.Sprintf("fallback%d-%s", p.used+1, f)] = effort
 	// Keep the unused fallbacks in their configured order.
 	copy(p.fallbacks[p.used+1:pick+1], p.fallbacks[p.used:pick])
 	p.fallbacks[p.used] = f
@@ -194,15 +211,12 @@ func (p *panel) attempt(name string, f Family, s *runner, startErr error, note s
 // start launches and prepares an adapter. On a prepare failure it returns
 // the stopped runner, whose result names the reviewer's log.
 func (p *panel) start(name string, f Family) (*runner, error) {
-	if isolatedAdapter(p.adapter(f)) && p.diffSize > promptDiffLimit {
-		return nil, errDiffTooLarge
-	}
-	if isolatedAdapter(p.adapter(f)) && p.binaryTextCut {
-		return nil, errBinaryTextCut
-	}
 	p.startMu.Lock()
 	defer p.startMu.Unlock()
-	return launch(p.ctx, p.root, p.trees, p.adapter(f), p.commands[f], p.copilot, p.ollamaModel, f, name, p.dir, p.timeout)
+	p.mu.Lock()
+	effort := p.efforts[strings.TrimSuffix(name, "-retry")]
+	p.mu.Unlock()
+	return launch(p.ctx, p.root, p.trees, p.adapter(f), p.commands[f], p.copilot, p.ollamaModel, f, name, p.dir, p.timeout, effort)
 }
 
 // adapter names the adapter that runs a family in this panel.
@@ -216,8 +230,13 @@ func (p *panel) adapter(f Family) string {
 // retryable reports whether a failed reviewer may get a second attempt. A
 // timeout would only double the wait, a canceled check wants no more work,
 // and a missing login or exhausted credits fail the same way again.
+var errEffort = errors.New("unsupported reviewer effort")
+
 func retryable(ctx context.Context, err error) bool {
-	if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errBinaryTextCut) || errors.Is(err, errChangeNotExported) || errors.Is(err, errOllamaSetup) || errors.Is(err, errOllamaCoverage) || errors.Is(err, errKimiNoKey) || errors.Is(err, errChangeBinary) {
+	if errors.Is(err, errEffort) {
+		return false
+	}
+	if errors.Is(err, gitx.ErrPatchTruncated) || ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, errForbiddenTool) || errors.Is(err, errDiffTooLarge) || errors.Is(err, errChangeNotExported) || errors.Is(err, errOllamaSetup) || errors.Is(err, errOllamaCoverage) || errors.Is(err, errKimiNoKey) || errors.Is(err, errChangeBinary) {
 		return false
 	}
 	if err != nil && chatagent.IsLimitError(err.Error()) {
@@ -306,7 +325,7 @@ func explainFailure(r Reviewer, err error) string {
 	if errors.As(err, &stop) {
 		return text + ". " + stop.advice()
 	}
-	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, errBinaryTextCut.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) || strings.Contains(text, errOllamaSetup.Error()) || strings.Contains(text, errOllamaCoverage.Error()) || strings.Contains(text, errChangeBinary.Error()) || chatagent.IsLimitError(text) {
+	if strings.Contains(text, errDiffTooLarge.Error()) || strings.Contains(text, gitx.ErrPatchTruncated.Error()) || strings.Contains(text, errChangeNotExported.Error()) || strings.Contains(text, errKimiNoKey.Error()) || strings.Contains(text, errOllamaSetup.Error()) || strings.Contains(text, errOllamaCoverage.Error()) || strings.Contains(text, errChangeBinary.Error()) || chatagent.IsLimitError(text) {
 		return text
 	}
 	if r.FirstError != "" && r.FirstError != text {

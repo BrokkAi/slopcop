@@ -125,7 +125,7 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			return review.Settings{}, fmt.Errorf("invalid review.reviewers in %s: want 1-%d families", path, review.MaxReviewers)
 		}
 		for _, name := range cfg.Review.Reviewers {
-			family, parseErr := review.ParseFamily(name)
+			family, effort, parseErr := review.ParseReviewerSpec(name)
 			if parseErr != nil {
 				path, err = configPath()
 				if err != nil {
@@ -134,6 +134,7 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 				return review.Settings{}, fmt.Errorf("invalid review.reviewers in %s: %w", path, parseErr)
 			}
 			settings.Reviewers = append(settings.Reviewers, family)
+			settings.ReviewerEfforts = append(settings.ReviewerEfforts, effort)
 		}
 		if len(cfg.Review.Fallbacks) > review.MaxReviewers {
 			path, err = configPath()
@@ -143,7 +144,7 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 			return review.Settings{}, fmt.Errorf("invalid review.fallbacks in %s: want at most %d families", path, review.MaxReviewers)
 		}
 		for _, name := range cfg.Review.Fallbacks {
-			family, parseErr := review.ParseFamily(name)
+			family, effort, parseErr := review.ParseReviewerSpec(name)
 			if parseErr != nil {
 				path, err = configPath()
 				if err != nil {
@@ -152,6 +153,7 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 				return review.Settings{}, fmt.Errorf("invalid review.fallbacks in %s: %w", path, parseErr)
 			}
 			settings.Fallbacks = append(settings.Fallbacks, family)
+			settings.FallbackEfforts = append(settings.FallbackEfforts, effort)
 		}
 		if cfg.Review.Timeout != "" {
 			settings.Timeout, err = time.ParseDuration(cfg.Review.Timeout)

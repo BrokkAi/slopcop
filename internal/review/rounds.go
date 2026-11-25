@@ -280,7 +280,7 @@ func linesChanged(root, from, to, path string, start, end int) (bool, error) {
 	}
 	// --text gives hunks for a file with a NUL byte, whose lines a reviewer can
 	// cite from the readable text in its prompt.
-	out, err := gitx.RunWithoutRepoAttributes(root, "diff", "--text", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "-U0", from, to, "--", ":(literal)"+path)
+	out, err := gitx.RunWithoutRepoAttributes(root, "diff", "--text", "--no-color", "--no-ext-diff", "--ignore-submodules=none", "--no-textconv", "--no-renames", "-U0", from, to, "--", ":(literal)"+path)
 	if err != nil {
 		return false, err
 	}
@@ -318,7 +318,7 @@ func renamedSince(root, from, to string) map[string]string {
 	if from == to {
 		return renames
 	}
-	out, err := gitx.Run(root, "diff", "--no-ext-diff", "--no-textconv", "-M", "--diff-filter=R", "--name-status", "-z", from, to)
+	out, err := gitx.Run(root, "diff", "--no-ext-diff", "--ignore-submodules=none", "--no-textconv", "-M", "--diff-filter=R", "--name-status", "-z", from, to)
 	if err != nil {
 		return renames
 	}

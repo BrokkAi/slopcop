@@ -56,7 +56,7 @@ const grokMaxRead = 16 << 20
 
 // grokRules tells the reviewer what it may use. The profile and the guard
 // enforce it; this keeps an honest reviewer from ending its own turn.
-const grokRules = "The snapshot's files are in the `repo` folder of your workspace, and `files.txt` in the workspace lists them. Read them only with the read_file tool, using paths inside the workspace. Any other tool, or a path outside the workspace, stops your review.\n"
+const grokRules = "patches.txt indexes per-file diffs under patches/ covering edits, additions, deletions, and binary text; repo/ and files.txt hold snapshot files. Inspect the diffs and files you need on demand. The snapshot's files are in the `repo` folder of your workspace, and `files.txt` in the workspace lists them. Read them only with the read_file tool, using paths inside the workspace. Any other tool, or a path outside the workspace, stops your review.\n"
 
 // grokProfile is the agent profile that removes every other tool. The MCP
 // meta-tools survive an allowlist, so they are denied by name.
@@ -95,7 +95,7 @@ func checkGrokCommand(base []string) error {
 // startGrok exports the checked tree into a fresh workspace and starts a
 // reviewer there. On a failure after the adapter started it returns the
 // stopped runner, whose result names the log.
-func startGrok(ctx context.Context, root string, trees reviewTrees, base []string, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+func startGrok(ctx context.Context, root string, trees reviewTrees, base []string, f Family, name, dir string, timeout time.Duration, efforts ...string) (*runner, error) {
 	if err := checkGrokCommand(base); err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func startGrok(ctx context.Context, root string, trees reviewTrees, base []strin
 	}
 	s.tempDir = tmp
 	s.result.Adapter = grokAdapter
-	if err = s.prepare(workspace); err != nil {
+	if err = s.prepare(workspace, efforts...); err != nil {
 		err = startError(s.ctx, err)
 		s.stop()
 		return s, err

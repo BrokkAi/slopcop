@@ -42,7 +42,8 @@ func TestClaudeIntentKeepsTheQuestionAReplyAnswers(t *testing.T) {
 	if err := os.WriteFile(p, []byte(strings.Join(rows, "\n")), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readClaudeIntent(p)
+	messages, err := readClaudeIntent(p)
+	got := strings.Join(messages, "\n\n")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,8 @@ func TestClaudeIntentSkipsHarnessRows(t *testing.T) {
 	if err := os.WriteFile(p, []byte(strings.Join(rows, "\n")), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	got, err := readClaudeIntent(p)
+	messages, err := readClaudeIntent(p)
+	got := strings.Join(messages, "\n\n")
 	if err != nil {
 		t.Fatal(err)
 	}

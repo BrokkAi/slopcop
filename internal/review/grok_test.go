@@ -267,7 +267,7 @@ func TestGrokCreditsOnlyAReadItServed(t *testing.T) {
 }
 
 func TestGrokPromptNamesTheExportedRepository(t *testing.T) {
-	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", Grok)
+	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", AdapterFor(Grok, Settings{}))
 	if strings.Contains(p, "/home/someone/private-repo") || !strings.Contains(p, "Repository root: repo\n") || !strings.Contains(p, "read_file") || strings.Contains(p, "git -C") {
 		t.Fatal(p)
 	}
@@ -636,7 +636,7 @@ func TestGrokDoesNotApproveADiffItCannotSee(t *testing.T) {
 	}
 	t.Setenv("XAI_API_KEY", "test-value")
 	root, c, store := reviewRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", promptDiffLimit/5)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", (256*1024)/5)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(root, "add", "-A"); err != nil {
@@ -651,11 +651,11 @@ func TestGrokDoesNotApproveADiffItCannotSee(t *testing.T) {
 	}
 	trace := filepath.Join(t.TempDir(), "trace")
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: grokSettings("clean", trace)})
-	if v.Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "over the 256 KiB") || v.Reviewers[0].FirstError != "" {
-		t.Fatalf("%+v", v)
+	if v.Status != StatusClean || len(v.Reviewers) != 1 {
+		t.Fatalf("on-demand diff review: %+v", v)
 	}
-	if _, err := os.Stat(trace); !os.IsNotExist(err) {
-		t.Fatal("the adapter started on a diff it cannot see")
+	if _, err := os.Stat(trace); err != nil {
+		t.Fatal("adapter did not start", err)
 	}
 }
 

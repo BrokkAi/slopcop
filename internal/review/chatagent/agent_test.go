@@ -199,7 +199,7 @@ func TestRequestCarriesPrivacyControlsAndOnlyReadTools(t *testing.T) {
 	for _, tool := range body["tools"].([]any) {
 		names = append(names, tool.(map[string]any)["function"].(map[string]any)["name"].(string))
 	}
-	if strings.Join(names, ",") != "read_file,list_files,search_files" {
+	if strings.Join(names, ",") != "read_diff,read_file,list_files,search_files" {
 		t.Fatalf("tools = %v", names)
 	}
 }
@@ -623,5 +623,75 @@ func TestMainRemovesTheKeyFromTheEnvironment(t *testing.T) {
 		if err := Main(ctx, "openrouter", "vendor/model", ids[0], ids[1], strings.NewReader(""), io.Discard); err == nil {
 			t.Fatalf("%v: a tree that is not an object id was accepted", ids)
 		}
+	}
+}
+
+func TestReadDiffModifiedDeletedAndBinary(t *testing.T) {
+	root := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		c := exec.Command("git", args...)
+		c.Dir = root
+		b, e := c.CombinedOutput()
+		if e != nil {
+			t.Fatalf("git: %s: %v", b, e)
+		}
+		return strings.TrimSpace(string(b))
+	}
+	git("init")
+	git("config", "user.name", "Test")
+	git("config", "user.email", "test@example.com")
+	write := func(p, s string) {
+		t.Helper()
+		if e := os.WriteFile(filepath.Join(root, p), []byte(s), 0600); e != nil {
+			t.Fatal(e)
+		}
+	}
+	write("edit", "before\n")
+	write("delete", "removed\n")
+	write("binary", "\x00before readable text\n")
+	git("add", ".")
+	git("commit", "-m", "base")
+	base := git("rev-parse", "HEAD^{tree}")
+	write("edit", "after\n")
+	os.Remove(filepath.Join(root, "delete"))
+	write("binary", "\x00after readable text\n")
+	git("add", "-A")
+	tree := git("write-tree")
+	s, e := loadSnapshot(context.Background(), root, tree, base)
+	if e != nil {
+		t.Fatal(e)
+	}
+	for _, path := range []string{"edit", "delete", "binary"} {
+		args, _ := json.Marshal(map[string]any{"path": path})
+		out, e := s.call(context.Background(), "read_diff", string(args))
+		if e != nil || !strings.Contains(out, "diff --git") {
+			t.Fatalf("%s: %s %v", path, out, e)
+		}
+	}
+	out, e := s.call(context.Background(), "read_diff", `{"path":"edit","offset":2,"limit":1}`)
+	if e != nil || !strings.HasPrefix(out, "2\t") || !strings.Contains(out, "continue with offset 3") {
+		t.Fatalf("pagination: %s %v", out, e)
+	}
+}
+
+func TestReadDiffRecoversFailedBinaryRead(t *testing.T) {
+	root := t.TempDir()
+	git(t, root, "init")
+	git(t, root, "commit", "--allow-empty", "-m", "base")
+	base := git(t, root, "rev-parse", "HEAD^{tree}")
+	if err := os.WriteFile(filepath.Join(root, "binary"), []byte("\x00readable script\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	git(t, root, "add", ".")
+	tree := git(t, root, "write-tree")
+	m := &model{replies: []string{
+		call("read_file", map[string]any{"path": "binary"}),
+		call("read_diff", map[string]any{"path": "./binary"}),
+		stop("No findings."),
+	}}
+	_, text, err := review(t, root, tree, m, func(c *Config) { c.Base = base })
+	if err != nil || !strings.Contains(text, "No findings.") {
+		t.Fatalf("verdict: %s %v", text, err)
 	}
 }

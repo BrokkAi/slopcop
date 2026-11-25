@@ -91,7 +91,7 @@ func TestEarlierRoundsKeepEveryRoundAndTheOverrideReason(t *testing.T) {
 	if !strings.Contains(history, "`gone.go:1-2` (1-terra; file is no longer in the reviewed diff)") {
 		t.Errorf("history lost a finding outside the change:\n%s", history)
 	}
-	prompt := reviewPrompt(root, third, intent{}, history, "diff", Terra)
+	prompt := reviewPrompt(root, third, intent{}, history, "diff", AdapterFor(Terra, Settings{}))
 	if !strings.Contains(prompt, "Apart from the author's reasons quoted under the earlier rounds") {
 		t.Error("prompt does not say the author's reasons are quoted")
 	}

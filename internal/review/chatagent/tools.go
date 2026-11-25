@@ -40,9 +40,9 @@ const (
 // tree's listing: no tool opens a path on disk, so a symlink or a ".." in the
 // tree cannot reach anything outside it.
 type snapshot struct {
-	root, tree, gitDir string
-	files              map[string]gitx.TreeFile
-	paths              []string
+	root, tree, gitDir, base string
+	files                    map[string]gitx.TreeFile
+	paths                    []string
 	// changed holds the files the change adds or edits, and unread those of
 	// them whose last read failed.
 	changed, unread map[string]bool
@@ -62,7 +62,7 @@ func loadSnapshot(ctx context.Context, root, tree, base string) (*snapshot, erro
 	if err != nil {
 		return nil, err
 	}
-	s := &snapshot{root: root, tree: tree, gitDir: gitDir, files: make(map[string]gitx.TreeFile, len(files)), changed: map[string]bool{}, unread: map[string]bool{}}
+	s := &snapshot{base: base, root: root, tree: tree, gitDir: gitDir, files: make(map[string]gitx.TreeFile, len(files)), changed: map[string]bool{}, unread: map[string]bool{}}
 	if base != "" {
 		changed, err := gitx.ChangedFiles(ctx, root, base, tree)
 		if err != nil {
@@ -98,6 +98,7 @@ func toolDefinitions() []map[string]any {
 		return map[string]any{"type": "integer", "description": description}
 	}
 	return []map[string]any{
+		tool("read_diff", "Read a captured per-file diff, including deleted files and readable binary text.", map[string]any{"path": text("Path from repository root."), "offset": number("First line from 1."), "limit": number("Number of lines."), "column": number("Byte column for long lines.")}, "path"),
 		tool("read_file", "Read a file of the reviewed snapshot, with line numbers.", map[string]any{
 			"path": text("Path from the repository root."), "offset": number("First line to read, from 1."), "limit": number("Number of lines to read."),
 			"column": number("Byte position in the first line to start from, from 1, to continue a very long line."),
@@ -113,7 +114,7 @@ func toolDefinitions() []map[string]any {
 // and whether the agent offers the tool.
 func toolKind(name string) (acp.ToolKind, bool) {
 	switch name {
-	case "read_file":
+	case "read_file", "read_diff":
 		return acp.ToolKindRead, true
 	case "list_files", "search_files":
 		return acp.ToolKindSearch, true
@@ -137,6 +138,24 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 		}
 	}
 	switch name {
+	case "read_diff":
+		if in.Path == "" {
+			return "", errors.New("path is required")
+		}
+		path := cleanPath(in.Path)
+		data, err := gitx.FilePatch(ctx, s.root, s.base, s.tree, path)
+		var out string
+		if err == nil {
+			out, err = renderRead(data, path, in.Offset, in.Limit, in.Column)
+		}
+		if s.changed[path] {
+			if err == nil || errors.Is(err, errPastEnd) {
+				delete(s.unread, path)
+			} else {
+				s.unread[path] = true
+			}
+		}
+		return out, err
 	case "read_file":
 		return s.read(ctx, cleanPath(in.Path), in.Offset, in.Limit, in.Column)
 	case "list_files":
@@ -195,6 +214,10 @@ func (s *snapshot) readFile(ctx context.Context, path string, offset, limit, col
 	if IsBinary(data) {
 		return "", fmt.Errorf("%q is a binary file", path)
 	}
+	return renderRead(data, path, offset, limit, column)
+}
+
+func renderRead(data []byte, path string, offset, limit, column int) (string, error) {
 	if offset < 1 {
 		offset = 1
 	}

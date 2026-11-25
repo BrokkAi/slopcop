@@ -88,12 +88,14 @@ const (
 
 // Settings choose and bound the reviewers.
 type Settings struct {
-	Reviewers []Family
+	Reviewers       []Family
+	ReviewerEfforts []string
 	// Timeout bounds each reviewer.
 	Timeout time.Duration
 	// Fallbacks stand in, in order, for reviewers that still fail after
 	// their retry, while fewer than MinCompleted reviewers have finished.
-	Fallbacks []Family
+	Fallbacks       []Family
+	FallbackEfforts []string
 	// MinCompleted is how many reviewers, primaries or fallbacks, must
 	// finish for a clean review; a reviewer that still fails is reported but
 	// does not block one. Zero means DefaultMinCompleted, capped at the
@@ -139,7 +141,10 @@ type Capture struct {
 	// Branch is the branch that was checked out when the snapshot was taken,
 	// "" when HEAD was detached. The review's rounds are that branch's. It is
 	// not stored: the round ledger already keys the rounds by it.
-	Branch string `json:"-"`
+	Branch       string   `json:"branch,omitempty"`
+	ChangedLines int      `json:"changedLines,omitempty"`
+	MergedIn     []string `json:"mergedIn,omitempty"`
+	Unattributed string   `json:"unattributed,omitempty"`
 }
 
 // CheckedTree names the contents actually sent to the reviewers.

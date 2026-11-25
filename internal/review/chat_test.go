@@ -89,7 +89,7 @@ func TestChatPrerequisites(t *testing.T) {
 
 func TestChatPromptHidesTheLocalPath(t *testing.T) {
 	root, c, _ := reviewRepo(t)
-	prompt := reviewPrompt(root, c, intent{Source: "test", Text: "x"}, "", "diff", OpenRouter)
+	prompt := reviewPrompt(root, c, intent{Source: "test", Text: "x"}, "", "diff", AdapterFor(OpenRouter, Settings{}))
 	if strings.Contains(prompt, root) {
 		t.Fatal("the prompt names the repository's location on this machine")
 	}
@@ -297,7 +297,7 @@ func TestChatReviewerMustRunTheConfiguredModel(t *testing.T) {
 
 func TestChatDoesNotApproveADiffItCannotSee(t *testing.T) {
 	root, c, store := reviewRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", promptDiffLimit/5)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", (256*1024)/5)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(root, "add", "-A"); err != nil {
@@ -312,11 +312,11 @@ func TestChatDoesNotApproveADiffItCannotSee(t *testing.T) {
 	}
 	trace := filepath.Join(t.TempDir(), "trace")
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(fakeAdapter("clean", chatTestModel, trace))})
-	if v.Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "over the 256 KiB") || v.Reviewers[0].FirstError != "" {
-		t.Fatalf("%+v", v.Reviewers[0])
+	if v.Status != StatusClean || len(v.Reviewers) != 1 {
+		t.Fatalf("on-demand diff review: %+v", v)
 	}
-	if _, err := os.Stat(trace); !os.IsNotExist(err) {
-		t.Fatal("the adapter started on a diff it cannot see")
+	if _, err := os.Stat(trace); err != nil {
+		t.Fatal("adapter did not start", err)
 	}
 }
 
@@ -387,6 +387,12 @@ func TestChatDoesNotApproveAChangeTheDiffHides(t *testing.T) {
 			trace := filepath.Join(t.TempDir(), "trace")
 			v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(fakeAdapter("clean", chatTestModel, trace))})
 			r := v.Reviewers[0]
+			if name != "latin-1 source" {
+				if v.Status != StatusClean {
+					t.Fatalf("binary diff accessible on demand: %+v", v)
+				}
+				return
+			}
 			if v.Status != StatusFailed || !strings.Contains(r.Error, errChangeBinary.Error()) || r.FirstError != "" {
 				t.Fatalf("%+v", r)
 			}
@@ -434,11 +440,8 @@ func TestChatDoesNotApproveADeletedFileItCannotRead(t *testing.T) {
 	}
 	trace := filepath.Join(t.TempDir(), "trace")
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: chatSettings(fakeAdapter("clean", chatTestModel, trace))})
-	if r := v.Reviewers[0]; v.Status != StatusFailed || !strings.Contains(r.Error, errChangeBinary.Error()) {
-		t.Fatalf("%+v", r)
-	}
-	if _, err := os.Stat(trace); !os.IsNotExist(err) {
-		t.Fatal("the adapter started on a deletion it cannot read")
+	if v.Status != StatusClean {
+		t.Fatalf("deleted binary available with read_diff: %+v", v)
 	}
 }
 

@@ -252,3 +252,39 @@ func hasChoice(option *acp.SessionConfigOptionSelect, value string) bool {
 	}
 	return false
 }
+
+const DefaultEffort = "high"
+
+var allowedEfforts = []string{"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+
+func ParseReviewerSpec(s string) (Family, string, error) {
+	raw, effort, slash := strings.Cut(s, "/")
+	f, err := ParseFamily(raw)
+	if err != nil {
+		return "", "", err
+	}
+	if slash && !slices.Contains(allowedEfforts, effort) {
+		return "", "", fmt.Errorf("invalid reviewer effort %q (want %s)", effort, strings.Join(allowedEfforts, ", "))
+	}
+	return f, effort, nil
+}
+
+func FormatReviewerSpec(f Family, effort string) string {
+	if effort == "" {
+		return string(f)
+	}
+	return string(f) + "/" + effort
+}
+
+func slotEffort(efforts []string, i int) string {
+	if i < len(efforts) {
+		return efforts[i]
+	}
+	return ""
+}
+func effectiveEffort(effort string) string {
+	if effort == "" {
+		return DefaultEffort
+	}
+	return effort
+}

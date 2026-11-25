@@ -57,10 +57,10 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 			copilot = newCopilotCatalog(commands[f])
 		}
 	}
-	keyData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands, ollamaIdentity(opts.Settings)})
+	keyData, _ := json.Marshal([]any{capture.MergedIn, capture.Unattributed, capture.BaseTree, capture.Tree, capture.CheckedTree(), in.Text, opts.Version, order, opts.Settings.Fallbacks, effortKeys(order, opts.Settings.ReviewerEfforts, opts.Settings), effortKeys(opts.Settings.Fallbacks, opts.Settings.FallbackEfforts, opts.Settings), minCompleted, commands, ollamaIdentity(opts.Settings)})
 	hash := sha256.Sum256(keyData)
 	key = hex.EncodeToString(hash[:])
-	contentData, _ := json.Marshal([]any{capture.BaseTree, capture.Tree, capture.CheckedTree(), opts.Version, order, opts.Settings.Fallbacks, minCompleted, commands, ollamaIdentity(opts.Settings)})
+	contentData, _ := json.Marshal([]any{capture.MergedIn, capture.Unattributed, capture.BaseTree, capture.Tree, capture.CheckedTree(), opts.Version, order, opts.Settings.Fallbacks, effortKeys(order, opts.Settings.ReviewerEfforts, opts.Settings), effortKeys(opts.Settings.Fallbacks, opts.Settings.FallbackEfforts, opts.Settings), minCompleted, commands, ollamaIdentity(opts.Settings)})
 	contentHash := sha256.Sum256(contentData)
 	contentKey = hex.EncodeToString(contentHash[:])
 	previous, err := store.Last()
@@ -123,31 +123,33 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	}
 	v.LogDir = dir
 	TrimLogs(store.dir)
-	diff, err := gitx.RunWithoutRepoAttributes(opts.Root, "diff", "--no-ext-diff", "--no-textconv", capture.BaseTree, capture.CheckedTree())
-	if err != nil {
-		v.Error = "read captured diff: " + err.Error()
-		save()
-		return v
+	patchDir := ""
+	for _, adapter := range adapters {
+		if adapter == "claude" || adapter == "dsh" || adapter == "copilot" {
+			patchDir, err = os.MkdirTemp("", "slopcop-patches-*")
+			if err == nil {
+				defer os.RemoveAll(patchDir)
+				_, err = gitx.ExportPerFilePatches(ctx, opts.Root, capture.BaseTree, capture.CheckedTree(), patchDir, 8<<20, 128<<20)
+			}
+			if err != nil {
+				v.Error = "export per-file patches: " + err.Error()
+				save()
+				return v
+			}
+			break
+		}
 	}
-	// It goes first so that a long diff cannot push it past the prompt's limit.
-	binaryText, err := gitx.BinaryFileText(opts.Root, capture.BaseTree, capture.CheckedTree())
-	if err != nil {
-		v.Error = "read text of changed binary files: " + err.Error()
-		save()
-		return v
-	}
-	diff = append([]byte(binaryText.Text), diff...)
 	overriddenText, shown := overriddenSection(overrides, capture)
 	v.PromptOverrides = shown
 	history := earlierRounds(opts.Root, rounds, capture) + overriddenText
-	prompt := reviewPrompt(opts.Root, capture, in, history, string(diff), order[0])
+	prompt := reviewPrompt(opts.Root, capture, in, history, patchDir, adapters[order[0]])
 	if err = os.WriteFile(filepath.Join(dir, "prompt.txt"), []byte(prompt), 0600); err != nil {
 		v.Error = "write review prompt: " + err.Error()
 		save()
 		return v
 	}
-	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, diffSize: len(diff), binaryTextCut: !binaryText.Complete, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.Models[Ollama], min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks),
-		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, string(diff), f) }}
+	p := &panel{ctx: ctx, root: opts.Root, trees: reviewTrees{base: capture.BaseTree, checked: capture.CheckedTree()}, dir: dir, timeout: timeout, commands: commands, adapters: adapters, copilot: copilot, ollamaModel: opts.Settings.Models[Ollama], min: minCompleted, fallbacks: slices.Clone(opts.Settings.Fallbacks), reviewerEfforts: opts.Settings.ReviewerEfforts, fallbackEfforts: slices.Clone(opts.Settings.FallbackEfforts),
+		prompt: func(f Family) string { return reviewPrompt(opts.Root, capture, in, history, patchDir, adapters[f]) }}
 	v.Reviewers = p.run(order)
 	v.DurationsMs = p.durations
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
@@ -188,4 +190,16 @@ func TrimLogs(dir string) {
 			names = names[1:]
 		}
 	}
+}
+
+func effortKeys(families []Family, efforts []string, settings Settings) []string {
+	out := make([]string, len(families))
+	for i, f := range families {
+		e := slotEffort(efforts, i)
+		if a := AdapterFor(f, settings); !IsChatAdapter(a) && a != ollamaAdapter {
+			e = effectiveEffort(e)
+		}
+		out[i] = e
+	}
+	return out
 }

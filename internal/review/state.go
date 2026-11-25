@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -363,12 +364,30 @@ func NewCapture(root, baseCommit, tree string) (Capture, error) {
 // the smaller tree whose changes are in review scope. branch is the branch
 // that was checked out when the snapshot was taken, "" for a detached HEAD.
 func NewFilteredCapture(root, branch, baseCommit, tree, diffTree string) (Capture, error) {
-	base, err := gitx.Run(root, "rev-parse", baseCommit+"^{tree}")
-	if err != nil {
-		return Capture{}, err
+	return NewCaptureWithBaseTree(root, branch, baseCommit, "", tree, diffTree, nil, "")
+}
+
+func NewCaptureWithBaseTree(root, branch, baseCommit, baseTree, tree, diffTree string, mergedIn []string, unattributed string) (Capture, error) {
+	var err error
+	if baseTree == "" {
+		baseTree, err = gitx.Run(root, "rev-parse", baseCommit+"^{tree}")
+		if err != nil {
+			return Capture{}, err
+		}
 	}
-	stat, err := gitx.RunWithoutRepoAttributes(root, "diff", "--no-ext-diff", "--no-textconv", "--numstat", base, diffTree)
-	capture := Capture{BaseCommit: baseCommit, BaseTree: base, Tree: tree, Numstat: strings.TrimSpace(string(stat)), Branch: branch}
+	if diffTree == "" {
+		diffTree = tree
+	}
+	stat, err := gitx.RunWithoutRepoAttributes(root, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", "--numstat", baseTree, diffTree)
+	capture := Capture{BaseCommit: baseCommit, BaseTree: baseTree, Tree: tree, Numstat: strings.TrimSpace(string(stat)), Branch: branch, MergedIn: mergedIn, Unattributed: unattributed}
+	for _, line := range strings.Split(capture.Numstat, "\n") {
+		cols := strings.Split(line, "\t")
+		if len(cols) >= 3 {
+			a, _ := strconv.Atoi(cols[0])
+			d, _ := strconv.Atoi(cols[1])
+			capture.ChangedLines += a + d
+		}
+	}
 	if diffTree != tree {
 		capture.DiffTree = diffTree
 	}

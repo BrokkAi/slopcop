@@ -51,7 +51,7 @@ const (
 
 // antigravityRules tells the reviewer what it may use. The client and the
 // guard enforce it; this keeps an honest reviewer from ending its own turn.
-const antigravityRules = "The snapshot's files are in the `repo` folder of your workspace, and `files.txt` in the workspace lists them. Read them only with the read_file tool. Do not call any other tool: shell commands, edits, web search and subagents are refused or stop your review.\n"
+const antigravityRules = "patches.txt indexes per-file diffs under patches/ covering edits, additions, deletions, and binary text; repo/ and files.txt hold snapshot files. Inspect the diffs and files you need on demand. The snapshot's files are in the `repo` folder of your workspace, and `files.txt` in the workspace lists them. Read them only with the read_file tool. Do not call any other tool: shell commands, edits, web search and subagents are refused or stop your review.\n"
 
 // errForbiddenTool marks a reviewer stopped by a toolGuard. It is not retried:
 // a repository that talked the reviewer into the call would get a second
@@ -90,11 +90,6 @@ func mayHaveRun(check func([]byte) string) func([]byte) toolStop {
 // history and no way to see deletions or files left out of its export, so it
 // could only approve a change it had not seen.
 var errDiffTooLarge = errors.New("the change's diff is over the 256 KiB this reviewer can read, so it did not review it; configure a fallback on another provider or check a smaller change")
-
-// errBinaryTextCut marks a change whose readable text in binary files did not
-// all fit in the prompt. For the same reason as errDiffTooLarge, a reviewer in
-// an isolated workspace could not see what was left out.
-var errBinaryTextCut = errors.New("the change has more readable text in binary files than this reviewer can be shown, so it did not review it; configure a fallback on another provider or check a smaller change")
 
 // errChangeNotExported marks a change to a file the reviewer's workspace does
 // not hold: one over the size limit, or one whose path cannot be written
@@ -205,7 +200,7 @@ func (g *toolGuard) stop(s toolStop) {
 // startAntigravity exports the checked tree into a fresh workspace and starts
 // a reviewer there. On a failure after the adapter started it returns the
 // stopped runner, whose result names the log.
-func startAntigravity(ctx context.Context, root string, trees reviewTrees, base []string, f Family, name, dir string, timeout time.Duration) (*runner, error) {
+func startAntigravity(ctx context.Context, root string, trees reviewTrees, base []string, f Family, name, dir string, timeout time.Duration, efforts ...string) (*runner, error) {
 	if slices.ContainsFunc(base, func(arg string) bool { return strings.HasPrefix(arg, "--dangerously-skip-permissions") }) {
 		return nil, errors.New("review.adapters.antigravity.command turns off permission requests, so the reviewer cannot be restricted")
 	}
@@ -221,7 +216,7 @@ func startAntigravity(ctx context.Context, root string, trees reviewTrees, base 
 	}
 	s.tempDir = tmp
 	s.result.Adapter = antigravityAdapter
-	if err = s.prepare(workspace); err != nil {
+	if err = s.prepare(workspace, efforts...); err != nil {
 		err = startError(s.ctx, err)
 		s.stop()
 		return s, err
@@ -302,6 +297,11 @@ func isolatedWorkspace(ctx context.Context, root string, trees reviewTrees, pref
 			return fail(err)
 		}
 		if err = requireChangedFiles(ctx, root, trees, paths); err != nil {
+			return fail(err)
+		}
+	}
+	if trees.base != "" && trees.checked != "" {
+		if _, err = gitx.ExportPerFilePatches(ctx, root, trees.base, trees.checked, workspace, antigravityMaxFile, antigravityMaxTotal); err != nil {
 			return fail(err)
 		}
 	}

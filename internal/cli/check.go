@@ -224,7 +224,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	var reviewDone chan review.Verdict
 	if mode != modeStatic {
 		reviewDone = make(chan review.Verdict, 1)
-		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: reviewing with %s; this can take several minutes.\n", reviewerNames(settings.Reviewers))
+		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: reviewing with %s; this can take several minutes.\n", reviewerNames(settings.Reviewers, settings.ReviewerEfforts))
 		go func() {
 			v := review.Verdict{Status: review.StatusFailed}
 			if storeErr != nil {
@@ -232,7 +232,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 				reviewDone <- v
 				return
 			}
-			capture, err := review.NewFilteredCapture(prepared.repoRoot, prepared.snapshot.Branch, prepared.request.BaseCommit, prepared.snapshot.Tree, prepared.reviewTree)
+			capture, err := review.NewCaptureWithBaseTree(prepared.repoRoot, prepared.snapshot.Branch, prepared.request.BaseCommit, prepared.reviewBaseTree, prepared.snapshot.Tree, prepared.reviewTree, prepared.reviewMergedIn, prepared.reviewUnattributed)
 			if err != nil {
 				v.Error = err.Error()
 				reviewDone <- v
@@ -936,7 +936,10 @@ type preparedCheck struct {
 	snapshot gitx.Snapshot
 	// reviewTree is the same size-filtered scope as the uploaded patch, but
 	// without selected ignored policy files. snapshot.Tree stays unfiltered.
-	reviewTree string
+	reviewTree         string
+	reviewBaseTree     string
+	reviewMergedIn     []string
+	reviewUnattributed string
 	// checkedTree is the tree the uploaded patch makes of the base: the
 	// files the service analyzed.
 	checkedTree  string
@@ -1011,6 +1014,11 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 			break
 		}
 	}
+	reviewBaseTree, reviewMergedIn, reviewUnattributed := localReviewBase(repoRoot, base, snapshot.Tree, opts)
+	filterBase := base
+	if reviewBaseTree != "" {
+		filterBase = reviewBaseTree
+	}
 	patchTree, reviewTree := snapshot.PatchTree, snapshot.Tree
 	exclude := excludeOutsideSelection(repoRoot, snapshot.PatchTree, selection.Files)
 	var omitted []report.OmittedFile
@@ -1023,10 +1031,10 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		for _, file := range filtered.OmittedFiles {
 			omitted = append(omitted, report.OmittedFile{Path: file.Path, Bytes: file.Bytes, Reason: file.Reason})
 		}
-		if snapshot.Tree == snapshot.PatchTree {
+		if snapshot.Tree == snapshot.PatchTree && reviewBaseTree == "" {
 			reviewTree = patchTree
 		} else {
-			filteredReview, err := gitx.FilterCheckTree(repoRoot, base, snapshot.Tree, exclude, opts.include...)
+			filteredReview, err := gitx.FilterCheckTree(repoRoot, filterBase, snapshot.Tree, exclude, opts.include...)
 			if err != nil {
 				return prepared, err
 			}
@@ -1061,7 +1069,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 		pushLevel = "error"
 	}
 	pushLevel = repositoryPushLevel(cfg, pushLevel, repositoryFailOn)
-	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, checkedTree: patchTree,
+	prepared = preparedCheck{repoRoot: repoRoot, snapshot: snapshot, reviewTree: reviewTree, reviewBaseTree: reviewBaseTree, reviewMergedIn: reviewMergedIn, reviewUnattributed: reviewUnattributed, checkedTree: patchTree,
 		omittedFiles: omitted, binaryFiles: binaryFiles, files: change.Files, bytes: len(change.Patch), base: resolution,
 		failOn: failOn, repositoryFailOn: repositoryFailOn, pushLevel: pushLevel,
 		request: service.Request{BaseCommit: base, Change: base64.StdEncoding.EncodeToString(change.Patch), FailOn: failOn}}
@@ -1674,13 +1682,17 @@ func approvalReason(empty, reviewPassed bool, verdict review.Verdict, static sta
 	return "the static check did not complete (failed, pending, or unknown status)"
 }
 
-func reviewerNames(families []review.Family) string {
+func reviewerNames(families []review.Family, efforts ...[]string) string {
 	if len(families) == 0 {
 		return "no configured reviewers"
 	}
 	names := make([]string, len(families))
 	for i, f := range families {
-		names[i] = string(f)
+		effort := ""
+		if len(efforts) > 0 && i < len(efforts[0]) {
+			effort = efforts[0][i]
+		}
+		names[i] = review.FormatReviewerSpec(f, effort)
 	}
 	return strings.Join(names, ", ")
 }
@@ -1720,4 +1732,67 @@ func warnLowCredits(cmd *cobra.Command, response *service.Response) {
 	if line := report.LowCreditsLine(response.Credits); line != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), line)
 	}
+}
+
+// localReviewBase keeps synthetic trees private to the local reviewer. The
+// hosted patch must continue to use a fetchable commit.
+func localReviewBase(root, base, tree string, opts *checkOptions) (string, []string, string) {
+	if strings.TrimSpace(opts.baseExact) != "" {
+		return "", nil, ""
+	}
+	names := []string{gitx.OriginHead(root)}
+	if opts.base != "" {
+		names = append(names, upstreamOf(root, opts.base))
+	}
+	head, _ := gitx.HeadCommit(root)
+	var commits, lines []string
+	seen := map[string]bool{}
+	for _, name := range names {
+		if name == "" {
+			continue
+		}
+		tip, err := gitx.ResolveCommit(root, name)
+		if err != nil || tip == base {
+			continue
+		}
+		mb, ok, err := gitx.MergeBase(root, head, tip)
+		if err != nil || !ok || mb == head || gitx.IsAncestor(root, mb, base) || seen[mb] {
+			continue
+		}
+		seen[mb] = true
+		commits = append(commits, mb)
+		lines = append(lines, name)
+	}
+	if len(commits) == 0 {
+		return "", nil, ""
+	}
+	reason := fmt.Sprintf("HEAD merged commits from %s that base %s does not have", strings.Join(lines, ", "), shortSHA(base))
+	independent, err := gitx.Run(root, append([]string{"merge-base", "--independent"}, commits...)...)
+	if err != nil {
+		return "", nil, reason + ": " + err.Error()
+	}
+	commits = strings.Fields(independent)
+	if len(commits) != 1 {
+		return "", nil, reason + "; multiple independent merged lines"
+	}
+	mb := commits[0]
+	if gitx.IsAncestor(root, base, mb) {
+		baseTree, err := gitx.Run(root, "rev-parse", mb+"^{tree}")
+		if err != nil {
+			return "", nil, reason + ": " + err.Error()
+		}
+		return baseTree, []string{mb}, ""
+	}
+	supported, err := gitx.SupportsMergeTreeWriteTree(root)
+	if err != nil {
+		return "", nil, reason + ": " + err.Error()
+	}
+	if !supported {
+		return "", nil, reason + "; synthetic baseline requires Git >= 2.39.5"
+	}
+	baseline, err := gitx.MergeTreeBaseline(root, base, mb, tree)
+	if err != nil {
+		return "", nil, reason + "; merge-tree fallback: " + err.Error()
+	}
+	return baseline, []string{mb}, ""
 }

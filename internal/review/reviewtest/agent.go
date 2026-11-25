@@ -180,6 +180,9 @@ func options(model, mode string) []acp.SessionConfigOption {
 		m = append(m, acp.SessionConfigSelectOption{Value: acp.SessionConfigValueId(value), Name: value})
 	}
 	err := acp.SessionConfigSelectOptionsUngrouped{{Value: "high", Name: "High"}}
+	if mode == "efforts" {
+		err = append(err, acp.SessionConfigSelectOption{Value: "xhigh", Name: "Extra high"}, acp.SessionConfigSelectOption{Value: "medium", Name: "Medium"})
+	}
 	if mode == "no-high" {
 		err = acp.SessionConfigSelectOptionsUngrouped{{Value: "low", Name: "Low"}}
 	}

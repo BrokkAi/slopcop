@@ -188,7 +188,7 @@ func TestKimiToolGuard(t *testing.T) {
 }
 
 func TestKimiPromptNamesTheExportedRepository(t *testing.T) {
-	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", Kimi)
+	p := reviewPrompt("/home/someone/private-repo", Capture{BaseTree: "base", Tree: "snap"}, intent{}, "", "diff", AdapterFor(Kimi, Settings{}))
 	if strings.Contains(p, "/home/someone/private-repo") || !strings.Contains(p, "Repository root: repo\n") || !strings.Contains(p, "Read tool") || strings.Contains(p, "git -C") {
 		t.Fatal(p)
 	}
@@ -482,7 +482,7 @@ func TestKimiRefusesACommandThatWidensItsAccess(t *testing.T) {
 func TestKimiDoesNotApproveADiffItCannotSee(t *testing.T) {
 	t.Setenv(kimiKeyEnv, kimiTestKey)
 	root, c, store := reviewRepo(t)
-	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", promptDiffLimit/5)), 0600); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "large.py"), []byte(strings.Repeat("value = 1\n", (256*1024)/5)), 0600); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := gitx.Run(root, "add", "-A"); err != nil {
@@ -498,11 +498,11 @@ func TestKimiDoesNotApproveADiffItCannotSee(t *testing.T) {
 	}
 	trace := filepath.Join(t.TempDir(), "trace")
 	v := Run(context.Background(), store, c, Options{Root: root, Settings: kimiSettings("clean", trace)})
-	if v.Status != StatusFailed || !strings.Contains(v.Reviewers[0].Error, "over the 256 KiB") || v.Reviewers[0].FirstError != "" {
-		t.Fatalf("%+v", v)
+	if v.Status != StatusClean || len(v.Reviewers) != 1 {
+		t.Fatalf("on-demand diff review: %+v", v)
 	}
-	if _, err := os.Stat(trace); !os.IsNotExist(err) {
-		t.Fatal("the Kimi adapter started on a diff it cannot see")
+	if _, err := os.Stat(trace); err != nil {
+		t.Fatal("adapter did not start", err)
 	}
 }
 
