@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/BrokkAi/slopcop/internal/config"
 )
 
 func TestSARIFFileWritesSARIFBesideTheJSONReport(t *testing.T) {
@@ -441,5 +443,128 @@ func TestCommentDefaultsToTheWorkflowToken(t *testing.T) {
 	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", commentReport), "--service", service.URL, "--api-url", github.URL)
 	if code != 0 || writes == 0 || len(sent) != 0 {
 		t.Fatalf("exit = %d, writes = %d, sent to the service = %v, stderr = %s", code, writes, sent, stderr)
+	}
+}
+
+// reportFrom is commentReport as a check against the service writes it.
+func reportFrom(service string) string {
+	return strings.Replace(commentReport, `"summary":{`, `"service":"`+service+`","summary":{`, 1)
+}
+
+// storeLogin stores this machine's login for the service, as `slopcop login`
+// would.
+func storeLogin(t *testing.T, service, token string) {
+	t.Helper()
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.SetToken(service, token)
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCommentAsksTheReportsServiceWhenItHasALogin(t *testing.T) {
+	appCommentEnv(t)
+	t.Setenv("SLOPCOP_TOKEN", "")
+	var sent map[string]any
+	service := appService(t, "posted", &sent)
+	storeLogin(t, service.URL, "slopcop-token")
+	writes := 0
+	github := commentGitHub(t, &writes)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", reportFrom(service.URL)), "--api-url", github.URL, "--via", "app")
+	if code != 0 || writes != 0 || sent["headCommit"] != headCommit {
+		t.Fatalf("exit = %d, writes = %d, sent = %v, stderr = %s", code, writes, sent, stderr)
+	}
+	if !strings.Contains(stderr, "asking "+service.URL+", the service the check ran against") {
+		t.Errorf("stderr = %s", stderr)
+	}
+}
+
+func TestCommentIgnoresTheReportsServiceWithoutALogin(t *testing.T) {
+	appCommentEnv(t)
+	t.Setenv("SLOPCOP_TOKEN", "")
+	reportedSent := map[string]any{}
+	reported := appService(t, "posted", &reportedSent)
+	var sent map[string]any
+	defaultService := appService(t, "posted", &sent)
+	// The login is the default service's: the report's must not get it.
+	storeLogin(t, defaultService.URL, "slopcop-token")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.ServiceURL = defaultService.URL
+	if _, err := config.Save(cfg); err != nil {
+		t.Fatal(err)
+	}
+	writes := 0
+	github := commentGitHub(t, &writes)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", reportFrom(reported.URL)), "--api-url", github.URL, "--via", "app")
+	if code != 0 || len(reportedSent) != 0 || sent["headCommit"] != headCommit {
+		t.Fatalf("exit = %d, report's service sent = %v, default sent = %v, stderr = %s", code, reportedSent, sent, stderr)
+	}
+	if !strings.Contains(stderr, "the check ran against "+reported.URL+", which this machine has no login for, so this asks "+defaultService.URL) {
+		t.Errorf("stderr = %s", stderr)
+	}
+
+	// $SLOPCOP_TOKEN may be another service's, so a stored login for the
+	// report's service does not make the report's service the target.
+	t.Setenv("SLOPCOP_TOKEN", "slopcop-token")
+	storeLogin(t, reported.URL, "slopcop-token")
+	sent = nil
+	code, _, stderr = runCLI(t, "comment", "--report", tempFile(t, "r.json", reportFrom(reported.URL)), "--api-url", github.URL, "--via", "app")
+	if code != 0 || len(reportedSent) != 0 || sent["headCommit"] != headCommit {
+		t.Fatalf("exit = %d, report's service sent = %v, default sent = %v, stderr = %s", code, reportedSent, sent, stderr)
+	}
+	if !strings.Contains(stderr, "$SLOPCOP_TOKEN may be another service's") {
+		t.Errorf("stderr = %s", stderr)
+	}
+}
+
+func TestCommentServiceFlagBeatsTheReports(t *testing.T) {
+	appCommentEnv(t)
+	t.Setenv("SLOPCOP_TOKEN", "")
+	reportedSent := map[string]any{}
+	reported := appService(t, "posted", &reportedSent)
+	var sent map[string]any
+	named := appService(t, "posted", &sent)
+	storeLogin(t, reported.URL, "slopcop-token")
+	storeLogin(t, named.URL, "slopcop-token")
+	writes := 0
+	github := commentGitHub(t, &writes)
+	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", reportFrom(reported.URL)), "--service", named.URL, "--api-url", github.URL, "--via", "app")
+	if code != 0 || len(reportedSent) != 0 || sent["headCommit"] != headCommit {
+		t.Fatalf("exit = %d, report's service sent = %v, named sent = %v, stderr = %s", code, reportedSent, sent, stderr)
+	}
+	if strings.Contains(stderr, "the check ran against") {
+		t.Errorf("stderr = %s", stderr)
+	}
+}
+
+func TestReportedServiceDropsCredentials(t *testing.T) {
+	for in, want := range map[string]string{
+		"https://slopcop.com":                  "https://slopcop.com",
+		"https://user:secret@staging.test/api": "https://staging.test/api",
+		"http://127.0.0.1:8080?token=secret#x": "http://127.0.0.1:8080",
+	} {
+		if got := reportedService(in); got != want {
+			t.Errorf("reportedService(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestCommentKeepsTheReportedServicesPath(t *testing.T) {
+	isolateUserConfig(t)
+	const host = "https://slopcop.test"
+	cfg := config.Config{ServiceURL: host}
+	cfg.SetToken(host, "login")
+	var stderr strings.Builder
+	if got := commentService(&stderr, cfg, "", host+"/staging/"); got != host+"/staging" {
+		t.Errorf("service = %q, stderr = %s", got, stderr.String())
+	}
+	if got := commentService(&stderr, cfg, "", host+"/"); got != "" {
+		t.Errorf("the default service came back as %q", got)
 	}
 }

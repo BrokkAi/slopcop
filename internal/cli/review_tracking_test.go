@@ -104,7 +104,7 @@ func trackedRepo(t *testing.T, agent string) string {
 }
 
 // volatile are the parts of a JSON report that differ between two runs.
-var volatile = regexp.MustCompile(`"logDir":\s*"[^"]*"|/review-[0-9T]+-[0-9]+|"reused":\s*(true|false),?`)
+var volatile = regexp.MustCompile(`"service":\s*"[^"]*",?|"logDir":\s*"[^"]*"|/review-[0-9T]+-[0-9]+|"reused":\s*(true|false),?`)
 
 func TestReportSentOnlyWhenTheAnswerSaysFindings(t *testing.T) {
 	for _, tc := range []struct {

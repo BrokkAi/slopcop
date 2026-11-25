@@ -366,6 +366,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	reportOptions.SizeBreakdown = static.sizeBreakdown
 	if prepared.client != nil {
 		reportOptions.Workspace = prepared.client.Workspace
+		reportOptions.Service = reportedService(prepared.client.BaseURL)
 	}
 	// The first check 'enable' runs is how the repository gets added, and
 	// right after enabling there is usually nothing to check yet. Its line
@@ -1488,6 +1489,21 @@ func resolveServiceURL(cfg config.Config, flagValue string) string {
 		}
 	}
 	return cfg.DefaultService()
+}
+
+// reportedService is the service URL a report names: the client's, without
+// any user, query or fragment, so a credential in the URL stays out of it.
+func reportedService(baseURL string) string {
+	parsed, err := url.Parse(baseURL)
+	if err != nil {
+		return ""
+	}
+	parsed.User = nil
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String()
 }
 
 // resolveToken is the credential for the service a command talks to:

@@ -405,6 +405,18 @@ func TestJSONSaysTheCertaintyTheCheckRanWith(t *testing.T) {
 	}
 }
 
+// The GitHub Action reads the service from its own report with sed, which
+// matches this exact line: a top-level key, indented two spaces.
+func TestJSONSaysTheServiceOnItsOwnLine(t *testing.T) {
+	got := renderWith(t, response(service.StatusClean, "error", sampleFindings()), FormatJSON, Options{Service: "https://staging.test/api"})
+	if !strings.Contains(got, "\n  \"service\": \"https://staging.test/api\",\n") {
+		t.Errorf("json = %s", got)
+	}
+	if got := render(t, response(service.StatusClean, "error", nil), FormatJSON); strings.Contains(got, "\"service\"") {
+		t.Errorf("a report with no service names one: %s", got)
+	}
+}
+
 func TestJSONListsNewFindingsAndCountsTheSplit(t *testing.T) {
 	decode := func(options Options) (map[string]any, []any) {
 		var document map[string]any
