@@ -141,6 +141,10 @@ type Response struct {
 	// .slopcop/config.toml excluded. Nil when the tree has none, or from a
 	// service from before BrokkAi/bifrost-service#1103.
 	Exclusions *Exclusions `json:"exclusions,omitempty"`
+	// RepositoryFailOn is the [check] fail_on of the checked tree's and the
+	// base commit's .slopcop/config.toml. Nil when neither sets one, or from
+	// a service or runner from before BrokkAi/bifrost-service#1526.
+	RepositoryFailOn *RepositoryFailOn `json:"repositoryFailOn,omitempty"`
 	// RepositorySize is how much of the checkout bounds the check's checkout
 	// used, counts only. A service or runner from before
 	// BrokkAi/bifrost-service#1192 omits it.
@@ -230,6 +234,23 @@ type Exclusions struct {
 	// OnlyExcluded says the change wrote files and [check] left nothing to
 	// check, so a clean status means nothing ran.
 	OnlyExcluded bool `json:"onlyExcluded"`
+}
+
+// RepositoryFailOn mirrors the service's repositoryFailOn: the threshold a
+// repository commits in [check] fail_on for every reader of its checks.
+type RepositoryFailOn struct {
+	// Config is the file the threshold comes from, .slopcop/config.toml.
+	Config string `json:"config"`
+	// Level is the checked tree's fail_on; empty when the change removed the
+	// base's.
+	Level string `json:"level,omitempty"`
+	// BaseLevel is the base commit's fail_on; empty when it sets none.
+	BaseLevel string `json:"baseLevel,omitempty"`
+	// Changed says the change itself set, removed or altered the threshold.
+	Changed bool `json:"changed,omitempty"`
+	// Applied says Level decided the status, because the request named no
+	// failOn.
+	Applied bool `json:"applied,omitempty"`
 }
 
 // ExclusionScope mirrors ExclusionScope: exclude (AllRules) or one

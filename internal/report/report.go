@@ -312,6 +312,7 @@ func human(response service.Response, options Options) string {
 		out.WriteString("\n")
 	}
 	writeExclusions(&out, response.Exclusions, options.Verbose)
+	out.WriteString(repositoryFailOnLine(response.RepositoryFailOn))
 	if size := response.RepositorySize; size != nil && size.NearLimit {
 		out.WriteString(SizeAdvice(size, options.SizeBreakdown))
 	}
@@ -397,6 +398,26 @@ func writeHumanOmittedAndReview(w io.Writer, options Options) error {
 func onlyExcluded(response service.Response) bool {
 	return response.Summary.OnlyExcluded ||
 		(response.Exclusions != nil && response.Exclusions.OnlyExcluded && response.Status == service.StatusClean)
+}
+
+// repositoryFailOnLine names the repository's [check] fail_on when it is set
+// or the change moves it, since a change can lower the threshold it is
+// checked against. It is "" when neither the tree nor the base sets one.
+func repositoryFailOnLine(threshold *service.RepositoryFailOn) string {
+	if threshold == nil {
+		return ""
+	}
+	config := printable(threshold.Config)
+	switch {
+	case !threshold.Changed:
+		return fmt.Sprintf("Threshold: %s, from [check] fail_on in %s\n", printable(threshold.Level), config)
+	case threshold.Level == "":
+		return fmt.Sprintf("Threshold: this change removes [check] fail_on (was %s) from %s\n", printable(threshold.BaseLevel), config)
+	case threshold.BaseLevel == "":
+		return fmt.Sprintf("Threshold: this change sets [check] fail_on to %s in %s\n", printable(threshold.Level), config)
+	default:
+		return fmt.Sprintf("Threshold: this change moves [check] fail_on from %s to %s in %s\n", printable(threshold.BaseLevel), printable(threshold.Level), config)
+	}
 }
 
 // writeExclusions lists what .slopcop/config.toml [check] excluded, each
@@ -1155,6 +1176,9 @@ type jsonReport struct {
 	// Exclusions is what .slopcop/config.toml [check] excluded, as the
 	// service sent it. It is set only when the checked tree has [check].
 	Exclusions *service.Exclusions `json:"exclusions,omitempty"`
+	// RepositoryFailOn is the repository's [check] fail_on, as the service
+	// sent it. It is set only when the checked tree or its base sets one.
+	RepositoryFailOn *service.RepositoryFailOn `json:"repositoryFailOn,omitempty"`
 	// SkillUpdated is set only when this run wrote the skill.
 	SkillUpdated []SkillUpdate `json:"skillUpdated,omitempty"`
 	// RepositorySize is the service's measure of the check's checkout, as
@@ -1221,6 +1245,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		EmptyChange:          options.EmptyChange,
 		SkillUpdated:         options.SkillUpdated,
 		Exclusions:           response.Exclusions,
+		RepositoryFailOn:     response.RepositoryFailOn,
 		RepositorySize:       response.RepositorySize,
 		SizeBreakdown:        options.SizeBreakdown,
 		OrgRules:             response.OrgRules,
@@ -1854,6 +1879,9 @@ func writeSARIF(w io.Writer, response service.Response, options Options) error {
 	}
 	if size := response.RepositorySize; size != nil {
 		properties["slopcop.repositorySize"] = size
+	}
+	if threshold := response.RepositoryFailOn; threshold != nil {
+		properties["slopcop.repositoryFailOn"] = threshold
 	}
 	// What .slopcop/config.toml [check] excluded is never silent: the run
 	// carries it, and each rule that matched nothing is a warning.

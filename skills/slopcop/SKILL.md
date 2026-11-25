@@ -257,8 +257,9 @@ error when `REV` shares no history with `HEAD`. On the default branch with nothi
 default base is `HEAD` and the patch is empty.
 
 Flags worth knowing: `--format human|json|sarif` (default `human`),
-`--fail-on never|finding|note|warning|error` (default `finding`, so any new
-finding fails the check; the service alone defaults to `warning`),
+`--fail-on never|finding|note|warning|error` (default the repository's
+`[check] fail_on`, else `finding`, so any new finding fails the check; the
+service alone defaults to `warning`),
 `--certainty definite|all` (default `definite`: only findings Bifrost proved
 are listed and can fail the check; `all` adds `possible` and `heuristic`
 ones, which `summary.lessCertainFindings` otherwise counts), `--policy
@@ -520,20 +521,25 @@ judgment, so read the code it names before you change anything, and override
 it (below) when it is wrong. The loop ends when the check
 approves the tree: `approved` is `true` in `json`, and where the push gate is
 installed, stderr says the tree may be pushed. That needs a clean review and
-no new static finding at or above the push level (`error` by default); a
+no new static finding at or above the push level (`error` by default, or the
+repository's `[check] fail_on` when that is stricter); a
 static check that ended `incomplete` does not prevent it, unless it lists
 `runFailures`: then the analyzer run failed and checked nothing, so run the
 check again. New static findings
 below the push level, warnings and notes by default, are advisory: they do not
-block the push, though they still exit `1` under the default `--fail-on`. A
-pull request check fails on every one of them, a note included: `json` counts
+block the push, though they may still exit `1` under the default `--fail-on`.
+A pull request check fails on every one at or above the repository's
+threshold, a note included when it sets none: `json` counts
 them in `advisoryFindings`, and stderr says so where the push gate is
 installed. So `approved: true` with `advisoryFindings` means the push is
 allowed and the pull request check will fail. Fix
 the real ones in this change, ignore the false positives, and tell the user
 about any you leave before you open the pull request. Do not edit a
 deliberate test input only to quiet a style rule: tell the user, who can keep
-those paths out of the rule with `[check]` in `.slopcop/config.toml`. A failed
+those paths out of the rule with `[check]` in `.slopcop/config.toml`, or
+commit a threshold there (`fail_on = "warning"`) so notes fail no check. Do
+not set or lower `fail_on` yourself: it is the team's bar, and a change that
+moves it says so on its pull request. A failed
 review, a service failure, or exit `3` never approves the tree. Read a
 `possible` or `heuristic` finding before fixing it, since it may be a false
 positive. A finding's `title` is often its rule's one sentence; its `message`,

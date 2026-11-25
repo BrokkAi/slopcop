@@ -136,6 +136,9 @@ families through Copilot CLI, on one login:
 | `kimi` | Kimi Code | `KIMI_API_KEY` |
 | `grok` | Grok Build | `XAI_API_KEY` |
 
+On a machine you keep, `flash` can instead read the DeepSeek key from a file;
+see [DeepSeek API key](/get-started/install/#deepseek-api-key).
+
 Reviewers can mix harnesses, such as `reviewers: sonnet,sol` with both
 secrets set. `ollama` needs a model server the runner can reach,
 and `gemini` an Antigravity login, so neither suits a hosted runner. See
@@ -159,7 +162,7 @@ alike, from the same check. It needs `security-events: write`.
 | `workspace` | the token's | workspace to check in, and bill |
 | `version` | the action's release, else the latest | CLI version to install |
 | `base` | the pull request's base branch | branch the change targets |
-| `fail-on` | `finding` | lowest level of a new static finding that fails the job |
+| `fail-on` | the repository's `[check] fail_on`, else `finding` | lowest level of a new static finding that fails the job |
 | `certainty` | `definite` | `all` also reports possible and heuristic findings |
 | `review` | `false` | also run the LLM review |
 | `review-provider` | | provider the reviewers run through, such as `copilot` |
@@ -252,8 +255,12 @@ rather than starting over.
 
 ## Threshold
 
-By default any new finding fails the check (`--fail-on finding`). To fail only
-on warnings and errors, pass `--fail-on warning`; to always exit `0` on a
+By default the check fails at the repository's threshold, `fail_on` in the
+`[check]` section of `.slopcop/config.toml`, and on any new finding when it
+sets none (`--fail-on finding`). Committing the threshold is the way to make
+CI, pull request checks and the push gate agree; see
+[The repository's threshold](/checks/exit-codes/#the-repositorys-threshold).
+To fail only on warnings and errors in one job, pass `--fail-on warning`; to always exit `0` on a
 completed check and read the report yourself, `--fail-on never`. Incomplete
 checks still exit `2` whatever the threshold.
 

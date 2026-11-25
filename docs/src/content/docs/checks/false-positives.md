@@ -223,6 +223,9 @@ still applies first; `[check]` only removes more.
   [push gate](/agents/stop-hook/) lets its tree through, since nothing in it is
   in scope. A change that also has files the size filter left unread is not
   approved.
+- `fail_on` in `[check]` is not an exclusion: it sets the least severe new
+  finding that fails a check of the repository. See
+  [The repository's threshold](/checks/exit-codes/#the-repositorys-threshold).
 - A `[check]` the service cannot read fails the check with
   `check_config_invalid` rather than check nothing.
 

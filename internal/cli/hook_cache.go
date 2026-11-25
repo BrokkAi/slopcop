@@ -47,6 +47,10 @@ type hookState struct {
 	// Handed says the hook already gave the agent or the user those
 	// findings.
 	Handed bool `json:"handed,omitempty"`
+	// HandedLevels are the check and push levels the findings were handed
+	// at. A level changed since, such as a tightened gate.blockOn, can make
+	// more of them count, so they are handed again.
+	HandedLevels string `json:"handedLevels,omitempty"`
 	// Holds counts the stops in a row the hook held the agent back at. A
 	// stop that follows no hold ends the run.
 	Holds int `json:"holds,omitempty"`
@@ -98,7 +102,9 @@ func (s *hookState) inWorkspace(workspace string) {
 
 // completed records the result of a check in workspace. The repository is
 // evidently checked there, and findings already handed over for the same
-// tree are not handed over again.
+// tree are not handed over again. Every new finding is kept; the hook
+// decides when it answers which of them to hand over, at the levels then in
+// force.
 func (s *hookState) completed(workspace, fingerprint string, response service.Response) {
 	s.Workspace, s.Active, s.Off = workspace, true, false
 	if fingerprint != s.Fingerprint {

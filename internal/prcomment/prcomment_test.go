@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/BrokkAi/slopcop/internal/service"
 )
 
 const samplePatch = "@@ -1,3 +1,4 @@\n line one\n-old two\n+new two\n+added three\n line four\n@@ -20,2 +21,3 @@ func f() {\n context 21\n+added 22\n context 23\n\\ No newline at end of file"
@@ -419,5 +421,31 @@ func TestReviewLineSaysAnUnfinishedReviewIsNotFull(t *testing.T) {
 	line := reviewLine(r, outcome(r, items(r)))
 	if !strings.Contains(line, "no findings") || !strings.Contains(line, "not every reviewer finished") {
 		t.Fatalf("review line = %q", line)
+	}
+}
+
+// A pull request that moves the repository's [check] fail_on says so in the
+// summary, since a change can lower the bar it is checked against.
+func TestSummarySaysWhenTheChangeMovesTheThreshold(t *testing.T) {
+	r := Report{Status: "clean", StaticStatus: "clean", RepositoryFailOn: &service.RepositoryFailOn{
+		Config: ".slopcop/config.toml", Level: "never", Changed: true,
+	}}
+	body := summary(r, outcome(r, nil), nil, 0, "abc", true)
+	if !strings.Contains(body, "This change moves what fails its check") || !strings.Contains(body, "from none (any new finding) to `never`") {
+		t.Fatalf("summary:\n%s", body)
+	}
+	r.RepositoryFailOn = &service.RepositoryFailOn{Config: ".slopcop/config.toml", Level: "warning", BaseLevel: "warning"}
+	body = summary(r, outcome(r, nil), nil, 0, "abc", true)
+	if !strings.Contains(body, "Fails at `warning`, from `[check] fail_on`") || strings.Contains(body, "moves") {
+		t.Fatalf("summary:\n%s", body)
+	}
+	r.Summary = &Summary{FailOn: "error"}
+	body = summary(r, outcome(r, nil), nil, 0, "abc", true)
+	if !strings.Contains(body, "This job fails at `error`, set by its own `fail-on`; the repository's `[check] fail_on` is `warning`") || strings.Contains(body, "Fails at `warning`") {
+		t.Fatalf("summary with an explicit fail-on:\n%s", body)
+	}
+	r.RepositoryFailOn = nil
+	if body = summary(r, outcome(r, nil), nil, 0, "abc", true); strings.Contains(body, "fail_on") {
+		t.Fatalf("summary without a threshold:\n%s", body)
 	}
 }

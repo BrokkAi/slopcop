@@ -78,8 +78,9 @@ keeps review findings, and static ones, from exiting `1`.
 A check records `refs/slopcop/reviewed/<tree>` when a nonempty change has a
 clean review (or no review), and the static half completed with no new finding
 at or above `gate.blockOn` (or was skipped or did not run). The default push
-level is `error`; warnings and notes are advisory even when `--fail-on` makes
-them exit `1`. `--fail-on` changes the exit code, not push approval. A static
+level is `error`, or [the repository's threshold](#the-repositorys-threshold)
+when that is stricter; findings below it are advisory even when `--fail-on`
+makes them exit `1`. `--fail-on` changes the exit code, not push approval. A static
 rule may be incomplete while the completed findings still approve the tree,
 but a run failure (`runFailures` in `json`) does not: it left every check of
 an analyzer run without an answer, so that run checked nothing. Run the check
@@ -91,34 +92,67 @@ findings are unchanged. JSON `approved` reports the decision directly.
 
 ## The push gate and pull request checks
 
-Three thresholds judge the same new static findings, and their defaults
-differ:
+Three thresholds judge the same new static findings:
 
 | Gate | Fails on | Set with |
 | --- | --- | --- |
-| The exit code of `slopcop check` | new findings at or above `--fail-on`; default `finding`, any new finding | the flag |
-| Push approval: `approved`, and the push gate | new findings at or above `gate.blockOn`; default `error` | the [user config file](/reference/configuration/#push-approval-level) |
-| A [pull request check](/checks/pull-requests/) | any new finding, as `--fail-on finding` | nothing: it has no setting |
+| The exit code of `slopcop check` | new findings at or above `--fail-on`; default the repository's threshold, else `finding`, any new finding | the flag |
+| Push approval: `approved`, and the push gate | new findings at or above `gate.blockOn`; default `error`, or the repository's threshold when that is stricter | the [user config file](/reference/configuration/#push-approval-level) |
+| A [pull request check](/checks/pull-requests/) | new findings at or above the repository's threshold; without one, any new finding | the repository's threshold |
 
-So by default a new `note` or `warning` exits `1`, is approved for push, and
-fails the pull request check. The exit code and the pull request check agree;
-push approval is the looser one. An `info` finding fails none of the three.
+### The repository's threshold
+
+A repository gives all three one threshold by committing `fail_on` in the
+`[check]` section of `.slopcop/config.toml`:
+
+```toml
+[check]
+# The least severe new finding that fails a check of this repository:
+# never, finding, note, warning or error.
+fail_on = "warning"
+```
+
+The service reads it from the code it checks, like the rest of
+[`[check]`](/checks/false-positives/#exclude-paths-from-checks), so pull
+request checks, the MCP `check` tool and `slopcop check` read the same value,
+and a change to it takes effect in the change that makes it. With
+`fail_on = "warning"`, a new `note` exits `0`, is approved for push and passes
+the pull request check; a new `warning` exits `1`, blocks the push and fails
+the pull request check.
+
+- `--fail-on` still wins for its own check, so a script that passes it gets
+  the exit code it asked for.
+- It rates static severities only. Local review findings still fail the
+  check under `fail_on = "never"`; only a `--fail-on never` you pass stops
+  them.
+- The threshold can raise the default push level, never lower it: a change
+  can edit its own `fail_on`, and what blocks a push stays a person's to
+  loosen. A `gate.blockOn` set in the user config file stands as it is.
+- A change that sets, removes or alters `fail_on` says so, in the report
+  (`repositoryFailOn` in `json`, `slopcop.repositoryFailOn` in `sarif`) and
+  on the pull request, so a change that lowers its own bar is seen in review.
+
+Without a repository threshold, a new `note` or `warning` exits `1`, is
+approved for push, and fails the pull request check. The exit code and the
+pull request check agree; push approval is the looser one. An `info` finding
+fails none of the three.
 
 A check that approves a tree with findings a pull request check fails on says
 so. `advisoryFindings` in `json` (`slopcop.advisoryFindings` in `sarif`)
 counts them, and where the push gate is installed stderr says, in every
 format, that a pull request check fails on them. Before you open the pull
 request, fix them or [ignore the false positives](/checks/false-positives/).
-To have the push gate block what the pull request check fails on, set
-`gate.blockOn` to `finding`; `advisoryFindings` is then never present.
+To have the push gate block what the pull request check fails on, commit the
+repository's threshold, or set `gate.blockOn` to the same level;
+`advisoryFindings` is then never present.
 
 None of the three treats a test or fixture path differently from any other
 path. What a check leaves out is decided by
 [`[check]` in `.slopcop/config.toml`](/checks/false-positives/#exclude-paths-from-checks),
-which the service reads from the checked code, so a path excluded there is
-excluded from all three alike. For test inputs that are small or wrong on
-purpose, name the style rules in an `exclude_rules` entry for their paths:
-every other rule, the security rules among them, keeps checking those files.
+so a path excluded there is excluded from all three alike. For test inputs
+that are small or wrong on purpose, name the style rules in an
+`exclude_rules` entry for their paths: every other rule, the security rules
+among them, keeps checking those files.
 
 ## Exit 2: incomplete, or an error
 

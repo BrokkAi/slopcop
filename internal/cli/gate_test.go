@@ -220,16 +220,28 @@ func TestAdvisoryFindingsAreWhatOnlyThePullRequestCheckFailsOn(t *testing.T) {
 	}
 	response := service.Response{Findings: findings}
 	for level, want := range map[string]int{"never": 5, "error": 3, "warning": 2, "note": 0, pullRequestFailOn: 0} {
-		if got := advisoryFindings(response, level); got != want {
+		if got := advisoryFindings(response, level, pullRequestFailOn); got != want {
 			t.Errorf("advisoryFindings at %s = %d, want %d", level, got, want)
+		}
+	}
+	// A repository's [check] fail_on is the pull request check's threshold:
+	// only the findings between it and the push level are advisory.
+	for prLevel, want := range map[string]int{"warning": 3, "error": 2, "never": 0} {
+		if got := advisoryFindings(response, "never", prLevel); got != want {
+			t.Errorf("advisoryFindings at never under pull request level %s = %d, want %d", prLevel, got, want)
 		}
 	}
 	// Findings the service left out of the list block no push and still fail
 	// the pull request check, even when nothing listed is advisory.
 	response = service.Response{Findings: []service.Finding{{New: true, Severity: "warning", Certainty: "possible"}}}
 	response.Summary.OmittedFindings = 4
-	if got := advisoryFindings(response, "error"); got != 4 {
+	if got := advisoryFindings(response, "error", pullRequestFailOn); got != 4 {
 		t.Errorf("advisoryFindings with 4 omitted = %d, want 4", got)
+	}
+	// When the push level is the pull request's, nothing is advisory, not
+	// even the omitted findings.
+	if got := advisoryFindings(response, "warning", "warning"); got != 0 {
+		t.Errorf("advisoryFindings at equal levels with 4 omitted = %d, want 0", got)
 	}
 	if pullRequestFailOn != "finding" {
 		t.Fatalf("pullRequestFailOn = %q: the docs (checks/exit-codes.md, checks/pull-requests.md) and the skill say finding; change them together", pullRequestFailOn)

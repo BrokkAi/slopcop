@@ -23,9 +23,9 @@ inputs:
     required: false
     default: ''
   fail-on:
-    description: 'Lowest level of a new static finding that fails the job: never, finding, note, warning or error.'
+    description: "Lowest level of a new static finding that fails the job: never, finding, note, warning or error. Defaults to the repository's [check] fail_on in .slopcop/config.toml, else finding."
     required: false
-    default: finding
+    default: ''
   certainty:
     description: Which static findings to report, definite or all.
     required: false
@@ -205,7 +205,10 @@ runs:
         report="$RUNNER_TEMP/slopcop.json"
         sarif="$RUNNER_TEMP/slopcop.sarif"
         rm -f "$report" "$sarif"
-        args=(check --base "$BASE_REF" --format json --sarif-file "$sarif" --fail-on "$FAIL_ON" --certainty "$CERTAINTY")
+        args=(check --base "$BASE_REF" --format json --sarif-file "$sarif" --certainty "$CERTAINTY")
+        if [ -n "$FAIL_ON" ]; then
+          args+=(--fail-on "$FAIL_ON")
+        fi
         if [ -n "$WORKSPACE" ]; then
           args+=(--workspace "$WORKSPACE")
         fi
