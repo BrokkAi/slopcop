@@ -359,7 +359,10 @@ func shellPushDestinations(command, branch string) []gitx.PushDestination {
 		result = append(result, dest)
 	}
 	if len(result) == 0 {
-		result = append(result, gitx.PushDestination{AllowExemptions: true})
+		// Commands without a parsed git push segment (such as gh pr create) can
+		// publish to a fork or remote selected outside Git's default push target,
+		// so require exact reviewed-tree approval.
+		result = append(result, gitx.PushDestination{AllowExemptions: false})
 	}
 	return result
 }

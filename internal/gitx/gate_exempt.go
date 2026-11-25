@@ -216,7 +216,7 @@ func trackingRefForRemoteBranch(root, remote, remoteBranch string) (string, bool
 		}
 		mapped = target
 	}
-	if mapped == "" {
+	if mapped == "" || !strings.HasPrefix(mapped, "refs/remotes/"+remote+"/") {
 		return "", false
 	}
 	// Ensure no other fetch refspec maps a different remote ref onto mapped.
@@ -227,6 +227,55 @@ func trackingRefForRemoteBranch(root, remote, remoteBranch string) (string, bool
 		}
 	}
 	return mapped, true
+}
+
+// fetchRefspecCovers reports whether remote.<remote>.fetch maps at least one
+// non-excluded remote branch under refs/heads/ onto localRef (within
+// refs/remotes/<remote>/).
+func fetchRefspecCovers(root, remote, localRef string) bool {
+	if !strings.HasPrefix(localRef, "refs/remotes/"+remote+"/") {
+		return false
+	}
+	raw, err := Run(root, "config", "--get-all", "remote."+remote+".fetch")
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return false
+	}
+	var negatives []string
+	type posSpec struct{ src, dst string }
+	var positives []posSpec
+	for _, line := range strings.Split(raw, "\n") {
+		spec := strings.TrimSpace(line)
+		if spec == "" {
+			continue
+		}
+		if strings.HasPrefix(spec, "^") {
+			negatives = append(negatives, strings.TrimPrefix(spec, "^"))
+			continue
+		}
+		spec = strings.TrimPrefix(spec, "+")
+		src, dst, ok := strings.Cut(spec, ":")
+		if !ok || src == "" || dst == "" {
+			continue
+		}
+		positives = append(positives, posSpec{src: src, dst: dst})
+	}
+	for _, sp := range positives {
+		revSrc, ok := applyRefspec(localRef, sp.dst, sp.src)
+		if !ok || !strings.HasPrefix(revSrc, "refs/heads/") {
+			continue
+		}
+		excluded := false
+		for _, neg := range negatives {
+			if refspecMatchesPattern(revSrc, neg) {
+				excluded = true
+				break
+			}
+		}
+		if !excluded {
+			return true
+		}
+	}
+	return false
 }
 
 func refspecMatchesPattern(ref, pattern string) bool {
@@ -307,13 +356,20 @@ func IsDocumentationOnlyPush(root, headCommit, headTree string, reviewedTrees ma
 		}
 	}
 	if upstream == "" && trusted {
-		out, err := Run(root, "for-each-ref", "--format=%(objectname)", "refs/remotes/"+remote+"/")
+		out, err := Run(root, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/"+remote+"/")
 		if err != nil {
 			return false, err
 		}
-		for _, ref := range strings.Fields(out) {
-			if IsAncestor(root, ref, headCommit) {
-				bases = append(bases, ref)
+		for _, line := range strings.Split(out, "\n") {
+			fields := strings.Fields(line)
+			if len(fields) != 2 || fields[0] == "refs/remotes/"+remote+"/HEAD" {
+				continue
+			}
+			if !fetchRefspecCovers(root, remote, fields[0]) {
+				continue
+			}
+			if IsAncestor(root, fields[1], headCommit) {
+				bases = append(bases, fields[1])
 			}
 		}
 	}
@@ -354,11 +410,20 @@ func IsCleanUpstreamMergePush(root, headCommit, headTree string, reviewedTrees m
 			return false, nil
 		}
 		published := false
-		for _, suffix := range []string{"HEAD", "main", "master"} {
-			ref, e := ResolveCommit(root, "refs/remotes/"+remote+"/"+suffix)
-			if e == nil {
+		if targetRef, e := Run(root, "symbolic-ref", "refs/remotes/"+remote+"/HEAD"); e == nil && fetchRefspecCovers(root, remote, targetRef) {
+			if ref, err := ResolveCommit(root, targetRef); err == nil {
 				published = IsAncestor(root, p2, ref)
-				break
+			}
+		} else {
+			for _, branchName := range []string{"main", "master"} {
+				mapped, ok := trackingRefForRemoteBranch(root, remote, branchName)
+				if !ok {
+					continue
+				}
+				if ref, e := ResolveCommit(root, mapped); e == nil {
+					published = IsAncestor(root, p2, ref)
+					break
+				}
 			}
 		}
 		if !published {

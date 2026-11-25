@@ -422,7 +422,7 @@ func TestGatePushDestinations(t *testing.T) {
 		allowed bool
 	}{
 		{"git push", true}, {"git push origin", true}, {"git push -u origin main", true},
-		{"git push origin HEAD:main", true}, {"gh pr create", true},
+		{"git push origin HEAD:main", true}, {"gh pr create", false},
 		{"git push --no-force-with-lease", true}, {"git push --no-force-if-includes", true},
 		{"git push other HEAD:main", false}, {"git push https://example.com/repo.git HEAD:main", false},
 		{"git push origin other-branch", false}, {"git push --all", false},
