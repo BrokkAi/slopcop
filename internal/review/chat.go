@@ -228,6 +228,8 @@ func (s *runner) prepareChat(root, model string) error {
 		return errors.New("the adapter did not confirm the configured model, so the reviewer does not run")
 	}
 	s.result.Model = model
-	s.result.Effort = copilotDefaultEffort
+	if s.result.Effort == "" {
+		s.result.Effort = copilotDefaultEffort
+	}
 	return nil
 }

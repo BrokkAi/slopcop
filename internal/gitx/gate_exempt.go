@@ -259,23 +259,26 @@ func fetchRefspecCovers(root, remote, localRef string) bool {
 		}
 		positives = append(positives, posSpec{src: src, dst: dst})
 	}
+	var matchedSrc string
 	for _, sp := range positives {
 		revSrc, ok := applyRefspec(localRef, sp.dst, sp.src)
-		if !ok || !strings.HasPrefix(revSrc, "refs/heads/") {
+		if !ok {
 			continue
 		}
-		excluded := false
+		if !strings.HasPrefix(revSrc, "refs/heads/") {
+			return false
+		}
 		for _, neg := range negatives {
 			if refspecMatchesPattern(revSrc, neg) {
-				excluded = true
-				break
+				return false
 			}
 		}
-		if !excluded {
-			return true
+		if matchedSrc != "" && matchedSrc != revSrc {
+			return false
 		}
+		matchedSrc = revSrc
 	}
-	return false
+	return matchedSrc != ""
 }
 
 func refspecMatchesPattern(ref, pattern string) bool {
@@ -451,10 +454,12 @@ func IsCleanUpstreamMergePush(root, headCommit, headTree string, reviewedTrees m
 	if n, _ := fmt.Sscanf(version, "git version %d.%d.%d", &major, &minor, &patch); n != 3 || major < 2 || (major == 2 && (minor < 39 || (minor == 39 && patch < 5))) {
 		return false, nil
 	}
-	// Unsupported versions/options and conflicts both fail closed.
+	// Unsupported versions/options and conflicts both fail closed; run without
+	// repository .gitattributes so custom merge drivers cannot resolve conflicts
+	// or execute during the gate check.
 	for _, base := range []string{candidates[0], p1} {
-		tree, e := Run(root, "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", base, p2)
-		if e != nil || tree != headTree {
+		out, e := RunWithoutRepoAttributes(root, "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", base, p2)
+		if e != nil || strings.TrimSpace(string(out)) != headTree {
 			return false, nil
 		}
 	}
