@@ -142,7 +142,7 @@ func MissingPrerequisite(f Family, root string, settings Settings) string {
 		}
 	case "dsh":
 		if os.Getenv("DEEPSEEK_API_KEY") == "" {
-			return "DEEPSEEK_API_KEY is not set"
+			return "DEEPSEEK_API_KEY is not set (to keep the key in a file instead, pass --api-key-file in review.adapters.dsh.command)"
 		}
 	case grokAdapter:
 		if strings.TrimSpace(os.Getenv("XAI_API_KEY")) == "" {

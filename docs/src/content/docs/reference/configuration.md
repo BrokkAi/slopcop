@@ -82,7 +82,8 @@ example, keep a DeepSeek key in a file with:
 "dsh": {"command": ["npx", "--yes", "@brokkai/dsh-acp@0.6.0", "--api-key-file", "/path/to/deepseek_api_key"]}
 ```
 
-Otherwise dsh reads `DEEPSEEK_API_KEY`.
+Otherwise dsh reads `DEEPSEEK_API_KEY`. See
+[DeepSeek API key](/get-started/install/#deepseek-api-key) for the whole setup.
 
 When `review.reviewers` is unset, `slopcop init` picks reviewers by sending
 each family a short prompt. It tries different adapters at the same time and

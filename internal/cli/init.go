@@ -736,7 +736,7 @@ func initReviewers(ctx context.Context, out io.Writer, workDir string, verbose b
 		if cfg.Mode != "" {
 			after = fmt.Sprintf("Until then, mode %s needs a reviewer, so run checks with --static.", cfg.Mode)
 		}
-		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code, Codex or GitHub Copilot CLI, or set DEEPSEEK_API_KEY, then run `slopcop init`%s). %s\n", why, after)
+		fmt.Fprintf(out, "slopcop: local review: none available yet (log in to Claude Code, Codex or GitHub Copilot CLI, or give DeepSeek a key in DEEPSEEK_API_KEY or a key file, see https://docs.slopcop.com/get-started/install/#deepseek-api-key, then run `slopcop init`%s). %s\n", why, after)
 		return nil
 	}
 	if cfg.Review == nil {

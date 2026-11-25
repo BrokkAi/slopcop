@@ -127,9 +127,34 @@ build that binary from source instead.
 ## Local review requirements
 
 The default check needs Node.js with `npx` and existing reviewer harness
-logins. DeepSeek ACP uses `DEEPSEEK_API_KEY` unless configured with a key file.
-Use `--mode static` to run only the hosted check, including in CI without
-reviewer logins.
+logins. Use `--mode static` to run only the hosted check, including in CI
+without reviewer logins.
+
+### DeepSeek API key
+
+The DeepSeek reviewer (`flash`) runs through dsh, which needs a DeepSeek API
+key. Set it in `DEEPSEEK_API_KEY`, or keep it in a file so it stays out of
+every process's environment. For a file, write only the key into it, make it
+readable by you alone, and point dsh at it in `config.json` in the
+[user config directory](/reference/configuration/#files-the-cli-writes):
+
+```console
+chmod 600 /path/to/deepseek_api_key
+```
+
+```json
+{
+  "review": {
+    "adapters": {
+      "dsh": {"command": ["npx", "--yes", "@brokkai/dsh-acp@0.6.0", "--api-key-file", "/path/to/deepseek_api_key"]}
+    }
+  }
+}
+```
+
+Merge `review` into what the file already holds. Then run `slopcop init` to
+pick reviewers again, after `slopcop config unset review.reviewers` if
+they are already set.
 
 ## Check the install
 
