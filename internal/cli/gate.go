@@ -275,6 +275,11 @@ func shellPushDestinations(command, branch string) []gitx.PushDestination {
 			if words[i] != "git" {
 				continue
 			}
+			// Prefix tokens before git (such as GIT_CONFIG_* env assignments or
+			// wrapper commands) can alter push destination/config unseen by git.
+			if i > 0 {
+				unsafe = true
+			}
 			for j := i + 1; j < len(words); j++ {
 				w := words[j]
 				if w == "push" {

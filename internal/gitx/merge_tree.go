@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -38,7 +40,25 @@ func SupportsMergeTreeWriteTree(root string) (bool, error) {
 // Both inputs must be commits: merge-tree cannot fold a synthetic tree into
 // another merge. Text conflict markers are retained to expose the resolution.
 func MergeTreeBaseline(root, baseCommit, mergedCommit, headTree string) (string, error) {
-	command := exec.Command("git", "-C", root, "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", "--name-only", "-z", baseCommit, mergedCommit)
+	// Run merge-tree in an empty worktree with an empty index and attr.tree
+	// cleared so repository .gitattributes merge drivers cannot execute or hide
+	// conflict resolutions.
+	gitDirOut, err := RunBytes(root, nil, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return "", err
+	}
+	gitDir := strings.TrimSuffix(string(gitDirOut), "\n")
+	emptyDir, err := os.MkdirTemp("", "slopcop-merge-tree-")
+	if err != nil {
+		return "", fmt.Errorf("create empty work tree: %w", err)
+	}
+	defer os.RemoveAll(emptyDir)
+	mergeEnv := slices.DeleteFunc(os.Environ(), func(entry string) bool {
+		return strings.HasPrefix(entry, "GIT_ATTR_SOURCE=")
+	})
+	mergeEnv = withEnv(mergeEnv, "GIT_INDEX_FILE", filepath.Join(emptyDir, "index"))
+	command := exec.Command("git", "-C", emptyDir, "--git-dir="+gitDir, "--work-tree="+emptyDir, "-c", "attr.tree=", "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", "--name-only", "-z", baseCommit, mergedCommit)
+	command.Env = mergeEnv
 	var stderr bytes.Buffer
 	command.Stderr = &stderr
 	output, err := command.Output()

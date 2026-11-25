@@ -171,10 +171,10 @@ func (s *snapshot) call(ctx context.Context, name, arguments string) (string, er
 			out, err = renderRead(data, path, in.Offset, in.Limit, in.Column)
 		}
 		if s.diffPaths[path] {
-			if err == nil || errors.Is(err, errPastEnd) {
+			if err == nil {
 				delete(s.unread, path)
 				delete(s.unreadDiff, path)
-			} else {
+			} else if !errors.Is(err, errPastEnd) {
 				s.unreadDiff[path] = true
 			}
 		}
