@@ -57,10 +57,14 @@ type NotConnected struct {
 	WorkspaceName string `json:"workspaceName"`
 	// WorkspaceKind is "personal" or "team".
 	WorkspaceKind string `json:"workspaceKind"`
+	// WorkspaceRole is the caller's role in the workspace, "owner" or
+	// "member": only an owner connects GitHub.
+	WorkspaceRole string `json:"workspaceRole"`
 	// Repository is the check's repository as owner/name.
 	Repository string `json:"repository"`
-	// ConnectURL is the service's Repositories page, where Connect GitHub
-	// connects the workspace that is active in the browser.
+	// ConnectURL is the workspace's own settings page, at its Integrations
+	// section, where Connect GitHub lives whichever workspace the browser
+	// has active.
 	ConnectURL string `json:"connectUrl"`
 	// InstallURL is the App's install page on GitHub.
 	InstallURL string `json:"installUrl"`

@@ -191,8 +191,9 @@ func appReason(response service.PullRequestCommentResponse) appDeclined {
 }
 
 // notConnected says which workspace has no installation for the App to post
-// through, and how to give it one. The web app's Repositories page acts on
-// the browser's active workspace, so the fix names the workspace to be in.
+// through, and how to give it one. The link is the workspace's own settings
+// page, so it works whichever workspace the browser has active. Only an
+// owner connects GitHub, so a member is told to ask one.
 func notConnected(answer service.NotConnected) appDeclined {
 	workspace := "the workspace that ran the check"
 	switch {
@@ -205,36 +206,47 @@ func notConnected(answer service.NotConnected) appDeclined {
 	if answer.Repository != "" {
 		repository = answer.Repository
 	}
-	repositoriesPage := "the SlopCop Repositories page"
-	connect := "click Connect GitHub on the Repositories page"
+	settings := "the workspace's settings in SlopCop"
 	if answer.ConnectURL != "" {
-		repositoriesPage = answer.ConnectURL
-		connect = "open " + answer.ConnectURL + " and click Connect GitHub"
+		settings = answer.ConnectURL
+		// A service before the settings link sent its Repositories page,
+		// which acts on the browser's active workspace.
+		if !strings.Contains(answer.ConnectURL, "/organization/") {
+			settings += " with " + workspace + " active"
+		}
+	}
+	// A member cannot change the workspace's integrations.
+	member := answer.WorkspaceRole != "" && answer.WorkspaceRole != "owner"
+	ask := func(action string) string {
+		if member {
+			return "ask an owner of " + workspace + " to " + action
+		}
+		return action
 	}
 	switch answer.Reason {
 	case "no_github_connection":
 		return appDeclined{
 			reason: workspace + ", which ran the check, has no GitHub connection",
-			fix: fmt.Sprintf("To let the App comment, %s with %s active. Installing the App on GitHub is not enough: the workspace needs its own connection.",
-				connect, workspace),
+			fix: fmt.Sprintf("To let the App comment, %s. Installing the App on GitHub is not enough: the workspace needs its own connection.",
+				ask("click Connect GitHub (or Reconnect GitHub) at "+settings)),
 		}
 	case "repository_not_covered":
 		owner, _, _ := strings.Cut(repository, "/")
 		if answer.InstallationSettingsURL != "" {
 			return appDeclined{
 				reason: fmt.Sprintf("the SlopCop App's installation on %s, which %s's GitHub connection holds, does not include %s", owner, workspace, repository),
-				fix: fmt.Sprintf("To let the App comment, add %s under Repository access at %s. It then shows on %s with %s active.",
-					repository, answer.InstallationSettingsURL, repositoriesPage, workspace),
+				fix: fmt.Sprintf("To let the App comment, %s.",
+					ask("add "+repository+" under Repository access at "+answer.InstallationSettingsURL)),
 			}
 		}
-		install := "Install the SlopCop App on the account that owns " + repository
+		install := "install the SlopCop App on the account that owns " + repository
 		if answer.InstallURL != "" {
 			install += " (" + answer.InstallURL + ")"
 		}
 		return appDeclined{
 			reason: fmt.Sprintf("no SlopCop App installation that %s's GitHub connection holds includes %s", workspace, repository),
-			fix: fmt.Sprintf("To let the App comment: %s with %s selected, or add it to the installation there if there is one; then %s with %s active.",
-				install, repository, connect, workspace),
+			fix: fmt.Sprintf("To let the App comment, %s.",
+				ask(install+" with "+repository+" selected, or add it to the installation there if there is one, then click Reconnect GitHub at "+settings)),
 		}
 	case "not_github":
 		return appDeclined{reason: "the App comments only on GitHub pull requests, and " + repository + " is not on GitHub"}

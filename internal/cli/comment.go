@@ -50,9 +50,9 @@ post them (it does not offer it, the workspace that ran the check has no
 GitHub connection or none of its App installations includes the repository,
 or the App's installation has not accepted Pull requests: Read and write),
 the command writes them itself with GITHUB_TOKEN, and says why and, where it
-can be fixed, how: a workspace connects GitHub with Connect GitHub on the
-SlopCop Repositories page, and a repository joins an installation in the
-App's settings on GitHub. When the service finds the report is not for the
+can be fixed, how: a workspace owner connects GitHub with Connect GitHub in
+the workspace's settings in SlopCop, and a repository joins an installation
+in the App's settings on GitHub. When the service finds the report is not for the
 pull request as it is now (its head moved on, or it does not make the
 check's change), nothing is written and the command fails. --via app uses
 only the App; --via token, the default, only GITHUB_TOKEN.

@@ -305,11 +305,11 @@ func TestCommentFallsBackToTheWorkflowTokenWhenTheAppDoesNotPost(t *testing.T) {
 
 const (
 	noConnectionAnswer = `{"checkId":"chk","status":"not_connected","reason":"no_github_connection",` +
-		`"workspaceId":"w1","workspaceName":"Acme","workspaceKind":"team","repository":"o/r",` +
-		`"connectUrl":"https://slopcop.test/repositories","installUrl":"https://github.com/apps/slopcop/installations/new"}`
+		`"workspaceId":"w1","workspaceName":"Acme","workspaceKind":"team","workspaceRole":"owner","repository":"o/r",` +
+		`"connectUrl":"https://slopcop.test/organization/w1/settings#workspace-integrations-heading","installUrl":"https://github.com/apps/slopcop/installations/new"}`
 	notCoveredAnswer = `{"checkId":"chk","status":"not_connected","reason":"repository_not_covered",` +
 		`"workspaceId":"w1","workspaceName":"David","workspaceKind":"personal","repository":"o/r",` +
-		`"connectUrl":"https://slopcop.test/repositories","installUrl":"https://github.com/apps/slopcop/installations/new"}`
+		`"connectUrl":"https://slopcop.test/organization/w1/settings#workspace-integrations-heading","installUrl":"https://github.com/apps/slopcop/installations/new"}`
 )
 
 func TestCommentViaAppSaysWhichWorkspaceToConnect(t *testing.T) {
@@ -319,18 +319,26 @@ func TestCommentViaAppSaysWhichWorkspaceToConnect(t *testing.T) {
 	}{
 		{"no connection", noConnectionAnswer, []string{
 			`the SlopCop GitHub App did not comment: the "Acme" workspace, which ran the check, has no GitHub connection.`,
-			`open https://slopcop.test/repositories and click Connect GitHub with the "Acme" workspace active`,
+			"click Connect GitHub (or Reconnect GitHub) at https://slopcop.test/organization/w1/settings#workspace-integrations-heading.",
 			"Installing the App on GitHub is not enough",
 		}},
 		{"repository not covered", notCoveredAnswer, []string{
 			"no SlopCop App installation that your personal workspace's GitHub connection holds includes o/r.",
-			"Install the SlopCop App on the account that owns o/r (https://github.com/apps/slopcop/installations/new) with o/r selected",
-			"open https://slopcop.test/repositories and click Connect GitHub with your personal workspace active",
+			"install the SlopCop App on the account that owns o/r (https://github.com/apps/slopcop/installations/new) with o/r selected",
+			"or add it to the installation there if there is one, then click Reconnect GitHub at https://slopcop.test/organization/w1/settings#workspace-integrations-heading.",
 		}},
 		{"repository not on the installation", strings.Replace(notCoveredAnswer, `"installUrl"`,
 			`"installationSettingsUrl":"https://github.com/organizations/o/settings/installations/7","installUrl"`, 1), []string{
 			"the SlopCop App's installation on o, which your personal workspace's GitHub connection holds, does not include o/r.",
-			"add o/r under Repository access at https://github.com/organizations/o/settings/installations/7. It then shows on https://slopcop.test/repositories with your personal workspace active.",
+			"To let the App comment, add o/r under Repository access at https://github.com/organizations/o/settings/installations/7.",
+		}},
+		{"member", strings.Replace(noConnectionAnswer, `"workspaceRole":"owner"`, `"workspaceRole":"member"`, 1), []string{
+			`To let the App comment, ask an owner of the "Acme" workspace to click Connect GitHub (or Reconnect GitHub) at ` + "https://slopcop.test/organization/w1/settings#workspace-integrations-heading.",
+		}},
+		// A service that still links its Repositories page, which acts on
+		// the browser's active workspace.
+		{"repositories link", strings.Replace(noConnectionAnswer, "https://slopcop.test/organization/w1/settings#workspace-integrations-heading", "https://slopcop.test/repositories", 1), []string{
+			`click Connect GitHub (or Reconnect GitHub) at https://slopcop.test/repositories with the "Acme" workspace active.`,
 		}},
 		{"not on GitHub", `{"checkId":"chk","status":"not_connected","reason":"not_github","repository":"g/r"}`, []string{
 			"the App comments only on GitHub pull requests, and g/r is not on GitHub",
@@ -410,7 +418,7 @@ func TestCommentViaAutoSaysOnceHowToLetTheAppComment(t *testing.T) {
 	}
 	for _, want := range []string{
 		`slopcop: the SlopCop GitHub App did not comment (the "Acme" workspace, which ran the check, has no GitHub connection); commenting with GITHUB_TOKEN instead.`,
-		`slopcop: To let the App comment, open https://slopcop.test/repositories and click Connect GitHub with the "Acme" workspace active.`,
+		"slopcop: To let the App comment, click Connect GitHub (or Reconnect GitHub) at https://slopcop.test/organization/w1/settings#workspace-integrations-heading. Installing the App on GitHub is not enough: the workspace needs its own connection.",
 	} {
 		if strings.Count(stderr, want) != 1 {
 			t.Errorf("stderr has %q %d times:\n%s", want, strings.Count(stderr, want), stderr)
