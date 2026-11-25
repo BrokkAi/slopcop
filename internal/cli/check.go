@@ -1060,9 +1060,33 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	inspected, err := gitx.InspectBinaryFiles(repoRoot, filterBase, reviewTree)
-	if err != nil {
-		return prepared, err
+	var inspected []gitx.BinaryFile
+	if opts.mode == modeAI || opts.ai {
+		inspected, err = gitx.InspectBinaryFiles(repoRoot, filterBase, reviewTree)
+		if err != nil {
+			return prepared, err
+		}
+	} else {
+		inspected, err = gitx.InspectBinaryFiles(repoRoot, base, patchTree)
+		if err != nil {
+			return prepared, err
+		}
+		if opts.mode != modeStatic && reviewBaseTree != "" {
+			localBinaries, err := gitx.InspectBinaryFiles(repoRoot, filterBase, reviewTree)
+			if err != nil {
+				return prepared, err
+			}
+			seen := make(map[string]bool, len(inspected))
+			for _, f := range inspected {
+				seen[f.Path] = true
+			}
+			for _, f := range localBinaries {
+				if !seen[f.Path] {
+					seen[f.Path] = true
+					inspected = append(inspected, f)
+				}
+			}
+		}
 	}
 	var binaryFiles []report.BinaryFile
 	for _, file := range inspected {
