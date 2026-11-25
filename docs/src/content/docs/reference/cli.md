@@ -394,11 +394,11 @@ fails. `--via app` uses only the App.
 
 The App posts through the GitHub connection of the workspace that ran the
 check. Having the App installed on your GitHub organization is not enough:
-when that workspace has never connected GitHub, `slopcop comment` names the
-workspace and links the Repositories page, where you click **Connect GitHub**
-with that workspace active. When the workspace is connected but the App's
-installation does not include the repository, it says to add the repository
-to the installation on GitHub. With `--via auto` it says so once and then
+when that workspace has no GitHub connection, `slopcop comment` names the
+workspace and links its settings in SlopCop, where an owner clicks **Connect
+GitHub**. When the workspace is connected but the App's installation does not
+include the repository, it links that installation's **Repository access**
+page on GitHub, where you add it. A member is told to ask an owner. With `--via auto` it says so once and then
 writes the comments with `GITHUB_TOKEN`.
 
 The token comes from `GITHUB_TOKEN` (or `GH_TOKEN`) and needs
