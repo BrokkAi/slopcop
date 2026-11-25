@@ -36,13 +36,33 @@ func SupportsMergeTreeWriteTree(root string) (bool, error) {
 	return true, nil
 }
 
+// noMergeDriverArgs returns git -c flags that disable merge.default, user
+// core.attributesfile, and any configured merge.<name>.driver commands so
+// synthetic merge-tree calls never invoke custom merge drivers.
+func noMergeDriverArgs(root string) []string {
+	args := []string{"-c", "attr.tree=", "-c", "core.attributesfile=" + os.DevNull, "-c", "merge.default=text"}
+	out, err := Run(root, "config", "--name-only", "--get-regexp", `^merge\..*\.driver$`)
+	if err == nil && out != "" {
+		seen := map[string]bool{}
+		for _, key := range strings.Split(out, "\n") {
+			key = strings.TrimSpace(key)
+			if key == "" || seen[key] {
+				continue
+			}
+			seen[key] = true
+			args = append(args, "-c", key+"=false")
+		}
+	}
+	return args
+}
+
 // MergeTreeBaseline absorbs mergedCommit into baseCommit for local review.
 // Both inputs must be commits: merge-tree cannot fold a synthetic tree into
 // another merge. Text conflict markers are retained to expose the resolution.
 func MergeTreeBaseline(root, baseCommit, mergedCommit, headTree string) (string, error) {
-	// Run merge-tree in an empty worktree with an empty index and attr.tree
-	// cleared so repository .gitattributes merge drivers cannot execute or hide
-	// conflict resolutions.
+	// Run merge-tree in an empty worktree with an empty index, attr.tree and
+	// core.attributesfile cleared, and configured merge drivers disabled so
+	// custom merge drivers cannot execute or hide conflict resolutions.
 	gitDirOut, err := RunBytes(root, nil, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return "", err
@@ -57,7 +77,10 @@ func MergeTreeBaseline(root, baseCommit, mergedCommit, headTree string) (string,
 		return strings.HasPrefix(entry, "GIT_ATTR_SOURCE=")
 	})
 	mergeEnv = withEnv(mergeEnv, "GIT_INDEX_FILE", filepath.Join(emptyDir, "index"))
-	command := exec.Command("git", "-C", emptyDir, "--git-dir="+gitDir, "--work-tree="+emptyDir, "-c", "attr.tree=", "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", "--name-only", "-z", baseCommit, mergedCommit)
+	gitArgs := []string{"-C", emptyDir, "--git-dir=" + gitDir, "--work-tree=" + emptyDir}
+	gitArgs = append(gitArgs, noMergeDriverArgs(root)...)
+	gitArgs = append(gitArgs, "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", "--name-only", "-z", baseCommit, mergedCommit)
+	command := exec.Command("git", gitArgs...)
 	command.Env = mergeEnv
 	var stderr bytes.Buffer
 	command.Stderr = &stderr

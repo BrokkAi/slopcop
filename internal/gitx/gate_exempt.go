@@ -456,10 +456,12 @@ func IsCleanUpstreamMergePush(root, headCommit, headTree string, reviewedTrees m
 		return false, nil
 	}
 	// Unsupported versions/options and conflicts both fail closed; run without
-	// repository .gitattributes so custom merge drivers cannot resolve conflicts
-	// or execute during the gate check.
+	// repository/user attributes or custom merge drivers so drivers cannot
+	// resolve conflicts or execute during the gate check.
+	driverArgs := noMergeDriverArgs(root)
 	for _, base := range []string{candidates[0], p1} {
-		out, e := RunWithoutRepoAttributes(root, "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", base, p2)
+		args := append(slices.Clone(driverArgs), "merge-tree", "--write-tree", "--allow-unrelated-histories", "--no-messages", base, p2)
+		out, e := RunWithoutRepoAttributes(root, args...)
 		if e != nil || strings.TrimSpace(string(out)) != headTree {
 			return false, nil
 		}

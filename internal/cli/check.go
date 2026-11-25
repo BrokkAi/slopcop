@@ -1060,7 +1060,7 @@ func prepareCheck(opts *checkOptions, cfg config.Config, serviceFlag, version, f
 	if err != nil {
 		return prepared, err
 	}
-	inspected, err := gitx.InspectBinaryFiles(repoRoot, base, reviewTree)
+	inspected, err := gitx.InspectBinaryFiles(repoRoot, filterBase, reviewTree)
 	if err != nil {
 		return prepared, err
 	}
