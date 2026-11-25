@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -195,6 +196,16 @@ func reviewSettings(cfg config.Config, timeoutFlag time.Duration) (review.Settin
 				}
 				settings.Adapters[name] = append([]string(nil), adapter.Command...)
 			}
+		}
+		if keyFile := cfg.Review.DSHKeyFile(); keyFile != "" {
+			if !filepath.IsAbs(keyFile) {
+				path, err = configPath()
+				if err != nil {
+					return review.Settings{}, err
+				}
+				return review.Settings{}, fmt.Errorf("invalid review.dsh.apiKeyFile in %s: want an absolute path", path)
+			}
+			settings.DSHKeyFile = keyFile
 		}
 		if err = chatModels(cfg.Review, &settings, configPath); err != nil {
 			return review.Settings{}, err

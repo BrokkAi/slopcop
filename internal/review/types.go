@@ -108,6 +108,10 @@ type Settings struct {
 	// Models names the model of each family that does not choose its own:
 	// an installed Ollama model for Ollama, a vendor/model for a chat family.
 	Models map[Family]string
+	// DSHKeyFile, when set, is an absolute path to a file holding the
+	// DeepSeek API key. The default dsh command passes it with
+	// --api-key-file; a configured dsh command is used as written.
+	DSHKeyFile string
 }
 
 // ProviderCopilot routes the families Copilot serves through Copilot CLI.

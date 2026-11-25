@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -14,7 +15,10 @@ import (
 )
 
 // configKeys lists settings supported by the config command.
-const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.models.ollama, review.models.openrouter"
+const configKeys = "mode, review.reviewers, review.fallbacks, review.timeout, review.minCompleted, review.provider, review.models.ollama, review.models.openrouter, review.dsh.apiKeyFile"
+
+// dshKeyFileKey names the file dsh reads the DeepSeek API key from.
+const dshKeyFileKey = "review.dsh.apiKeyFile"
 
 // modelKey returns the family of a review.models.<family> key, for a family
 // that reviews on a model the user names.
@@ -166,6 +170,11 @@ func configValue(cfg config.Config, key string) (string, error) {
 			return cfg.Review.Provider, nil
 		}
 		return "(not set; each family uses its own adapter)", nil
+	case dshKeyFileKey:
+		if keyFile := cfg.Review.DSHKeyFile(); keyFile != "" {
+			return keyFile, nil
+		}
+		return "(not set; dsh reads DEEPSEEK_API_KEY)", nil
 	default:
 		return "", fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -245,6 +254,15 @@ func setConfigValue(cfg *config.Config, key, value string) error {
 			return fmt.Errorf("invalid review.provider %q (want %s)", value, review.ProviderCopilot)
 		}
 		ensureReview(cfg).Provider = value
+	case dshKeyFileKey:
+		keyFile, err := filepath.Abs(value)
+		if err != nil {
+			return fmt.Errorf("invalid %s %q: %w", key, value, err)
+		}
+		if err := review.CheckDSHKeyFile(keyFile); err != nil {
+			return fmt.Errorf("invalid %s %q: %w", key, value, err)
+		}
+		ensureReview(cfg).DSH = &config.DSH{APIKeyFile: keyFile}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)
 	}
@@ -293,6 +311,10 @@ func unsetConfigValue(cfg *config.Config, key string) error {
 	case "review.provider":
 		if cfg.Review != nil {
 			cfg.Review.Provider = ""
+		}
+	case dshKeyFileKey:
+		if cfg.Review != nil {
+			cfg.Review.DSH = nil
 		}
 	default:
 		return fmt.Errorf("unknown config key %q (valid keys: %s)", key, configKeys)

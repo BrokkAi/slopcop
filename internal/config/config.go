@@ -221,11 +221,28 @@ type Review struct {
 	// Models names the model of each family that does not choose its own,
 	// such as "ollama" or "openrouter".
 	Models map[string]string `json:"models,omitempty"`
+	// DSH holds settings for the dsh adapter's default command.
+	DSH *DSH `json:"dsh,omitempty"`
+}
+
+// DSH configures the default dsh command without replacing it, so its
+// pinned package still follows the CLI.
+type DSH struct {
+	// APIKeyFile is an absolute path to a file holding the DeepSeek API key.
+	APIKeyFile string `json:"apiKeyFile,omitempty"`
 }
 
 // Empty reports whether no review setting is set.
 func (r *Review) Empty() bool {
-	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == "" && r.LegacyOllamaModel == "" && len(r.Models) == 0
+	return r == nil || len(r.Reviewers) == 0 && len(r.Fallbacks) == 0 && r.Timeout == "" && r.MinCompleted == 0 && len(r.Adapters) == 0 && r.Provider == "" && r.LegacyOllamaModel == "" && len(r.Models) == 0 && (r.DSH == nil || r.DSH.APIKeyFile == "")
+}
+
+// DSHKeyFile is the configured DeepSeek key file, or empty.
+func (r *Review) DSHKeyFile() string {
+	if r == nil || r.DSH == nil {
+		return ""
+	}
+	return r.DSH.APIKeyFile
 }
 
 // Gate controls which hosted findings block push approval.

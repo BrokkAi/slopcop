@@ -273,9 +273,10 @@ duplicates allowed), `review.fallbacks` (the same form; reviewers that stand in
 for one that fails), `review.timeout` (default `20m`), and
 `review.minCompleted` (default 2, at most the number of reviewers: how many
 must finish for a clean review), `review.provider` (`copilot` runs
-`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI), and
+`terra`, `sol`, `haiku`, `sonnet` and `opus` through GitHub Copilot CLI),
 `review.models.<ollama|openrouter>` (the model an opt-in family that takes one
-reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`). Adapter command
+reviews on: an installed model for `ollama`, a `vendor/model` for `openrouter`), and
+`review.dsh.apiKeyFile` (a file holding the DeepSeek key for `flash`). Adapter command
 overrides are under `review.adapters.<codex|dsh|claude|copilot|antigravity|kimi|grok|opencode|openrouter>.command`.
 The opt-in `gemini`, `kimi`, `grok` and `ollama` families are used only when you name them; see
 [Gemini through Antigravity](/reference/configuration/#gemini-through-antigravity-opt-in),

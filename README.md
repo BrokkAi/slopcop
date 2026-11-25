@@ -593,7 +593,8 @@ mode is not static, then saves the first two that work (or one) as reviewers
 and the rest that work as `review.fallbacks`. Configured reviewers are left
 alone; unset `review.reviewers` and run init to pick again.
 The probe skips a family whose login or API key is plainly missing (Codex or
-Claude Code never logged in here, `DEEPSEEK_API_KEY` unset), and prints one
+Claude Code never logged in here, neither `DEEPSEEK_API_KEY` nor
+`review.dsh.apiKeyFile` set), and prints one
 line when none work; `slopcop init --verbose` says why each one failed.
 `slopcop init --no-reviewers` skips probing. A reviewer that cannot start does
 not stop the others. One that ends without a verdict runs once more in a fresh
