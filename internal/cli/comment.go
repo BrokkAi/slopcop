@@ -80,7 +80,7 @@ It exits 0 whatever the check found; the check's own exit code is the gate.`,
 	flags.StringVar(&opts.via, "via", "token", "who writes the comments: token (GITHUB_TOKEN), auto (the SlopCop GitHub App where SlopCop offers it, else GITHUB_TOKEN) or app")
 	flags.StringVar(&opts.failOn, "fail-on", "", "the --fail-on the check ran with (default: the report's)")
 	flags.StringVar(&opts.certainty, "certainty", "", "the --certainty the check ran with (default: the report's)")
-	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the login's)")
+	flags.StringVar(&opts.workspace, "workspace", "", "SlopCop workspace the check ran in (default: the report's, else the login's)")
 	_ = command.MarkFlagRequired("report")
 	return command
 }

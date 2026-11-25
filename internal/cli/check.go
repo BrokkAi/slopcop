@@ -356,6 +356,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	}
 	reportOptions.EmptyChange = prepared.bytes == 0
 	reportOptions.SizeBreakdown = static.sizeBreakdown
+	if prepared.client != nil {
+		reportOptions.Workspace = prepared.client.Workspace
+	}
 	// The first check 'enable' runs is how the repository gets added, and
 	// right after enabling there is usually nothing to check yet. Its line
 	// that the repository was added says all there is, so an empty, clean

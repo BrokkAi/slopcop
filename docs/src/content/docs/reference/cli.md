@@ -378,7 +378,7 @@ slopcop comment --report slopcop.json
 | `--dry-run` | print the summary and write nothing to GitHub |
 | `--via token\|auto\|app` | who writes the comments (default `token`) |
 | `--fail-on`, `--certainty` | the options the check ran with (default: the report's) |
-| `--workspace ID` | SlopCop workspace the check ran in (default: the login's) |
+| `--workspace ID` | SlopCop workspace the check ran in (default: the report's, else the login's) |
 
 With `--via auto` it first asks SlopCop, with the login that ran the check, to
 have the SlopCop GitHub App write the comments, and sends SlopCop the report's

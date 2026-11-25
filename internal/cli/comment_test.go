@@ -203,6 +203,7 @@ func appService(t *testing.T, status string, sent *map[string]any) *httptest.Ser
 				t.Errorf("authorization = %q", got)
 			}
 			_ = json.NewDecoder(r.Body).Decode(sent)
+			(*sent)["_workspace"] = r.Header.Get("SlopCop-Workspace")
 			_, _ = w.Write([]byte(`{"checkId":"chk","status":"` + status + `","outcome":"findings","posted":1,"inline":1,"elsewhere":0,"summaryUrl":"https://github.test/o/r/pull/12#issuecomment-9"}`))
 			return
 		}
@@ -293,6 +294,9 @@ func TestCommentFallsBackToTheWorkflowTokenWhenTheAppDoesNotPost(t *testing.T) {
 	}
 }
 
+// reportWorkspace is the workspace a report says its check ran in.
+const reportWorkspace = "6f1c2a8e-0b5d-4e7f-9a3c-2d4b6e8f0a1c"
+
 func TestCommentTakesTheChecksOptionsFromTheReport(t *testing.T) {
 	appCommentEnv(t)
 	var sent map[string]any
@@ -300,12 +304,12 @@ func TestCommentTakesTheChecksOptionsFromTheReport(t *testing.T) {
 	writes := 0
 	github := commentGitHub(t, &writes)
 	// As a check run with args overriding the action's inputs writes it.
-	report := strings.Replace(commentReport, `"summary":{`, `"certainty":"all","summary":{"failOn":"warning",`, 1)
+	report := strings.Replace(commentReport, `"summary":{`, `"certainty":"all","workspace":"`+reportWorkspace+`","summary":{"failOn":"warning",`, 1)
 	code, _, stderr := runCLI(t, "comment", "--report", tempFile(t, "r.json", report), "--service", service.URL, "--api-url", github.URL, "--via", "app")
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if sent["certainty"] != "all" || sent["failOn"] != "warning" {
+	if sent["certainty"] != "all" || sent["failOn"] != "warning" || sent["_workspace"] != reportWorkspace {
 		t.Errorf("sent = %v", sent)
 	}
 }

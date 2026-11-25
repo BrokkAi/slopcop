@@ -57,6 +57,7 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 		Review        json.RawMessage `json:"review"`
 		ReviewSkipped string          `json:"reviewSkipped"`
 		Certainty     string          `json:"certainty"`
+		Workspace     string          `json:"workspace"`
 		Summary       *struct {
 			FailOn string `json:"failOn"`
 		} `json:"summary"`
@@ -73,7 +74,13 @@ func publishWithApp(cmd *cobra.Command, opts *commentOptions, data []byte, parse
 	if resolveToken(cfg, resolveServiceURL(cfg, serviceFlag)) == "" {
 		return result, false, "there is no SlopCop login (set SLOPCOP_TOKEN)", nil
 	}
-	client, err := workspaceClient(cmd, serviceFlag, version, opts.workspace)
+	// The check's own workspace, which args can have chosen, unless the
+	// caller names one.
+	workspace := opts.workspace
+	if workspace == "" {
+		workspace = raw.Workspace
+	}
+	client, err := workspaceClient(cmd, serviceFlag, version, workspace)
 	if err != nil {
 		return result, false, "", err
 	}

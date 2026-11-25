@@ -246,20 +246,16 @@ runs:
         REPORT: ${{ steps.check.outputs.report }}
         COMMENT: ${{ inputs.comment }}
         COMMENT_VIA: ${{ inputs.comment-via }}
-        WORKSPACE: ${{ inputs.workspace }}
       run: |
         if [ ! -s "$REPORT" ]; then
           echo "slopcop check wrote no report; its log above says why."
           exit 0
         fi
         if [ "$COMMENT" = "true" ]; then
-          # The report carries the --fail-on and --certainty the check ran
-          # with, args included, so the App comments what the check reported.
-          args=(comment --report "$REPORT" --via "$COMMENT_VIA")
-          if [ -n "$WORKSPACE" ]; then
-            args+=(--workspace "$WORKSPACE")
-          fi
-          slopcop "${args[@]}"
+          # The report carries the workspace, --fail-on and --certainty the
+          # check ran with, args included, so the App comments what the
+          # check reported.
+          slopcop comment --report "$REPORT" --via "$COMMENT_VIA"
         else
           slopcop comment --report "$REPORT" --dry-run > /dev/null
         fi
