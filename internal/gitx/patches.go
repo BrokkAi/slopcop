@@ -40,7 +40,26 @@ func filePatch(ctx context.Context, root, base, tree, path string, maxFile int64
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	data, truncated, err := runWithoutRepoAttributesBounded(ctx, root, maxFile, "diff", "--no-ext-diff", "--no-textconv", "--ignore-submodules=none", base, tree, "--", ":(literal)"+path)
+	diffBase, diffTree := base, tree
+	// When a file is replaced by a directory (or vice versa) at the same path,
+	// git diff treats the pathspec as a prefix for the directory's descendants.
+	// Diff the non-tree side against the empty tree so only the exact file
+	// entry is included.
+	baseType, _ := RunContext(ctx, root, nil, "cat-file", "-t", base+":"+path)
+	treeType, _ := RunContext(ctx, root, nil, "cat-file", "-t", tree+":"+path)
+	if (baseType == "tree") != (treeType == "tree") {
+		emptyTree, err := RunInput(root, nil, nil, "hash-object", "-t", "tree", "--stdin")
+		if err != nil {
+			return nil, err
+		}
+		empty := strings.TrimSpace(string(emptyTree))
+		if baseType == "tree" {
+			diffBase = empty
+		} else {
+			diffTree = empty
+		}
+	}
+	data, truncated, err := runWithoutRepoAttributesBounded(ctx, root, maxFile, "diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--ignore-submodules=none", diffBase, diffTree, "--", ":(literal)"+path)
 	if err != nil {
 		return nil, err
 	}
@@ -48,7 +67,7 @@ func filePatch(ctx context.Context, root, base, tree, path string, maxFile int64
 		return nil, fmt.Errorf("%w: %q (limit %d)", ErrPatchTruncated, path, maxFile)
 	}
 	if strings.Contains(string(data), "Binary files ") || strings.Contains(string(data), "GIT binary patch") {
-		changes, sizes, err := changedBinaries(root, base, tree, path)
+		changes, sizes, err := changedBinaries(root, diffBase, diffTree, path)
 		if err != nil {
 			return nil, err
 		}

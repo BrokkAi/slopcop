@@ -301,6 +301,9 @@ func renderRead(data []byte, path string, offset, limit, column int) (string, er
 	}
 	var b strings.Builder
 	end := min(len(lines), offset-1+limit)
+	if end == offset && column > 1 && column-1 >= len(lines[offset-1]) {
+		return "", fmt.Errorf("%q line %d has %d bytes, so column %d is %w", path, offset, len(lines[offset-1]), column, errPastEnd)
+	}
 	for i := offset - 1; i < end; i++ {
 		text := lines[i]
 		start := 0
