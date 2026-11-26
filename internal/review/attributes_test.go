@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -234,6 +235,9 @@ func TestIsolatedReviewersRefuseCutBinaryText(t *testing.T) {
 	} {
 		for _, lines := range []int{2000, 60000} {
 			t.Run(fmt.Sprintf("%s/%d", tc.family, lines), func(t *testing.T) {
+				if tc.family == Grok && runtime.GOOS == "windows" {
+					t.Skip("Grok reviewers do not run on Windows")
+				}
 				t.Setenv("KIMI_API_KEY", "test-kimi-key")
 				t.Setenv("XAI_API_KEY", "test-xai-key")
 				root, _, store := reviewRepo(t)
