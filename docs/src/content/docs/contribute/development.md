@@ -22,10 +22,14 @@ A build whose version is not a release tag (`vX.Y.Z`), such as `dev` or a
 `git describe` string past a tag, never updates the skills installed on your
 machine during a check. Only its `slopcop init` installs its skill.
 
-CI runs `make fmt-check`, `make vet`, and `make test` on every change, plus
-`goreleaser check` and a snapshot build of every release target, the npm
-packaging against a stand-in release, and the PyPI wheels installed on each
-platform GitHub can run.
+CI runs `make fmt-check`, `make vet`, and `make test` on Linux and Windows on
+every change, plus `goreleaser check` and a snapshot build of every release
+target, the npm packaging against a stand-in release, and the PyPI wheels
+installed on each platform GitHub can run. macOS runners are scarcer and
+dearer, so the macOS tests run every four hours on `master` unless their newest
+run already passed at its head (`.github/workflows/macos.yml`), and a failure
+opens an issue that the next green run closes. Run them on a branch from the
+workflow's **Run workflow** button.
 
 ## Layout
 

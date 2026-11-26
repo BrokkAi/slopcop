@@ -10,11 +10,13 @@ jobs:
     name: check (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     # The release ships linux, darwin, and windows on amd64 and arm64, so all
-    # three get a real test run.
+    # three get a real test run. macOS runners are scarcer and cost ten times
+    # Linux minutes, so darwin runs from macos.yml every four hours instead of
+    # on each change.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7
