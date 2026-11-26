@@ -59,7 +59,7 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write   # the comments
+  pull-requests: write   # the comments, unless the SlopCop App writes them
 
 jobs:
   check:
@@ -148,6 +148,78 @@ repository content, which is untrusted. Claude and DeepSeek reviewers may only
 read and search files; SlopCop refuses their requests to run commands or change
 files. Codex reviewers run in Codex's read-only sandbox, and Copilot reviewers
 get only its read and search tools.
+
+### Comments from the SlopCop App
+
+By default the action comments with the workflow's `github-token`, so the job
+needs `pull-requests: write` and every comment comes from github-actions. With
+`comment-via: app`, the SlopCop GitHub App writes the same review and summary
+comment instead, as SlopCop, and the workflow keeps a read-only token:
+
+```yaml
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: BrokkAi/slopcop@v0
+        with:
+          slopcop-token: ${{ secrets.SLOPCOP_TOKEN }}
+          comment-via: app
+```
+
+Before the App can comment:
+
+1. **The App is installed with the repository.** Install the
+   [SlopCop GitHub App](https://github.com/apps/slop-cop) on the account or
+   organization that owns the repository, with the repository under
+   **Repository access**.
+2. **The installation has accepted Pull requests: Read and write.** A new
+   installation grants it when you install. On an installation from before the
+   App asked for it, GitHub asks the organization's owner once, on the
+   installation's settings page. Until it is accepted, the App comments
+   nothing.
+3. **The workspace the check runs in is connected to GitHub.** That is the
+   token's workspace, or the one `workspace` names. A workspace owner opens
+   **Repositories** in SlopCop and clicks **Connect GitHub**. Installing the
+   App on GitHub is not enough: the App comments through the workspace's own
+   connection.
+
+When the App cannot comment, the comment step's log says why and what fixes
+it, such as the workspace to connect or the installation to add the repository
+to. `comment-via: auto` uses the App where it can and otherwise comments with
+`github-token`, so keep `pull-requests: write` with it. When SlopCop finds the
+pull request's head has moved past the commit the check ran on, the App writes
+nothing, and `auto` does not fall back to `github-token` for it.
+
+The App posts the [LLM review](#add-the-llm-review)'s findings too. The
+reviewers still run in your runner on your own model account, such as a
+Copilot token:
+
+```yaml
+      - uses: BrokkAi/slopcop@v0
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        with:
+          slopcop-token: ${{ secrets.SLOPCOP_TOKEN }}
+          review: true
+          review-provider: copilot
+          reviewers: sol
+          comment-via: app
+```
+
+Your key stays in the workflow: the reviewers call your provider from the
+runner. With `app` or `auto`, the action sends SlopCop the report's review
+section, the reviewers' replies and their findings, so the App can post them;
+never your key, the prompt or the diff. The static
+findings come from SlopCop already. See
+[`slopcop comment`](/reference/cli/#slopcop-comment) for the same from the CLI.
 
 ### Code scanning
 

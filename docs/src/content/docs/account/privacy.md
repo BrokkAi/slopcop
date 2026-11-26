@@ -129,9 +129,13 @@ and so the workspace's Checks page can show what was found and ignored.
   range), not its source. The [privacy policy](https://slopcop.com/privacy)
   names the providers. Local reviewers send the diff to model providers under
   your own harness logins.
-- **Never writes to your repository.** The GitHub App asks for read-only
-  contents and metadata; the optional issues permission is for the web app's
-  issue filing, not checks.
+- **Never writes to your repository's code.** The GitHub App asks for
+  read-only contents and metadata. What it writes is on the pull request:
+  check runs for [pull request checks](/checks/pull-requests/), and, with
+  Pull requests: Read and write, the comments the GitHub Action's
+  [`comment-via: app`](/checks/ci/#comments-from-the-slopcop-app) asks it for.
+  The optional issues permission is for the web app's issue filing, not
+  checks.
 - **Never puts source in a finding.** A finding carries the rule, severity,
   certainty, file, line, and message. The workspace's Checks page shows a
   private repository's examples only to members whose own connection can read
