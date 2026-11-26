@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -524,20 +525,24 @@ func TestOverrideRules(t *testing.T) {
 		t.Fatal("tree mismatch")
 	}
 	for _, tc := range []struct {
-		exit    int
-		status  string
-		allowed bool
-		blocks  bool
+		exit      int
+		status    string
+		allowed   bool
+		blocks    bool
+		runFailed bool
 	}{
-		{2, "incomplete", true, false},
-		{0, "clean", true, false},
-		{0, "skipped", true, false},
-		{2, "failed", false, true},
-		{3, "pending", false, true},
-		{1, "findings", false, true},
-		{1, "findings", true, false},
+		{2, "incomplete", true, false, false},
+		{0, "clean", true, false, false},
+		{0, "skipped", true, false, false},
+		{2, "failed", false, true, false},
+		{3, "pending", false, true, false},
+		{1, "findings", false, true, false},
+		{1, "findings", true, false, false},
+		// A failed analyzer run that blocks with no finding to blame.
+		{2, "incomplete", true, true, true},
+		{1, "findings", true, true, true},
 	} {
-		if err := s.SetStatic(tc.exit, tc.status, tc.blocks); err != nil {
+		if err := s.SetStatic(tc.exit, tc.status, tc.blocks, tc.runFailed); err != nil {
 			t.Fatal(err)
 		}
 		err := s.Override("reason", c.Tree)
@@ -548,7 +553,7 @@ func TestOverrideRules(t *testing.T) {
 			t.Errorf("override reason missing %s: %v", tc.status, err)
 		}
 	}
-	if err := s.SetStatic(2, "incomplete", false); err != nil {
+	if err := s.SetStatic(2, "incomplete", false, false); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.Override("reason", c.Tree); err != nil {
@@ -568,6 +573,32 @@ func TestOverrideRules(t *testing.T) {
 	}
 	if err := s.Override("reason", c.Tree); err == nil {
 		t.Fatal("clean override")
+	}
+	// A clean review beside a failed analyzer run: the override accepts the
+	// static half alone, and adds no round for reviewers to read.
+	if err := s.SetStatic(2, "incomplete", true, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := Unmark(root, c.Tree); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Override("the analyzer run times out on every check", c.Tree); err != nil {
+		t.Fatalf("clean review, failed run: %v", err)
+	}
+	if ok, err := Reviewed(root, c.Tree); err != nil || !ok {
+		t.Fatal("failed-run override did not approve", ok, err)
+	}
+	if rounds, err := s.roundsOn(s.branch()); err != nil || slices.ContainsFunc(rounds, func(r Round) bool {
+		return strings.Contains(r.Override, "times out")
+	}) {
+		t.Fatalf("failed-run override added a review round: %v %+v", err, rounds)
+	}
+	// Run failed but a blocking static finding too: still refused.
+	if err := s.SetStatic(1, "findings", true, false); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Override("reason", c.Tree); err == nil || !strings.Contains(err.Error(), "static") {
+		t.Fatalf("blocking finding beside failed run: %v", err)
 	}
 	r.Status = StatusFindings
 	r.Reviewers = append(r.Reviewers, Reviewer{Error: "timeout"})

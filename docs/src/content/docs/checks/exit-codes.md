@@ -84,7 +84,10 @@ makes them exit `1`. `--fail-on` changes the exit code, not push approval. A sta
 rule may be incomplete while the completed findings still approve the tree,
 but a run failure (`runFailures` in `json`) does not: it left every check of
 an analyzer run without an answer, so that run checked nothing. Run the check
-again.
+again. If the run keeps failing the same way, `slopcop override --reason "..."`
+approves this tree only, with the reason recorded, when the review passed (or
+its findings are accepted with it) and no static finding blocks the push;
+stderr says so in every format. Report the failure to SlopCop too.
 A failed review, static failure, refusal, pending or unknown status never
 approves it. A later check that does not approve the same nonempty tree removes
 its approval ref, including an override. Rerun `slopcop override` if the review

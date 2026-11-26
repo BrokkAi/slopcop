@@ -267,6 +267,12 @@ type Record struct {
 	StaticExit *int `json:"staticExit,omitempty"`
 	// StaticBlocksPush records whether the hosted result prevents approval.
 	StaticBlocksPush bool `json:"staticBlocksPush,omitempty"`
+	// StaticRunFailed records that the hosted result blocks only because an
+	// analyzer run failed and checked nothing: it reported no finding at or
+	// above the push level, and the check judged the review to pass or its
+	// findings overridable. `slopcop override --reason` may accept such a
+	// tree. A record from before it leaves it false, so it never does.
+	StaticRunFailed bool `json:"staticRunFailed,omitempty"`
 	// StaticStatus is the hosted half's own status; empty in AI mode.
 	StaticStatus string `json:"staticStatus,omitempty"`
 	// Accepted is the `slopcop override` that accepted this review's findings.

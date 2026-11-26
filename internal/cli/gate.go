@@ -67,7 +67,7 @@ func forgedApproval(command string) bool {
 
 // forgedApprovalText is the reason a command that names the approval refs is
 // blocked.
-const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong run `slopcop override --reason \"...\"`"
+const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"`"
 
 // unsureTargetText is the reason a push is blocked when the gate cannot read
 // which repository it would push, by why.
@@ -135,7 +135,7 @@ func gateTree(root string) error {
 	if err == nil && reviewed == tree {
 		return nil
 	}
-	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong run `slopcop override --reason \"...\"` there; then push", tree, root, root)
+	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there; then push", tree, root, root)
 }
 
 // newGateCommand exposes a direct tree check and a hidden hook form. The hook

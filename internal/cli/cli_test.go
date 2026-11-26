@@ -22,6 +22,7 @@ import (
 
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/BrokkAi/slopcop/internal/review/reviewtest"
 	"github.com/spf13/cobra"
 
@@ -2831,14 +2832,34 @@ func TestPushApprovalWithIncompleteRules(t *testing.T) {
 			if doc.Approved != tc.approved {
 				t.Fatalf("approved=%v want %v: %s", doc.Approved, tc.approved, out)
 			}
+			// json too says how to get past a run that keeps failing.
+			if notice := "`slopcop override --reason"; strings.Contains(stderr, notice) == tc.approved {
+				t.Fatalf("run failure notice in stderr = %v, want %v: %s", !tc.approved, !tc.approved, stderr)
+			}
 			installUserGate(t)
 			_, _, humanErr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--format", "human", "--timeout", "50ms")
 			want := "may be pushed: it passed the check."
 			if !tc.approved {
-				want = "may not be pushed yet: the static analyzer run failed (unreliable), so it checked nothing; run the check again."
+				want = "may not be pushed yet: the static analyzer run failed (unreliable), so it checked nothing; run the check again, and if it keeps failing, accept the tree with slopcop override --reason."
 			}
 			if !strings.Contains(humanErr, want) {
 				t.Fatalf("push line: want %q in %s", want, humanErr)
+			}
+			if tc.approved {
+				return
+			}
+			// BrokkAi/slopcop#236: a run that keeps failing can be accepted
+			// for this tree, with a reason, and then the tree is approved.
+			code, overrideOut, overrideErr := runCLI(t, "override", "--root", repo, "--reason", "the analyzer run fails on every check")
+			if code != 0 || !strings.Contains(overrideOut, "accepted the static check whose analyzer run failed for tree") {
+				t.Fatalf("override: exit = %d, stdout = %q, stderr = %q", code, overrideOut, overrideErr)
+			}
+			tree, err := gitx.WorkingTreeID(repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := review.Reviewed(repo, tree); err != nil || !ok {
+				t.Fatalf("tree not approved after override: %v %v", ok, err)
 			}
 		})
 	}
