@@ -455,6 +455,11 @@ func pushTargets(cwd, command string) ([]string, string) {
 			dirs = been
 			branched = true
 		case seg.next == "&&":
+		case seg.next == "|":
+			// A pipeline is one command of its and-or list: what runs after
+			// it, joined by && or ||, runs where the list was, not where an
+			// earlier list stopped. cdDirs already keeps a piped cd from
+			// moving anything.
 		case seg.next == "(":
 			// A subshell or command substitution keeps its cd to itself.
 			frames = append(frames, frame{dirs: dirs, been: been, branched: branched, length: length})
@@ -470,7 +475,7 @@ func pushTargets(cwd, command string) ([]string, string) {
 			frames = append(frames, frame{dirs: dirs, been: been, branched: branched, length: length, backtick: true})
 			been, branched, length = dirs, false, 0
 		default:
-			// ;, a newline, & or |: a new list starts here, wherever the
+			// ;, a newline or &: a new list starts here, wherever the
 			// last one stopped.
 			if length > 1 {
 				dirs = been

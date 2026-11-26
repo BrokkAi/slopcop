@@ -49,6 +49,13 @@ func TestPushTargetsFollowCdAndGitC(t *testing.T) {
 		{"cd " + b + " | git push", []string{a}},
 		{"echo x | cd " + b + " && git push", []string{a}},
 		{"echo x |& cd " + b + " && git push", []string{a}},
+		// A pipeline after a cd is one command of the cd's list, so pushes
+		// after it still run where the cd went.
+		{"cd " + b + " && git push 2>&1 | tail -2 && gh pr create --fill", []string{b}},
+		{"cd " + b + " && make | tee log && git push", []string{b}},
+		{"cd " + b + " && make |& tee log && git push", []string{b}},
+		{"cd " + b + " && make | tee log; git push", []string{a, b}},
+		{"cd " + b + " && make | tee log || git push", []string{a, b}},
 		{"cd " + b + " & git push", []string{a}},
 		{"(cd " + b + ") && git push", []string{a}},
 		// After ||, the push runs where the list began when the cd failed,
