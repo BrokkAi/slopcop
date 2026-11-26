@@ -272,7 +272,10 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	var checkRef *review.CheckRef
 	if store != nil {
 		if mode == modeBoth {
-			if err := store.SetStatic(static.exit, static.status, !staticPasses(static, mode, blockLevel)); err != nil {
+			// An override may accept a failed analyzer run only beside a
+			// review that passed, or whose findings it accepts with it.
+			runFailed := staticRunFailedOnly(static, mode, blockLevel) && (reviewPasses(mode, verdict, prepared) || verdict.Overridable())
+			if err := store.SetStatic(static.exit, static.status, !staticPasses(static, mode, blockLevel), runFailed); err != nil {
 				verdict.Status = review.StatusFailed
 				verdict.Error = err.Error()
 			}
@@ -401,8 +404,7 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	// The size filter emptying a change is not the same: those files are in
 	// scope but went unread, so it stays unapproved.
 	excludedOnly := prepared.onlyExcluded()
-	reviewPassed := mode == modeStatic || verdict.Status == review.StatusClean ||
-		((excludedOnly || prepared.reviewMergedClean) && verdict.Status == review.StatusEmpty)
+	reviewPassed := reviewPasses(mode, verdict, prepared)
 	staticPassed := staticPasses(static, mode, blockLevel)
 	nonempty := (prepared.bytes > 0 || excludedOnly) && (static.response != nil || (reviewPassed && mode != modeStatic))
 	reportOptions.Approved = reviewPassed && staticPassed && nonempty
@@ -472,8 +474,11 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if err := writeSARIFFile(opts.sarifFile, render); err != nil {
 		return err
 	}
-	overridable := verdict.Overridable() && staticPasses(static, mode, blockLevel)
+	overridable := verdict.Overridable() && (staticPasses(static, mode, blockLevel) || staticRunFailedOnly(static, mode, blockLevel))
 	if notice := reviewFailureNotice(reportOptions.ExitReason, failingReviewFindings(verdict), failOn, format, overridable); notice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), notice)
+	}
+	if notice := runFailureNotice(static, verdict, prepared, mode, blockLevel); notice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
 	if format == report.FormatHuman {
@@ -615,7 +620,7 @@ func recordStaticRefusal(root, tree string, static staticOutcome, held *review.S
 	}
 	last, err := store.Last()
 	if err == nil && last != nil && last.Capture.Tree == tree {
-		err = store.SetStatic(static.exit, static.status, true)
+		err = store.SetStatic(static.exit, static.status, true, false)
 	}
 	return err
 }
@@ -1697,6 +1702,48 @@ func staticPasses(static staticOutcome, mode, level string) bool {
 			staticBlockingCount(*static.response, level) == 0 && len(static.response.RunFailures) == 0)
 }
 
+// reviewPasses says whether the review half allows the tree to be approved.
+// A change the repository's own exclusions emptied leaves the reviewers
+// nothing to read, so an empty review passes it, as the service's "Nothing
+// checked" does. A clean upstream merge whose synthetic review baseline
+// absorbed all merged-in changes likewise leaves nothing new to review
+// locally while the static half still checks the real-base patch. The size
+// filter emptying a change is not the same: those files are in scope but
+// went unread, so it stays unapproved.
+func reviewPasses(mode string, verdict review.Verdict, prepared preparedCheck) bool {
+	return mode == modeStatic || verdict.Status == review.StatusClean ||
+		((prepared.onlyExcluded() || prepared.reviewMergedClean) && verdict.Status == review.StatusEmpty)
+}
+
+// staticRunFailedOnly says the static half blocks the push only because an
+// analyzer run failed: the service answered, with no new finding at or above
+// the push level, but a run failure left every check of an analyzer run
+// without an answer. Running the check again is the first remedy; when the
+// run keeps failing, `slopcop override --reason` may accept the tree.
+func staticRunFailedOnly(static staticOutcome, mode, level string) bool {
+	return mode != modeAI && static.skipped == nil && static.response != nil && static.response.KnownStatus() &&
+		staticBlockingCount(*static.response, level) == 0 && len(static.response.RunFailures) > 0
+}
+
+// runFailureNotice is the stderr line for a check whose tree is unapproved
+// only because the static analyzer run failed, when an override would accept
+// it. It is "" otherwise. It prints in every format: an agent reads json and
+// would otherwise find no way past a run that fails every time.
+func runFailureNotice(static staticOutcome, verdict review.Verdict, prepared preparedCheck, mode, level string) string {
+	if mode != modeBoth || !staticRunFailedOnly(static, mode, level) ||
+		(!reviewPasses(mode, verdict, prepared) && !verdict.Overridable()) {
+		return ""
+	}
+	failure := static.response.RunFailures[0]
+	cause := report.Printable(failure.Reason)
+	if detail := strings.TrimSpace(failure.Detail); detail != "" {
+		cause += ": " + report.Printable(detail)
+	}
+	return fmt.Sprintf("slopcop: the static analyzer run failed (%s), so it checked nothing and the tree is not approved for push. "+
+		"Run the check again. If it fails the same way again, `slopcop override --reason \"why this tree is safe to push\"` "+
+		"approves this tree only, with the reason recorded; report the failure to SlopCop.", cause)
+}
+
 // approvalReason names why a check did not approve its tree, for the line a
 // person or agent reads before pushing. It checks the causes in the order the
 // approval rule does.
@@ -1715,7 +1762,11 @@ func approvalReason(empty, reviewPassed bool, verdict review.Verdict, static sta
 			return fmt.Sprintf("%d static finding(s) at or above %s", n, level)
 		}
 		if failures := static.response.RunFailures; len(failures) > 0 {
-			return fmt.Sprintf("the static analyzer run failed (%s), so it checked nothing; run the check again", failures[0].Reason)
+			remedy := "run the check again"
+			if mode == modeBoth {
+				remedy += ", and if it keeps failing, accept the tree with slopcop override --reason"
+			}
+			return fmt.Sprintf("the static analyzer run failed (%s), so it checked nothing; %s", failures[0].Reason, remedy)
 		}
 	}
 	return "the static check did not complete (failed, pending, or unknown status)"

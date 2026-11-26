@@ -300,7 +300,10 @@ relied on it; `--list [--format json]` lists them with their reasons. See
 
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided
-the static half passed or did not run. It records the reason and cannot
+the static half passed or did not run. It also accepts a static half whose
+analyzer run failed (`runFailures`) and keeps failing, when the review passed
+or its findings are accepted with it and no static finding blocks the push.
+It records the reason and cannot
 accept failed or incomplete reviews or real bugs. It covers that snapshot
 only. Both forms are recorded locally, never on the service, so they accept
 `-w`/`--workspace` from the `check` they follow and ignore it.

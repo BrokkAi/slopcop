@@ -525,7 +525,9 @@ no new static finding at or above the push level (`error` by default, or the
 repository's `[check] fail_on` when that is stricter); a
 static check that ended `incomplete` does not prevent it, unless it lists
 `runFailures`: then the analyzer run failed and checked nothing, so run the
-check again. New static findings
+check again. If it fails the same way again, tell the user and, with a
+concrete reason, run `slopcop override --reason "..."` (below): it accepts the
+failed run for this tree only. New static findings
 below the push level, warnings and notes by default, are advisory: they do not
 block the push, though they may still exit `1` under the default `--fail-on`.
 A pull request check fails on every one at or above the repository's
@@ -652,13 +654,15 @@ finding overrides with their reasons; add `--format json` to read them.
 **The whole review, this tree only: `slopcop override --reason "concrete
 explanation"`.** This accepts every finding of the last **complete** review of
 the current snapshot, only when the static half has no new findings at or
-above the push level and completed, was skipped, or did not run. It does not
+above the push level and completed, was skipped, or did not run. It also
+accepts a static half whose analyzer run failed (`runFailures`) beside a clean
+or overridable review, for a run that keeps failing after a retry. It does not
 carry over: the next change is reviewed afresh and the findings can come back.
 Later review rounds show the reviewers this reason beside the findings it
 accepted. Prefer overriding the one wrong finding.
 
 Never override a real bug the user has not agreed to defer (see "Know when to
-stop" above), a timeout, a failed or incomplete review, or a different tree.
+stop" above), a reviewer timeout, a failed or incomplete review, or a different tree.
 Do not switch reviewers or reduce the count to bypass a failure. Tell the user every review finding you overrode and why.
 
 Set the push level with `gate.blockOn` in the config file. Only a person

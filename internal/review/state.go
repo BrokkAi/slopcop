@@ -216,7 +216,8 @@ func (s *Store) saveOn(branch string, r Record) error {
 }
 
 // SetStatic records the hosted half's exit and status for override checks.
-func (s *Store) SetStatic(code int, status string, blocks bool) error {
+// runFailed says the half blocks only because an analyzer run failed.
+func (s *Store) SetStatic(code int, status string, blocks, runFailed bool) error {
 	r, err := s.Last()
 	if err != nil {
 		return err
@@ -227,6 +228,7 @@ func (s *Store) SetStatic(code int, status string, blocks bool) error {
 	r.StaticExit = &code
 	r.StaticStatus = status
 	r.StaticBlocksPush = blocks
+	r.StaticRunFailed = blocks && runFailed
 	return s.write("last.json", *r)
 }
 
@@ -255,8 +257,16 @@ type overrideLogEntry struct {
 	Record *Record   `json:"record"`
 }
 
+// StaticRunFailedOnly says the record's static half blocks the push only
+// because an analyzer run failed, which an override may accept.
+func (r Record) StaticRunFailedOnly() bool {
+	return r.StaticExit != nil && r.StaticBlocksPush && r.StaticRunFailed
+}
+
 // Override logs a justified acceptance, keeps the reason for later rounds,
-// and marks only the reviewed tree approved.
+// and marks only the reviewed tree approved. It accepts the findings of a
+// complete review, and a static half that blocks only because its analyzer
+// run failed when the review passed or its findings are accepted with it.
 func (s *Store) Override(reason, currentTree string) error {
 	if strings.TrimSpace(reason) == "" {
 		return errors.New("override requires a nonempty reason")
@@ -265,14 +275,20 @@ func (s *Store) Override(reason, currentTree string) error {
 	if err != nil {
 		return err
 	}
-	if r == nil || !r.Verdict.Overridable() {
+	if r == nil {
 		return errors.New("override requires complete findings")
 	}
-	if r.StaticExit != nil && r.StaticBlocksPush {
+	runFailed := r.StaticRunFailedOnly()
+	if r.StaticExit != nil && r.StaticBlocksPush && !runFailed {
 		if r.StaticStatus == "findings" {
 			return errors.New("static finding at or above the push block level does not allow override")
 		}
 		return fmt.Errorf("static status %s does not allow override", r.StaticStatus)
+	}
+	// The check recorded runFailed only beside a review it judged to pass,
+	// an empty one included, or whose findings are overridable.
+	if !r.Verdict.Overridable() && !runFailed {
+		return errors.New("override requires complete findings")
 	}
 	if currentTree != r.Capture.Tree {
 		return errors.New("working tree differs from reviewed tree")
@@ -302,8 +318,11 @@ func (s *Store) Override(reason, currentTree string) error {
 		return closeErr
 	}
 	// Later rounds show reviewers the reason beside the findings it answers.
-	if err = s.overrideRound(*r, reason); err != nil {
-		return err
+	// A clean review has none, and the reason is about the static half.
+	if r.Verdict.Status == StatusFindings {
+		if err = s.overrideRound(*r, reason); err != nil {
+			return err
+		}
 	}
 	// Recorded before the approval: if the approval then fails, the record
 	// names an override that OverrideState reports as not in effect.

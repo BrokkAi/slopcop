@@ -45,6 +45,11 @@ that reported the finding, the override and its reason are also sent to it.
       working tree only, when the static check passed. The next change is
       reviewed afresh and its findings can come back.
 
+      It also accepts a static check whose analyzer run failed and checked
+      nothing (runFailures in the report), when the review passed or its
+      findings are accepted with it and no static finding blocks the push.
+      Run the check again first: use this only for a run that keeps failing.
+
   slopcop override --undo <rv-id>
       Undo a finding override. Takes the overridden id, or the id of a
       finding listed under review.overridden. Every tree whose review relied
@@ -204,7 +209,7 @@ func listFindingOverrides(out io.Writer, repo, format string) error {
 }
 
 // overrideReview accepts every finding of the latest review for the current
-// working tree. It returns the tracked check the review ran beside, if any.
+// working tree, and a static half that blocks only on a failed analyzer run. It returns the tracked check the review ran beside, if any.
 func overrideReview(out io.Writer, repo, reason string) (*review.CheckRef, error) {
 	// Never waits: the running check is about to replace the review this
 	// override means to accept, and its result has to be read first.
@@ -224,15 +229,24 @@ func overrideReview(out io.Writer, repo, reason string) (*review.CheckRef, error
 		return nil, err
 	}
 	var tracked *review.CheckRef
-	if last, err := store.Last(); err == nil && last != nil && last.Check != nil && last.Check.Tracked {
-		if ref := review.CurrentCheck(repo, *last.Check); ref.Tracked {
-			tracked = &ref
+	what := "the review's findings"
+	if last, err := store.Last(); err == nil && last != nil {
+		if last.StaticRunFailedOnly() {
+			what = "the static check whose analyzer run failed"
+			if last.Verdict.Status == review.StatusFindings {
+				what = "the review's findings and the static check whose analyzer run failed"
+			}
+		}
+		if last.Check != nil && last.Check.Tracked {
+			if ref := review.CurrentCheck(repo, *last.Check); ref.Tracked {
+				tracked = &ref
+			}
 		}
 	}
 	gitDir, err := gitx.Run(repo, "rev-parse", "--absolute-git-dir")
 	if err != nil {
 		return nil, err
 	}
-	fmt.Fprintf(out, "slopcop: accepted the review's findings for tree %s; the reason is recorded in %s and shown to the reviewers of later rounds\n", snapshot.Tree, filepath.Join(gitDir, "slopcop", "overrides.jsonl"))
+	fmt.Fprintf(out, "slopcop: accepted %s for tree %s; the reason is recorded in %s and shown to the reviewers of later rounds\n", what, snapshot.Tree, filepath.Join(gitDir, "slopcop", "overrides.jsonl"))
 	return tracked, nil
 }
