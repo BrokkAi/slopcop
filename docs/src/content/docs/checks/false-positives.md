@@ -173,6 +173,30 @@ one command, `slopcop override --reason "..." && git push`, when the latest
 review is of the committed tree. Join them with `&&`: the gate refuses `;`,
 which would push even when the override fails.
 
+## Let an agent propose an override
+
+An agent may not be allowed to approve its own work: Claude Code's auto mode
+refuses `slopcop override --reason`. Rather than retype the agent's command,
+let it propose the override and accept it with one short command:
+
+```console
+slopcop override --propose --reason "the retry is bounded by the caller's deadline"   # the agent
+slopcop override --pending                                                           # what waits for you
+slopcop override --accept                                                            # you
+```
+
+`--propose` checks that the latest review could be overridden for the current
+working tree, records the proposal with its reason and the findings it answers,
+and approves nothing. `--accept` approves the tree with the proposal's reason,
+as `slopcop override --reason` would, and the override records that it was
+accepted from that proposal. It is refused if the working tree changed or the
+tree was checked again since the proposal; the agent then proposes again.
+
+The decision stays yours: the push gate's hook blocks the agent from running
+`slopcop override --accept`, and a blocked push names the proposal that waits
+for you. In Claude Code, type `! slopcop override --accept` in the prompt to
+run it yourself.
+
 ## Add a word to the dictionary
 
 A misspelled-identifier finding flags one part of an identifier as a typo. When

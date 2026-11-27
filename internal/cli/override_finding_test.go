@@ -94,7 +94,7 @@ func TestOverrideRefusesWrongFindingIDs(t *testing.T) {
 		{[]string{findingID, "--reason", "x"}, "is a static finding's id; run `slopcop ignore " + findingID + "`"},
 		{[]string{"nope", "--reason", "x"}, "is not a review finding id"},
 		{[]string{"--undo", findingID}, "is a static finding's id"},
-		{[]string{id, "--undo", id}, "give one of an rv- id, --undo <rv-id> or --list"},
+		{[]string{id, "--undo", id}, "give one of an rv- id, --undo <rv-id>, --list, --propose, --accept or --pending"},
 	} {
 		code, stdout, stderr := runCLI(t, append([]string{"override", "--root", repo}, tc.args...)...)
 		if code == 0 || stdout != "" || !strings.Contains(stderr, tc.want) {
