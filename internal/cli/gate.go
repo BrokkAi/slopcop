@@ -139,7 +139,7 @@ func gateTree(root string) error {
 	if err == nil && reviewed == tree {
 		return reviewOnlyStillStands(root, tree)
 	}
-	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there; then push", tree, root, root)
+	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there, then push: as its own command, or joined to the push with && (`slopcop override --reason \"...\" && git push`)", tree, root, root)
 }
 
 // reviewOnlyStillStands refuses an approval that a review alone gave, from
@@ -179,8 +179,11 @@ func newGateCommand() *cobra.Command {
 		Long: `Check whether the current committed tree has a passing SlopCop check.
 A Claude Code or Codex PreToolUse hook uses this command to block git push,
 gh pr create, and GitHub MCP tools that push or open a pull request, until the
-exact committed tree is reviewed. The hook reads its payload
-from stdin and blocks malformed input rather than allowing an unchecked push.`,
+exact committed tree is reviewed. A shell command line that runs
+slopcop override --reason "..." joined by && to the push passes when the latest
+review is of HEAD's tree, since the override approves that tree before the
+push runs. The hook reads its payload from stdin and blocks malformed input
+rather than allowing an unchecked push.`,
 		Args:          cobra.NoArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -208,12 +211,17 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				if hook == "claude" && underCopilotHook() && copilotHookInstalled(true) {
 					return nil
 				}
+				shape, why := noOverride, ""
 				switch {
 				case shellTools[input.ToolName]:
 					if forgedApproval(input.ToolInput.Command) {
 						return gateBlock(cmd, errors.New(forgedApprovalText))
 					}
 					if !pushCommand(input.ToolInput.Command) {
+						return nil
+					}
+					shape, why = overrideBeforePush(input.ToolInput.Command)
+					if shape == overrideOnly {
 						return nil
 					}
 				case githubPushTool.MatchString(input.ToolName):
@@ -241,9 +249,23 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 					}
 				}
 				for _, target := range roots {
-					if err := gateTree(target); err != nil {
-						return gateBlock(cmd, err)
+					err := gateTree(target)
+					if err == nil {
+						continue
 					}
+					switch shape {
+					case overrideThenPush:
+						// The override before the push approves the tree
+						// it sends, if it succeeds; && stops it if not.
+						notHead := overrideApprovesHead(input.CWD, target)
+						if notHead == nil {
+							continue
+						}
+						err = fmt.Errorf("%w. The `slopcop override` on this line would not approve it: %v", err, notHead)
+					case overrideUncredited:
+						err = fmt.Errorf("%w. The `slopcop override` on this line does not count: %s. %s", err, why, overrideOwnCommand)
+					}
+					return gateBlock(cmd, err)
 				}
 				return nil
 			}

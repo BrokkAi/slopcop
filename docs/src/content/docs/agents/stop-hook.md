@@ -31,7 +31,12 @@ The Claude Code, Codex, Grok and Copilot CLI settings also get a PreToolUse push
 blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override.
 The gate leaves a repository alone until SlopCop has created review state
-there, so installing it machine-wide does not block unrelated pushes. The Stop
+there, so installing it machine-wide does not block unrelated pushes. It
+judges a command line before any of it runs, and lets
+`slopcop override --reason "..." && git push` through when the latest review
+is of HEAD's tree, so the override approves exactly what the push sends; a line
+joined by `;` or a newline, or with another command between the override and
+the push, is refused, and the override has to run as its own command first. The Stop
 hook itself remains hosted static-only; it does not run the local review.
 
 ## When it checks
