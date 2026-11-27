@@ -105,3 +105,75 @@ func TestHumanCheckExplainsAReviewOnlyFailure(t *testing.T) {
 		}
 	}
 }
+
+func TestIncompletePoliciesNotice(t *testing.T) {
+	loop := service.IncompletePolicy{PolicyID: "bifrost.correctness.loop-body-never-repeats", Reason: "timed_out"}
+	self := service.IncompletePolicy{PolicyID: "bifrost.correctness.local-self-assignment", Reason: "timed_out"}
+	withIncomplete := func(count int, policies ...service.IncompletePolicy) *service.Response {
+		response := &service.Response{Status: service.StatusIncomplete, Incomplete: policies}
+		response.Summary.IncompletePolicies = count
+		for _, policy := range policies {
+			response.Summary.IncompletePolicyIDs = append(response.Summary.IncompletePolicyIDs, policy.PolicyID)
+		}
+		return response
+	}
+	for _, tc := range []struct {
+		name     string
+		response *service.Response
+		format   string
+		want     string
+	}{
+		{"no response", nil, report.FormatJSON, ""},
+		{"none incomplete", withIncomplete(0), report.FormatJSON, ""},
+		{"human", withIncomplete(1, loop), report.FormatHuman,
+			"slopcop: the check is incomplete: 1 policy didn't finish: bifrost.correctness.loop-body-never-repeats (timed out). " +
+				"The code wasn't checked against it, so it may have findings this check did not report; " +
+				"the report's Incomplete line lists them."},
+		{"one", withIncomplete(1, loop), report.FormatJSON,
+			"slopcop: the check is incomplete: 1 policy didn't finish: bifrost.correctness.loop-body-never-repeats (timed out). " +
+				"The code wasn't checked against it, so it may have findings this check did not report; " +
+				"summary.incompletePolicyIds and incomplete list them."},
+		{"several", withIncomplete(2, loop, self), report.FormatJSON,
+			"slopcop: the check is incomplete: 2 policies didn't finish: bifrost.correctness.loop-body-never-repeats (timed out), " +
+				"bifrost.correctness.local-self-assignment (timed out). " +
+				"The code wasn't checked against them, so it may have findings this check did not report; " +
+				"summary.incompletePolicyIds and incomplete list them."},
+		{"reason missing", withIncomplete(1, service.IncompletePolicy{PolicyID: "acme.slow"}), report.FormatSARIF,
+			"slopcop: the check is incomplete: 1 policy didn't finish: acme.slow (no reason given). " +
+				"The code wasn't checked against it, so it may have findings this check did not report; " +
+				"the run's tool notifications list them."},
+	} {
+		if got := incompletePoliciesNotice(tc.response, tc.format); got != tc.want {
+			t.Errorf("%s:\n got %q\nwant %q", tc.name, got, tc.want)
+		}
+	}
+
+	// Only ids: no reasons to give.
+	idsOnly := withIncomplete(1)
+	idsOnly.Summary.IncompletePolicyIDs = []string{"acme.slow"}
+	if got := incompletePoliciesNotice(idsOnly, report.FormatJSON); !strings.Contains(got, "1 policy didn't finish: acme.slow (no reason given).") {
+		t.Errorf("ids only = %q", got)
+	}
+	// More than it names: the rest are counted, including those the service
+	// counted but did not name.
+	many := withIncomplete(60)
+	for i := range 7 {
+		many.Incomplete = append(many.Incomplete, service.IncompletePolicy{PolicyID: fmt.Sprintf("acme.p%d", i), Reason: "timed_out"})
+	}
+	got := incompletePoliciesNotice(many, report.FormatJSON)
+	if !strings.Contains(got, "60 policies didn't finish: acme.p0 (timed out),") || !strings.Contains(got, "acme.p4 (timed out), and 55 more.") ||
+		strings.Contains(got, "acme.p5") {
+		t.Errorf("many = %q", got)
+	}
+	// Counted but none named.
+	unnamed := withIncomplete(3)
+	if got := incompletePoliciesNotice(unnamed, report.FormatJSON); !strings.HasPrefix(got, "slopcop: the check is incomplete: 3 policies didn't finish. ") {
+		t.Errorf("unnamed = %q", got)
+	}
+	// The whole analysis failing is the document's failure, not this notice.
+	failed := withIncomplete(1, loop)
+	failed.Failure = "The analysis could not be completed."
+	if got := incompletePoliciesNotice(failed, report.FormatJSON); got != "" {
+		t.Errorf("failed analysis = %q", got)
+	}
+}

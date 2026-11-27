@@ -2890,3 +2890,48 @@ func TestHumanQuotesTheSpanFromTheCheckedTree(t *testing.T) {
 		t.Fatalf("exit=%d stdout=%s stderr=%s", code, stdout, stderr)
 	}
 }
+
+// A check whose policies timed out says so on stderr, where a reader of the
+// summary lines alone would otherwise see only that nothing was found.
+func TestIncompletePoliciesNamedOnStderr(t *testing.T) {
+	isolateUserConfig(t)
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"status": "incomplete",
+			"baseCommit": "0123456789abcdef0123456789abcdef01234567",
+			"applied": true,
+			"summary": {"files": 1, "findings": 0, "incompletePolicies": 2,
+				"incompletePolicyIds": ["bifrost.correctness.loop-body-never-repeats", "bifrost.correctness.local-self-assignment"],
+				"omittedFindings": 0, "failOn": "finding"},
+			"findings": [],
+			"incomplete": [
+				{"policyId": "bifrost.correctness.loop-body-never-repeats", "reason": "timed_out"},
+				{"policyId": "bifrost.correctness.local-self-assignment", "reason": "timed_out"}
+			]
+		}`))
+	}))
+	defer server.Close()
+
+	code, stdout, stderr := runCLI(t, "check", "--root", repo, "--service", server.URL, "--mode", "static", "--format", "json")
+	if code != 2 {
+		t.Fatalf("exit = %d, stderr = %s", code, stderr)
+	}
+	if !strings.Contains(stdout, `"incompletePolicies": 2`) {
+		t.Errorf("stdout = %s", stdout)
+	}
+	want := "slopcop: the check is incomplete: 2 policies didn't finish: bifrost.correctness.loop-body-never-repeats (timed out), " +
+		"bifrost.correctness.local-self-assignment (timed out)."
+	if !strings.Contains(stderr, want) {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+
+	// In the human format too, since stderr is what an agent may read alone.
+	code, stdout, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL, "--mode", "static")
+	if code != 2 || !strings.Contains(stderr, want) || !strings.Contains(stderr, "the report's Incomplete line lists them") ||
+		!strings.Contains(stdout, "Incomplete (all 2 named: timed_out)") {
+		t.Errorf("human: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
+	}
+}
