@@ -35,83 +35,87 @@ var ghPRCreate = regexp.MustCompile(`\bgh\b[^\n;&|]*\bpr\s+create\b`)
 
 // pushCommand recognizes the git push and gh pr create forms that checkpoint
 // guarded, in any command of a chained command line. It is deliberately
-// conservative: this is a prompt guard, not a shell parser or a security
-// boundary, so an unquoted `echo git push` still counts. Text the shell does
-// not run as a command does not: a quoted argument (git commit -m "git push",
-// a sed script), a heredoc body that is only data, a comment. Code the line
-// runs does: bash -c and eval code, a heredoc fed to a shell, a command
-// substitution in an unquoted heredoc, a pipe into a shell, and interpreter
-// code that spawns a process and names git push.
+// conservative: this is a prompt guard, not a security boundary, so an
+// unquoted `echo git push` still counts. Text the shell does not run as a
+// command does not: a quoted argument (git commit -m "git push", a sed
+// script), a heredoc body that is only data, a comment. Code the line runs
+// does: bash -c and eval code, a heredoc fed to a shell, a command
+// substitution, a pipe into a shell, and interpreter code that spawns a
+// process and names git push.
 func pushCommand(command string) bool {
 	return pushIn(command, 0)
+}
+
+// namesPush reports whether text names a push anywhere, quoted or not.
+func namesPush(text string) bool {
+	return gitPush.MatchString(text) || ghPRCreate.MatchString(text) || pipedPush.MatchString(text)
 }
 
 // pushIn is pushCommand for a command line or code a shell in one runs.
 func pushIn(command string, depth int) bool {
 	if depth > 8 {
-		return gitPush.MatchString(command) || ghPRCreate.MatchString(command)
+		return namesPush(command)
 	}
-	stripped, docs := stripHeredocs(command)
-	piped := false
+	cmds, err := parseShell(command, false)
+	if err != nil && namesPush(command) {
+		// A line the parser cannot read is matched whole, and the
+		// statements before its error, which the shell runs, are judged
+		// below.
+		return true
+	}
 	// quiet says every command so far only reads its words as text: an
 	// inert command, or interpreter code that starts no process. Quoted
 	// text is skipped only on a quiet line; anywhere else a command could
-	// run what another one wrote or printed, so the line is matched whole,
-	// as the old text match did.
+	// run what another one wrote or printed, so the line is matched whole.
 	quiet := true
-	for _, seg := range segments(stripped) {
-		var body strings.Builder
-		for _, doc := range docs {
-			if doc.at >= seg.start && doc.at < seg.start+len(seg.text) {
-				// An unquoted body runs its command substitutions, and
-				// one whose end is unclear may hide a push.
-				// Quotes in the body do not stop a substitution, so look
-				// for a push in the raw text of any that has one.
-				if doc.expands && (strings.Contains(doc.body, "$(") || strings.Contains(doc.body, "`")) && pipedPush.MatchString(doc.body) ||
-					doc.unsure && (gitPush.MatchString(doc.body) || ghPRCreate.MatchString(doc.body)) {
-					return true
-				}
-				body.WriteString(doc.body)
-				body.WriteByte('\n')
-			}
+	for _, cmd := range cmds {
+		body := cmd.stdin()
+		// A heredoc whose end is unclear may hide a push.
+		if cmd.unsure && (gitPush.MatchString(body) || ghPRCreate.MatchString(body)) {
+			return true
 		}
 		// Quoted text and a heredoc of data are skipped only for commands
 		// known not to run their arguments; any other command is matched
-		// on its whole text, as source /dev/stdin <<< 'git push' runs it.
-		text := seg.text
-		if inertCommand(seg.text) {
-			text = maskQuoted(seg.text)
-		} else if !runsCodeWords(seg.text) {
-			text += "\n" + body.String()
+		// on its whole text, as make ARGS="git push" may run it. A code
+		// runner's heredoc or here-string is left to pushRuns.
+		inert := inertCommand(cmd)
+		text := cmd.masked
+		switch {
+		case inert:
+		case runsCode(cmd.runner()):
+			text = cmd.raw
+		default:
+			text = cmd.raw + "\n" + body
 		}
-		if gitPush.MatchString(text) || ghPRCreate.MatchString(text) || quotedPush(seg.text) ||
-			pushRuns(seg.text, body.String(), piped, command, depth) {
+		if gitPush.MatchString(text) || ghPRCreate.MatchString(text) || quotedPush(cmd) ||
+			pushRuns(cmd, body, command, depth) {
 			return true
 		}
 		// A command that may run what a pipe carries (sed -n e, awk)
-		// sees the line as the old text match did.
-		if piped && !inertCommand(seg.text) && pipedPush.MatchString(command) {
+		// sees the line as a text match does.
+		if cmd.pipe && !inert && pipedPush.MatchString(command) {
 			return true
 		}
-		// Once a pipe starts, later commands may share it, as in a
-		// subshell: printf ... | (cd x; sh).
-		piped = piped || seg.next == "|"
-		if quiet && strings.TrimSpace(seg.text) != "" && !inertCommand(seg.text) {
-			name, _ := commandName(seg.text)
-			code := seg.text + "\n" + body.String()
+		if quiet && (len(cmd.words) > 0 || len(cmd.assigns) > 0) && !inert {
+			name := cmd.name()
 			// Any other command may run a file the line wrote:
-			// printf ... > x; chmod +x x; ./x.
-			quiet = quietBuiltins[name] || interpreter(name) && !spawnsProcess.MatchString(code)
+			// printf ... > x; chmod +x x; ./x. An assignment alone may
+			// hold a command a later $x runs.
+			quiet = len(cmd.words) > 0 && !cmd.byUnknownPath() &&
+				(quietBuiltins[name] || interpreter(name) && !spawnsProcess.MatchString(cmd.raw+"\n"+body))
 		}
 	}
 	return !quiet && pipedPush.MatchString(command)
 }
 
 // quotedPush reports whether a git or gh command pushes once the shell
-// removes its quotes: git "push" origin HEAD, gh "pr" create. Masking
-// quoted text would hide those words.
-func quotedPush(text string) bool {
-	name, args := commandName(text)
+// removes its quotes: git "push" origin HEAD, gh "pr" create.
+func quotedPush(cmd *shellCmd) bool {
+	return pushWords(cmd.name(), cmd.args().vals)
+}
+
+// pushWords reports whether a command's name and unquoted arguments push.
+func pushWords(name string, args []string) bool {
 	switch name {
 	case "git":
 		i := 0
@@ -121,11 +125,21 @@ func quotedPush(text string) bool {
 			}
 			i++
 		}
-		return i < len(args) && args[i] == "push"
+		return i < len(args) && bare(args[i]) == "push"
 	case "gh":
-		return len(args) >= 2 && args[0] == "pr" && args[1] == "create"
+		return len(args) >= 2 && bare(args[0]) == "pr" && bare(args[1]) == "create"
 	}
 	return false
+}
+
+// bare is a word without backslashes. On Windows the readers keep a
+// backslash before an ordinary character, as a path separator, but bash
+// removes it: git pu\sh is a push.
+func bare(word string) string {
+	if !backslashSeparates {
+		return word
+	}
+	return strings.ReplaceAll(word, `\`, "")
 }
 
 // quietBuiltins change no file a later command could run.
@@ -154,12 +168,13 @@ func commandName(text string) (string, []string) {
 // inertCommand reports whether a command only reads its arguments as text
 // or paths: git, gh, echo, printf, the search tools and readers, and sed
 // with no script that runs a command.
-func inertCommand(text string) bool {
-	if words := shellWords(text); len(words) > 0 && shellAssignment.MatchString(words[0]) {
-		// GIT_EDITOR='...' git commit runs the editor as shell code.
+func inertCommand(cmd *shellCmd) bool {
+	if len(cmd.assigns) > 0 || len(cmd.words) == 0 || cmd.dyn[0] || cmd.byUnknownPath() {
+		// GIT_EDITOR='...' git commit runs the editor as shell code, and
+		// ./cat may be a script the line wrote.
 		return false
 	}
-	name, args := commandName(text)
+	name, args := cmd.name(), cmd.args().vals
 	switch {
 	case name == "git":
 		// A -c setting can run shell code: an alias, core.editor,
@@ -170,79 +185,94 @@ func inertCommand(text string) bool {
 	case inertCommands[name], searchCommands[name], readCommands[name]:
 		return true
 	case name == "sed":
-		return !slices.ContainsFunc(args, sedExecute.MatchString) && len(optionValues(args, "f", "--file")) == 0
+		if len(optionValues(args, "f", "--file")) > 0 {
+			return false
+		}
+		for i := range patternArgs(args, "e", "--expression") {
+			if sedRuns(sedScript(args[i])) {
+				return false
+			}
+		}
+		return true
 	}
 	return false
 }
 
-// runsCodeWords reports whether a command is a shell, eval, an interpreter
-// or a wrapper, whose code pushRuns reads.
-func runsCodeWords(text string) bool {
-	name, _ := commandName(text)
-	return runsCode(name)
+// runner is the name of the command that runs the code: the command's own,
+// or for a wrapper such as sudo or env, the shell, interpreter or eval it
+// runs, if any.
+func (c *shellCmd) runner() string {
+	name := c.name()
+	if !wrappers[name] {
+		return name
+	}
+	for _, w := range c.words[1:] {
+		w = path.Base(filepath.ToSlash(w))
+		if w == "eval" || shells[w] || interpreter(w) {
+			return w
+		}
+	}
+	return name
 }
 
 // pushRuns reports whether one command runs code that pushes: a shell's -c
 // code, heredoc or eval arguments, a shell reading a pipe from a line that
 // names a push, or interpreter code that spawns git push. line is the whole
 // command line.
-func pushRuns(text, body string, piped bool, line string, depth int) bool {
-	if strs := hereStrings(text); len(strs) > 0 {
-		body += strings.Join(strs, "\n") + "\n"
-	}
-	words := shellWords(text)
-	for len(words) > 0 && (commandPrefixes[words[0]] || shellAssignment.MatchString(words[0])) {
-		words = words[1:]
-	}
-	if len(words) == 0 || words[0] == "" {
+func pushRuns(cmd *shellCmd, body, line string, depth int) bool {
+	if len(cmd.words) == 0 || cmd.words[0] == "" {
 		return false
 	}
-	if words[0] == "source" || words[0] == "." {
+	if cmd.words[0] == "source" || cmd.words[0] == "." {
 		// source runs a file, stdin included, as shell code, and the
 		// file may be one the line wrote.
-		return pipedPush.MatchString(text+"\n"+body) || pipedPush.MatchString(line)
+		return pipedPush.MatchString(cmd.raw+"\n"+body) || pipedPush.MatchString(line)
 	}
-	if wrappers[path.Base(filepath.ToSlash(words[0]))] {
+	args := cmd.args()
+	name := cmd.name()
+	if wrappers[name] {
 		// sudo -u me sh -c ..., env X=1 bash -c ...: the code runner is
 		// further on, after the wrapper's options and their values.
-		j := slices.IndexFunc(words, func(w string) bool {
+		j := slices.IndexFunc(cmd.words, func(w string) bool {
 			w = path.Base(filepath.ToSlash(w))
 			return w == "eval" || shells[w] || interpreter(w)
 		})
 		if j < 0 {
 			return false
 		}
-		words = words[j:]
+		name, args = path.Base(filepath.ToSlash(cmd.words[j])), argv{vals: cmd.words[j+1:], dyn: cmd.dyn[j+1:]}
 	}
-	name, args := path.Base(filepath.ToSlash(words[0])), words[1:]
 	raw := pipedPush.MatchString
 	switch {
 	case name == "eval":
-		return pushIn(strings.Join(args, " "), depth+1)
+		return pushIn(strings.Join(args.vals, " "), depth+1)
 	case shells[name]:
-		code, _, inline, script := codeArgs(args, func(a string) bool {
-			return strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c")
-		}, "oO", map[string]bool{"--rcfile": true, "--init-file": true})
+		code, _, inline, script, _ := codeArgs(args, shellCodeOption, "oO", map[string]bool{"--rcfile": true, "--init-file": true}, false)
 		if inline {
 			// The code may run its stdin: a pipe, or a here-string or
 			// heredoc in body.
-			return pushIn(code, depth+1) || piped && raw(line) || raw(body)
+			return pushIn(code, depth+1) || cmd.pipe && raw(line) || raw(body)
 		}
-		// A script file may be one the line wrote: printf ... > x.sh; sh x.sh.
-		return pushIn(body, depth+1) || (piped || script) && raw(line)
+		for _, code := range append(slices.Clone(cmd.heredocs), cmd.hereStrings...) {
+			if pushIn(code, depth+1) {
+				return true
+			}
+		}
+		// A script file may be one the line wrote: printf ... > x.sh; sh
+		// x.sh. The shell expands an unquoted heredoc before the code
+		// runs, so $(printf 'git push') in it is code too.
+		return (cmd.pipe || script || cmd.heredocExpands) && raw(line)
 	case interpreter(name):
 		// The whole command, not only the -c value, so glued code such
 		// as -c"..." counts too.
-		code := text + "\n" + body
-		// Code that runs a process may run what a pipe carries.
-		_, _, _, script := codeArgs(args, func(a string) bool {
-			return a == "-c" || a == "-e" || a == "-E" && name == "perl" || a == "--eval"
-		}, "WXr", map[string]bool{"--require": true, "--import": true})
+		code := cmd.raw + "\n" + body
+		_, _, _, script, _ := codeArgs(args, interpreterCodeOption(name), interpreterValueShort(name), map[string]bool{"--require": true, "--import": true}, true)
 		if script && raw(line) {
 			// A script file may be one the line wrote.
 			return true
 		}
-		return spawnsProcess.MatchString(code) && (interpreterPush.MatchString(code) || piped && raw(line))
+		// Code that runs a process may run what a pipe carries.
+		return spawnsProcess.MatchString(code) && (interpreterPush.MatchString(code) || cmd.pipe && raw(line))
 	}
 	return false
 }
@@ -253,39 +283,12 @@ func pushRuns(text, body string, piped bool, line string, depth int) bool {
 var pipedPush = regexp.MustCompile(`(?:^|[^\w.-]|\\n)git\s[^\n|]*\bpush\b|(?:^|[^\w.-]|\\n)gh\s[^\n|]*\bpr\s+create\b`)
 
 // spawnsProcess matches interpreter code that runs another program.
-var spawnsProcess = regexp.MustCompile(`subprocess|os\.system|popen|Popen|spawn|child_process|execSync|execFile|\bexec[lv]?p?e?\b|\bsystem\b|Open3|IO\.popen|%x|qx|` + "`")
+var spawnsProcess = regexp.MustCompile(`subprocess|os\.system|popen|Popen|spawn|child_process|execSync|execFile|\bexec[lv]?p?e?\b|\bsystem\b|readpipe|['"]\|-['"]|['"]-\|['"]|Open3|IO\.popen|%x|qx|` + "`")
 
 // interpreterPush matches git push in interpreter code, as a command string
 // (global options such as -C dir included) or as a list of arguments, and
 // gh pr create the same way.
 var interpreterPush = regexp.MustCompile(`\bgit\b[^'"\n]*\bpush\b|['"]git['"](?:\s*,\s*['"][^'"\n]*['"])*?\s*,\s*['"]push['"]|\bgh\b[^'"\n]*\bpr\s+create\b|['"]gh['"]\s*,\s*['"]pr['"]\s*,\s*['"]create['"]`)
-
-// maskQuoted blanks the inside of quoted strings, keeping the quotes, so a
-// pattern matched over it sees only the words the shell runs and the shape
-// of each quoted word.
-func maskQuoted(text string) string {
-	out := []byte(text)
-	var quote byte
-	for i := 0; i < len(out); i++ {
-		c := out[i]
-		switch {
-		case quote != 0 && c == quote:
-			quote = 0
-		case quote == '"' && c == '\\' && i+1 < len(out):
-			out[i], out[i+1] = ' ', ' '
-			i++
-		case quote != 0:
-			if c != '\n' {
-				out[i] = ' '
-			}
-		case c == '\\' && i+1 < len(out):
-			i++
-		case c == '\'' || c == '"':
-			quote = c
-		}
-	}
-	return string(out)
-}
 
 // overrideWord and acceptWord match the override subcommand and its --accept
 // flag as shellWords gives them, which may run on into a shell operator, as in

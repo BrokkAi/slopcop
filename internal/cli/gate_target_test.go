@@ -30,6 +30,34 @@ func TestPushTargetsFollowCdAndGitC(t *testing.T) {
 		{"cd " + b + "\ngit push", []string{b}},
 		{`cd "` + b + `" && git push origin HEAD`, []string{b}},
 		{`git -C ` + b + ` "push"`, []string{b}},
+		{`git -C ` + b + ` $'push'`, []string{b}},
+		{"cd " + b + " && git $'\\x70ush'", []string{b}},
+		{"git -C " + b + " pu\\\nsh", []string{b}},
+		// Pushes in shell code run where the code says.
+		{`bash -c "git -C ` + b + ` push"`, []string{a, b}},
+		{`bash -c "git -C ` + b + ` \$'push'"`, []string{a, b}},
+		{`sh -c 'cd ` + b + ` && git push'`, []string{a, b}},
+		{`eval "git -C ` + b + ` push"`, []string{a, b}},
+		{`bash <<< $'git -C ` + filepath.ToSlash(b) + ` pu\x73h'`, []string{a, b}},
+		{"sh <<'EOF'\ngit -C " + b + " push\nEOF", []string{b}},
+		{"bash <<< 'cd " + b + "' <<< 'git push origin HEAD'", []string{a}},
+		{`if true; then bash -c "git -C ` + b + ` \$'push'"; fi`, []string{a, b}},
+		{`while true; do sudo sh -c 'git -C ` + b + ` push'; done`, []string{a, b}},
+		{`sudo -u me sh -c 'git -C ` + b + ` push'`, []string{a, b}},
+		{`cd ` + b + ` && bash -c 'cd sub && git push'`, []string{b, filepath.Join(b, "sub")}},
+		// The reader may misread shell code, so the shell's own directory
+		// counts too.
+		{"bash -c 'cat <<EOF\ncd " + b + "\nEOF\ngit push origin HEAD'", []string{a, b}},
+		{`bash -c 'git -C ` + b + ` push; source /dev/stdin' <<< 'git push origin HEAD'`, []string{a, b}},
+		// A word after a wrapper may be a branch, not a shell: the direct
+		// push still counts.
+		{"env git -C " + b + " push origin sh <<< 'git push'", []string{a, b}},
+		// A cd in a heredoc's text may be read as one, so on a line with a
+		// heredoc a push counts in every directory the line has been in.
+		{"cat <<'EOF'\ncd " + b + "\nEOF\ngit push origin HEAD", []string{a, b}},
+		{"cat <<'EOF'\ncd " + b + "\nEOF\nbash -c 'git \"push\" origin HEAD'", []string{a, b}},
+		{"cat <<'EOF'\ncd " + b + "\nEOF\nbash -c 'git \"push\" origin HEAD'\nif", []string{a, b}},
+		{"cat <<'EOF'\nIt's docs\nEOF\ngit push; git -C " + b + " push", []string{a, b}},
 		{"builtin cd -P " + b + " && git push", []string{b}},
 		{"cd " + b + " && cd sub && git push", []string{filepath.Join(b, "sub")}},
 		// The push runs only if cd succeeded, so it would run there.
@@ -137,6 +165,8 @@ func TestPushTargetsCannotReadEveryDirectory(t *testing.T) {
 		"cp -r " + b + " " + filepath.Join(b, "copy") + "; cd " + filepath.Join(b, "copy") + "; git push",
 		"git -C " + filepath.Join(b, "missing") + " push",
 		"make || cd nosuch; cd sub; git push",
+		// A push the parser finds where these rules place none.
+		`time -p bash -c "git -C ` + b + ` \$'push'"`,
 	} {
 		if _, unsure := pushTargets(a, command); unsure == "" {
 			t.Errorf("%q: read as sure", command)
@@ -197,6 +227,13 @@ func TestGateHookJudgesTheRepositoryThePushTargets(t *testing.T) {
 		{unguarded, "cd $REPO && git -C " + unchecked + " push", true},
 		{unchecked, "cd " + checked + ` && git commit -m "a; b" && git push`, false},
 		{unguarded, `echo "$(git -C ` + unchecked + ` push)"`, true},
+		// Pushes in shell code, followed or not, are judged where they run.
+		{unguarded, `bash -c "git -C ` + unchecked + ` push"`, true},
+		{unguarded, `bash -c "git -C ` + checked + ` push"`, false},
+		{unguarded, `time -p bash -c "git -C ` + unchecked + ` \$'push'"`, true},
+		{unguarded, "cat <<EOF\n$(git -C " + unchecked + " push origin HEAD)\nEOF", true},
+		{unchecked, "cat <<'EOF'\ncd " + checked + "\nEOF\nbash -c 'git \"push\" origin HEAD'", true},
+		{unchecked, "cat <<'EOF'\nIt's docs\nEOF\ngit push; git -C " + checked + " push", true},
 		// Every push on the line must pass.
 		{unchecked, "git -C " + checked + " push && git push", true},
 	} {

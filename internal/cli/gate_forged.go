@@ -1,8 +1,6 @@
 package cli
 
 import (
-	"path"
-	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -17,22 +15,24 @@ import (
 // of either are common in harmless commands, though: a grep over the docs, a
 // pull request body, a commit message, a script that edits source.
 //
-// forgedApproval reads a command line that names the refs or the state
-// directory one command at a time, with heredoc bodies attached to the
-// command that reads them, and blocks a command that could write, remove or
+// forgedApproval parses a command line that names the refs or the state
+// directory (see parseShell) and reads it one simple command at a time, with
+// heredoc bodies attached to the command that reads them, and blocks a command that could write, remove or
 // read them. A command passes when it is one of the text tools below and the
 // mention is text it prints, searches for or sends, not a file it opens or
 // writes:
 //
 //   - echo and printf: every argument is text; gh: bodies and titles are.
-//   - cat, head, ls and other readers: every argument is a path, so none may
-//     name the refs or a path under .git.
+//   - cat, head, ls and other readers, and filters such as tr and cut:
+//     every argument is a path, so none may name the refs or a path under
+//     .git.
 //   - grep, rg, ag and git grep: the pattern is text; the rest are paths.
 //   - sed: the script is text unless it names .git or update-ref, holds a
-//     shell variable or runs a command (e), since w file writes; the rest
+//     shell expansion or runs a command (e), since w file writes; the rest
 //     are paths.
 //   - git commit: the message is text; git log: the --grep, -S, -G, --author
-//     and --committer values are.
+//     and --committer values are. A global option such as -c core.editor
+//     may not hold an expansion.
 //   - bash -c, sh, eval and a heredoc fed to a shell: the code is read again
 //     by these rules.
 //   - python, node, ruby and perl code from -c, -e or a heredoc, not fed by
@@ -46,7 +46,12 @@ import (
 // line names them anywhere, a command that runs update-ref or symbolic-ref,
 // touches a .git path, or runs code it reads from elsewhere (a shell or
 // interpreter fed on stdin or from a script file, xargs), since a pipe or a
-// variable can carry the ref there. Reads of the state are blocked with the
+// variable can carry the ref there. So is a word whose value the shell
+// decides ($x, $(...), a glob or brace that may reach .git) where a path or
+// code goes, a command fed by a pipe that is not one of the tools above (tar
+// -T - reads paths from it), and a command run by a path outside the
+// system's program directories, which may be a script the line wrote under a
+// known tool's name (./cat). Reads of the state are blocked with the
 // writes: an agent has no need to read approvals, and listing them is the
 // first step to copying one. Like pushCommand, this guards against an
 // agent's shortcut, not an attacker.
@@ -76,15 +81,12 @@ var gitStatePath = regexp.MustCompile(`(?:^|[/\\=])\.git(?:[/\\]|$)|packed-refs`
 // or --stdin, where git reads refs or refspecs from a pipe.
 var refWriteHint = regexp.MustCompile(`update-ref|symbolic-ref|packed-refs|\.git(?:[/\\]|['"])|[:+]refs[/\\]+slopcop\b|--stdin\b`)
 
-// sedVariable matches a shell variable or substitution left in a sed
-// script, as in sed "w $ref", but not sed's own $ for the last line.
-var sedVariable = regexp.MustCompile("\\$[A-Za-z_{(]|`")
-
-// sedExecute matches GNU sed's e command, or the e flag of s with any
-// delimiter (s/x/y/e, s|x|y|e, sX^XXe), which run a line or the pattern
-// space as a shell command. It errs towards matching: any e that ends a
-// command counts.
-var sedExecute = regexp.MustCompile(`(?:^|[;{}\n/\d$!])\s*e(?:\s|$|;|})|\Se[gpiImM0-9w]*\s*(?:$|;|})|[^\w\s\\]\s+e[gpiImM0-9w]*\s*(?:$|;|})`)
+// codeVariables are the variables whose value Bash runs or looks up as
+// commands: aliases, hashed commands, prompts and startup files.
+var codeVariables = map[string]bool{
+	"BASH_ALIASES": true, "BASH_CMDS": true, "PROMPT_COMMAND": true, "BASH_ENV": true, "ENV": true,
+	"PS0": true, "PS1": true, "PS2": true, "PS3": true, "PS4": true,
+}
 
 // shellAssignment matches a variable assignment word before a command.
 var shellAssignment = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=`)
@@ -106,11 +108,13 @@ func protectedPath(word string) bool {
 // textCommands take only text arguments.
 var textCommands = map[string]bool{"echo": true, "printf": true}
 
-// readCommands take only paths and options.
+// readCommands take only paths and options, or text that is no path (tr's
+// sets, jq's filter), and neither write a file nor read paths from stdin.
 var readCommands = map[string]bool{
 	"cat": true, "head": true, "tail": true, "wc": true, "less": true, "more": true, "sort": true,
 	"uniq": true, "nl": true, "bat": true, "ls": true, "diff": true, "cmp": true, "file": true,
-	"stat": true, "tree": true, "du": true,
+	"stat": true, "tree": true, "du": true, "tr": true, "cut": true, "column": true, "fold": true,
+	"rev": true, "tac": true, "paste": true, "fmt": true, "expand": true, "unexpand": true, "jq": true,
 }
 
 // searchCommands take a pattern, then paths.
@@ -155,164 +159,191 @@ func forgedIn(command string, named, stdin bool, depth int) bool {
 	if depth > 8 {
 		return true
 	}
-	stripped, docs := stripHeredocs(command)
-	// The first command reads the stdin of the code's shell, which may be
-	// a pipe.
-	piped := stdin
-	for _, seg := range segments(stripped) {
-		var body strings.Builder
-		count := 0
-		for _, doc := range docs {
-			if doc.at >= seg.start && doc.at < seg.start+len(seg.text) {
-				count++
-				// Where the gate cannot be sure where a heredoc ends,
-				// or which one a command reads, its body may hide a
-				// command; and the shell runs a command substitution in
-				// an unquoted heredoc as it reads the body.
-				if doc.unsure || count > 1 ||
-					doc.expands && (strings.Contains(doc.body, "$(") || strings.Contains(doc.body, "`")) {
-					return true
-				}
-				body.WriteString(doc.body)
-				body.WriteByte('\n')
-			}
-		}
-		if forgedSegment(seg.text, body.String(), piped, depth) {
+	cmds, err := parseShell(command, stdin)
+	if err != nil {
+		// A line the parser cannot read may hide anything.
+		return true
+	}
+	for _, cmd := range cmds {
+		// Where the gate cannot be sure where a heredoc ends, its body may
+		// hide a command.
+		// The shell runs a command substitution in an unquoted heredoc as
+		// it reads the body, and its output joins the body.
+		if cmd.unsure || cmd.heredocSubst || forgedSegment(cmd, depth) {
 			return true
 		}
-		// A subshell's ( leaves an empty command that keeps the pipe.
-		// Once a pipe starts, later commands may share it, as in a
-		// subshell: printf ... | (cd x; python3 -c ...).
-		piped = piped || seg.next == "|"
 	}
 	return false
 }
 
 // forgedSegment reports whether one command of a line that names the refs
-// or the state could write, remove or read them. body holds the heredocs the
-// command reads; piped says its stdin comes from the command before it.
-func forgedSegment(text, body string, piped bool, depth int) bool {
-	if strs := hereStrings(text); len(strs) > 0 {
-		// A here-string is stdin, as a pipe or heredoc is.
-		piped = true
-		body += strings.Join(strs, "\n") + "\n"
-	}
+// or the state could write, remove or read them.
+func forgedSegment(cmd *shellCmd, depth int) bool {
+	body := cmd.stdin()
+	// A here-string is stdin, as a pipe is; a heredoc is judged as the
+	// command's input or code.
+	piped := cmd.pipe || len(cmd.hereStrings) > 0
 	// A redirection writes or reads its file whatever the command is, and
 	// $ref in one may carry the path.
-	if slices.ContainsFunc(redirectFiles(text), protectedPath) {
-		return true
-	}
-	words := shellWords(text)
-	assigned := false
-	for len(words) > 0 && (commandPrefixes[words[0]] || shellAssignment.MatchString(words[0])) {
-		if shellAssignment.MatchString(words[0]) && protectedPath(words[0][strings.IndexByte(words[0], '=')+1:]) {
-			assigned = true
+	for i, file := range cmd.redirs {
+		if cmd.redirDyn[i] || protectedPath(file) {
+			return true
 		}
-		words = words[1:]
 	}
-	if len(words) == 0 {
+	if len(cmd.words) == 0 {
 		// Assignments alone write nothing; a command that later reads
-		// the variable is judged by its $.
+		// the variable is judged by its $. But an array element, or a
+		// variable Bash runs as code, can hold a command no later $
+		// shows: BASH_ALIASES[x]='rm -rf ...' defines an alias.
+		for i, assign := range cmd.assigns {
+			name, value, _ := strings.Cut(assign, "=")
+			if (strings.Contains(name, "[") || codeVariables[name]) && (cmd.assignDyn[i] || namesApproval(value) || refWriteHint.MatchString(value) || protectedPath(value)) {
+				return true
+			}
+		}
 		return false
 	}
-	if assigned {
-		// STATE=.git/slopcop cmd hands the command the path in its
-		// environment.
+	for i, assign := range cmd.assigns {
+		if cmd.assignDyn[i] || protectedPath(assign[strings.IndexByte(assign, '=')+1:]) {
+			// STATE=.git/slopcop cmd hands the command the path in its
+			// environment.
+			return true
+		}
+	}
+	name := cmd.name()
+	args := cmd.args()
+	all := cmd.raw + "\n" + body
+	// A command run by a path outside the system's program directories may
+	// be a script the line wrote, even under a known tool's name (./cat).
+	if cmd.byUnknownPath() {
 		return true
 	}
-	name := words[0]
-	if name != "" && name != "." {
-		// path.Base would turn "" into ".", the source builtin.
-		name = path.Base(filepath.ToSlash(name))
-	}
-	all := text + "\n" + body
-	// A command run by its path (./x, /tmp/x) may be a script the line
-	// wrote, so it is classified too: a known tool by its base name, any
-	// other file blocked.
-	byPath := strings.ContainsAny(words[0], `/\`)
-	if !namesApproval(all) && !refWriteHint.MatchString(all) && !slices.ContainsFunc(words, protectedPath) && !runsCode(name) && name != "sed" && !awkCommands[name] && !byPath {
+	// A command fed by a pipe may read paths from it: tar -T -, cpio. Only
+	// the commands below are known not to.
+	if !piped && !namesApproval(all) && !refWriteHint.MatchString(all) && !cmd.dyn[0] && !args.anyProtected(nil) &&
+		!runsCode(name) && name != "sed" && !awkCommands[name] {
 		return false
 	}
-	args := words[1:]
 	switch {
+	case cmd.dyn[0]:
+		// $cmd runs whatever the variable holds.
+		return true
 	case textCommands[name]:
 		return false
 	case name == "gh":
 		// Bodies and titles are text; a path such as --body-file or
 		// gh release download --output is not.
-		return pathsProtected(args, optionValues(args, "bt", "--body", "--title", "--notes", "--subject"))
+		return args.anyProtected(optionValues(args.vals, "bt", "--body", "--title", "--notes", "--subject"))
 	case readCommands[name]:
-		return slices.ContainsFunc(args, protectedPath)
+		return args.anyProtected(nil)
 	case searchCommands[name]:
-		if slices.Contains(args, "--files") {
+		if slices.Contains(args.vals, "--files") {
 			// rg --files lists files and takes no pattern.
-			return slices.ContainsFunc(args, protectedPath)
+			return args.anyProtected(nil)
 		}
-		return pathsProtected(args, patternArgs(args, "e", "--regexp"))
+		return args.anyProtected(patternArgs(args.vals, "e", "--regexp"))
 	case name == "sed":
-		if len(optionValues(args, "f", "--file")) > 0 {
+		if len(optionValues(args.vals, "f", "--file")) > 0 {
 			// A script from a file, or a pipe, is out of sight.
 			return true
 		}
-		scripts := patternArgs(args, "e", "--expression")
+		scripts := patternArgs(args.vals, "e", "--expression")
 		for i := range scripts {
-			// A script can write a file (w file), and a variable in it
-			// can carry the path.
-			if refWriteHint.MatchString(args[i]) || sedVariable.MatchString(args[i]) || sedExecute.MatchString(args[i]) {
+			// A script can write a file (w file), a shell variable in it
+			// can carry the path, and e runs a command.
+			if args.dyn[i] || refWriteHint.MatchString(args.vals[i]) || sedRuns(sedScript(args.vals[i])) {
 				return true
 			}
 		}
-		return pathsProtected(args, scripts)
+		return args.anyProtected(scripts)
 	case name == "git":
 		return forgedGit(args)
 	case awkCommands[name]:
 		// The program is text unless it can run a command, write a file
 		// or read one by name; the rest are paths.
-		if len(optionValues(args, "f", "--file")) > 0 {
+		if len(optionValues(args.vals, "f", "--file")) > 0 {
 			return true
 		}
 		program := -1
-		for i := 0; i < len(args); i++ {
-			if !strings.HasPrefix(args[i], "-") {
+		for i := 0; i < len(args.vals); i++ {
+			if !strings.HasPrefix(args.vals[i], "-") {
 				program = i
 				break
 			}
-			if takesOperand(args[i], "Fv", nil) {
+			if takesOperand(args.vals[i], "Fv", nil) {
 				i++
 			}
 		}
-		if program >= 0 && awkRuns.MatchString(args[program]) {
+		if program >= 0 && (args.dyn[program] || awkRuns.MatchString(args.vals[program])) {
 			return true
 		}
-		return pathsProtected(args, map[int]bool{program: true})
+		return args.anyProtected(map[int]bool{program: true})
 	case name == "eval":
-		return forgedIn(strings.Join(args, " "), true, piped, depth+1)
+		return forgedIn(strings.Join(args.vals, " "), true, piped, depth+1)
 	case shells[name]:
-		code, rest, inline, script := codeArgs(args, func(a string) bool {
-			return strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c")
-		}, "oO", map[string]bool{"--rcfile": true, "--init-file": true})
-		if slices.ContainsFunc(rest, protectedPath) || !inline && (body == "" || script) {
-			// Code from stdin or a script file is out of sight; with
-			// a script, a heredoc is only its input.
+		code, rest, inline, script, _ := codeArgs(args, shellCodeOption, "oO", map[string]bool{"--rcfile": true, "--init-file": true}, false)
+		if rest.anyProtected(nil) {
 			return true
 		}
-		return forgedIn(code+"\n"+body, true, piped, depth+1)
+		if inline {
+			// A heredoc or here-string is the code's stdin, not code.
+			return forgedIn(code, true, piped || body != "", depth+1)
+		}
+		if script || len(cmd.heredocs)+len(cmd.hereStrings) == 0 || cmd.heredocExpands {
+			// Code from a pipe or a script file is out of sight; with a
+			// script, a heredoc is only its input. The shell expands an
+			// unquoted heredoc before the code runs, so $c in it may be
+			// any code.
+			return true
+		}
+		for _, code := range append(slices.Clone(cmd.heredocs), cmd.hereStrings...) {
+			if forgedIn(code, true, piped, depth+1) {
+				return true
+			}
+		}
+		return false
 	case interpreter(name):
-		code, rest, inline, script := codeArgs(args, func(a string) bool {
-			return a == "-c" || a == "-e" || a == "-E" && name == "perl" || a == "--eval"
-		}, "WXr", map[string]bool{"--require": true, "--import": true})
-		if !inline && script || inline && piped {
-			// A script file is out of sight, and inline code may run
-			// or open what the pipe carries.
+		code, rest, inline, script, codeDyn := codeArgs(args, interpreterCodeOption(name), interpreterValueShort(name), map[string]bool{"--require": true, "--import": true}, true)
+		if !inline && (script || cmd.heredocExpands) || inline && (piped || codeDyn) {
+			// A script file is out of sight, inline code may run or
+			// open what the pipe carries, and "$code" or an expansion in
+			// a heredoc of code may be anything.
 			return true
 		}
 		code += "\n" + body
 		if strings.TrimSpace(code) == "" || refWriteHint.MatchString(code) {
 			return true
 		}
-		return slices.ContainsFunc(rest, protectedPath)
+		return rest.anyProtected(nil)
 	}
 	return true
+}
+
+// shellCodeOption reports whether a shell option gives code as the next
+// word: -c, or a cluster with c such as -lc.
+func shellCodeOption(arg string) bool {
+	return strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "--") && strings.Contains(arg, "c")
+}
+
+// interpreterCodeOption is the test for an interpreter's options that give
+// code as the next word.
+func interpreterCodeOption(name string) func(string) bool {
+	return func(arg string) bool {
+		return arg == "-c" || arg == "-e" || arg == "-E" && name == "perl" || arg == "--eval"
+	}
+}
+
+// interpreterValueShort is an interpreter's short options that take the
+// next word as their value: python -W and -X, node and ruby -r. Perl's take
+// theirs glued.
+func interpreterValueShort(name string) string {
+	switch {
+	case strings.HasPrefix(name, "python"):
+		return "WX"
+	case name == "node", name == "ruby":
+		return "r"
+	}
+	return ""
 }
 
 // awkCommands are the awk implementations.
@@ -327,39 +358,30 @@ var awkRuns = regexp.MustCompile(`system|getline|[|>]|ENVIRON|ARGV|ARGC|close|ff
 var gitValueOptions = map[string]bool{"-C": true, "-c": true, "--git-dir": true, "--work-tree": true, "--namespace": true, "--config-env": true}
 
 // forgedGit reports whether a git command could write or read the refs:
-// anything but a commit message, a log search or a git grep pattern.
-func forgedGit(args []string) bool {
+// anything but a commit message, a log search or a git grep pattern. A
+// global option's value may carry the path, and a -c setting such as
+// core.editor runs shell code.
+func forgedGit(args argv) bool {
 	i := 0
-	for i < len(args) && strings.HasPrefix(args[i], "-") {
-		if gitValueOptions[args[i]] {
+	for i < len(args.vals) && strings.HasPrefix(args.vals[i], "-") {
+		if gitValueOptions[args.vals[i]] {
 			i++
 		}
 		i++
 	}
-	if i >= len(args) || slices.ContainsFunc(args[:i], namesApproval) {
+	if i >= len(args.vals) || args.sub(0, i).anyProtected(nil) {
 		return true
 	}
-	sub, rest := args[i], args[i+1:]
+	sub, rest := args.vals[i], args.sub(i+1, len(args.vals))
 	switch sub {
 	case "commit":
-		return pathsProtected(rest, optionValues(rest, "m", "--message"))
+		return rest.anyProtected(optionValues(rest.vals, "m", "--message"))
 	case "log":
-		return pathsProtected(rest, optionValues(rest, "SG", "--grep", "--author", "--committer"))
+		return rest.anyProtected(optionValues(rest.vals, "SG", "--grep", "--author", "--committer"))
 	case "grep":
-		return pathsProtected(rest, patternArgs(rest, "e", "--regexp"))
+		return rest.anyProtected(patternArgs(rest.vals, "e", "--regexp"))
 	}
 	return true
-}
-
-// pathsProtected reports whether any argument but the text ones is a
-// protected path.
-func pathsProtected(args []string, text map[int]bool) bool {
-	for i, arg := range args {
-		if !text[i] && protectedPath(arg) {
-			return true
-		}
-	}
-	return false
 }
 
 // optionValues finds the arguments that are values of the given options:
@@ -368,6 +390,13 @@ func pathsProtected(args []string, text map[int]bool) bool {
 // value marks its whole word.
 func optionValues(args []string, short string, long ...string) map[int]bool {
 	values := map[int]bool{}
+	// next marks the word after i, if there is one: an option that ends
+	// the line has no value.
+	next := func(i int) {
+		if i+1 < len(args) {
+			values[i+1] = true
+		}
+	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -376,7 +405,7 @@ func optionValues(args []string, short string, long ...string) map[int]bool {
 		case strings.HasPrefix(arg, "--"):
 			for _, opt := range long {
 				if arg == opt {
-					values[i+1] = true
+					next(i)
 					i++
 					break
 				}
@@ -396,7 +425,7 @@ func optionValues(args []string, short string, long ...string) map[int]bool {
 			}
 			if k := strings.IndexAny(letters, short); k == 0 || k >= 0 && k+2 == len(arg) {
 				if k+2 == len(arg) {
-					values[i+1] = true
+					next(i)
 					i++
 				} else {
 					values[i] = true
@@ -464,261 +493,32 @@ func takesOperand(arg, short string, long map[string]bool) bool {
 // codeArgs splits an interpreter's arguments into the code an option such
 // as -c gives and every other argument: options, a script file and its
 // arguments; whether an option gave code; and, where none did, whether a
-// script file runs (the first operand that is not an option's value or -).
-func codeArgs(args []string, codeOption func(string) bool, valueShort string, valueLong map[string]bool) (code string, rest []string, inline, script bool) {
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if codeOption(arg) && i+1 < len(args) {
-			return args[i+1], append(slices.Clone(args[:i]), args[i+2:]...), true, false
+// script file runs (the first operand that is not an option's value). After
+// an interpreter's -, code comes from stdin and the rest are its arguments. codeDyn says the
+// code holds an expansion, so it is not known before the shell runs.
+func codeArgs(args argv, codeOption func(string) bool, valueShort string, valueLong map[string]bool, dashIsStdin bool) (code string, rest argv, inline, script, codeDyn bool) {
+	for i := 0; i < len(args.vals); i++ {
+		arg := args.vals[i]
+		if codeOption(arg) && i+1 < len(args.vals) {
+			rest := argv{vals: append(slices.Clone(args.vals[:i]), args.vals[i+2:]...), dyn: append(slices.Clone(args.dyn[:i]), args.dyn[i+2:]...)}
+			return args.vals[i+1], rest, true, false, args.dyn[i+1]
 		}
 		if arg == "-" {
-			// Code from stdin, as from a heredoc.
+			if dashIsStdin {
+				// python3 - arg: code from stdin, as from a heredoc,
+				// and the rest are its arguments.
+				return "", args, false, false, false
+			}
+			// A shell's - ends its options: the next operand is a
+			// script.
 			continue
 		}
 		if !strings.HasPrefix(arg, "-") && !strings.HasPrefix(arg, "+") {
-			return "", args, false, true
+			return "", args, false, true, false
 		}
 		if takesOperand(strings.Replace(arg, "+", "-", 1), valueShort, valueLong) {
 			i++
 		}
 	}
-	return "", args, false, false
-}
-
-// hereStrings is the text of a command's here-strings (<<< word), which the
-// command reads on stdin.
-func hereStrings(text string) []string {
-	var strs []string
-	var quote byte
-	for i := 0; i < len(text); i++ {
-		c := text[i]
-		switch {
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			} else if c == '\\' && quote == '"' {
-				i++
-			}
-		case c == '\\':
-			i++
-		case c == '\'' || c == '"':
-			quote = c
-		case strings.HasPrefix(text[i:], "<<<"):
-			if words := shellWords(text[i+3:]); len(words) > 0 {
-				strs = append(strs, words[0])
-			}
-			i += 2
-		}
-	}
-	return strs
-}
-
-// redirectFiles is the files a command's redirections read or write. A
-// heredoc's delimiter and a here-string's text are not files, nor is a
-// descriptor such as the 1 of 2>&1.
-func redirectFiles(text string) []string {
-	var files []string
-	var quote byte
-	for i := 0; i < len(text); i++ {
-		c := text[i]
-		switch {
-		case quote != 0:
-			if c == quote {
-				quote = 0
-			} else if c == '\\' && quote == '"' {
-				i++
-			}
-			continue
-		case c == '\\':
-			i++
-			continue
-		case c == '\'' || c == '"':
-			quote = c
-			continue
-		case c != '<' && c != '>':
-			continue
-		}
-		j := i
-		for j < len(text) && strings.IndexByte("<>&|", text[j]) >= 0 {
-			j++
-		}
-		op := text[i:j]
-		i = j - 1
-		if strings.HasPrefix(op, "<<") {
-			continue
-		}
-		rest := strings.TrimLeft(text[j:], " \t")
-		if strings.HasSuffix(op, "&") && rest != "" && (rest[0] >= '0' && rest[0] <= '9' || rest[0] == '-') {
-			continue
-		}
-		if words := shellWords(rest); len(words) > 0 {
-			files = append(files, words[0])
-		}
-	}
-	return files
-}
-
-// heredoc is a heredoc's body and where its operator stands in the command
-// line with the bodies taken out.
-type heredoc struct {
-	at   int
-	body string
-	// expands says the delimiter is unquoted, so the shell expands
-	// variables and runs command substitutions in the body.
-	expands bool
-	// unsure says the gate cannot be sure where the body ends: the
-	// delimiter is not a plain word, quoted whole or not at all, the body
-	// has no delimiter line, or an unquoted body continues a line with a
-	// backslash.
-	unsure bool
-}
-
-// plainDelimiter matches the heredoc delimiters the gate reads with
-// confidence: a word, quoted whole or not at all.
-var plainDelimiter = regexp.MustCompile(`^(?:[A-Za-z_][\w.-]*|'[A-Za-z_][\w.-]*'|"[A-Za-z_][\w.-]*"|\\[A-Za-z_][\w.-]*)$`)
-
-// heredocOperator matches a heredoc operator and its delimiter word, quoted
-// in whole or in part or not at all, at the start of the text.
-var heredocOperator = regexp.MustCompile(`^<<(-?)[ \t]*((?:'[^'\n]*'|"[^"\n]*"|\\.|[^\s;&|()<>'"\\])+)`)
-
-// stripHeredocs takes the heredoc bodies out of a command line, so that text
-// in them is neither split into commands nor read as quotes. It follows
-// quotes and command substitution as segments does, so a << in quoted text
-// starts no heredoc, and one in "$(cat <<'EOF' ...)" does.
-func stripHeredocs(command string) (string, []heredoc) {
-	type pending struct {
-		at      int
-		delim   string
-		tabs    bool
-		expands bool
-		plain   bool
-	}
-	var out strings.Builder
-	var docs []heredoc
-	var open []pending
-	var quote byte
-	var parens []byte
-	// escaped is where the last escaped character stood: an escaped blank
-	// does not end a word, so a # after it starts no comment.
-	escaped := -1
-	for i := 0; i < len(command); i++ {
-		c := command[i]
-		if c == '\n' && len(open) > 0 && quote == 0 {
-			out.WriteByte(c)
-			next := i + 1
-			for _, doc := range open {
-				var body string
-				var ended bool
-				body, next, ended = heredocBody(command, next, doc.delim, doc.tabs)
-				continued := doc.expands && strings.Contains(body, "\\\n")
-				docs = append(docs, heredoc{at: doc.at, body: body, expands: doc.expands,
-					unsure: !doc.plain || !ended || continued})
-			}
-			open = nil
-			i = next - 1
-			continue
-		}
-		switch {
-		case quote == '\'':
-			if c == '\'' {
-				quote = 0
-			}
-		case quote == '"':
-			switch {
-			case c == '\\' && i+1 < len(command):
-				out.WriteByte(c)
-				i++
-				c = command[i]
-			case c == '"':
-				quote = 0
-			case c == '$' && i+1 < len(command) && command[i+1] == '(':
-				out.WriteByte(c)
-				i++
-				c = command[i]
-				parens = append(parens, '"')
-				quote = 0
-			}
-		case c == '\\' && i+1 < len(command):
-			out.WriteByte(c)
-			i++
-			c = command[i]
-			escaped = i
-		case c == '#' && commentStart(command, i, escaped):
-			// A comment runs to the end of the line, and a quote or a
-			// << in it is not one.
-			end := strings.IndexByte(command[i:], '\n')
-			if end < 0 {
-				i = len(command)
-			} else {
-				i += end - 1
-			}
-			continue
-		case c == '\'' || c == '"':
-			quote = c
-		case c == '(':
-			parens = append(parens, 0)
-		case c == ')':
-			if n := len(parens); n > 0 {
-				quote, parens = parens[n-1], parens[:n-1]
-			}
-		case c == '<' && (i == 0 || command[i-1] != '<') && !inArithmetic(out.String()):
-			if m := heredocOperator.FindStringSubmatch(command[i:]); m != nil {
-				delim := ""
-				if words := shellWords(m[2]); len(words) > 0 {
-					delim = words[0]
-				}
-				open = append(open, pending{at: out.Len(), delim: delim, tabs: m[1] == "-",
-					expands: !strings.ContainsAny(m[2], `'"\\`), plain: plainDelimiter.MatchString(m[2])})
-				out.WriteString(m[0])
-				i += len(m[0]) - 1
-				continue
-			}
-		}
-		out.WriteByte(c)
-	}
-	for _, doc := range open {
-		docs = append(docs, heredoc{at: doc.at, unsure: true})
-	}
-	return out.String(), docs
-}
-
-// inArithmetic reports whether the text so far is inside an
-// arithmetic expansion or command, $((...)), ((...)) or $[...], where << is a
-// shift, not a heredoc.
-func inArithmetic(text string) bool {
-	return strings.Count(text, "((") > strings.Count(text, "))") ||
-		strings.LastIndex(text, "$[") > strings.LastIndex(text, "]")
-}
-
-// commentStart reports whether the # at i starts a comment: it starts a word,
-// after a blank or an operator that was not escaped. A backslash-newline
-// joins the lines, so the character before it is the one that counts.
-func commentStart(command string, i, escaped int) bool {
-	k := i - 1
-	for k >= 1 && command[k] == '\n' && command[k-1] == '\\' {
-		k -= 2
-	}
-	return k < 0 || k != escaped && strings.IndexByte(" \t\n;&|(", command[k]) >= 0
-}
-
-// heredocBody reads a heredoc body from start up to its delimiter line, or
-// the end of the command, and returns the body and where the command
-// resumes, and whether it found the delimiter. With tabs, as for <<-, leading tabs do not count on the
-// delimiter line.
-func heredocBody(command string, start int, delim string, tabs bool) (string, int, bool) {
-	for pos := start; pos < len(command); {
-		lineEnd, next := len(command), len(command)
-		if end := strings.IndexByte(command[pos:], '\n'); end >= 0 {
-			lineEnd, next = pos+end, pos+end+1
-		}
-		line := command[pos:lineEnd]
-		if tabs {
-			line = strings.TrimLeft(line, "\t")
-		}
-		if line == delim {
-			return command[start:pos], next, true
-		}
-		pos = next
-	}
-	return command[start:], len(command), false
+	return "", args, false, false, false
 }

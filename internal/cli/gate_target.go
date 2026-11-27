@@ -2,9 +2,15 @@ package cli
 
 import (
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"runtime"
+	"slices"
 	"strings"
+
+	"mvdan.cc/sh/v3/expand"
+	"mvdan.cc/sh/v3/syntax"
 )
 
 // The hook payload's cwd is the agent session's working directory, which is
@@ -29,20 +35,20 @@ import (
 const unknownDir = ""
 
 // segment is one command of a command line and the operator after it, ""
-// at the end. start is where text begins in the command line.
+// at the end.
 type segment struct {
-	text  string
-	next  string
-	start int
+	text string
+	next string
 }
 
 // segments splits a command line at the operators that end a command: &&,
 // ||, ;, &, |, newlines, subshells and command substitution. Quoted text and
-// escaped characters are not operators, and a backslash-newline continues
-// the line. The & of a redirection (2>&1, >&file, &>file) is not an
-// operator, and |& is a pipe; shellWords reads the redirections themselves.
+// escaped characters are not operators, and a backslash-newline is
+// removed, as the shell removes it: pu\<newline>sh is push. The & of a
+// redirection (2>&1, >&file, &>file) is not an operator, and |& is a pipe;
+// shellWords reads the redirections themselves.
 func segments(command string) []segment {
-	command = strings.ReplaceAll(command, "\\\n", "  ")
+	command = strings.ReplaceAll(command, "\\\n", "")
 	var parts []segment
 	start := 0
 	var quote byte
@@ -51,7 +57,7 @@ func segments(command string) []segment {
 	// commands as one outside them does.
 	var parens, backticks []byte
 	emit := func(i int, op string) {
-		parts = append(parts, segment{text: command[start:i], next: op, start: start})
+		parts = append(parts, segment{text: command[start:i], next: op})
 		start = i + len(op)
 	}
 	for i := 0; i < len(command); i++ {
@@ -128,7 +134,7 @@ func segments(command string) []segment {
 		emit(i, op)
 		i += len(op) - 1
 	}
-	return append(parts, segment{text: command[start:], start: start})
+	return append(parts, segment{text: command[start:]})
 }
 
 // backslashSeparates says a backslash is a path separator unless it escapes
@@ -214,6 +220,15 @@ func shellWords(text string) []string {
 			}
 			word.WriteByte(text[i])
 			inWord = true
+		case c == '$' && i+1 < len(text) && text[i+1] == '\'':
+			// $'...' is a quote that decodes backslash escapes: git $'push'.
+			i = ansiQuoted(text, i+2, &word)
+			inWord = true
+		case c == '$' && i+1 < len(text) && text[i+1] == '"':
+			// $"..." is a translated double quote.
+			i++
+			quote = '"'
+			inWord = true
 		case c == '\'' || c == '"':
 			quote = c
 			inWord = true
@@ -226,6 +241,31 @@ func shellWords(text string) []string {
 	}
 	flush()
 	return words
+}
+
+// ansiQuoted decodes the body of a $'...' quote that starts at i into word,
+// as the parser does for the gate's checks, and returns where its closing
+// quote stands.
+func ansiQuoted(text string, i int, word *strings.Builder) int {
+	start := i
+	for ; i < len(text) && text[i] != '\''; i++ {
+		if text[i] == '\\' {
+			i++
+		}
+	}
+	end := min(i, len(text))
+	quoted := "$'" + text[start:end] + "'"
+	file, err := shellParser().Parse(strings.NewReader(quoted), "")
+	if err == nil && len(file.Stmts) == 1 {
+		if call, ok := file.Stmts[0].Cmd.(*syntax.CallExpr); ok && len(call.Args) == 1 {
+			if v, err := expand.Literal(nil, call.Args[0]); err == nil {
+				word.WriteString(v)
+				return i
+			}
+		}
+	}
+	word.WriteString(text[start:end])
+	return i
 }
 
 // isDigits reports whether s is one or more ASCII digits.
@@ -385,6 +425,24 @@ const (
 // one directory, it lists each: after `cd dir && make || <push>`, the push
 // runs in the old directory when the cd failed and in dir when make did.
 func pushTargets(cwd, command string) ([]string, string) {
+	targets, unsure := pushTargetsIn(cwd, command, 0)
+	if stripped, ok := withoutHeredocs(command); ok {
+		// segments reads a heredoc's lines as commands, and a quote in
+		// its text can swallow the commands after it. The line is read
+		// again without its heredocs, and a push counts where either
+		// reading puts it.
+		more, why := pushTargetsIn(cwd, stripped, 0)
+		targets = union(targets, more)
+		if why == unsureShell || why != "" && unsure == "" {
+			unsure = why
+		}
+	}
+	return targets, unsure
+}
+
+// pushTargetsIn is pushTargets for a command line, or for shell code
+// (bash -c, eval) one runs, depth levels down.
+func pushTargetsIn(cwd, command string, depth int) ([]string, string) {
 	// dirs is where the next command may run. been is every directory the
 	// current and-or list (commands joined by && and ||) has run in: a
 	// command after ||, and the first command after the list, run wherever
@@ -408,7 +466,11 @@ func pushTargets(cwd, command string) ([]string, string) {
 	var targets []string
 	unsure := ""
 	seen := map[string]bool{}
+	// attributed counts the pushes given a directory, whether or not it
+	// was a new one.
+	attributed := 0
 	add := func(target string) {
+		attributed++
 		switch {
 		case target == unknownDir:
 			unsure = unsureShell
@@ -424,31 +486,73 @@ func pushTargets(cwd, command string) ([]string, string) {
 			targets = append(targets, target)
 		}
 	}
+	// segments reads a heredoc's lines as commands, so a cd in its text
+	// may move dirs where the shell does not go. On a line with a heredoc,
+	// each push is judged in every directory the line has been in, which
+	// holds the one it really runs in.
+	heredoc := hasHeredoc(command)
+	visited := dirs
 	prev := ""
 	for _, seg := range segments(command) {
+		pushDirs := dirs
+		if heredoc {
+			pushDirs = union(visited, dirs)
+		}
 		// A pipeline runs each of its commands in a subshell.
 		piped := prev == "|" || seg.next == "|"
 		prev = seg.next
 		words := shellWords(seg.text)
 		// quotedPush also finds a push whose words are quoted, such as
 		// git "push"; name tells its git from its gh.
-		name, _ := commandName(seg.text)
-		quoted := quotedPush(seg.text)
+		name, args := commandName(seg.text)
+		quoted := pushWords(name, args)
+		codes, nested := shellCode(seg.text)
+		before := attributed
+		if nested && depth < 8 && slices.ContainsFunc(codes, func(code string) bool { return pushIn(code, depth+1) }) {
+			// bash -c 'git -C dir push' and eval: the pushes in the code
+			// run where it says, from where the shell runs. This reader
+			// may misread the code (a heredoc's text, code from stdin), so
+			// the shell's own directory is judged too, as for any push.
+			// The command may also push directly (env git push origin sh
+			// <<< ...), which the cases below still read.
+			for _, dir := range pushDirs {
+				add(dir)
+				if dir == unknownDir {
+					continue
+				}
+				for _, code := range codes {
+					inner, why := pushTargetsIn(dir, code, depth+1)
+					for _, target := range inner {
+						add(target)
+					}
+					if why == unsureShell || why != "" && unsure == "" {
+						unsure = why
+					}
+				}
+			}
+		}
 		switch {
 		case gitPush.MatchString(seg.text) || quoted && name == "git":
-			for _, dir := range dirs {
+			for _, dir := range pushDirs {
 				add(gitDir(dir, words))
 			}
 		case ghPRCreate.MatchString(seg.text) || quoted:
-			for _, dir := range dirs {
+			for _, dir := range pushDirs {
 				add(dir)
 			}
-		default:
+		case attributed == before:
 			if moved, ok := cdDirs(dirs, words, seg.next, branched, piped); ok {
 				dirs = moved
 			}
 		}
+		// A push the parser finds in this command that none of the
+		// cases above placed (time -p bash -c '...', and forms not yet
+		// followed) runs somewhere the gate cannot read.
+		if attributed == before && depth < 8 && pushIn(seg.text, depth+1) {
+			unsure = unsureShell
+		}
 		been = union(been, dirs)
+		visited = union(visited, dirs)
 		if strings.TrimSpace(seg.text) != "" {
 			length++
 		}
@@ -489,6 +593,102 @@ func pushTargets(cwd, command string) ([]string, string) {
 		}
 	}
 	return targets, unsure
+}
+
+// withoutHeredocs is a command line with each heredoc, its operator,
+// delimiter and body, taken out as the parser reads them, and whether it
+// had one the parser could read.
+func withoutHeredocs(command string) (string, bool) {
+	file, err := shellParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return "", false
+	}
+	type span struct{ start, end int }
+	var spans []span
+	syntax.Walk(file, func(n syntax.Node) bool {
+		r, ok := n.(*syntax.Redirect)
+		if !ok || r.Op != syntax.Hdoc && r.Op != syntax.DashHdoc {
+			return true
+		}
+		spans = append(spans, span{int(r.OpPos.Offset()), int(r.Word.End().Offset())})
+		if r.Hdoc != nil && len(r.Hdoc.Parts) > 0 {
+			spans = append(spans, span{int(r.Hdoc.Parts[0].Pos().Offset()), int(r.Hdoc.End().Offset())})
+		}
+		return true
+	})
+	if len(spans) == 0 {
+		return "", false
+	}
+	slices.SortFunc(spans, func(a, b span) int { return a.start - b.start })
+	var out strings.Builder
+	at := 0
+	for _, sp := range spans {
+		if sp.start < at {
+			// A heredoc inside another's body went with it.
+			continue
+		}
+		out.WriteString(command[at:sp.start])
+		at = sp.end
+	}
+	out.WriteString(command[at:])
+	return out.String(), true
+}
+
+// hasHeredoc reports whether a command line has a heredoc, as the parser
+// reads it, or, where the parser cannot read it, a << that is not <<<.
+func hasHeredoc(command string) bool {
+	file, err := shellParser().Parse(strings.NewReader(command), "")
+	if err != nil {
+		return strings.Contains(strings.ReplaceAll(command, "<<<", ""), "<<")
+	}
+	found := false
+	syntax.Walk(file, func(n syntax.Node) bool {
+		if r, ok := n.(*syntax.Redirect); ok && (r.Op == syntax.Hdoc || r.Op == syntax.DashHdoc) {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// leadingKeywords matches the keywords segments leaves before a command.
+var leadingKeywords = regexp.MustCompile(`^\s*(?:(?:if|then|else|elif|do|while|until|time|!|\{)\s+)+`)
+
+// shellCode is the code one command of a line may run as shell code: a
+// shell's -c code, each of its heredocs and here-strings, or eval's
+// arguments, after a wrapper such as sudo.
+func shellCode(text string) ([]string, bool) {
+	// A segment may start with the keyword before a command: then, do.
+	text = leadingKeywords.ReplaceAllString(text, "")
+	cmds, err := parseShell(text, false)
+	if err != nil || len(cmds) == 0 || len(cmds[0].words) == 0 {
+		return nil, false
+	}
+	cmd := cmds[0]
+	words, dyn := cmd.words, cmd.dyn
+	if j := slices.IndexFunc(words, func(w string) bool {
+		w = path.Base(filepath.ToSlash(w))
+		return w == "eval" || shells[w]
+	}); j >= 0 && (j == 0 || wrappers[cmd.name()]) {
+		words, dyn = words[j:], dyn[j:]
+	} else {
+		return nil, false
+	}
+	args := argv{vals: words[1:], dyn: dyn[1:]}
+	if path.Base(filepath.ToSlash(words[0])) == "eval" {
+		return []string{strings.Join(args.vals, " ")}, true
+	}
+	code, _, inline, script, _ := codeArgs(args, shellCodeOption, "oO", map[string]bool{"--rcfile": true, "--init-file": true}, false)
+	if inline {
+		return []string{code}, true
+	}
+	// bash <<< '...' and bash <<EOF: the shell reads its code from stdin.
+	// Of several, only the last is stdin; each is followed on its own, so
+	// no other's cd counts.
+	if sources := append(slices.Clone(cmd.heredocs), cmd.hereStrings...); !script && len(sources) > 0 {
+		return sources, true
+	}
+	return nil, false
 }
 
 // cdDirs is where the commands after a cd may run, from each directory in
@@ -572,8 +772,19 @@ func namedDirs(cwd, command string) []string {
 	var dirs []string
 	for _, seg := range segments(command) {
 		words := shellWords(seg.text)
-		for i := 1; i < len(words) && len(dirs) < maxNamedDirs; i++ {
-			word := words[i]
+		var candidates []string
+		for i := 1; i < len(words); i++ {
+			candidates = append(candidates, words[i])
+			if strings.ContainsAny(words[i], " \t\n") {
+				// Code in one quoted word, as in bash -c "git -C /repo
+				// push", names its directories too.
+				candidates = append(candidates, shellWords(words[i])...)
+			}
+		}
+		for _, word := range candidates {
+			if len(dirs) >= maxNamedDirs {
+				break
+			}
 			if strings.HasPrefix(word, "-") {
 				continue
 			}
