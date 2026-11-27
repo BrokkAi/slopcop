@@ -125,11 +125,21 @@ func pushWords(name string, args []string) bool {
 			}
 			i++
 		}
-		return i < len(args) && args[i] == "push"
+		return i < len(args) && bare(args[i]) == "push"
 	case "gh":
-		return len(args) >= 2 && args[0] == "pr" && args[1] == "create"
+		return len(args) >= 2 && bare(args[0]) == "pr" && bare(args[1]) == "create"
 	}
 	return false
+}
+
+// bare is a word without backslashes. On Windows the readers keep a
+// backslash before an ordinary character, as a path separator, but bash
+// removes it: git pu\sh is a push.
+func bare(word string) string {
+	if !backslashSeparates {
+		return word
+	}
+	return strings.ReplaceAll(word, `\`, "")
 }
 
 // quietBuiltins change no file a later command could run.

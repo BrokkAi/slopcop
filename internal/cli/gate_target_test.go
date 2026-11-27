@@ -38,7 +38,7 @@ func TestPushTargetsFollowCdAndGitC(t *testing.T) {
 		{`bash -c "git -C ` + b + ` \$'push'"`, []string{a, b}},
 		{`sh -c 'cd ` + b + ` && git push'`, []string{a, b}},
 		{`eval "git -C ` + b + ` push"`, []string{a, b}},
-		{`bash <<< $'git -C ` + b + ` pu\x73h'`, []string{a, b}},
+		{`bash <<< $'git -C ` + filepath.ToSlash(b) + ` pu\x73h'`, []string{a, b}},
 		{"sh <<'EOF'\ngit -C " + b + " push\nEOF", []string{b}},
 		{"bash <<< 'cd " + b + "' <<< 'git push origin HEAD'", []string{a}},
 		{`if true; then bash -c "git -C ` + b + ` \$'push'"; fi`, []string{a, b}},

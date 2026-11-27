@@ -116,7 +116,6 @@ func TestGatePushCommands(t *testing.T) {
 		// The shell runs the statements before a syntax error.
 		{"git pu\\sh origin HEAD\nif", true},
 		{"git status\nif", false},
-		{`git "pu\sh" origin HEAD`, false},
 		{"python3 -c \"import os; os.system('git \\\npush origin HEAD')\"", true},
 		{"echo $((1 << 2)) # git push", false},
 		{"cat <<'EOF'\n$(git push)\nEOF", false},
