@@ -2891,8 +2891,8 @@ func TestHumanQuotesTheSpanFromTheCheckedTree(t *testing.T) {
 	}
 }
 
-// A JSON check whose policies timed out says so on stderr, where a reader of
-// the summary lines alone would otherwise see only that nothing was found.
+// A check whose policies timed out says so on stderr, where a reader of the
+// summary lines alone would otherwise see only that nothing was found.
 func TestIncompletePoliciesNamedOnStderr(t *testing.T) {
 	isolateUserConfig(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
@@ -2928,9 +2928,10 @@ func TestIncompletePoliciesNamedOnStderr(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", stderr, want)
 	}
 
-	// The human report names them on stdout, so stderr does not repeat them.
+	// In the human format too, since stderr is what an agent may read alone.
 	code, stdout, stderr = runCLI(t, "check", "--root", repo, "--service", server.URL, "--mode", "static")
-	if code != 2 || strings.Contains(stderr, "didn't finish") || !strings.Contains(stdout, "Incomplete (all 2 named: timed_out)") {
+	if code != 2 || !strings.Contains(stderr, want) || !strings.Contains(stderr, "the report's Incomplete line lists them") ||
+		!strings.Contains(stdout, "Incomplete (all 2 named: timed_out)") {
 		t.Errorf("human: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 }

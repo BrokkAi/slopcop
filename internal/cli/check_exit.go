@@ -74,14 +74,14 @@ func reviewFailureNotice(reason string, count int, failOn, format string, overri
 const incompleteNoticeNamed = 5
 
 // incompletePoliciesNotice is the stderr line for a static check in which
-// some policies did not finish, such as one that timed out. The human report
-// names them on stdout already; in the JSON and SARIF formats they are only
-// in the document, so a reader of the stderr lines alone would take a check
-// with no findings for a complete one. It is "" for the human format, when
-// every policy finished, and when the whole analysis failed, which the
-// document's failure says instead.
+// some policies did not finish, such as one that timed out. Without it a
+// reader of the stderr lines alone, such as the review failure notice's "no
+// static finding crossed --fail-on", would take the static check for a
+// complete one. It is printed in every format, as that notice is. It is ""
+// when every policy finished and when the whole analysis failed, which the
+// report's failure says instead.
 func incompletePoliciesNotice(response *service.Response, format string) string {
-	if response == nil || format == report.FormatHuman || response.Failure != "" {
+	if response == nil || response.Failure != "" {
 		return ""
 	}
 	type named struct{ id, reason string }
@@ -119,8 +119,11 @@ func incompletePoliciesNotice(response *service.Response, format string) string 
 		subject = "1 policy didn't finish"
 		them = "it"
 	}
-	where := "summary.incompletePolicyIds and incomplete list them"
-	if format == report.FormatSARIF {
+	where := "the report's Incomplete line lists them"
+	switch format {
+	case report.FormatJSON:
+		where = "summary.incompletePolicyIds and incomplete list them"
+	case report.FormatSARIF:
 		where = "the run's tool notifications list them"
 	}
 	if len(names) > 0 {

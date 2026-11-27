@@ -125,7 +125,10 @@ func TestIncompletePoliciesNotice(t *testing.T) {
 	}{
 		{"no response", nil, report.FormatJSON, ""},
 		{"none incomplete", withIncomplete(0), report.FormatJSON, ""},
-		{"human report names them itself", withIncomplete(1, loop), report.FormatHuman, ""},
+		{"human", withIncomplete(1, loop), report.FormatHuman,
+			"slopcop: the check is incomplete: 1 policy didn't finish: bifrost.correctness.loop-body-never-repeats (timed out). " +
+				"The code wasn't checked against it, so it may have findings this check did not report; " +
+				"the report's Incomplete line lists them."},
 		{"one", withIncomplete(1, loop), report.FormatJSON,
 			"slopcop: the check is incomplete: 1 policy didn't finish: bifrost.correctness.loop-body-never-repeats (timed out). " +
 				"The code wasn't checked against it, so it may have findings this check did not report; " +
