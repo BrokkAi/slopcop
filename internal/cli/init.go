@@ -616,8 +616,15 @@ func legacyRepoRoot(path string) string {
 // cleanupInstalledLegacyRepository removes clone-local installs only after the
 // user-level hooks that replace them are present. An upgraded binary by itself
 // must not strip a checkout's working setup.
+//
+// Copilot CLI runs a checkout's .claude settings but not ~/.claude, so under
+// Copilot, where its hooks or its agent's commands run, the clone-local hooks
+// are its only ones until Copilot's own Stop hook and gate are installed.
 func cleanupInstalledLegacyRepository(repo string) error {
 	if repo == "" || !agenthooks.GateInstalled(repo) {
+		return nil
+	}
+	if underCopilot() && !(copilotHookInstalled(true) && copilotHookInstalled(false)) {
 		return nil
 	}
 	return cleanupLegacyRepository(repo, true, true, nil)

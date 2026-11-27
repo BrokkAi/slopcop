@@ -125,6 +125,10 @@ func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output ho
 	// Copilot's.
 	if harness == attribution.ClaudeHarness && underCopilotHook() {
 		if copilotHookInstalled(false) {
+			// The repository's hooks have done their part.
+			if repoRoot, err := gitx.Toplevel(input.CWD); err == nil {
+				_ = cleanupInstalledLegacyRepository(repoRoot)
+			}
 			return hookOutput{}
 		}
 		harness = attribution.CopilotHarness
@@ -451,6 +455,13 @@ func boundedHookText(text string) string {
 // its agent's commands (checked live with 1.0.114).
 func underCopilotHook() bool {
 	return os.Getenv("COPILOT_HOOK_DEPTH") != ""
+}
+
+// underCopilot reports whether Copilot CLI runs this process, as a hook or as
+// one of its agent's commands, which carry COPILOT_CLI=1 (checked live with
+// 1.0.114).
+func underCopilot() bool {
+	return underCopilotHook() || os.Getenv("COPILOT_CLI") != ""
 }
 
 // copilotHookInstalled reports whether Copilot CLI's user-level settings hold
