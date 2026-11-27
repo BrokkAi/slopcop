@@ -56,6 +56,9 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 		"slopcop override --accept=true && git push",
 		"slopcop override '--accept'",
 		`slopcop override --acc"ept"`,
+		"slopcop override \\\n  --accept",
+		"slopcop --accept=true override",
+		"./bin/slopcop override --root . --accept",
 	} {
 		if blocked, reason := gateHook(t, repo, command); !blocked || !strings.Contains(reason, "only the user accepts a proposed override") {
 			t.Errorf("%s: blocked = %v, reason = %q", command, blocked, reason)
@@ -63,6 +66,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	}
 	for _, command := range []string{
 		`slopcop override --propose --reason "wrong"`,
+		`slopcop override --propose --reason "the --accept flag is unrelated"`,
 		"slopcop override --pending",
 		`git commit -m "slopcop override --accept-all is not a flag"`,
 	} {
@@ -148,5 +152,34 @@ func TestProposeRefusesWhatAnOverrideCannotAccept(t *testing.T) {
 	}
 	if code, stdout, _ := runCLI(t, "override", "--root", repo, "--pending"); code != 0 || !strings.Contains(stdout, "no proposed override") {
 		t.Fatalf("pending: exit = %d, stdout = %q", code, stdout)
+	}
+}
+
+func TestAcceptAfterTheStaticHalfChangedIsRefused(t *testing.T) {
+	isolateUserConfig(t)
+	repo, _ := reviewedRepo(t)
+	if code, _, stderr := runCLI(t, "override", "--root", repo, "--propose", "--reason", "wrong"); code != 0 {
+		t.Fatalf("propose: %s", stderr)
+	}
+	// A later check of the same tree reuses the review, and its static half
+	// now blocks only on a failed analyzer run, which an override could accept.
+	store, err := review.OpenStore(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	last, err := store.Last()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exit := 1
+	last.Mode, last.StaticExit, last.StaticBlocksPush, last.StaticRunFailed, last.StaticStatus = "both", &exit, true, true, "failed"
+	err = store.Save(*last)
+	store.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runCLI(t, "override", "--root", repo, "--accept")
+	if code == 0 || !strings.Contains(stderr, "changed since, so nothing was accepted") {
+		t.Fatalf("accept after the static half changed: exit = %d, stderr = %q", code, stderr)
 	}
 }

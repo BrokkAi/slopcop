@@ -73,22 +73,29 @@ func forgedApproval(command string) bool {
 // blocked.
 const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"`"
 
-// acceptOverride matches `slopcop override --accept`, which accepts a
-// proposed override.
-var acceptOverride = regexp.MustCompile(`\bslopcop\b.*\boverride\b.*(?:^|\s)--accept(?:[\s=]|$)`)
-
-// shellQuoting drops the quote and escape characters the shell removes.
-var shellQuoting = strings.NewReplacer(`"`, "", "'", "", `\`, "")
-
 // acceptsProposal reports whether a command accepts a proposed override. An
 // agent proposes an override with --propose and a person accepts it; the
 // hook refuses the agent's own --accept so that the decision stays theirs.
 // Like forgedApproval, it guards against an agent's shortcut, not an attacker.
 func acceptsProposal(command string) bool {
+	// The shell joins a line continued with a backslash.
+	command = strings.ReplaceAll(command, "\\\n", " ")
 	for _, part := range shellSeparator.Split(command, -1) {
-		// The shell removes quotes and backslashes before slopcop reads its
-		// arguments, so '--accept' and --acc"ept" are --accept.
-		if acceptOverride.MatchString(shellQuoting.Replace(part)) {
+		var slopcop, override, accept bool
+		// shellWords removes quotes and backslashes as the shell does, so
+		// '--accept' and --acc"ept" are --accept, while a quoted reason that
+		// mentions --accept is one word of its own.
+		for _, word := range shellWords(part) {
+			switch {
+			case filepath.Base(word) == "slopcop":
+				slopcop = true
+			case word == "override":
+				override = true
+			case word == "--accept" || strings.HasPrefix(word, "--accept="):
+				accept = true
+			}
+		}
+		if slopcop && override && accept {
 			return true
 		}
 	}

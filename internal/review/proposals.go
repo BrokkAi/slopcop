@@ -3,6 +3,7 @@ package review
 import (
 	"bufio"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -31,7 +32,11 @@ type Proposal struct {
 	// later check of the same tree does not inherit it.
 	ReviewTime time.Time `json:"reviewTime"`
 	Findings   []string  `json:"findings,omitempty"`
-	Reason     string    `json:"reason"`
+	// Record is a digest of the whole check record the proposal answers, so
+	// a later check that reuses the review but changes the static half does
+	// not inherit it either.
+	Record string `json:"record"`
+	Reason string `json:"reason"`
 	// AcceptedAt is set once a person accepted it.
 	AcceptedAt *time.Time `json:"acceptedAt,omitempty"`
 }
@@ -44,6 +49,7 @@ type AcceptedProposal struct {
 	Tree       string    `json:"tree"`
 	ReviewTime time.Time `json:"reviewTime"`
 	Findings   []string  `json:"findings,omitempty"`
+	Record     string    `json:"record"`
 }
 
 // ErrNoProposal says there is no proposed override to accept.
@@ -67,11 +73,24 @@ type proposalEvent struct {
 // matches says the proposal answers record r: the same tree, review and
 // findings.
 func (p AcceptedProposal) matches(r Record) bool {
-	return p.Tree == r.Capture.Tree && p.ReviewTime.Equal(r.Time) && slices.Equal(p.Findings, findingIDs(r.Verdict))
+	return p.Tree == r.Capture.Tree && p.ReviewTime.Equal(r.Time) && slices.Equal(p.Findings, findingIDs(r.Verdict)) &&
+		p.Record != "" && p.Record == recordDigest(r)
+}
+
+// recordDigest hashes a check record as a proposal saw it, before any
+// override accepted it.
+func recordDigest(r Record) string {
+	r.Accepted = nil
+	b, err := json.Marshal(r)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
 }
 
 func (p Proposal) accepted() AcceptedProposal {
-	return AcceptedProposal{ID: p.ID, ProposedAt: p.Time, Tree: p.Tree, ReviewTime: p.ReviewTime, Findings: p.Findings}
+	return AcceptedProposal{ID: p.ID, ProposedAt: p.Time, Tree: p.Tree, ReviewTime: p.ReviewTime, Findings: p.Findings, Record: p.Record}
 }
 
 func findingIDs(v Verdict) []string {
@@ -99,7 +118,7 @@ func (s *Store) Propose(reason, currentTree string) (Proposal, error) {
 	}
 	p := Proposal{
 		ID: "op-" + hex.EncodeToString(id), Time: time.Now().UTC(), Tree: r.Capture.Tree,
-		ReviewTime: r.Time, Findings: findingIDs(r.Verdict), Reason: reason,
+		ReviewTime: r.Time, Findings: findingIDs(r.Verdict), Record: recordDigest(*r), Reason: reason,
 	}
 	return p, s.appendProposalEvent(proposalEvent{Proposal: &p, Time: p.Time})
 }
