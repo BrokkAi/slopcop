@@ -66,6 +66,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 		"slopcop override --accept; git push",
 		"slopcop override --accept&& git push",
 		"(slopcop override --accept)",
+		"bash -lc 'slopcop override --accept'",
 		"python -m brokk_slopcop override --accept",
 	} {
 		if blocked, reason := gateHook(t, repo, command); !blocked || !strings.Contains(reason, "only the user accepts a proposed override") {
@@ -75,6 +76,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	for _, command := range []string{
 		`slopcop override --propose --reason "wrong"`,
 		`slopcop override --propose --reason "the --accept flag is unrelated"`,
+		`slopcop override --propose --reason "--accept=true is only in a fixture"`,
 		"slopcop override --pending",
 		`git commit -m "slopcop override --accept-all is not a flag"`,
 	} {

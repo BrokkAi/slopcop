@@ -92,6 +92,15 @@ func acceptsProposal(command string) bool {
 	var slopcop, override, accept bool
 	for _, word := range shellWords(strings.ReplaceAll(command, "\\\n", "")) {
 		switch {
+		case strings.ContainsAny(word, " \t\n"):
+			// A quoted word with spaces is an argument value, such as a
+			// reason, or a command for a shell (bash -c '...') judged alone.
+			if acceptsProposal(word) {
+				return true
+			}
+			if strings.Contains(strings.ToLower(word), "slopcop") {
+				slopcop = true
+			}
 		case acceptWord.MatchString(word):
 			accept = true
 		case overrideWord.MatchString(word):
