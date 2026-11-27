@@ -118,7 +118,7 @@ func runOverride(cmd *cobra.Command, opts *overrideOptions, args []string, servi
 	case opts.list:
 		return listFindingOverrides(cmd.OutOrStdout(), repo, opts.format)
 	case opts.pending:
-		return listProposals(cmd.OutOrStdout(), repo, opts.format)
+		return listProposals(cmd.OutOrStdout(), repo, opts.format, acceptCommandFor(repo))
 	case opts.accept:
 		ref, reason, err := acceptProposal(cmd.OutOrStdout(), repo)
 		if err == nil && ref != nil {
@@ -139,13 +139,7 @@ func runOverride(cmd *cobra.Command, opts *overrideOptions, args []string, servi
 		return errors.New("--reason is required: say why the findings do not hold; later reviewers are shown it")
 	}
 	if opts.propose {
-		accept := acceptCommand
-		// Run elsewhere with --root, the person must accept it in that
-		// repository too.
-		if cwd, err := os.Getwd(); err != nil || !sameRepo(cwd, repo) {
-			accept += " --root " + quoteShellArg(repo)
-		}
-		return proposeOverride(cmd.OutOrStdout(), repo, opts.reason, accept)
+		return proposeOverride(cmd.OutOrStdout(), repo, opts.reason, acceptCommandFor(repo))
 	}
 	if len(args) > 0 {
 		id := strings.TrimSpace(args[0])
@@ -331,6 +325,15 @@ func proposeOverride(out io.Writer, repo, reason, accept string) error {
 	return nil
 }
 
+// acceptCommandFor is the accept command for repo. Run from elsewhere, as
+// with --root, it names the repository, so the person accepts it there.
+func acceptCommandFor(repo string) string {
+	if cwd, err := os.Getwd(); err == nil && sameRepo(cwd, repo) {
+		return acceptCommand
+	}
+	return acceptCommand + " --root " + quoteShellArg(repo)
+}
+
 // sameRepo says dir is in the checkout whose top level is repo.
 func sameRepo(dir, repo string) bool {
 	top, err := gitx.Toplevel(dir)
@@ -363,7 +366,7 @@ func acceptProposal(out io.Writer, repo string) (*review.CheckRef, string, error
 }
 
 // listProposals prints the proposed overrides that wait for a person.
-func listProposals(out io.Writer, repo, format string) error {
+func listProposals(out io.Writer, repo, format, accept string) error {
 	pending, err := review.PendingProposals(repo)
 	if err != nil {
 		return err
@@ -383,6 +386,6 @@ func listProposals(out io.Writer, repo, format string) error {
 	for _, p := range pending {
 		fmt.Fprintf(out, "%s for tree %s (proposed %s, %d findings)\n  Reason: %s\n", p.ID, p.Tree, p.Time.UTC().Format("2006-01-02 15:04 UTC"), len(p.Findings), report.Printable(p.Reason))
 	}
-	fmt.Fprintf(out, "slopcop: accept the latest with `%s`\n", acceptCommand)
+	fmt.Fprintf(out, "slopcop: accept the latest with `%s`\n", accept)
 	return nil
 }

@@ -91,7 +91,8 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	}
 
 	code, stdout, _ = runCLI(t, "override", "--root", repo, "--pending")
-	if code != 0 || !strings.Contains(stdout, "for tree "+tree+" (proposed ") || !strings.Contains(stdout, "1 findings)\n  Reason: the npm job needs goreleaser\n") {
+	if code != 0 || !strings.Contains(stdout, "for tree "+tree+" (proposed ") || !strings.Contains(stdout, "1 findings)\n  Reason: the npm job needs goreleaser\n") ||
+		!strings.Contains(stdout, "slopcop: accept the latest with `slopcop override --accept --root ") {
 		t.Fatalf("pending: exit = %d, stdout = %q", code, stdout)
 	}
 	code, stdout, _ = runCLI(t, "override", "--root", repo, "--pending", "--format", "json")
