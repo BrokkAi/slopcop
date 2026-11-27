@@ -812,7 +812,8 @@ format, with the count and where the review findings are listed. Fix the real
 ones and check again. For a wrong one, `slopcop override <rv-id> --reason "..."`
 and check again: the reused review leaves it out and later reviews do not
 report it. `slopcop override --reason "..."` without an id approves the tree
-for push but does not change the exit code; `--fail-on never` keeps review
+for push but does not change the exit code (an agent that may not run it
+proposes it with `--propose`, and you accept with `slopcop override --accept`); `--fail-on never` keeps review
 findings, and static ones, from exiting `1`.
 
 An inconclusive check, one that ran but could not prove there is nothing

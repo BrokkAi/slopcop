@@ -14,6 +14,7 @@ import (
 
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/spf13/cobra"
 )
@@ -71,6 +72,27 @@ func forgedApproval(command string) bool {
 // forgedApprovalText is the reason a command that names the approval refs is
 // blocked.
 const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"`"
+
+// acceptOverride matches `slopcop override --accept`, which accepts a
+// proposed override.
+var acceptOverride = regexp.MustCompile(`\bslopcop\b.*\boverride\b.*(?:^|\s)--accept(?:[\s=]|$)`)
+
+// acceptsProposal reports whether a command accepts a proposed override. An
+// agent proposes an override with --propose and a person accepts it; the
+// hook refuses the agent's own --accept so that the decision stays theirs.
+// Like forgedApproval, it guards against an agent's shortcut, not an attacker.
+func acceptsProposal(command string) bool {
+	for _, part := range shellSeparator.Split(command, -1) {
+		if acceptOverride.MatchString(part) {
+			return true
+		}
+	}
+	return false
+}
+
+// acceptByAgentText is the reason an agent's `slopcop override --accept` is
+// blocked.
+const acceptByAgentText = "slopcop: blocked: only the user accepts a proposed override, so an agent may not run `slopcop override --accept`. Ask the user to run `slopcop override --accept` themselves (in Claude Code they type `! slopcop override --accept`), and wait for them"
 
 // unsureTargetText is the reason a push is blocked when the gate cannot read
 // which repository it would push, by why.
@@ -139,7 +161,22 @@ func gateTree(root string) error {
 	if err == nil && reviewed == tree {
 		return reviewOnlyStillStands(root, tree)
 	}
-	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there; then push", tree, root, root)
+	if p, ok := pendingProposal(root, tree); ok {
+		return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check, and override %s proposed for it waits for the user (reason: %s). Ask the user to accept it by running `slopcop override --accept` in %s (in Claude Code: `! slopcop override --accept`); you cannot run it yourself. Then push", tree, root, p.ID, report.Printable(p.Reason), root)
+	}
+	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there, or have an agent propose one with `slopcop override --propose --reason \"...\"` for the user to accept; then push", tree, root, root)
+}
+
+// pendingProposal returns the newest proposed override for tree that waits
+// for a person, if any. An unreadable proposal log is read as none.
+func pendingProposal(root, tree string) (review.Proposal, bool) {
+	pending, _ := review.PendingProposals(root)
+	for _, p := range pending {
+		if p.Tree == tree {
+			return p, true
+		}
+	}
+	return review.Proposal{}, false
 }
 
 // reviewOnlyStillStands refuses an approval that a review alone gave, from
@@ -212,6 +249,9 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				case shellTools[input.ToolName]:
 					if forgedApproval(input.ToolInput.Command) {
 						return gateBlock(cmd, errors.New(forgedApprovalText))
+					}
+					if acceptsProposal(input.ToolInput.Command) {
+						return gateBlock(cmd, errors.New(acceptByAgentText))
 					}
 					if !pushCommand(input.ToolInput.Command) {
 						return nil

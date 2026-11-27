@@ -320,6 +320,19 @@ accept failed or incomplete reviews or real bugs. It covers that snapshot
 only. Both forms are recorded locally, never on the service, so they accept
 `-w`/`--workspace` from the `check` they follow and ignore it.
 
+`slopcop override --propose --reason "..."` is the same override for an agent
+that may not approve its own work: it checks that the latest review could be
+overridden for the current working tree, records a proposal with the reason
+beside the override log, and approves nothing. A person accepts the latest
+proposal with `slopcop override --accept`, which approves the tree as
+`--reason` would with the proposal's reason, and records on the override that
+it was accepted from that proposal. It is refused when the working tree or the
+review changed since the proposal. `--pending [--format json]` lists the
+proposals that wait for a person. The push gate's hook blocks an agent's
+`slopcop override --accept`, so the agent cannot accept its own proposal; in
+Claude Code, type `! slopcop override --accept` to run it yourself. See
+[Let an agent propose an override](/checks/false-positives/#let-an-agent-propose-an-override).
+
 Each review is shown the findings of every earlier round since the last
 clean review, with whether the lines a finding cites have changed since, and
 the reason of an override beside the findings it accepted. Reviewers are told
@@ -332,7 +345,9 @@ does not fail the check.
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok), `slopcop gate --hook codex` in Codex and `slopcop gate --hook copilot`
 in Copilot CLI. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
-open a pull request until HEAD's tree has a passing check or valid override. An
+open a pull request until HEAD's tree has a passing check or valid override,
+and names a proposed override for that tree when one waits for a person. It
+also blocks `slopcop override --accept` from the agent. An
 approval from a review-only check (`--mode ai`) lets the tree through only
 while the static half cannot run (no origin, no login, or origin has no
 branches yet). A
