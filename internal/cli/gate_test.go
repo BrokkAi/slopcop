@@ -101,6 +101,42 @@ func TestGatePushCommands(t *testing.T) {
 		{"sed -n 'e git push origin HEAD' /etc/hosts", true},
 		{`make deploy ARGS="git push origin HEAD"`, true},
 		{`python3 -c"import os; os.system('git push origin HEAD')"`, true},
+		// The known limit of the hand-written reader: Perl's readpipe.
+		{"perl <<'EOF'\nreadpipe('git push origin HEAD');\nEOF", true},
+		// What the parser reads that the hand-written reader did not.
+		{"if true; then git push; fi", true},
+		{"f() { git push origin HEAD; }; f", true},
+		{"{ git push; } 2>&1", true},
+		{"cat <<'EOF' | sh\ngit push origin HEAD\nEOF", true},
+		{"x=$(cat <<EOF\n$(git push)\nEOF\n)", true},
+		{"cat <<$'EOF'\nEOF\ngit push", true},
+		{"bash <<EOF\n$(printf 'git push origin HEAD')\nEOF", true},
+		{`perl -e 'open(my $p, "|-", "git push origin HEAD"); close($p);'`, true},
+		{`bash -c "git pu\sh origin HEAD"`, true},
+		// The shell runs the statements before a syntax error.
+		{"git pu\\sh origin HEAD\nif", true},
+		{"git status\nif", false},
+		{`git "pu\sh" origin HEAD`, false},
+		{"python3 -c \"import os; os.system('git \\\npush origin HEAD')\"", true},
+		{"echo $((1 << 2)) # git push", false},
+		{"cat <<'EOF'\n$(git push)\nEOF", false},
+		{`grep -rn 'git push' docs | head -1`, false},
+		{"printf 'git push origin HEAD\\n' | sed $'#\\\\\\ne'", true},
+		{`echo $(printf 'git push origin HEAD')`, false},
+		{`sed -n -e'/git push/p' docs/cli.md`, false},
+		{`sed -n --expression='/git push/p' docs/cli.md`, false},
+		{"printf 'git push origin HEAD\\n' | sed 'q 0'", false},
+		{"sed -e", false},
+		{`PYTHONUTF8=1 python3 -c "print('git push')"`, false},
+		{`x='git push origin HEAD'; $x`, true},
+		// Brace expansion the gate must not materialize.
+		{"echo {1..1000000000}", false},
+		{"echo {9223372036854775807..9223372036854775807}", false},
+		{"echo {a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}{a,b}", false},
+		{`echo ${message:-'git push origin HEAD'}`, false},
+		{`echo "${message:-"git push origin HEAD"}"`, false},
+		{`echo ${message:-git push origin HEAD}`, true},
+		{"sed --expression", false},
 	} {
 		if got := pushCommand(tc.cmd); got != tc.want {
 			t.Errorf("%q: got %v", tc.cmd, got)
@@ -338,6 +374,41 @@ func TestForgedApproval(t *testing.T) {
 		// A text tool in a line that also writes.
 		"grep -rn refs/slopcop docs && git update-ref refs/slopcop/reviewed/abc abc",
 		`gh pr create --body "refs/slopcop" ; echo abc > .git/refs/slopcop/reviewed/abc`,
+		// The known limits of the hand-written reader.
+		"printf .git/slopcop | tar --remove-files -cf x -T -",
+		"printf 'rm -rf .git/slopcop\\n' | sed 'sX^XX e'",
+		`state=.git/slopcop; git -c core.editor="rm -rf $state" commit`,
+		"printf '#!/bin/sh\\nrm -rf .git/slopcop\\n' > ./cat; chmod +x ./cat; ./cat",
+		// Code, a command or a path held in a variable.
+		`c='import shutil; shutil.rmtree(".git/slopcop")'; python3 -c "$c"`,
+		`c='rm -rf .git/slopcop'; bash -c "$c"`,
+		`c=rm; $c -rf .git/slopcop`,
+		// A glob or brace that reaches .git.
+		"echo refs/slopcop; cat .g*/slopcop/state.json",
+		"echo refs/slopcop; cat {.git,x}/slopcop/state.json",
+		"echo refs/slopcop; cat .{git,x}/slopcop/state.json",
+		"echo refs/slopcop; rm -rf .gi{t,}/slopcop",
+		"echo refs/slopcop; rm -rf .@(git|x)/slopcop",
+		// A shell's - ends its options; the script after it runs.
+		"bash - /tmp/erase.sh <<'EOF'\necho refs/slopcop\nEOF",
+		// An unquoted heredoc of code expands before it runs.
+		"c=\"__import__('shutil').rmtree('.git/slopcop')\"\npython3 <<EOF\n$(printf %s \"$c\")\nEOF",
+		"c='rm -rf .git/slopcop'\npython3 <<EOF\nimport os; os.system('$c')\nEOF",
+		"c='rm -rf .git/slopcop'\nsh <<EOF\necho x; $c\nEOF",
+		"echo refs/slopcop; cat +(.git)/slopcop/state.json",
+		// Redirections and heredocs on compound commands.
+		"{ echo abc; } > .git/refs/slopcop/reviewed/abc",
+		"(echo abc) >> .git/packed-refs # refs/slopcop",
+		"{ sh; } <<'EOF'\nrm -rf .git/slopcop\nEOF",
+		"if true; then rm -rf .git/slopcop; fi",
+		"f() { rm -rf .git/slopcop; }; f",
+		"export STATE=.git/slopcop",
+		"shopt -s expand_aliases\nBASH_ALIASES[erase]='rm -rf .git/slopcop'\nerase",
+		"BASH_ALIASES[erase]='rm -rf .git/slopcop'\nerase",
+		"BASH_ALIASES=([erase]='rm -rf .git/slopcop')\nerase",
+		"PROMPT_COMMAND='rm -rf .git/slopcop'",
+		"printf 'rm -rf .git/slopcop\\n' | sed $'#\\\\\\ne'",
+		"printf 'rm -rf .git/slopcop\\n' | sed -e's/^//e'",
 	}
 	allowed := []string{
 		// Search patterns.
@@ -384,6 +455,22 @@ func TestForgedApproval(t *testing.T) {
 		"rm -rf .git/info/exclude.bak",
 		"cat .git/HEAD",
 		"echo '<<EOF' && echo refs/slopcop",
+		// False positives of the hand-written reader.
+		"python3 - docs/cli.md <<'EOF'\nimport sys\nprint(open(sys.argv[1]).read().count('refs/slopcop'))\nEOF",
+		`perl -W -e "print 'refs/slopcop'"`,
+		"bash -c 'cat' <<'EOF'\nrefs/slopcop/reviewed\nEOF",
+		"sed -n '/refs\\/slopcop/p;$p' docs/cli.md",
+		"grep -rn refs/slopcop docs | tr -s ' ' | cut -d: -f1",
+		"sed -n -e'/refs\\/slopcop/p' docs/cli.md",
+		"sed -n --expression='/refs\\/slopcop/p' docs/cli.md",
+		"sh <<'sh'\necho refs/slopcop\nsh",
+		"bash <<-EOF\n\techo refs/slopcop\n\tEOF",
+		"printf 'refs/slopcop\\n' | sed 'q 0'",
+		"echo refs/slopcop; sed -e",
+		"rg refs/slopcop internal/{cli,review}",
+		"cat > notes.md <<EOF\nThe gate reads refs/slopcop in $HOME/repo.\nEOF",
+		"grep -rn refs/slopcop docs/*.md",
+		"echo 'refs/slopcop' # (( x << 1 ))",
 	}
 	for _, command := range blocked {
 		if !forgedApproval(command) {
@@ -543,5 +630,49 @@ func TestApprovedCheckWarnsOfFindingsThePullRequestCheckFailsOn(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSedRuns covers which sed scripts may run a command: e, or the e flag
+// of s with any delimiter, and scripts the reader cannot follow.
+func TestSedRuns(t *testing.T) {
+	for script, want := range map[string]bool{
+		"e":                       true,
+		"e rm -rf x":              true,
+		"1e date":                 true,
+		"/x/e":                    true,
+		"s/^//e":                  true,
+		"s|^||e":                  true,
+		"sX^XXe":                  true,
+		"sX^XX e":                 true,
+		"s|^|| e":                 true,
+		"s/^//ep":                 true,
+		"s/x/y/g;e":               true,
+		"s/x/y":                   true,
+		"s/a/e/":                  false,
+		"s/x/y/g":                 false,
+		"s/x/y/w out.txt":         false,
+		`s/"git " + "push"/x/`:    false,
+		"/refs\\/slopcop/p":       false,
+		"/refs\\/slopcop/p;$p":    false,
+		"1,/end/d":                false,
+		"$!N;P;D":                 false,
+		"/start/,/end/{s/a/b/;p}": false,
+		"y/abc/xyz/":              false,
+		"a\\\nexit e":             false,
+		"# e is not run":          false,
+		"q 0":                     false,
+		"v;e":                     true,
+		"v 4.2\ne":                true,
+		"v":                       false,
+		"5q":                      false,
+		"#\\\ne":                  true,
+		"w out\\\ne":              true,
+		"a\\\ntext\ne":            true,
+		":a;N;ba":                 false,
+	} {
+		if got := sedRuns(script); got != want {
+			t.Errorf("sedRuns(%q) = %v, want %v", script, got, want)
+		}
 	}
 }
