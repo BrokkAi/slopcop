@@ -110,9 +110,16 @@ own workspace and its plan instead, and `json` carries them as `login`
 When other workspaces of the account have the repository, an `Also in` line
 names each with its state there, and `json` carries them as `otherWorkspaces`
 (`id`, `name`, `kind`, `role`, and `state`, which adds `unknown` for a
-workspace the service would not answer for). For a GitHub repository a
-`PR checks` line follows: pull request checks are turned on per workspace in
-the web app and do not follow the workspace `status` prints. See
+workspace the service would not answer for).
+
+For a GitHub repository a `PR checks` line names the workspace that checks its
+pull requests, which does not follow the workspace `status` prints: `the
+workspace above`, another workspace with the `-w` that gives the pull request
+check's answer locally, or `not checked`. `json` carries it as
+`pullRequestChecks` (`on`, `workspaceId`, `workspaceName`, `workspaceKind`,
+`member`, `sameWorkspace`, `selector`). A service that does not say prints
+the line only when other workspaces have the repository, and says where to
+look instead. See
 [Pull request checks have their own workspace](/account/workspaces/#pull-request-checks-have-their-own-workspace).
 
 ## `slopcop login`
@@ -174,7 +181,7 @@ login to another of them. See
 | --- | --- |
 | `workspace list [--format human\|json]` | the account's workspaces; `*` marks this login's |
 | `workspace use <name\|id> [--format human\|json]` | bind this login to another workspace; moves every agent and script using the login, so it asks `[y/N]` and refuses when stdin is not a terminal |
-| `workspace map <name\|id> [--root PATH]` | check this checkout's repository in that workspace from now on, on this machine; it decides which workspace pays, so it asks `[y/N]` and refuses when stdin is not a terminal. Pull request checks are unaffected, and it says so |
+| `workspace map <name\|id> [--root PATH]` | check this checkout's repository in that workspace from now on, on this machine; it decides which workspace pays, so it asks `[y/N]` and refuses when stdin is not a terminal. It affects local checks only: pull request checks are unaffected, and it says so and names the workspace that checks them |
 | `workspace unmap [--root PATH]` | forget the mapping, so the repository checks in the login's workspace again; asks `[y/N]` at a terminal |
 | `workspace mappings [--format human\|json]` | the repositories this machine maps, and to which workspace |
 
@@ -198,7 +205,9 @@ Stop reporting one static finding that is a false positive. The id is the UUID
 a check printed. A local review finding's `rv-` id is refused with the
 `slopcop override` command to run instead. Ignoring covers that one finding in its repository for your workspace,
 not its rule. Takes `-w`/`--workspace`. Exits `0` with a confirmation, `2` with
-the service's message otherwise. See [False positives](/checks/false-positives/).
+the service's message otherwise. When another workspace checks the
+repository's pull requests, it warns on stderr that their check still reports
+the finding, and how to ignore it there. See [False positives](/checks/false-positives/).
 
 ## `slopcop unignore <finding-id>`
 

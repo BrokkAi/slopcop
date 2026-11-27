@@ -73,10 +73,12 @@ Each workspace has its own **Check pull requests** setting for a repository.
 When more than one workspace turns it on for the same repository, the first
 to have turned it on checks its pull requests and pays for those checks; the
 others do not post a second check. Every check's summary ends by naming the
-workspace that ran it.
+workspace that ran it, and `slopcop status` names it on its `PR checks` line.
 
 The workspace a checkout checks in locally (`slopcop workspace map`,
-`--workspace`, or the login's) has no say in this. To move a repository's pull
+`--workspace`, or the login's) has no say in this, and an ignore made in that workspace does not apply to the
+pull request's check; `slopcop check` and `slopcop ignore` warn when the two
+differ. To move a repository's pull
 request checks, turn the setting off in the workspace that runs them and on in
 the one that should; see
 [Pull request checks have their own workspace](/account/workspaces/#pull-request-checks-have-their-own-workspace).

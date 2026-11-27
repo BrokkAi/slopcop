@@ -66,7 +66,12 @@ you.
 ## What an ignore is
 
 - It applies in your workspace, for that repository. The same finding in
-  another workspace is that workspace's.
+  another workspace is that workspace's, with its own id. That includes the
+  workspace that checks the repository's
+  [pull requests](/account/workspaces/#pull-request-checks-have-their-own-workspace),
+  when it is not yours: `slopcop ignore` then warns that the pull request's
+  check still reports the finding, and names the `-w` to check and ignore it
+  there.
 - It uses the same login and service URL as a check, and `-w`/`--workspace` to
   ignore in another workspace this once.
 - It exits `0` with a one-line confirmation, and otherwise `2` with the
