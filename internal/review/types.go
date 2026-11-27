@@ -281,6 +281,12 @@ type Record struct {
 	StaticRunFailed bool `json:"staticRunFailed,omitempty"`
 	// StaticStatus is the hosted half's own status; empty in AI mode.
 	StaticStatus string `json:"staticStatus,omitempty"`
+	// StaticRequired records that this "ai" review ran where the static half
+	// could have run: the checkout has an origin, the CLI holds a token, and
+	// origin has a branch the service can read. Neither the check nor an
+	// override approves such a tree on the review alone, so a review-only
+	// check cannot stand in for the static half at the push gate.
+	StaticRequired bool `json:"staticRequired,omitempty"`
 	// Accepted is the `slopcop override` that accepted this review's findings.
 	// It is on the record rather than the verdict so that a later check, which
 	// saves a new record even when it reuses the verdict, does not inherit it.

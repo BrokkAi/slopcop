@@ -111,6 +111,17 @@ func RemoteDefaultBranch(ctx context.Context, root string) (string, bool) {
 	return "", false
 }
 
+// OriginHasNoBranches reports whether origin holds no branch, as a
+// repository just made on GitHub and not yet pushed to. It asks origin, since
+// remote-tracking branches may be left from an origin the checkout no longer
+// names. An answer that cannot be had without a prompt before ctx ends is
+// false, so a caller that relaxes a rule on true never does so on a guess.
+func OriginHasNoBranches(ctx context.Context, root string) bool {
+	env := withEnv(os.Environ(), "GIT_TERMINAL_PROMPT", "0")
+	out, err := RunContext(ctx, root, env, "ls-remote", "--heads", "origin")
+	return err == nil && strings.TrimSpace(out) == ""
+}
+
 // CurrentBranch names the checked-out branch, or "" when HEAD is detached.
 func CurrentBranch(root string) string {
 	name, err := Run(root, "symbolic-ref", "-q", "--short", "HEAD")

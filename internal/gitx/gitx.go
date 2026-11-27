@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"time"
 )
 
 // Run executes git in root and returns trimmed stdout.
@@ -80,6 +81,9 @@ func runContext(ctx context.Context, root string, env []string, input []byte, ar
 	if input != nil {
 		command.Stdin = bytes.NewReader(input)
 	}
+	// A child git leaves behind, such as ssh, can hold the output pipes
+	// open after ctx kills git; stop waiting for them soon after.
+	command.WaitDelay = 2 * time.Second
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
