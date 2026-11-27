@@ -394,6 +394,8 @@ func TestInstallNeedsNoHomeWithTheHarnessDirectoriesSet(t *testing.T) {
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
+	t.Setenv("COPILOT_HOME", "")
 	result, err := Install()
 	if err != nil || len(result.ChangedPaths) != 1 {
 		t.Fatalf("result = %+v, err = %v", result, err)
@@ -436,6 +438,8 @@ func TestNoHarnessInstallsNothing(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
+	t.Setenv("COPILOT_HOME", "")
 	result, err := Install()
 	if err != nil || len(result.ChangedPaths) != 0 || len(result.Installed) != 0 {
 		t.Fatalf("result = %+v, err = %v", result, err)
