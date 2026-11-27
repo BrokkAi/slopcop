@@ -168,6 +168,11 @@ have not changed since, is left out and listed under `review.overridden` with
 the `round` whose override accepted it. Once you edit those lines, or a review
 of the branch is clean, the findings can come back.
 
+Where the push gate is installed, an agent can accept the review and push in
+one command, `slopcop override --reason "..." && git push`, when the latest
+review is of the committed tree. Join them with `&&`: the gate refuses `;`,
+which would push even when the override fails.
+
 ## Let an agent propose an override
 
 An agent may not be allowed to approve its own work: Claude Code's auto mode

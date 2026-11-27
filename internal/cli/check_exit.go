@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
@@ -66,4 +67,68 @@ func reviewFailureNotice(reason string, count int, failOn, format string, overri
 	}
 	return fmt.Sprintf("slopcop: the check failed (exit 1): %s. The review findings are listed %s. %s; "+
 		"`--fail-on never` keeps review findings from failing it.", what, where, remedy)
+}
+
+// incompleteNoticeNamed is how many incomplete policies the stderr notice
+// names before it counts the rest.
+const incompleteNoticeNamed = 5
+
+// incompletePoliciesNotice is the stderr line for a static check in which
+// some policies did not finish, such as one that timed out. Without it a
+// reader of the stderr lines alone, such as the review failure notice's "no
+// static finding crossed --fail-on", would take the static check for a
+// complete one. It is printed in every format, as that notice is. It is ""
+// when every policy finished and when the whole analysis failed, which the
+// report's failure says instead.
+func incompletePoliciesNotice(response *service.Response, format string) string {
+	if response == nil || response.Failure != "" {
+		return ""
+	}
+	type named struct{ id, reason string }
+	policies := make([]named, 0, len(response.Incomplete))
+	for _, policy := range response.Incomplete {
+		policies = append(policies, named{policy.PolicyID, policy.Reason})
+	}
+	// A service that sent only the ids gave no reasons.
+	if len(policies) == 0 {
+		for _, id := range response.Summary.IncompletePolicyIDs {
+			policies = append(policies, named{id: id})
+		}
+	}
+	count := max(response.Summary.IncompletePolicies, len(policies))
+	if count == 0 {
+		return ""
+	}
+	names := make([]string, 0, incompleteNoticeNamed+1)
+	for i, policy := range policies {
+		if i == incompleteNoticeNamed {
+			break
+		}
+		reason := strings.ReplaceAll(strings.TrimSpace(policy.reason), "_", " ")
+		if reason == "" {
+			reason = "no reason given"
+		}
+		names = append(names, fmt.Sprintf("%s (%s)", report.Printable(policy.id), report.Printable(reason)))
+	}
+	if rest := count - len(names); rest > 0 && len(names) > 0 {
+		names = append(names, fmt.Sprintf("and %d more", rest))
+	}
+	subject := fmt.Sprintf("%d policies didn't finish", count)
+	them := "them"
+	if count == 1 {
+		subject = "1 policy didn't finish"
+		them = "it"
+	}
+	where := "the report's Incomplete line lists them"
+	switch format {
+	case report.FormatJSON:
+		where = "summary.incompletePolicyIds and incomplete list them"
+	case report.FormatSARIF:
+		where = "the run's tool notifications list them"
+	}
+	if len(names) > 0 {
+		subject += ": " + strings.Join(names, ", ")
+	}
+	return fmt.Sprintf("slopcop: the check is incomplete: %s. The code wasn't checked against %s, "+
+		"so it may have findings this check did not report; %s.", subject, them, where)
 }

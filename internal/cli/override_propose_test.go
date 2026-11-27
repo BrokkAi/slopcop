@@ -50,6 +50,10 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 		!strings.Contains(reason, "`! slopcop override --accept`") {
 		t.Fatalf("gate on push: blocked = %v, reason = %q", blocked, reason)
 	}
+	// A proposal approves nothing, so it does not let a push after it through.
+	if blocked, _ := gateHook(t, repo, `slopcop override --propose --reason "wrong" && git push`); !blocked {
+		t.Error("a push after a proposal was let through")
+	}
 	for _, command := range []string{
 		"slopcop override --accept",
 		"cd sub && slopcop override --root . --accept",

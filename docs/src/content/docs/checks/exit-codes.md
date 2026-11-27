@@ -173,7 +173,11 @@ among them, keeps checking those files.
 Two different things exit `2`:
 
 - **A check report with incomplete rules.** Stdout has the report; its
-  `incomplete` list names the rules that did not complete and why. Rerunning
+  `incomplete` list names the rules that did not complete and why. In every
+  format, stderr also names up to five of them with their reasons, such as
+  `slopcop: the check is incomplete: 1 policy didn't finish:
+  bifrost.correctness.loop-body-never-repeats (timed out).` A rule that did not
+  finish did not check the code, whatever the findings count says. Rerunning
   usually gives the same answer, so do not loop on it.
 - **A failure.** Stdout is empty in `human`; in `json` it is a `failed` report
   with the service's `code`, `message`, `remedy`, and `retryable`. Stderr starts

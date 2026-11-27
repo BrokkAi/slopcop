@@ -256,6 +256,18 @@ but only enforces a repository
 after SlopCop has created review state there. A repository that has never been
 checked is left alone.
 
+The gate judges a command line before any of it runs, so it credits an
+override on the same line only where it can tell what that override approves.
+`slopcop override --reason "..." && git push` goes through when the latest
+review in the session's repository is of HEAD's tree: the override, if it
+succeeds, approves exactly the tree the push sends, and `&&` stops the push if
+it fails. Only the whole-review form counts, run in the repository the push
+runs in, with nothing but `&&` and further pushes between it and the last
+push. A line joined by `;` or a newline is refused, since there the push runs
+even when the override fails, and so is one with a finding id, `--root`, an
+expansion such as `$REASON`, or another command in between: run `slopcop override --reason "..."` as its own
+command first, then push.
+
 Codex runs a new or changed user-level hook only once you trust it: open Codex
 and review it with `/hooks`. Init never writes that trust itself. The hook
 stays the same from one release to the next, so an update does not ask for it

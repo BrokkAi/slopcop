@@ -701,7 +701,13 @@ reason: there, a push "Denied by preToolUse hook" is the gate. Never write, read
 or `.git/slopcop` yourself; the gate blocks any command that names either,
 and blocks `slopcop override --accept`, which only the user runs.
 After checking a dirty tree, commit exactly that state,
-including untracked files, before pushing. Gate approval does not authorize a push the user did not request. The
+including untracked files, before pushing. The gate judges a whole command
+line before any of it runs. It lets `slopcop override --reason "..." && git push`
+through when the latest review is of HEAD's tree, so commit the reviewed state
+first. It refuses the override joined by `;` or a newline (the push would run
+even if the override failed), with a finding id, `--root`, or a `$`, backtick, brace or glob the shell
+would expand, or with any other command between the override and the push; then run the override as its own
+command first, and push after it. Gate approval does not authorize a push the user did not request. The
 gate checks HEAD in the directory the command runs from and does not follow
 `cd` or `git -C`, so do not use them to get around it.
 
