@@ -1,18 +1,19 @@
 ---
 title: The Stop hook
-description: "The automatic check hook slopcop init installs for Claude Code, Codex and Grok. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
+description: "The automatic check hook slopcop init installs for Claude Code, Codex, Grok and GitHub Copilot CLI. When it runs, what it hands back to the agent, how it stays quiet, and how to remove it."
 sidebar:
   order: 8
 ---
 
 `slopcop init` adds a static-only `Stop` hook at user level for Claude Code,
-Codex and Grok, and leaves everything else in each file as it was:
+Codex, Grok and Copilot CLI, and leaves everything else in each file as it was:
 
 | File | Harness |
 | --- | --- |
 | `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
 | `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
 | `hooks/slopcop.json` under `GROK_HOME`, or `~/.grok` | Grok |
+| `settings.json` under `COPILOT_HOME`, or `~/.copilot` | GitHub Copilot CLI |
 
 One install covers every checkout. Kimi Code keeps its hooks in `config.toml`,
 which init does not edit; see
@@ -26,7 +27,7 @@ again.
 The hook is a backstop, not a replacement. The skill keeps telling the agent to
 check as it works; the hook catches a session that stopped without doing so.
 
-The Claude Code, Codex and Grok settings also get a PreToolUse push gate. It
+The Claude Code, Codex, Grok and Copilot CLI settings also get a PreToolUse push gate. It
 blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override.
 The gate leaves a repository alone until SlopCop has created review state

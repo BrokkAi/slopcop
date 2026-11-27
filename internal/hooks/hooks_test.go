@@ -22,6 +22,7 @@ func isolateHome(t *testing.T) string {
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("GROK_HOME", "")
+	t.Setenv("COPILOT_HOME", "")
 	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -393,6 +394,8 @@ func TestInstallNeedsNoHomeWithTheHarnessDirectoriesSet(t *testing.T) {
 	t.Setenv("USERPROFILE", "")
 	t.Setenv("CLAUDE_CONFIG_DIR", dir)
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
+	t.Setenv("COPILOT_HOME", "")
 	result, err := Install()
 	if err != nil || len(result.ChangedPaths) != 1 {
 		t.Fatalf("result = %+v, err = %v", result, err)
@@ -435,6 +438,8 @@ func TestNoHarnessInstallsNothing(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("GROK_HOME", "")
+	t.Setenv("COPILOT_HOME", "")
 	result, err := Install()
 	if err != nil || len(result.ChangedPaths) != 0 || len(result.Installed) != 0 {
 		t.Fatalf("result = %+v, err = %v", result, err)
@@ -561,5 +566,46 @@ func TestRepositoryGateMovesToTheNewMatcher(t *testing.T) {
 	if len(groups) != 2 || len(groups["Bash"]) != 1 || groups["Bash"][0] != "other-guard" ||
 		len(groups[claudeGateMatcher]) != 1 || groups[claudeGateMatcher][0] != "slopcop gate --hook claude" {
 		t.Fatalf("groups = %v\n%s", groups, data)
+	}
+}
+
+func TestInstallAddsTheCopilotHookToItsSettings(t *testing.T) {
+	home := isolateHome(t)
+	copilot := filepath.Join(home, "custom-copilot")
+	t.Setenv("COPILOT_HOME", copilot)
+	settings := filepath.Join(copilot, "settings.json")
+	writeConfig(t, settings, `{"model": "auto", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine"}]}]}}`)
+
+	result, err := Install()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.NeedsTrust || !slices.Contains(result.Installed, "copilot") || !slices.Contains(result.Gates, "copilot") {
+		t.Fatalf("result = %+v", result)
+	}
+	data := readConfig(t, settings)
+	for _, want := range []string{
+		`"model": "auto"`, `"command": "mine"`,
+		`"command": "slopcop hook copilot || true"`, `"timeout": 720`,
+		`"command": "slopcop gate --hook copilot"`,
+		`"matcher": "^(Bash|mcp__.+__(create_pull_request|push_files))$"`,
+	} {
+		if !bytes.Contains(data, []byte(want)) {
+			t.Errorf("settings.json lacks %s:\n%s", want, data)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, ".copilot")); !os.IsNotExist(err) {
+		t.Fatalf("install used ~/.copilot instead of COPILOT_HOME: %v", err)
+	}
+	if p := Find()["copilot"]; !p.Configured || !p.Stop || !p.Gate || p.NeedsTrust {
+		t.Fatalf("Find = %+v", p)
+	}
+
+	if _, err := Remove(); err != nil {
+		t.Fatal(err)
+	}
+	removed := readConfig(t, settings)
+	if bytes.Contains(removed, []byte("slopcop")) || !bytes.Contains(removed, []byte(`"command": "mine"`)) || !bytes.Contains(removed, []byte(`"model": "auto"`)) {
+		t.Fatalf("settings.json after removal:\n%s", removed)
 	}
 }

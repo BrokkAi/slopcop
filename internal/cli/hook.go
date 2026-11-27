@@ -41,6 +41,10 @@ var hookHarnesses = map[string]string{
 	"codex":  attribution.CodexHarness,
 	"grok":   attribution.GrokHarness,
 	"kimi":   attribution.KimiHarness,
+	// Copilot CLI runs a hook registered under Claude Code's Stop event
+	// with Claude Code's payload: hook_event_name, session_id, cwd,
+	// transcript_path and stop_hook_active (checked live with 1.0.114).
+	"copilot": attribution.CopilotHarness,
 }
 
 // repositoryProviders names the provider the service lists a repository
@@ -71,8 +75,8 @@ type hookOutput struct {
 
 func newHookCommand(serviceURL *string, version string) *cobra.Command {
 	return &cobra.Command{
-		Use:    "hook <claude|codex|grok|kimi>",
-		Short:  "Run a check from a Claude Code, Codex, Grok or Kimi Code Stop hook",
+		Use:    "hook <claude|codex|grok|kimi|copilot>",
+		Short:  "Run a check from a Claude Code, Codex, Grok, Kimi Code or Copilot CLI Stop hook",
 		Hidden: true,
 		// A harness reads exit 2 from a Stop hook as an order to keep going,
 		// so the hook takes any arguments and always exits 0 with its
@@ -113,6 +117,21 @@ func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output ho
 	// GROK_HOOK_EVENT for every hook it runs.
 	if harness == attribution.ClaudeHarness && os.Getenv("GROK_HOOK_EVENT") != "" {
 		return hookOutput{}
+	}
+	// Copilot CLI runs the hooks in a repository's .claude/settings.json and
+	// .claude/settings.local.json too, where an earlier release put SlopCop's
+	// Claude Code hook, and hands them its own session. When its own hook is
+	// installed, that one handles the stop; otherwise this one does, as
+	// Copilot's.
+	if harness == attribution.ClaudeHarness && underCopilotHook() {
+		if copilotHookInstalled(false) {
+			// The repository's hooks have done their part.
+			if repoRoot, err := gitx.Toplevel(input.CWD); err == nil {
+				_ = cleanupInstalledLegacyRepository(repoRoot)
+			}
+			return hookOutput{}
+		}
+		harness = attribution.CopilotHarness
 	}
 	input.Harness = harness
 	input.StopHookActive = input.StopHookActive || input.StopHookActiveCamel
@@ -429,4 +448,28 @@ func boundedHookText(text string) string {
 	}
 	runes := []rune(text)
 	return string(runes[:maxHookOutputRunes-1]) + "…"
+}
+
+// underCopilotHook reports whether Copilot CLI is running this process as a
+// hook. Copilot sets COPILOT_HOOK_DEPTH for every hook it runs and not for
+// its agent's commands (checked live with 1.0.114).
+func underCopilotHook() bool {
+	return os.Getenv("COPILOT_HOOK_DEPTH") != ""
+}
+
+// underCopilot reports whether Copilot CLI runs this process, as a hook or as
+// one of its agent's commands, which carry COPILOT_CLI=1 (checked live with
+// 1.0.114).
+func underCopilot() bool {
+	return underCopilotHook() || os.Getenv("COPILOT_CLI") != ""
+}
+
+// copilotHookInstalled reports whether Copilot CLI's user-level settings hold
+// SlopCop's own push gate, with gate set, or its Stop hook.
+func copilotHookInstalled(gate bool) bool {
+	p := agenthooks.Find()["copilot"]
+	if gate {
+		return p.Gate
+	}
+	return p.Stop
 }

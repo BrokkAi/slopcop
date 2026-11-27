@@ -1,5 +1,5 @@
 // Package hooks installs and removes SlopCop's user-level Stop hooks and push
-// gates for Claude Code, Codex and Grok.
+// gates for Claude Code, Codex, Grok and GitHub Copilot CLI.
 package hooks
 
 import (
@@ -74,7 +74,9 @@ type harness struct {
 // server name, that open a pull request or push files. Grok reads the same
 // .claude/settings.local.json and also tests a regex against Claude's names
 // for its tools, so ^Bash$ matches its run_terminal_command. Codex sends
-// every shell command as Bash and matches a plain name exactly.
+// every shell command as Bash and matches a plain name exactly. Copilot CLI
+// tests Claude Code's matcher against Claude's names for its tools, so it
+// takes Claude Code's.
 const (
 	claudeGateMatcher = "^(Bash|mcp__.+__(create_pull_request|push_files))$"
 	codexGateMatcher  = "Bash"
@@ -84,8 +86,9 @@ const (
 // harnesses are the harnesses user-level hooks install into, each at the
 // configuration directory it reads: CLAUDE_CONFIG_DIR or ~/.claude for
 // Claude Code, as the attribution package reads it, CODEX_HOME or
-// ~/.codex for Codex, and GROK_HOME or ~/.grok for Grok. A harness whose
-// directory cannot be told is left out.
+// ~/.codex for Codex, GROK_HOME or ~/.grok for Grok, and COPILOT_HOME or
+// ~/.copilot for Copilot CLI. A harness whose directory cannot be told is
+// left out.
 func harnesses() []harness {
 	home, homeErr := os.UserHomeDir()
 	dir := func(variable, fallback string) string {
@@ -107,6 +110,11 @@ func harnesses() []harness {
 		// file of its own there. Grok asks to trust project hooks, not
 		// these.
 		{name: "grok", dir: dir("GROK_HOME", ".grok"), file: filepath.Join("hooks", "slopcop.json")},
+		// Copilot CLI reads user-level hooks from its settings.json, in
+		// Claude Code's shape and under Claude Code's event names, and runs
+		// them without asking (checked live with 1.0.114). It honours the
+		// handler's timeout and a Stop hook's block decision.
+		{name: "copilot", dir: dir("COPILOT_HOME", ".copilot"), file: "settings.json"},
 	}
 	var known []harness
 	for _, h := range all {
@@ -118,8 +126,9 @@ func harnesses() []harness {
 }
 
 // userHarnesses are the Stop hook and push gate entries user-level init
-// installs. Claude Code and Codex keep both in their normal settings files.
-// Grok loads JSON hook files of the same shape from its hooks directory.
+// installs. Claude Code, Codex and Copilot CLI keep both in their normal
+// settings files. Grok loads JSON hook files of the same shape from its hooks
+// directory.
 func userHarnesses() []harness {
 	var all []harness
 	for _, h := range harnesses() {
@@ -128,7 +137,7 @@ func userHarnesses() []harness {
 		gate.event = "PreToolUse"
 		gate.gate = true
 		switch h.name {
-		case "claude":
+		case "claude", "copilot":
 			gate.matcher = claudeGateMatcher
 		case "codex":
 			gate.matcher = codexGateMatcher
@@ -230,7 +239,7 @@ func Repository(root string, install bool, skip func(string) bool) (Result, erro
 	return result, errors.Join(errs...)
 }
 
-// GateInstalled reports whether user-level Claude Code, Codex or Grok settings
+// GateInstalled reports whether user-level Claude Code, Codex, Grok or Copilot CLI settings
 // hold SlopCop's push gate. A check says whether its tree may be pushed only
 // where the gate will ask; elsewhere, such as in CI, the line would be noise.
 // The root is accepted for compatibility; installation is machine-wide now.

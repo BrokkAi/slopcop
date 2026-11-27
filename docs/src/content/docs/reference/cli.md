@@ -243,7 +243,7 @@ See [False positives](/checks/false-positives/#add-a-word-to-the-dictionary).
 ## `slopcop init`
 
 Run once to install user-level skills and static-only Stop hooks and push gates
-for Claude Code, Codex and Grok. The gate enforces only repositories where
+for Claude Code, Codex, Grok and Copilot CLI. The gate enforces only repositories where
 SlopCop has review state, so it does not block unrelated projects. When run in
 a checkout, init also removes the hooks, skills and exclude entries written by
 the earlier per-repository releases; other checkouts migrate themselves the
@@ -259,18 +259,19 @@ first time their old hook runs the upgraded binary. See
 ## `slopcop doctor`
 
 Report whether SlopCop's skill, Stop hook and push gate are installed for each
-agent harness here (Claude Code, Codex, Grok), and the init command that adds
+agent harness here (Claude Code, Codex, Grok, Copilot CLI), and the init command that adds
 what is missing. Run in a checkout, it also lists hooks and skills left by the
 earlier per-repository releases. Local only: it sends nothing, probes no
 reviewer and changes nothing. Flags: `--root <path>`, `--format human|json`.
 Exits `0`. See [Checking your setup](/agents/setup-check/).
 
-## `slopcop hook <claude|codex|grok|kimi>`
+## `slopcop hook <claude|codex|grok|kimi|copilot>`
 
-Run a check from a Claude Code, Codex, Grok or Kimi Code Stop hook. It reads
-the hook's input on stdin and answers in the harness's hook protocol.
-`slopcop init` installs it as `slopcop hook claude || true`,
-`slopcop hook codex || true` and `slopcop hook grok || true`; Kimi Code's is
+Run a check from a Claude Code, Codex, Grok, Kimi Code or Copilot CLI Stop
+hook. It reads the hook's input on stdin and answers in the harness's hook
+protocol. `slopcop init` installs it as `slopcop hook claude || true`,
+`slopcop hook codex || true`, `slopcop hook grok || true` and
+`slopcop hook copilot || true`; Kimi Code's is
 added by hand (see [Grok and Kimi Code](/agents/grok-kimi/)). It is not meant
 to be run by hand.
 
@@ -329,7 +330,8 @@ round, is left out and listed under `review.overridden` with its `round`; it
 does not fail the check.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
-Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
+Grok), `slopcop gate --hook codex` in Codex and `slopcop gate --hook copilot`
+in Copilot CLI. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
 open a pull request until HEAD's tree has a passing check or valid override. An
 approval from a review-only check (`--mode ai`) lets the tree through only
 while the static half cannot run (no origin, no login, or origin has no
@@ -465,6 +467,7 @@ Print the version. A release binary prints its tag; a plain `go install` prints
 | `OPENCODE_SESSION_ID`, `OPENCODE_DB`, `XDG_DATA_HOME` | set by OpenCode or you; the same |
 | `GROK_SESSION_ID`, `GROK_HOME` | set by Grok; the same |
 | `KIMI_CODE_HOME` | Kimi Code's data directory, read by its Stop hook |
+| `COPILOT_AGENT_SESSION_ID`, `COPILOT_HOME` | set by Copilot CLI or you; name the session the CLI reads model attribution from, and where its hooks are installed |
 
 See [Configuration](/reference/configuration/) for precedence and the files
 the CLI writes.

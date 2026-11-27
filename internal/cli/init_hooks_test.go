@@ -130,3 +130,39 @@ func TestAnExistingRepositoryHookMigratesItself(t *testing.T) {
 		t.Fatalf("legacy repository skill remains: %v", err)
 	}
 }
+
+// Copilot CLI runs a checkout's .claude settings but not ~/.claude, so the
+// checkout's hooks stay until Copilot has SlopCop's own.
+func TestARepositoryHookStaysUnderCopilotUntilItsOwnAreInstalled(t *testing.T) {
+	home := isolateAgentHome(t)
+	makeHarness(t, filepath.Join(home, ".claude"))
+	if code, _, stderr := runCLI(t, "init", "--no-reviewers", "--root", t.TempDir()); code != 0 {
+		t.Fatal(stderr)
+	}
+	repo := testInitRepo(t)
+	claude, _, _ := seedLegacyRepositoryInstall(t, repo)
+	t.Setenv("COPILOT_HOOK_DEPTH", "1")
+	runGate := func() {
+		t.Helper()
+		payload, _ := json.Marshal(map[string]any{
+			"cwd": repo, "tool_name": "Bash", "tool_input": map[string]string{"command": "git status"},
+		})
+		cmd := newGateCommand()
+		cmd.SetIn(bytes.NewReader(payload))
+		cmd.SetArgs([]string{"--hook", "claude"})
+		if err := cmd.Execute(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGate()
+	if data, err := os.ReadFile(claude); err != nil || !bytes.Contains(data, []byte("slopcop gate --hook claude")) {
+		t.Fatalf("the checkout's gate was removed under Copilot with no Copilot gate: %s, %v", data, err)
+	}
+
+	makeHarness(t, filepath.Join(home, ".copilot"))
+	if code, _, stderr := runCLI(t, "init", "--no-reviewers", "--no-skill", "--root", t.TempDir()); code != 0 {
+		t.Fatal(stderr)
+	}
+	runGate()
+	assertNoSlopCop(t, claude)
+}

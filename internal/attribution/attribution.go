@@ -44,6 +44,9 @@ var hookHarnesses = map[string]struct {
 	CodexHarness:  {"CODEX_THREAD_ID", codexFrom},
 	GrokHarness:   {"GROK_SESSION_ID", grokFrom},
 	KimiHarness:   {kimiSessionVariable, kimiFrom},
+	// Copilot CLI's Stop hook payload names the same session its agent's
+	// commands do (checked live with Copilot CLI 1.0.114).
+	CopilotHarness: {"COPILOT_AGENT_SESSION_ID", copilotFrom},
 }
 
 // DetectHook returns the attribution of the session a Stop hook of harness

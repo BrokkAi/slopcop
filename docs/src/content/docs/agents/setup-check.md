@@ -23,7 +23,7 @@ asking.
 
 ## What it reports
 
-For Claude Code, Codex and Grok, when the harness is installed here, doctor
+For Claude Code, Codex, Grok and Copilot CLI, when the harness is installed here, doctor
 reports whether the `slopcop` skill, the Stop hook and the push gate are each
 present. It then gives one of three states:
 
@@ -65,7 +65,8 @@ listed or removed.
 | Claude Code | skill in `~/.claude/skills`, Stop hook and push gate in `settings.json` |
 | Codex | skill in `~/.agents/skills` or `CODEX_HOME/skills`, Stop hook and push gate in `hooks.json`; trust is not visible |
 | Grok | skill in `~/.agents/skills`, Stop hook and push gate in `hooks/slopcop.json` |
-| Kimi Code, opencode, Cursor, Copilot CLI, others | the shared skill only; hooks for these are set up by hand |
+| Copilot CLI | skill in `~/.agents/skills`, Stop hook and push gate in `settings.json` under `COPILOT_HOME` or `~/.copilot` |
+| Kimi Code, opencode, Cursor, others | the shared skill only; hooks for these are set up by hand |
 
 Hooks deployed through managed settings (see [Managed rollout](/agents/managed-rollout/))
 live outside these files, so doctor reports them as missing.
