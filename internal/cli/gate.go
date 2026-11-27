@@ -75,10 +75,10 @@ const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .gi
 
 // overrideWord and acceptWord match the override subcommand and its --accept
 // flag as shellWords gives them, which may run on into a shell operator, as in
-// `--accept;`.
+// `--accept;`, and may keep the $ of an ANSI-C quote, as in $'--accept'.
 var (
-	overrideWord = regexp.MustCompile("^override(?:$|[;&|()<>`])")
-	acceptWord   = regexp.MustCompile("^--accept(?:$|=|[;&|()<>`])")
+	overrideWord = regexp.MustCompile("^\\$?override(?:$|[;&|()<>`])")
+	acceptWord   = regexp.MustCompile("^\\$?--accept(?:$|=|[;&|()<>`])")
 )
 
 // acceptsProposal reports whether a command accepts a proposed override. An
