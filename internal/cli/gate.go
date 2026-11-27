@@ -77,13 +77,18 @@ const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .gi
 // proposed override.
 var acceptOverride = regexp.MustCompile(`\bslopcop\b.*\boverride\b.*(?:^|\s)--accept(?:[\s=]|$)`)
 
+// shellQuoting drops the quote and escape characters the shell removes.
+var shellQuoting = strings.NewReplacer(`"`, "", "'", "", `\`, "")
+
 // acceptsProposal reports whether a command accepts a proposed override. An
 // agent proposes an override with --propose and a person accepts it; the
 // hook refuses the agent's own --accept so that the decision stays theirs.
 // Like forgedApproval, it guards against an agent's shortcut, not an attacker.
 func acceptsProposal(command string) bool {
 	for _, part := range shellSeparator.Split(command, -1) {
-		if acceptOverride.MatchString(part) {
+		// The shell removes quotes and backslashes before slopcop reads its
+		// arguments, so '--accept' and --acc"ept" are --accept.
+		if acceptOverride.MatchString(shellQuoting.Replace(part)) {
 			return true
 		}
 	}

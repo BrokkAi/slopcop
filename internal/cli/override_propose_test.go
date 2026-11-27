@@ -32,6 +32,9 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	if code, _, stderr := runCLI(t, "override", "--root", repo, "--propose"); code == 0 || !strings.Contains(stderr, "--reason is required") {
 		t.Fatalf("propose without a reason: exit = %d, stderr = %q", code, stderr)
 	}
+	if code, _, stderr := runCLI(t, "override", "--root", repo, "--propose", "--reason", "an older proposal"); code != 0 {
+		t.Fatalf("first propose: %s", stderr)
+	}
 	code, stdout, stderr := runCLI(t, "override", "--root", repo, "--propose", "--reason", "the npm job needs goreleaser")
 	if code != 0 || !strings.Contains(stdout, "nothing is approved until a person accepts it") ||
 		!strings.Contains(stdout, "ask the user to accept it by running `slopcop override --accept`") {
@@ -51,6 +54,8 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 		"slopcop override --accept",
 		"cd sub && slopcop override --root . --accept",
 		"slopcop override --accept=true && git push",
+		"slopcop override '--accept'",
+		`slopcop override --acc"ept"`,
 	} {
 		if blocked, reason := gateHook(t, repo, command); !blocked || !strings.Contains(reason, "only the user accepts a proposed override") {
 			t.Errorf("%s: blocked = %v, reason = %q", command, blocked, reason)
@@ -74,7 +79,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	var doc struct {
 		Pending []review.Proposal `json:"pending"`
 	}
-	if err := json.Unmarshal([]byte(stdout), &doc); code != 0 || err != nil || len(doc.Pending) != 1 ||
+	if err := json.Unmarshal([]byte(stdout), &doc); code != 0 || err != nil || len(doc.Pending) != 2 ||
 		doc.Pending[0].Tree != tree || len(doc.Pending[0].Findings) != 1 || doc.Pending[0].Findings[0] != id {
 		t.Fatalf("pending json: %v\n%s", err, stdout)
 	}
@@ -107,7 +112,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	if code, stdout, _ = runCLI(t, "override", "--root", repo, "--pending"); code != 0 || stdout != "slopcop: no proposed override waits for a person in this clone\n" {
 		t.Fatalf("pending after accept: exit = %d, stdout = %q", code, stdout)
 	}
-	if code, _, stderr = runCLI(t, "override", "--root", repo, "--accept"); code == 0 || !strings.Contains(stderr, "no override is proposed") {
+	if code, _, stderr = runCLI(t, "override", "--root", repo, "--accept"); code == 0 || !strings.Contains(stderr, "already accepted") {
 		t.Fatalf("second accept: exit = %d, stderr = %q", code, stderr)
 	}
 }

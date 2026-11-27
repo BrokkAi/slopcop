@@ -49,6 +49,10 @@ type AcceptedProposal struct {
 // ErrNoProposal says there is no proposed override to accept.
 var ErrNoProposal = errors.New("no override is proposed for this clone; an agent proposes one with `slopcop override --propose --reason \"...\"`")
 
+// ErrAlreadyAccepted refuses a proposal for a review an override has already
+// accepted, such as an older proposal beside the one accepted.
+var ErrAlreadyAccepted = errors.New("the latest review's findings are already accepted for this tree; nothing was changed")
+
 // ErrProposalStale refuses a proposal whose tree or review has changed since.
 var ErrProposalStale = errors.New("the latest proposed override is for a tree or review that has changed since, so nothing was accepted; run `slopcop check` again and propose again if the findings are still wrong")
 
@@ -122,6 +126,9 @@ func (s *Store) Accept(currentTree string) (Proposal, error) {
 	r, err := s.Last()
 	if err != nil {
 		return Proposal{}, err
+	}
+	if r != nil && r.Accepted != nil {
+		return Proposal{}, ErrAlreadyAccepted
 	}
 	accepted := latest.accepted()
 	if r == nil || !accepted.matches(*r) || latest.Tree != currentTree {
