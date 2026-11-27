@@ -474,7 +474,8 @@ Other bounds in the report:
   this is normal and is not a problem with the change. They never change the
   status. `inconclusive` names them by policy id, with `files` (the files
   it concerns, when the analyzer named them all) and `elsewhere: true` for
-  one that concerns only files the change does not write. Do nothing about
+  one that concerns only files the change does not write; `changeCovered: true`
+  says every one does, so the change itself was fully checked. Do nothing about
   them: do not report them as gaps, rerun, rewrite code, or ignore or disable
   a policy because of them. Name them only when someone asks how much a
   `clean` result covers.

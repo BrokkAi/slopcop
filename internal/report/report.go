@@ -310,8 +310,8 @@ func human(response service.Response, options Options) string {
 	// static analysis, so by default they get one line, for a reader judging
 	// what a clean result is worth.
 	if options.Verbose {
-		writeInconclusive(&out, response)
-	} else if line := inconclusiveLine(response); line != "" {
+		writeInconclusive(&out, response, options)
+	} else if line := inconclusiveLine(response, options); line != "" {
 		out.WriteString(line)
 		out.WriteString("\n")
 	}
@@ -1029,14 +1029,17 @@ func inconclusiveCounts(response service.Response, checks []inconclusiveCheck) (
 // inconclusiveLine counts the inconclusive checks, such as `Inconclusive: 23
 // check(s), 3 only about files the change does not write; they never fail
 // the check. --verbose names them.`
-func inconclusiveLine(response service.Response) string {
+func inconclusiveLine(response service.Response, options Options) string {
 	checks := inconclusiveChecks(response)
 	total, elsewhere := inconclusiveCounts(response, checks)
 	if total == 0 {
 		return ""
 	}
 	line := fmt.Sprintf("Inconclusive: %d check(s)", total)
-	if elsewhere > 0 {
+	switch {
+	case changeCovered(response, options):
+		line += ", all only about files the change does not write, so every check finished on the files the change writes"
+	case elsewhere > 0:
 		line = fmt.Sprintf("%s, %d only about files the change does not write", line, elsewhere)
 	}
 	line += "; they never fail the check."
@@ -1048,7 +1051,7 @@ func inconclusiveLine(response service.Response) string {
 
 // writeInconclusive names each inconclusive check, one per line, and counts
 // the ones past the listed bound.
-func writeInconclusive(out *strings.Builder, response service.Response) {
+func writeInconclusive(out *strings.Builder, response service.Response, options Options) {
 	checks := inconclusiveChecks(response)
 	if total, _ := inconclusiveCounts(response, checks); total == 0 {
 		return
@@ -1056,8 +1059,11 @@ func writeInconclusive(out *strings.Builder, response service.Response) {
 	out.WriteString("Inconclusive (never fail the check)\n")
 	for _, check := range checks {
 		where := ""
-		if check.Elsewhere {
+		switch {
+		case check.Elsewhere:
 			where = " (only files the change does not write)"
+		case len(check.Files) == 0:
+			where = " (files not named, so it may concern the change)"
 		}
 		detail := ""
 		if check.Detail != "" {
@@ -1068,6 +1074,32 @@ func writeInconclusive(out *strings.Builder, response service.Response) {
 	if unnamed := inconclusiveUnlisted(response, checks); unnamed > 0 {
 		fmt.Fprintf(out, "  and %d more\n", unnamed)
 	}
+	if changeCovered(response, options) {
+		out.WriteString("Every check finished on the files the change writes.\n")
+	}
+}
+
+// changeCovered says the inconclusive checks are no reason to doubt the
+// change itself: the analysis completed, some checks were inconclusive, and
+// the service placed every one of them only in files the change does not
+// write. It is false whenever any check did not complete or ran on part of
+// its scope, any inconclusive check could not be placed, none was
+// inconclusive, or part of the change was left out of the check: a file
+// omitted for size, or files or rules .slopcop/config.toml [check] excluded.
+func changeCovered(response service.Response, options Options) bool {
+	if response.Failure != "" || response.Summary.IncompletePolicies > 0 || len(response.Incomplete) > 0 ||
+		len(response.Checks) > 0 || len(options.OmittedFiles) > 0 ||
+		response.Summary.ExcludedFiles > 0 || response.Summary.ExcludedPairs > 0 ||
+		(response.Exclusions != nil && (response.Exclusions.ExcludedFiles > 0 || response.Exclusions.ExcludedPairs > 0)) {
+		return false
+	}
+	switch response.Status {
+	case service.StatusClean, service.StatusFindings:
+	default:
+		return false
+	}
+	total, elsewhere := inconclusiveCounts(response, inconclusiveChecks(response))
+	return total > 0 && elsewhere == total
 }
 
 // maxInconclusiveFiles is how many of an inconclusive check's files the
@@ -1163,8 +1195,13 @@ type jsonReport struct {
 	// InconclusiveUnlisted counts the inconclusive checks summary.inconclusive
 	// counts but inconclusive does not name. It is set only when the list was
 	// cut.
-	InconclusiveUnlisted int    `json:"inconclusiveUnlisted,omitempty"`
-	Failure              string `json:"failure,omitempty"`
+	InconclusiveUnlisted int `json:"inconclusiveUnlisted,omitempty"`
+	// ChangeCovered is set only when some checks were inconclusive, every
+	// one concerns only files the change does not write, every other check
+	// completed in full, and no part of the change was omitted or excluded:
+	// the inconclusive verdicts say nothing about the change itself.
+	ChangeCovered bool   `json:"changeCovered,omitempty"`
+	Failure       string `json:"failure,omitempty"`
 	// RepositoryAdded is set only when the check added the repository to
 	// the workspace.
 	RepositoryAdded bool `json:"repositoryAdded,omitempty"`
@@ -1245,6 +1282,7 @@ func writeJSON(w io.Writer, response service.Response, options Options) error {
 		RunFailures:          response.RunFailures,
 		Inconclusive:         inconclusive,
 		InconclusiveUnlisted: inconclusiveUnlisted(response, inconclusive),
+		ChangeCovered:        changeCovered(response, options),
 		Failure:              response.Failure,
 		RepositoryAdded:      response.RepositoryAdded,
 		AddedToWorkspace:     options.AddedTo,

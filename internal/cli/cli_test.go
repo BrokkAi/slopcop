@@ -291,7 +291,7 @@ func TestVerboseNamesInconclusiveChecks(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr)
 	}
-	if !strings.Contains(stdout, "  acme.a\n  acme.b (only files the change does not write)\n") {
+	if !strings.Contains(stdout, "  acme.a (files not named, so it may concern the change)\n  acme.b (only files the change does not write)\n") {
 		t.Errorf("verbose stdout = %q", stdout)
 	}
 }
