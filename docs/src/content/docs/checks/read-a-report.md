@@ -143,8 +143,9 @@ and the files it concerns. `json` lists them in `inconclusive`, each with
 repository paths the rule could not finish proving, when the analyzer named
 them all), and `elsewhere` (`true` when it concerns only files the change does
 not write), beside the `summary.inconclusive` count. When every inconclusive
-rule concerns only files the change does not write and every other rule
-completed, the change itself was fully checked: `human` says every check
+rule concerns only files the change does not write, every other rule completed
+in full, and no changed file was omitted or excluded, the change itself was
+fully checked: `human` says every check
 finished on the files the change writes, and `json` sets `changeCovered: true`.
 `--verbose` marks a rule whose files the analyzer did not name, since it may
 concern the change. `sarif` adds a `note`

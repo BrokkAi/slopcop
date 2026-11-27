@@ -821,7 +821,8 @@ with the count and how many concern only files the change does not write, and
 analyzer named every file the check concerns) and `elsewhere` (true when it
 concerns only files the change does not write), beside the
 `summary.inconclusive` count. When every inconclusive check concerns only files
-the change does not write and every other check completed, `human` says every
+the change does not write, every other check completed in full, and no changed
+file was omitted or excluded, `human` says every
 check finished on the files the change writes, and `json` sets
 `changeCovered: true`. `--verbose` marks a check whose files the analyzer did
 not name, since it may concern the change. `sarif` adds a `note` notification per check

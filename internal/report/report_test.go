@@ -2541,6 +2541,21 @@ func TestReportsSayTheChangeWasCoveredWhenEveryInconclusiveCheckIsElsewhere(t *t
 			return r
 		}(),
 	}
+	notCovered["a check notice"] = func() service.Response {
+		r := covered
+		r.Checks = []service.CheckNotice{{PolicyID: "acme.c", Status: "partial", Message: "ran on part"}}
+		return r
+	}()
+	notCovered["a file excluded"] = func() service.Response {
+		r := covered
+		r.Summary.ExcludedFiles = 1
+		return r
+	}()
+	notCovered["a rule excluded"] = func() service.Response {
+		r := covered
+		r.Exclusions = &service.Exclusions{ExcludedPairs: 1}
+		return r
+	}()
 	for name, r := range notCovered {
 		if got := render(t, r, FormatHuman); strings.Contains(got, "every check finished") {
 			t.Errorf("%s: human = %q", name, got)
@@ -2552,5 +2567,18 @@ func TestReportsSayTheChangeWasCoveredWhenEveryInconclusiveCheckIsElsewhere(t *t
 		if _, ok := document["changeCovered"]; ok {
 			t.Errorf("%s: changeCovered = %v", name, document["changeCovered"])
 		}
+	}
+
+	// A file left out of the upload for its size was never checked.
+	omitted := Options{OmittedFiles: []OmittedFile{{Path: "big.json", Bytes: 600000}}}
+	if got := renderWith(t, covered, FormatHuman, omitted); strings.Contains(got, "every check finished") {
+		t.Errorf("omitted human = %q", got)
+	}
+	var document2 map[string]any
+	if err := json.Unmarshal([]byte(renderWith(t, covered, FormatJSON, omitted)), &document2); err != nil {
+		t.Fatalf("omitted json: %v", err)
+	}
+	if _, ok := document2["changeCovered"]; ok {
+		t.Errorf("omitted: changeCovered = %v", document2["changeCovered"])
 	}
 }
