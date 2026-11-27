@@ -29,7 +29,11 @@ func newIgnoreCommand(serviceURL *string, version string) *cobra.Command {
 
 The finding id is the one a check printed for it. Ignoring covers that one
 finding in its repository for your workspace, not its rule; later checks of
-the repository never report it again. Ignoring a finding twice is fine.`,
+the repository never report it again. Ignoring a finding twice is fine.
+
+Ignores belong to the workspace, and so do pull request checks: when another
+workspace checks the repository's pull requests, their check still reports
+the finding, and this command says so and names that workspace.`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runIgnore(cmd, *serviceURL, version, workspace, args[0])
@@ -40,7 +44,7 @@ the repository never report it again. Ignoring a finding twice is fine.`,
 }
 
 func runIgnore(cmd *cobra.Command, serviceFlag, version, workspace, findingID string) error {
-	response, err := sendFinding(cmd, serviceFlag, version, workspace, findingID, (*service.Client).Ignore)
+	response, client, err := sendFinding(cmd, serviceFlag, version, workspace, findingID, (*service.Client).Ignore)
 	if err != nil {
 		return err
 	}
@@ -50,33 +54,34 @@ func runIgnore(cmd *cobra.Command, serviceFlag, version, workspace, findingID st
 		"slopcop: ignored finding %s; later checks of this repository will not report it\n",
 		response.FindingID,
 	)
+	ignoreElsewhereNotice(cmd, client, ".")
 	return nil
 }
 
 // sendFinding checks the finding id, then sends it with send in the
-// workspace named. A service failure prints its message and remedy and exits
-// incomplete.
+// workspace named, and returns the client it sent it with. A service failure
+// prints its message and remedy and exits incomplete.
 func sendFinding(
 	cmd *cobra.Command,
 	serviceFlag, version, workspace, findingID string,
 	send func(*service.Client, context.Context, string) (service.IgnoreResponse, error),
-) (service.IgnoreResponse, error) {
+) (service.IgnoreResponse, *service.Client, error) {
 	findingID = strings.TrimSpace(findingID)
 	if review.IsFindingID(findingID) {
-		return service.IgnoreResponse{}, fmt.Errorf("%s is a local review finding's id, which `slopcop ignore` does not take; run `slopcop override %s --reason \"why it does not hold\"` instead", findingID, findingID)
+		return service.IgnoreResponse{}, nil, fmt.Errorf("%s is a local review finding's id, which `slopcop ignore` does not take; run `slopcop override %s --reason \"why it does not hold\"` instead", findingID, findingID)
 	}
 	if !uuidPattern.MatchString(findingID) {
-		return service.IgnoreResponse{}, fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
+		return service.IgnoreResponse{}, nil, fmt.Errorf("finding id %q is not a UUID; use the id a check printed for the finding", findingID)
 	}
 	client, err := workspaceClient(cmd, serviceFlag, version, workspace)
 	if err != nil {
-		return service.IgnoreResponse{}, err
+		return service.IgnoreResponse{}, nil, err
 	}
 	response, err := send(client, cmd.Context(), findingID)
 	if err != nil {
-		return service.IgnoreResponse{}, serviceFailure(cmd, err)
+		return service.IgnoreResponse{}, nil, serviceFailure(cmd, err)
 	}
-	return response, nil
+	return response, client, nil
 }
 
 // workspaceClient is a client for the service a command names, in the

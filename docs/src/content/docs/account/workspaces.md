@@ -95,23 +95,35 @@ has, by [the first to have turned it on](/checks/pull-requests/#more-than-one-wo
 So a repository can check locally in your team workspace while its pull
 requests are checked, and billed, in your personal one.
 
-To see which workspace that is:
+Findings and [ignores](/checks/false-positives/#what-an-ignore-is) belong to
+one workspace, and a finding has its own id in each. So when the two
+workspaces differ, a finding you ignore locally is still reported on the pull
+request, and a local check is not the answer the pull request check gives.
 
+To see which workspace checks the pull requests:
+
+- `slopcop status` prints a `PR checks` line under the workspace it checks
+  in: `the workspace above`, the other workspace's name with the `-w` that
+  gives the pull request check's answer locally, or `not checked` when no
+  workspace has the setting on. `json` carries it as `pullRequestChecks`
+  (`on`, `workspaceId`, `workspaceName`, `workspaceKind`, `member`,
+  `sameWorkspace`, and `selector`, what `-w` takes).
+- `slopcop check` and `slopcop ignore` warn on stderr when it is another
+  workspace than the one they ran in, naming both.
 - A pull request's **SlopCop** check names the workspace that ran it, at the
   end of its summary.
-- `slopcop status` prints an `Also in` line naming your account's other
+- `status` also prints an `Also in` line naming your account's other
   workspaces that have the repository, each with its state there, and
-  `otherWorkspaces` in `json` (`id`, `name`, `kind`, `role`, `state`). Those
-  and the workspace above it are the ones that can run its pull request
-  checks. A workspace the service would not answer for is listed as `could not
-  be asked`, `unknown` in `json`.
+  `otherWorkspaces` in `json` (`id`, `name`, `kind`, `role`, `state`). A
+  workspace the service would not answer for is listed as `could not be
+  asked`, `unknown` in `json`.
 
 To move it, a manager or owner turns **Check pull requests** off in the
 repository's **Settings** in the workspace that runs them now, and on in the
 one that should; then `slopcop workspace map <name>` in the checkout moves the
-local checks to match. The CLI cannot read or change the setting, so `status`
-does not say which of the workspaces has it on, and `workspace map` says that
-it leaves pull request checks where they are.
+local checks to match. The CLI cannot change the setting, and `workspace map`
+affects local checks only: it says so, and names the workspace that still
+checks the pull requests.
 
 ## Moving the login
 

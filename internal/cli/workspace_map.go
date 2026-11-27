@@ -109,10 +109,12 @@ origin URL, for the service the command talks to. --workspace and
 $SLOPCOP_WORKSPACE still win for one command. 'slopcop enable' maps the
 checkout to the workspace it adds the repository to.
 
-Pull request checks are unaffected. Each workspace turns them on for a
-repository in the web app, and they keep running in the workspace that has
-them on whatever this machine maps. 'slopcop status' names the account's other
-workspaces that have the repository.
+It affects local checks only: 'slopcop check', the hooks and the agent
+gates on this machine. Pull request checks are unaffected. Each workspace
+turns them on for a repository in the web app, and they keep running in the
+workspace that has them on, with that workspace's ignores, whatever this
+machine maps. 'slopcop status' names the workspace that checks the
+repository's pull requests.
 
 It decides which workspace pays, so it asks whoever runs it to confirm, and
 refuses when stdin is not a terminal.`,
@@ -158,11 +160,12 @@ refuses when stdin is not a terminal.`,
 				return err
 			}
 			client.Workspace = workspace.ID
-			if repository, err := repositoryStatus(cmd.Context(), client, repoURL); err == nil && repository.State == statusNotAdded {
+			repository, err := repositoryStatus(cmd.Context(), client, repoURL)
+			if err == nil && repository.State == statusNotAdded {
 				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: %s is not added to %q yet; run `slopcop enable` to add it\n", name, workspace.Name)
 			}
 			if localRepository(repoURL).Provider == "github" {
-				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: pull request checks are unaffected: they run in whichever workspace has Check pull requests on for %s in the web app; `slopcop status` names the workspaces that have it\n", name)
+				fmt.Fprintln(cmd.ErrOrStderr(), mappedPullRequestsText(name, resolvePullRequestChecks(repository.pullRequests, workspace.ID, whoami.Workspaces)))
 			}
 			return nil
 		},
@@ -440,4 +443,21 @@ func noticeUnmapped(cmd *cobra.Command, client *service.Client, choice workspace
 	}
 	notices[key] = workspaceNotice{At: time.Now().UTC(), Said: said}
 	saveWorkspaceNotices(notices)
+}
+
+// mappedPullRequestsText is what 'workspace map' says of a GitHub
+// repository's pull request checks, which a mapping does not move: which
+// workspace checks them when the service said, where to look when it did not.
+func mappedPullRequestsText(name string, checks *statusPullRequestChecks) string {
+	const prefix = "slopcop: the mapping affects local checks only; pull request checks are unaffected: "
+	switch {
+	case checks == nil:
+		return prefix + fmt.Sprintf("they run in whichever workspace has Check pull requests on for %s in the web app; `slopcop status` names it", name)
+	case !checks.On:
+		return prefix + fmt.Sprintf("no workspace has Check pull requests on for %s", name)
+	case checks.SameWorkspace:
+		return prefix + "they already run in this workspace"
+	default:
+		return prefix + fmt.Sprintf("pull requests of %s are still checked in %s, with its ignores, not this workspace's", name, checks.workspaceText())
+	}
 }

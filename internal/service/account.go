@@ -50,6 +50,40 @@ type Repository struct {
 	FullName string `json:"fullName"`
 	Enabled  bool   `json:"enabled"`
 	Active   bool   `json:"active"`
+	// PullRequestChecks is the service's answer to which workspace checks
+	// the repository's pull requests, as it was sent: absent from a service
+	// that does not say, null when no workspace checks them. Read it with
+	// PullRequestCheckWorkspace.
+	PullRequestChecks json.RawMessage `json:"pullRequestChecks,omitempty"`
+}
+
+// PullRequestCheckWorkspace is the workspace that checks a repository's pull
+// requests. The findings on a pull request, and the ignores that apply to
+// them, are that workspace's, whichever workspace a local check runs in.
+type PullRequestCheckWorkspace struct {
+	WorkspaceID string `json:"workspaceId"`
+	// WorkspaceName is empty for a personal workspace, which has no name of
+	// its own to the service.
+	WorkspaceName string `json:"workspaceName"`
+	// Member says the account belongs to it, so --workspace reaches it.
+	Member bool `json:"member"`
+}
+
+// PullRequestCheckWorkspace reads PullRequestChecks. known is false when the
+// service did not say, or said something this version cannot read; a nil
+// workspace with known true means no workspace checks the pull requests.
+func (r Repository) PullRequestCheckWorkspace() (workspace *PullRequestCheckWorkspace, known bool) {
+	if len(r.PullRequestChecks) == 0 {
+		return nil, false
+	}
+	var decoded *PullRequestCheckWorkspace
+	if err := json.Unmarshal(r.PullRequestChecks, &decoded); err != nil {
+		return nil, false
+	}
+	if decoded != nil && decoded.WorkspaceID == "" {
+		return nil, false
+	}
+	return decoded, true
 }
 
 // RepositoryList is the GET /v1/repositories body.

@@ -158,6 +158,9 @@ type workspaceRepository struct {
 	Workspace service.Workspace
 	State     string
 	Err       error
+	// PullRequests is what that workspace's listing said about the
+	// workspace that checks the repository's pull requests.
+	PullRequests pullRequestOwner
 }
 
 // repositoryElsewhere asks each of the account's workspaces, other than the
@@ -172,7 +175,7 @@ func repositoryElsewhere(ctx context.Context, client *service.Client, workspaces
 		}
 		other.Workspace = workspace.ID
 		repository, err := repositoryStatus(ctx, &other, repoURL)
-		asked = append(asked, workspaceRepository{Workspace: workspace, State: repository.State, Err: err})
+		asked = append(asked, workspaceRepository{Workspace: workspace, State: repository.State, Err: err, PullRequests: repository.pullRequests})
 	}
 	return asked
 }

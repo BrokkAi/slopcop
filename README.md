@@ -418,7 +418,9 @@ refuse when stdin is not a terminal. `--workspace` and `$SLOPCOP_WORKSPACE`
 still win for one command, and `slopcop status` prints the workspace a
 checkout gets and a `Chosen by` line saying why. Pull request checks do not
 follow the mapping: each workspace turns them on for a repository in the web
-app, and `status` names your other workspaces that have the repository. A mapping to a workspace that
+app, `status` names the one that checks them on its `PR checks` line, and
+`check` and `ignore` warn when it is not the workspace they ran in, since
+ignores made in one do not apply to the other. A mapping to a workspace that
 was archived, or that your account left, stops the check with
 `workspace_not_found` instead of falling back to another workspace. The first
 check of a repository with no mapping, when your account has more than one

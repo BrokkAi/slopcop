@@ -91,8 +91,11 @@ more than one stored, `whoami` also lists them and marks the default.
 names, whether the workspace has it and whether it is active. Its `Also in`
 line (`otherWorkspaces` in json) names the account's other workspaces that
 have the repository. Pull request checks are turned on per workspace in the
-web app and do not follow `--workspace` or a mapping, so one of those may run
-them; the CLI cannot read or change that setting.
+web app and do not follow `--workspace` or a mapping; its `PR checks` line
+names the workspace that runs them. When `check` or `ignore` warns that pull
+requests are checked in another workspace, an ignore here does not reach the
+pull request: tell the user, and use the `-w` the warning names to check and
+ignore there. The CLI cannot change that setting.
 
 - `slopcop workspace list` lists the account's workspaces; `*` marks this
   login's. `slopcop workspace use <name|id>` moves this login to another one,

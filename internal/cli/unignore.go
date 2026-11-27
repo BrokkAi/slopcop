@@ -29,7 +29,7 @@ is fine.`,
 }
 
 func runUnignore(cmd *cobra.Command, serviceFlag, version, workspace, findingID string) error {
-	response, err := sendFinding(cmd, serviceFlag, version, workspace, findingID, (*service.Client).Unignore)
+	response, _, err := sendFinding(cmd, serviceFlag, version, workspace, findingID, (*service.Client).Unignore)
 	if err != nil {
 		return err
 	}

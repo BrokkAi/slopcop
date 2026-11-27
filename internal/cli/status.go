@@ -58,6 +58,10 @@ type statusReport struct {
 	// repository, or may: each can run its pull request checks, whatever
 	// Workspace is.
 	OtherWorkspaces []statusElsewhere `json:"otherWorkspaces,omitempty"`
+	// PullRequestChecks is the workspace that checks the repository's pull
+	// requests, which may not be Workspace. It is absent when the service
+	// did not say.
+	PullRequestChecks *statusPullRequestChecks `json:"pullRequestChecks,omitempty"`
 }
 
 // statusLogin is the workspace the login is bound to, and that workspace's
@@ -88,6 +92,12 @@ type statusRepository struct {
 	ID       string `json:"id,omitempty"`
 	Enabled  bool   `json:"enabled"`
 	Active   bool   `json:"active"`
+	// listedIn is the workspace whose listing this is: the one the command
+	// ran in. It is empty when the service was not asked.
+	listedIn string
+	// pullRequests is what that listing said about the workspace that checks
+	// the repository's pull requests.
+	pullRequests pullRequestOwner
 }
 
 func newStatusCommand(serviceURL *string, version string) *cobra.Command {
@@ -108,9 +118,13 @@ one there is no "Plan" line: a "Login" line names the login's own workspace
 and its plan instead.
 
 "Also in" names the account's other workspaces that have the repository.
-Pull request checks do not follow the workspace above: each workspace turns
-them on for a repository in the web app, so one of those may be the one that
-runs them. A pull request's SlopCop check names the workspace that ran it.
+
+"PR checks" names the workspace that checks the repository's pull requests on
+GitHub. It does not follow the workspace above: each workspace turns them on
+for a repository in the web app, and a pull request's findings, and the
+ignores that apply to them, are that workspace's. When it is another
+workspace, the line gives the --workspace that makes a local check give the
+pull request check's answer.
 
 A repository that is not added is added by its first check. A disabled one is not checked; the workspace's owner
 enables it with 'slopcop repo enable'. SlopCop checks repositories on
@@ -177,8 +191,18 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 	} else {
 		answer.Login = &statusLogin{Workspace: whoami.Workspace, Plan: whoami.Plan}
 	}
+	owner := repository.pullRequests
 	if repository.State != statusUnsupported && len(whoami.Workspaces) > 1 {
-		answer.OtherWorkspaces = otherWorkspaces(cmd.Context(), client, whoami.Workspaces, repoURL, workspace.ID)
+		var elsewhere pullRequestOwner
+		answer.OtherWorkspaces, elsewhere = otherWorkspaces(cmd.Context(), client, whoami.Workspaces, repoURL, workspace.ID)
+		// A workspace without the repository does not list it, and so says
+		// nothing of its pull requests; one that has it does.
+		if !owner.known {
+			owner = elsewhere
+		}
+	}
+	if repository.Provider == "github" {
+		answer.PullRequestChecks = resolvePullRequestChecks(owner, workspace.ID, whoami.Workspaces)
 	}
 	if opts.format == "json" {
 		return writeJSON(cmd.OutOrStdout(), answer)
@@ -191,11 +215,16 @@ func runStatus(cmd *cobra.Command, opts *statusOptions, serviceFlag, version str
 // except, that have repoURL, and those the service would not answer for.
 // Pull request checks are turned on per workspace and do not follow the
 // workspace a checkout checks in, so these are where they may run instead.
-func otherWorkspaces(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) []statusElsewhere {
+//
+// owner is what the first of them to say reported about the workspace that
+// checks the repository's pull requests.
+func otherWorkspaces(ctx context.Context, client *service.Client, workspaces []service.Workspace, repoURL, except string) (others []statusElsewhere, owner pullRequestOwner) {
 	ctx, cancel := context.WithTimeout(ctx, elsewhereTimeout)
 	defer cancel()
-	var others []statusElsewhere
 	for _, asked := range repositoryElsewhere(ctx, client, workspaces, repoURL, except) {
+		if !owner.known && asked.Err == nil {
+			owner = asked.PullRequests
+		}
 		state := asked.State
 		switch {
 		case asked.Err != nil:
@@ -208,7 +237,7 @@ func otherWorkspaces(ctx context.Context, client *service.Client, workspaces []s
 			Kind: asked.Workspace.Kind, Role: asked.Workspace.Role, State: state,
 		})
 	}
-	return others
+	return others, owner
 }
 
 // lookupRepositoryStatus describes the repository the checkout's origin remote
@@ -236,6 +265,7 @@ func repositoryStatus(ctx context.Context, client *service.Client, repoURL strin
 	if err != nil {
 		return repository, err
 	}
+	repository.listedIn = listed.WorkspaceID
 	for _, candidate := range listed.Repositories {
 		if strings.EqualFold(candidate.Provider, repository.Provider) &&
 			strings.EqualFold(candidate.FullName, repository.FullName) {
@@ -243,6 +273,7 @@ func repositoryStatus(ctx context.Context, client *service.Client, repoURL strin
 			repository.Enabled = candidate.Enabled
 			repository.Active = candidate.Active
 			repository.State = statusState(candidate)
+			repository.pullRequests.workspace, repository.pullRequests.known = candidate.PullRequestCheckWorkspace()
 			break
 		}
 	}
@@ -303,9 +334,12 @@ func writeStatus(out io.Writer, answer statusReport) {
 			others[index] = fmt.Sprintf("%q (%s)", other.Name, elsewhereText(other.State))
 		}
 		fmt.Fprintf(out, "Also in:    %s\n", strings.Join(others, ", "))
-		if answer.Repository.Provider == "github" {
-			fmt.Fprintf(out, "PR checks:  %s\n", pullRequestChecksText)
-		}
+	}
+	switch {
+	case answer.PullRequestChecks != nil:
+		fmt.Fprintf(out, "PR checks:  %s\n", answer.PullRequestChecks.statusLineText())
+	case len(answer.OtherWorkspaces) > 0 && answer.Repository.Provider == "github":
+		fmt.Fprintf(out, "PR checks:  %s\n", pullRequestChecksText)
 	}
 	if login := answer.Login; login != nil {
 		fmt.Fprintf(out, "Login:      %s (%s, %s), %s plan\n",
@@ -317,8 +351,8 @@ func writeStatus(out io.Writer, answer statusReport) {
 }
 
 // pullRequestChecksText is what status says of pull request checks when
-// more than one workspace has the repository. The service tells a login
-// nothing about them, so it says where to look.
+// more than one workspace has the repository and the service did not say
+// which workspace checks them, so it says where to look.
 const pullRequestChecksText = "turned on per workspace in the web app, not by the workspace above; a pull request's SlopCop check names the workspace that ran it"
 
 // elsewhereText is a repository's state in another workspace as a person

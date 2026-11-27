@@ -572,6 +572,7 @@ func gateCheck(cmd *cobra.Command, opts *checkOptions, prepared *preparedCheck, 
 	if err != nil {
 		return staticFailure(cmd, err), gateStatic
 	}
+	prepared.pullRequestsWarned = warnPullRequestChecksElsewhere(cmd, client, repository)
 	// Adding is not turning back on: a disabled repository stays the
 	// workspace's choice.
 	if repository.State == statusNotAdded {
@@ -705,6 +706,12 @@ func runStaticCheck(cmd *cobra.Command, opts *checkOptions, prepared preparedChe
 		}
 	case response.RepositoryAdded:
 		addedTo = noticeAdded(cmd, client, request.RepoURL, prepared.choice)
+	}
+	// Before the add, this workspace's listing said nothing of the
+	// repository, and no other workspace of the account may have it. Now it
+	// does, so ask again which workspace checks its pull requests.
+	if response.RepositoryAdded && !prepared.pullRequestsWarned {
+		warnPullRequestChecksAfterAdd(cmd, client, prepared.repoRoot)
 	}
 	if !response.KnownStatus() {
 		fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: the service answered status %q, which this version of slopcop does not know, so the check fails. Update slopcop.\n", response.Status)
@@ -940,8 +947,11 @@ func sendCheck(ctx context.Context, client *service.Client, request *service.Req
 // preparedCheck is a check request ready to send, and the client to send it.
 // The caller adds the attribution.
 type preparedCheck struct {
-	client   *service.Client
-	snapshot gitx.Snapshot
+	// pullRequestsWarned says gateCheck already warned that the repository's
+	// pull requests are checked in another workspace.
+	pullRequestsWarned bool
+	client             *service.Client
+	snapshot           gitx.Snapshot
 	// reviewTree is the same size-filtered scope as the uploaded patch, but
 	// without selected ignored policy files. snapshot.Tree stays unfiltered.
 	reviewTree         string

@@ -22,6 +22,11 @@ type mapService struct {
 	repositories map[string][]string
 	// whoami replaces the two-workspace account when set.
 	whoami string
+	// pullRequestChecks is every listed repository's pullRequestChecks, as
+	// the service sends it; empty leaves it out, as an older service does.
+	pullRequestChecks string
+	// ignores are the SlopCop-Workspace headers of the ignores sent.
+	ignores []string
 	// checks are the SlopCop-Workspace headers of the checks sent; empty is
 	// the login's own workspace.
 	checks  []string
@@ -58,15 +63,28 @@ func (s *mapService) start(t *testing.T, repo string) *httptest.Server {
 			s.lists++
 			listed := service.RepositoryList{WorkspaceID: workspace}
 			for _, name := range s.repositories[workspace] {
-				listed.Repositories = append(listed.Repositories, service.Repository{ID: name, Provider: "github", FullName: name, Enabled: true, Active: true})
+				listed.Repositories = append(listed.Repositories, service.Repository{
+					ID: name, Provider: "github", FullName: name, Enabled: true, Active: true,
+					PullRequestChecks: json.RawMessage(s.pullRequestChecks),
+				})
 			}
 			_ = json.NewEncoder(w).Encode(listed)
+		case "/v1/ignore":
+			s.ignores = append(s.ignores, r.Header.Get("SlopCop-Workspace"))
+			var body map[string]string
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			_ = json.NewEncoder(w).Encode(service.IgnoreResponse{FindingID: body["findingId"], Status: "ignored"})
 		case "/v1/check":
 			s.checks = append(s.checks, r.Header.Get("SlopCop-Workspace"))
 			var body map[string]any
 			_ = json.NewDecoder(r.Body).Decode(&body)
 			base, _ := body["baseCommit"].(string)
 			added := body["addRepository"] == true
+			if added && s.repositories != nil {
+				// The check adds the repository, so later listings name it.
+				repoURL, _ := body["repoUrl"].(string)
+				s.repositories[workspace] = append(s.repositories[workspace], repositoryName(repoURL))
+			}
 			_ = json.NewEncoder(w).Encode(service.Response{
 				Status: service.StatusClean, BaseCommit: base, Applied: true,
 				Findings: []service.Finding{}, Incomplete: []service.IncompletePolicy{}, RepositoryAdded: added,
