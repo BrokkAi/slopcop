@@ -508,12 +508,13 @@ func pushTargetsIn(cwd, command string, depth int) ([]string, string) {
 		quoted := pushWords(name, args)
 		codes, nested := shellCode(seg.text)
 		before := attributed
-		switch {
-		case nested && depth < 8 && slices.ContainsFunc(codes, func(code string) bool { return pushIn(code, depth+1) }):
+		if nested && depth < 8 && slices.ContainsFunc(codes, func(code string) bool { return pushIn(code, depth+1) }) {
 			// bash -c 'git -C dir push' and eval: the pushes in the code
 			// run where it says, from where the shell runs. This reader
 			// may misread the code (a heredoc's text, code from stdin), so
 			// the shell's own directory is judged too, as for any push.
+			// The command may also push directly (env git push origin sh
+			// <<< ...), which the cases below still read.
 			for _, dir := range pushDirs {
 				add(dir)
 				if dir == unknownDir {
@@ -529,6 +530,8 @@ func pushTargetsIn(cwd, command string, depth int) ([]string, string) {
 					}
 				}
 			}
+		}
+		switch {
 		case gitPush.MatchString(seg.text) || quoted && name == "git":
 			for _, dir := range pushDirs {
 				add(gitDir(dir, words))
@@ -537,7 +540,7 @@ func pushTargetsIn(cwd, command string, depth int) ([]string, string) {
 			for _, dir := range pushDirs {
 				add(dir)
 			}
-		default:
+		case attributed == before:
 			if moved, ok := cdDirs(dirs, words, seg.next, branched, piped); ok {
 				dirs = moved
 			}

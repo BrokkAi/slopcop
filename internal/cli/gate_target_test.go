@@ -49,6 +49,9 @@ func TestPushTargetsFollowCdAndGitC(t *testing.T) {
 		// counts too.
 		{"bash -c 'cat <<EOF\ncd " + b + "\nEOF\ngit push origin HEAD'", []string{a, b}},
 		{`bash -c 'git -C ` + b + ` push; source /dev/stdin' <<< 'git push origin HEAD'`, []string{a, b}},
+		// A word after a wrapper may be a branch, not a shell: the direct
+		// push still counts.
+		{"env git -C " + b + " push origin sh <<< 'git push'", []string{a, b}},
 		// A cd in a heredoc's text may be read as one, so on a line with a
 		// heredoc a push counts in every directory the line has been in.
 		{"cat <<'EOF'\ncd " + b + "\nEOF\ngit push origin HEAD", []string{a, b}},
