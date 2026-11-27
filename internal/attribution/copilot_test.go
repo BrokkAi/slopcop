@@ -131,3 +131,51 @@ func TestCopilotWithoutAJournalSendsTheSessionOnly(t *testing.T) {
 		}
 	}
 }
+
+// capturedCopilotSession is the session copilot-events-1.0.114.jsonl was
+// captured from: a live Copilot CLI 1.0.114 run in prompt mode, on Auto, that
+// created new2.txt, edited existing.txt and then failed an edit of
+// existing.txt. Its conversation, tool input and output and the session's
+// directory were left out of the fixture, and its repository path replaced by
+// {{repo}}; its event types, order and the fields read here are as written.
+const capturedCopilotSession = "4d9df930-c47d-4742-b85f-d71426c27672"
+
+func TestCopilotStopHookReadsACapturedSessionFromItsTranscriptPath(t *testing.T) {
+	home, repo := t.TempDir(), t.TempDir()
+	data, err := os.ReadFile(filepath.Join("testdata", "copilot-events-1.0.114.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The payload's transcript_path; COPILOT_HOME names another directory,
+	// as when the hook's environment and the session's differ.
+	transcript := filepath.Join(home, "elsewhere", "session-state", capturedCopilotSession, "events.jsonl")
+	if err := os.MkdirAll(filepath.Dir(transcript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.ReplaceAll(string(data), "{{repo}}", filepath.ToSlash(repo))
+	if err := os.WriteFile(transcript, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COPILOT_HOME", filepath.Join(home, "empty"))
+	t.Setenv("COPILOT_AGENT_SESSION_ID", "")
+
+	got := DetectHook(CopilotHarness, repo, capturedCopilotSession, transcript)
+	want := &service.Attribution{
+		Harness:        "copilot-cli",
+		HarnessVersion: "1.0.114",
+		SessionID:      capturedCopilotSession,
+		Models: []service.AttributedModel{
+			// Auto chose gpt-6-luna and set no effort; the failed edit
+			// committed nothing.
+			{Model: "gpt-6-luna", Source: SourceTranscript, Files: []string{"existing.txt", "new2.txt"}},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %+v\nwant %+v", got, want)
+	}
+
+	// A transcript path of another session is not read in its place.
+	if got := DetectHook(CopilotHarness, repo, testCopilotSession, transcript); got == nil || len(got.Models) != 0 {
+		t.Fatalf("another session's transcript was read: %+v", got)
+	}
+}

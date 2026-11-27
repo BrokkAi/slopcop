@@ -29,10 +29,11 @@ var (
 // CLI is not open source, so the schema is the one its SDK publishes:
 // github/copilot-sdk nodejs/src/generated/session-events.ts at
 // 99d90edf504f824c77dcdf0faa978f4b35848a87, generated from
-// session-events.schema.json for Copilot CLI 1.0.106-1. That schema says
-// which events are persisted to events.jsonl; that a persisted line has the
-// same shape is not yet checked against a live session. fileEdits is marked
-// experimental there and appeared in 1.0.92. A field is a pointer where
+// session-events.schema.json for Copilot CLI 1.0.106-1. A live Copilot CLI
+// 1.0.114 session wrote the same shape to events.jsonl: fileEdits on a
+// successful edit's tool.execution_complete, none on a failed one, and the
+// model on both. fileEdits is marked experimental in the schema and appeared
+// in 1.0.92. A field is a pointer where
 // absent and null mean different things.
 type copilotEvent struct {
 	Type string `json:"type"`
@@ -68,20 +69,33 @@ type copilotEvent struct {
 // agent runs, and the session's events.jsonl records the model of every tool
 // call and the files each built-in edit committed.
 func copilot(getenv func(string) string, repoRoot string) (*service.Attribution, []string) {
+	return copilotFrom(getenv, repoRoot, "")
+}
+
+// copilotFrom reads the session COPILOT_AGENT_SESSION_ID names. Its Stop
+// hook passes the payload's transcript_path, the session's events.jsonl
+// (checked live with Copilot CLI 1.0.114), which is read in place of the one
+// under the Copilot home when it belongs to that session.
+func copilotFrom(getenv func(string) string, repoRoot, transcript string) (*service.Attribution, []string) {
 	sessionID := strings.TrimSpace(getenv("COPILOT_AGENT_SESSION_ID"))
 	if !sessionIDPattern.MatchString(sessionID) || strings.Trim(sessionID, ".") == "" {
 		return nil, nil
 	}
 	attribution := &service.Attribution{Harness: CopilotHarness, SessionID: sessionID}
-	home := strings.TrimSpace(getenv("COPILOT_HOME"))
-	if home == "" {
-		userHome, err := os.UserHomeDir()
-		if err != nil {
-			return attribution, nil
+	dir := ""
+	if transcript != "" && filepath.Base(transcript) == "events.jsonl" && filepath.Base(filepath.Dir(transcript)) == sessionID {
+		dir = filepath.Dir(transcript)
+	} else {
+		home := strings.TrimSpace(getenv("COPILOT_HOME"))
+		if home == "" {
+			userHome, err := os.UserHomeDir()
+			if err != nil {
+				return attribution, nil
+			}
+			home = filepath.Join(userHome, ".copilot")
 		}
-		home = filepath.Join(userHome, ".copilot")
+		dir = filepath.Join(home, "session-state", sessionID)
 	}
-	dir := filepath.Join(home, "session-state", sessionID)
 	journals := copilotJournals(dir)
 	var edits []fileEdit
 	for _, journal := range journals {

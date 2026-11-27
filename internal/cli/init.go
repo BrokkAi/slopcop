@@ -516,7 +516,8 @@ machine. The skills go into the user-level directories each installed harness
 reads. Claude Code gets its Stop hook and push gate in settings.json under
 CLAUDE_CONFIG_DIR or ~/.claude. Codex gets both in hooks.json under CODEX_HOME
 or ~/.codex, and requires /hooks trust. Grok gets both in
-hooks/slopcop.json under GROK_HOME or ~/.grok. The push gate blocks git push,
+hooks/slopcop.json under GROK_HOME or ~/.grok, and Copilot CLI in settings.json
+under COPILOT_HOME or ~/.copilot. The push gate blocks git push,
 gh pr create, and GitHub MCP tools that push or open a pull request until
 HEAD's tree passed a check. Repositories that have never run SlopCop are left
 alone. Init also removes clone-local hooks and skills written by the earlier
@@ -573,10 +574,9 @@ API key is plainly missing, and prints why the others failed with --verbose.`, A
 				fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: warning: %s\n", problem)
 			}
 			if len(result.Gates) > 0 {
-				names := map[string]string{"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
 				var gated []string
 				for _, name := range result.Gates {
-					gated = append(gated, names[name])
+					gated = append(gated, harnessTitles[name])
 				}
 				fmt.Fprintf(out, "slopcop: %s now install a user-level push gate for git push, gh pr create, and GitHub MCP pushes\n", strings.Join(gated, ", "))
 			}

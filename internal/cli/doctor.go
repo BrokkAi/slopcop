@@ -21,9 +21,9 @@ const (
 )
 
 // doctorHarnesses are the harnesses init installs into, in report order.
-var doctorHarnesses = []string{"claude", "codex", "grok"}
+var doctorHarnesses = []string{"claude", "codex", "grok", "copilot"}
 
-var harnessTitles = map[string]string{"claude": "Claude Code", "codex": "Codex", "grok": "Grok"}
+var harnessTitles = map[string]string{"claude": "Claude Code", "codex": "Codex", "grok": "Grok", "copilot": "Copilot CLI"}
 
 // setupReport is what doctor found. It is built from local files only: no
 // service call, reviewer probe or write.
@@ -51,9 +51,9 @@ func newDoctorCommand() *cobra.Command {
 	command := &cobra.Command{
 		Use:   "doctor",
 		Short: "Show whether SlopCop's skill and hooks are installed for your agents",
-		Long: `Report, for each agent harness installed here (Claude Code, Codex and Grok),
-whether it would load SlopCop's skill and run its Stop hook and push gate, and
-the init command that adds what is missing. Run inside a checkout, doctor also
+		Long: `Report, for each agent harness installed here (Claude Code, Codex, Grok and
+Copilot CLI), whether it would load SlopCop's skill and run its Stop hook and
+push gate, and the init command that adds what is missing. Run inside a checkout, doctor also
 lists per-repository hooks and skills left by releases that installed per
 repository, which 'slopcop init' there removes.
 

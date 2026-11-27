@@ -162,6 +162,9 @@ func isolateUserConfig(t *testing.T) {
 	t.Setenv("GROK_HOME", "")
 	t.Setenv("GROK_HOOK_EVENT", "")
 	t.Setenv("KIMI_CODE_HOME", "")
+	t.Setenv("COPILOT_AGENT_SESSION_ID", "")
+	t.Setenv("COPILOT_HOME", "")
+	t.Setenv("COPILOT_HOOK_DEPTH", "")
 	// A check with no mode set runs only the static half in CI; tests run
 	// the same everywhere.
 	t.Setenv("CI", "")

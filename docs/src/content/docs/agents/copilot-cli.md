@@ -1,17 +1,17 @@
 ---
 title: GitHub Copilot CLI
-description: "Running the local review through GitHub Copilot CLI, what a check run inside Copilot CLI sends about the models that wrote the change, and what is not supported yet."
+description: "The Stop hook and push gate slopcop init installs for GitHub Copilot CLI, running the local review through Copilot, and what a check run inside Copilot CLI sends about the models that wrote the change."
 sidebar:
   order: 4
 ---
 
-> **What a check reads from a Copilot session is not yet verified against a
-> live session.** Copilot CLI is not open source. That part is built from the
-> session event schema GitHub publishes in the
-> [Copilot SDK](https://github.com/github/copilot-sdk/blob/99d90edf504f824c77dcdf0faa978f4b35848a87/nodejs/src/generated/session-events.ts),
-> the CLI's [changelog](https://github.com/github/copilot-cli/blob/main/changelog.md)
-> and its [hooks reference](https://docs.github.com/en/copilot/reference/hooks-configuration),
-> not from a captured session.
+Copilot CLI is not open source. What follows is built from the session event
+schema GitHub publishes in the
+[Copilot SDK](https://github.com/github/copilot-sdk/blob/99d90edf504f824c77dcdf0faa978f4b35848a87/nodejs/src/generated/session-events.ts),
+the CLI's [changelog](https://github.com/github/copilot-cli/blob/main/changelog.md),
+its [hooks reference](https://docs.github.com/en/copilot/reference/hooks-configuration)
+and `copilot help config`, and checked against live Copilot CLI 1.0.114
+sessions on Copilot Free.
 
 ## Checking a change
 
@@ -23,7 +23,29 @@ project's instructions:
 Run `slopcop check --if-enabled` before you finish and fix what it reports.
 ```
 
-There is no Stop hook for Copilot CLI yet; `slopcop init` installs none there.
+## The Stop hook and push gate
+
+`slopcop init` adds SlopCop's [Stop hook](/agents/stop-hook/) and push gate to
+`settings.json` under `COPILOT_HOME`, or `~/.copilot`, when that directory
+exists. Copilot CLI reads hooks there in Claude Code's shape and under Claude
+Code's event names, and runs user-level hooks without asking to trust them.
+Your other settings and hooks in the file are left as they were, and
+`slopcop init --remove-hooks` takes SlopCop's out again.
+
+- **Stop:** `slopcop hook copilot || true`. Copilot sends it Claude Code's
+  payload (`session_id`, `cwd`, `transcript_path`, `stop_hook_active`), waits
+  for it up to its timeout, and keeps the agent going when the hook blocks
+  the stop with findings to fix.
+- **Push gate:** `slopcop gate --hook copilot`, on `PreToolUse` for Copilot's
+  shell tool, which a hook sees as `Bash`. Copilot blocks the command when the
+  gate refuses it, but tells the agent only that a hook denied it, not why.
+  The skill tells the agent to check before it pushes.
+
+Copilot CLI also runs the hooks in a repository's `.claude/settings.json` and
+`.claude/settings.local.json`, where earlier SlopCop releases put the Claude
+Code hooks. Those see that Copilot is running them (`COPILOT_HOOK_DEPTH`) and
+do nothing, so each stop is checked once. It does not read
+`~/.claude/settings.json`.
 
 ## Copilot as a reviewer
 
@@ -100,6 +122,9 @@ an opaque identifier, and each model and effort with the repository-relative
 files it wrote. This is analytics only and never decides a check.
 `slopcop --verbose` prints it.
 
-A live session still has to confirm that the variable is set in the agent's
-shell, that `events.jsonl` holds the schema's events in that shape and is
-written before the agent runs the check, and where effort shows up.
+The Stop hook reads the same session, from the `events.jsonl` its payload
+names. Checked live with Copilot CLI 1.0.114: the agent's shell has
+`COPILOT_AGENT_SESSION_ID`, the hook's payload names the same session, and
+`events.jsonl` holds each successful edit's `fileEdits` and model, and no
+`fileEdits` for a failed one. Copilot Free runs only Auto, which takes no
+reasoning effort, so where a set effort shows up is still unchecked.

@@ -191,13 +191,14 @@ The binary carries two agent skills. `slopcop` teaches a coding agent how
 to check a change. `slopcop-audit` audits code that has already landed: it
 splits a commit range into module slices and checks them in parallel with
 hosted checks, then triages the findings into a fix plan. The binary also
-carries automatic check and push-gate hooks for Claude Code, Codex and Grok.
+carries automatic check and push-gate hooks for Claude Code, Codex, Grok and
+GitHub Copilot CLI.
 Run `slopcop init` once for the machine. It installs both skills into the
 user-level directories below and names what it did:
 
 | Location | Harness |
 | --- | --- |
-| `~/.agents/skills/slopcop/`, `~/.agents/skills/slopcop-audit/` | Codex, Grok and other agents |
+| `~/.agents/skills/slopcop/`, `~/.agents/skills/slopcop-audit/` | Codex, Grok, Copilot CLI and other agents |
 | `~/.claude/skills/slopcop/`, `~/.claude/skills/slopcop-audit/` | Claude Code and other agents |
 
 It leaves tracked files alone. A command run inside a checkout also removes
@@ -230,13 +231,15 @@ notice says where. A check's `json` and `sarif` reports carry the same update
 it.
 
 Init also adds a static-only `Stop` hook and a `PreToolUse` push gate for
-Claude Code, Codex and Grok, and leaves everything else in each file as it was:
+Claude Code, Codex, Grok and Copilot CLI, and leaves everything else in each
+file as it was:
 
 | File | Harness |
 | --- | --- |
 | `settings.json` under `CLAUDE_CONFIG_DIR`, or `~/.claude` | Claude Code |
 | `hooks.json` under `CODEX_HOME`, or `~/.codex` | Codex |
 | `hooks/slopcop.json` under `GROK_HOME`, or `~/.grok` | Grok |
+| `settings.json` under `COPILOT_HOME`, or `~/.copilot` | GitHub Copilot CLI |
 
 The push gate blocks `git push`, `gh pr create`, and the GitHub MCP tools that
 push files or open a pull request until HEAD's tree has a passing check or

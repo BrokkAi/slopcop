@@ -80,8 +80,9 @@ var unsureTargetText = map[string]string{
 }
 
 // shellTools are the tool names a PreToolUse payload gives a shell command:
-// Bash from Claude Code and Codex, and run_terminal_command from Grok, which
-// runs the gate from the repository's Claude Code settings.
+// Bash from Claude Code, Codex and Copilot CLI (which names its shell tool
+// Bash for a hook under Claude Code's event names), and run_terminal_command
+// from Grok, which runs the gate from the repository's Claude Code settings.
 var shellTools = map[string]bool{"Bash": true, "run_terminal_command": true}
 
 // githubPushTool matches the GitHub MCP tools that open a pull request or
@@ -185,12 +186,17 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if hook != "" {
-				if hook != "claude" && hook != "codex" && hook != "grok" {
+				if hook != "claude" && hook != "codex" && hook != "grok" && hook != "copilot" {
 					return fmt.Errorf("unknown gate hook %q", hook)
 				}
 				// Grok also runs the Claude Code compatibility settings. Its
 				// own hook performs the same gate, so skip the duplicate.
 				if hook == "claude" && os.Getenv("GROK_HOOK_EVENT") != "" {
+					return nil
+				}
+				// Copilot CLI runs a repository's Claude Code settings too,
+				// beside its own gate.
+				if hook == "claude" && underCopilotHook() {
 					return nil
 				}
 				var input gateInput
