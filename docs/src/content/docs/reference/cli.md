@@ -300,7 +300,9 @@ relied on it; `--list [--format json]` lists them with their reasons. See
 
 `slopcop override --reason "..."` accepts demonstrably incorrect findings
 from the last complete review of the same working-tree snapshot, provided
-the static half passed or did not run. It also accepts a static half whose
+the static half passed or did not run. It does not accept a review-only
+(`--mode ai`) check where the static half could have run; run `slopcop check`
+first. It also accepts a static half whose
 analyzer run failed (`runFailures`) and keeps failing, when the review passed
 or its findings are accepted with it and no static finding blocks the push.
 It records the reason and cannot
@@ -316,7 +318,10 @@ wrong, so write the reason for them: say why the finding does not hold.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
-open a pull request until HEAD's tree has a passing check or valid override. A
+open a pull request until HEAD's tree has a passing check or valid override. An
+approval from a review-only check (`--mode ai`) lets the tree through only
+while the static half cannot run (no origin, no login, or origin has no
+branches yet). A
 shell push is judged in each repository it may run in: the session's
 directory, moved by a `cd` the push runs after (`cd ../other && git push`) or
 by `git -C`, or named by `--git-dir` or `GIT_DIR`. Where a `cd` may not

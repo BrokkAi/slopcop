@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,7 +12,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/spf13/cobra"
 )
 
@@ -133,9 +136,33 @@ func gateTree(root string) error {
 	}
 	reviewed, err := gitx.Run(root, "rev-parse", "--verify", "refs/slopcop/reviewed/"+tree)
 	if err == nil && reviewed == tree {
-		return nil
+		return reviewOnlyStillStands(root, tree)
 	}
 	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there; then push", tree, root, root)
+}
+
+// reviewOnlyStillStands refuses an approval that a review alone gave, from
+// `--mode ai`, once the static half can run: the checkout has a login and an
+// origin with a branch. A review-only check approves a tree only while the
+// static half cannot run, and logging out for one check, or the first push
+// landing, must not leave that approval standing. It asks origin only for
+// such an approval with a login present.
+func reviewOnlyStillStands(root, tree string) error {
+	reviewOnly, err := review.ReviewedWithoutStatic(root, tree)
+	if err != nil {
+		return fmt.Errorf("slopcop: push blocked: cannot read how HEAD's tree %s in %s was approved: %w", tree, root, err)
+	}
+	if !reviewOnly {
+		return nil
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s was approved by the review alone, and the config file cannot be read to tell whether the static check can run: %w", tree, root, err)
+	}
+	if available, _ := staticAvailability(context.Background(), cfg, "", root); !available {
+		return nil
+	}
+	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s was approved by the review alone (--mode ai), and this repository can now run the static check. Run `slopcop check` in %s so both halves check it, then push", tree, root, root)
 }
 
 // newGateCommand exposes a direct tree check and a hidden hook form. The hook

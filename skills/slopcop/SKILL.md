@@ -135,7 +135,8 @@ The JSON report then has no `review` and sets `reviewSkipped` (`noReviewers`,
 `ci`, `staticMode`, or `repositoryInactive`): a `clean` status there covers
 only the static half.
 `--mode static` or `--static` runs only the hosted half; `--mode ai` or `--ai`
-runs only review. `--if-enabled` skips only the static half of a disabled
+runs only review, and approves a tree for push only where the static half
+cannot run (no origin, no login, or origin has no branches yet). `--if-enabled` skips only the static half of a disabled
 repository. The Stop
 hook and `slopcop enable` remain static-only. A single captured snapshot
 includes committed, uncommitted, and untracked work, excluding ignored
@@ -373,7 +374,7 @@ the usual codes mean:
 | `device_flow_disabled` | This deployment has no browser login; use `slopcop login --token`. |
 | `repo_not_indexed` | Analyze the repository on SlopCop first; a private one needs the SlopCop GitHub App. |
 | `no_access` | The account needs access to the repository. |
-| `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch. Follow that line. |
+| `base_not_found` | The service's clone lacks the base commit; pass one it has with `--base`. When the clone can tell why, a line after the remedy says so: origin's default branch was renamed and `origin/HEAD` still names the old one, or the base is not on origin's default branch, or origin has no branches yet (first push of a new repository). Follow that line. |
 | `payload_too_large` | The change is over the service's limit; check a smaller change. |
 | `repository_too_large` | The repository is over the service's size limit (50,000 files or 512 MiB, on every plan), so nothing was checked, and retrying as is will not help. The lines after the remedy (and `sizeBreakdown` in `--format json`) name the base tree's largest paths, measured locally, and a ready `[check] exclude` snippet. Act on it as for `repositorySize.nearLimit`. |
 | `finding_not_found` | `slopcop ignore`, `unignore` or `dictionary add` got an id that is not from a check run with this login; use one a check printed. |

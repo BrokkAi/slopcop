@@ -89,7 +89,18 @@ approves this tree only, with the reason recorded, when the review passed (or
 its findings are accepted with it) and no static finding blocks the push;
 stderr says so in every format. Report the failure to SlopCop too.
 A failed review, static failure, refusal, pending or unknown status never
-approves it. A later check that does not approve the same nonempty tree removes
+approves it.
+
+A review-only check (`--mode ai`) approves a tree only where the static half
+cannot run: the checkout has no origin the service can name, the CLI has no
+login, or origin has no branches yet. Where the static half could have run,
+a passing review-only check reports `approved: false`, stderr says why in
+every format, and `slopcop override --reason` will not approve the tree on that
+review either: run `slopcop check` so both halves check it, or
+`slopcop check --mode static`. An approval a review-only check gave is marked
+with `refs/slopcop/review-only/<tree>`, and the push gate refuses it once the
+static half can run, such as after logging in again or once the first push has
+given origin a branch. A later check that does not approve the same nonempty tree removes
 its approval ref, including an override. Rerun `slopcop override` if the review
 findings are unchanged. JSON `approved` reports the decision directly.
 

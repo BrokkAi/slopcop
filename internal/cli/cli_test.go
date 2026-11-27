@@ -43,6 +43,8 @@ func TestMain(m *testing.M) {
 	// Tests print the same remedies on every OS; the Windows shell note has
 	// its own test.
 	separateShellLogins = func() bool { return false }
+	// Tests reach no remote; one about an origin with no branch says so.
+	originHasNoBranches = func(context.Context, string) bool { return false }
 	os.Exit(m.Run())
 }
 

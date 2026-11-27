@@ -269,8 +269,24 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			verdict = <-reviewDone
 		}
 	}
+	// A review-only check approves nothing where the static half could have
+	// run, or `--mode ai` would be a way past the static half at the push
+	// gate. It approves on the review alone only where the static half
+	// cannot run: no origin, no login, or an origin with no branch yet.
+	staticRequired, originEmpty := false, false
+	if mode == modeAI {
+		staticRequired, originEmpty = staticAvailability(cmd.Context(), cfg, serviceFlag, prepared.repoRoot)
+	}
 	var checkRef *review.CheckRef
 	if store != nil {
+		if staticRequired {
+			// Recorded so that `slopcop override` will not approve the tree
+			// on this review either.
+			if err := store.SetStaticRequired(verdict); err != nil {
+				verdict.Status = review.StatusFailed
+				verdict.Error = err.Error()
+			}
+		}
 		if mode == modeBoth {
 			// An override may accept a failed analyzer run only beside a
 			// review that passed, or whose findings it accepts with it.
@@ -407,9 +423,16 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	reviewPassed := reviewPasses(mode, verdict, prepared)
 	staticPassed := staticPasses(static, mode, blockLevel)
 	nonempty := (prepared.bytes > 0 || excludedOnly) && (static.response != nil || (reviewPassed && mode != modeStatic))
-	reportOptions.Approved = reviewPassed && staticPassed && nonempty
+	reviewOnlyRefused := staticRequired && reviewPassed && nonempty
+	reportOptions.Approved = reviewPassed && staticPassed && nonempty && !staticRequired
 	if reportOptions.Approved {
-		if err := review.MarkReviewed(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
+		mark := review.MarkReviewed
+		if mode == modeAI {
+			// The push gate refuses this approval once the static half
+			// can run, as after logging in again or the first push.
+			mark = review.MarkReviewedWithoutStatic
+		}
+		if err := mark(prepared.repoRoot, prepared.snapshot.Tree); err != nil {
 			return err
 		}
 		// A finding override the review relied on may have been undone after
@@ -481,6 +504,13 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if notice := runFailureNotice(static, verdict, prepared, mode, blockLevel); notice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
+	// In every format, since an agent reads json and pushes on approved.
+	if reviewOnlyRefused {
+		fmt.Fprintf(cmd.ErrOrStderr(), reviewOnlyRefusedNotice+"\n", shortSHA(prepared.snapshot.Tree))
+	}
+	if reportOptions.Approved && originEmpty {
+		fmt.Fprintf(cmd.ErrOrStderr(), firstPushApprovalNotice+"\n", shortSHA(prepared.snapshot.Tree), shortSHA(prepared.request.BaseCommit))
+	}
 	if format == report.FormatHuman {
 		warnLowCredits(cmd, static.response)
 	}
@@ -495,6 +525,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may be pushed: it passed the check.\n", tree)
 		} else {
 			reason := approvalReason(prepared.bytes == 0 && !excludedOnly, reviewPassed, verdict, static, mode, blockLevel)
+			if reviewOnlyRefused {
+				reason = reviewOnlyReason
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "slopcop: tree %s may not be pushed yet: %s.\n", tree, reason)
 		}
 	}
@@ -879,17 +912,48 @@ func (r *localRefusal) hint() string { return r.text }
 // baseNotFoundHint explains a base the service does not have when the clone
 // can tell why: origin's default branch moved, as after a rename from main to
 // master, and the clone still points origin/HEAD, and so the default base, at
-// the old one; or the base is not on origin's default branch at all. It asks
+// the old one; the base is not on origin's default branch at all; or origin
+// has no branch yet, before the first push of a new repository. It asks
 // origin, so it runs only after the service refused, and says nothing when
 // origin cannot be asked in time.
 func baseNotFoundHint(ctx context.Context, root, base string) string {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
+	// Asked first: an origin with no branch may still name an unborn
+	// default branch.
+	if originHasNoBranches(ctx, root) {
+		return firstPushHint(root, base)
+	}
 	branch, ok := gitx.RemoteDefaultBranch(ctx, root)
 	if !ok {
 		return ""
 	}
 	return describeBase(root, base, branch)
+}
+
+// firstPushHint is baseNotFoundHint for an origin with no branch, as before
+// the first push of a new repository. Pushing the base, the service's own
+// remedy, is what the push gate blocks until a check approves the tree, and
+// no static check can run until origin has a commit. So it gives the way
+// that works with the gate: while origin has no branch, a passing review
+// approves the tree on its own.
+func firstPushHint(root, base string) string {
+	exact := "<the commit the change starts from>"
+	if head, err := gitx.HeadCommit(root); err == nil && head != base {
+		exact = shortSHA(base)
+	} else if _, err := gitx.ResolveCommit(root, "HEAD~1"); err != nil {
+		// No check can diff a repository's only commit against anything,
+		// so none can approve it. The gate guards agents, not a person at
+		// a terminal.
+		return "origin has no branches yet, so the service cannot read any commit of this repository, and this repository's only commit has nothing before it to check against, so no check can approve it for the push gate. " +
+			"Ask the user to push this first commit themselves from a terminal; check later changes against it with `slopcop check --base-exact <that commit>`."
+	}
+	return fmt.Sprintf(
+		"origin has no branches yet, so the service cannot read any commit of this repository, and the push gate blocks pushing the base until a check approves the tree. "+
+			"Until the first push, a passing review approves the tree on its own: run `slopcop check --mode ai --base-exact %s`, push once it approves, "+
+			"then run `slopcop check --mode static --base-exact %s` to run the static check on the same change.",
+		exact, exact,
+	)
 }
 
 // describeBase is baseNotFoundHint once origin has named its default branch.
@@ -1743,6 +1807,52 @@ func runFailureNotice(static staticOutcome, verdict review.Verdict, prepared pre
 		"Run the check again. If it fails the same way again, `slopcop override --reason \"why this tree is safe to push\"` "+
 		"approves this tree only, with the reason recorded; report the failure to SlopCop.", cause)
 }
+
+// originHasNoBranches is gitx.OriginHasNoBranches, which reaches the network;
+// tests replace it.
+var originHasNoBranches = gitx.OriginHasNoBranches
+
+// staticAvailability says whether the static half could have run beside a
+// review-only check, from what the checkout and the login say: it needs an
+// origin on a host the service checks, a token for the service, and a commit of the
+// repository the service can read, which origin lacks while it has no
+// branch. originEmpty says it could not run only for that last reason, as
+// before the first push of a new repository. Asking origin is the last step,
+// so a checkout without a login never reaches the network.
+func staticAvailability(ctx context.Context, cfg config.Config, serviceFlag, root string) (available, originEmpty bool) {
+	origin, err := gitx.OriginURL(root)
+	if err != nil {
+		return false, false
+	}
+	repoURL, err := gitx.CanonicalRepoURL(origin)
+	if err != nil || localRepository(repoURL).State == statusUnsupported {
+		return false, false
+	}
+	if resolveToken(cfg, resolveServiceURL(cfg, serviceFlag)) == "" {
+		return false, false
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if originHasNoBranches(ctx, root) {
+		return false, true
+	}
+	return true, false
+}
+
+// reviewOnlyReason is why a passing review-only check did not approve its
+// tree, for the push line.
+const reviewOnlyReason = "only the review ran (--mode ai), and this repository can run the static check; run `slopcop check` so both halves check it"
+
+// reviewOnlyRefusedNotice is the stderr line for a passing review-only check
+// that does not approve its tree because the static half could have run. It
+// takes the tree.
+const reviewOnlyRefusedNotice = "slopcop: the review passed, but tree %s is not approved for push: a review-only check (--mode ai) does not approve a tree when this repository can run the static check. " +
+	"Run `slopcop check` to check it with both halves, or `slopcop check --mode static` for the static half alone."
+
+// firstPushApprovalNotice is the stderr line for a review-only approval that
+// stands because origin has no branch yet. It takes the tree and the base.
+const firstPushApprovalNotice = "slopcop: approved without a static check: tree %s may be pushed on the review alone, because origin has no branches yet and the service cannot read any commit of this repository. " +
+	"After this first push, run `slopcop check --mode static --base-exact %s` to run the static check on the same change."
 
 // approvalReason names why a check did not approve its tree, for the line a
 // person or agent reads before pushing. It checks the causes in the order the

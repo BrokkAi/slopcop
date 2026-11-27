@@ -246,6 +246,25 @@ func (s *Store) SetCheck(ref CheckRef, v Verdict) error {
 	return s.write("last.json", *r)
 }
 
+// SetStaticRequired records on the review v, when the latest record is that
+// review, that the static half could have run beside it. A record of
+// anything else keeps its own.
+func (s *Store) SetStaticRequired(v Verdict) error {
+	r, err := s.Last()
+	if err != nil || r == nil {
+		return err
+	}
+	if r.Capture.Tree != v.Capture.Tree || !r.Time.Equal(v.Time) {
+		return nil
+	}
+	r.StaticRequired = true
+	return s.write("last.json", *r)
+}
+
+// ErrStaticRequired refuses to approve a tree on a review-only record where
+// the static half could have run.
+var ErrStaticRequired = errors.New("the last check ran only the review (--mode ai), and this repository can run the static check; run `slopcop check` so both halves check the tree, then override what remains")
+
 // overrideLog is the append-only log of whole-review overrides.
 const overrideLog = "overrides.jsonl"
 
@@ -277,6 +296,9 @@ func (s *Store) Override(reason, currentTree string) error {
 	}
 	if r == nil {
 		return errors.New("override requires complete findings")
+	}
+	if r.StaticRequired {
+		return ErrStaticRequired
 	}
 	runFailed := r.StaticRunFailedOnly()
 	if r.StaticExit != nil && r.StaticBlocksPush && !runFailed {
@@ -329,7 +351,11 @@ func (s *Store) Override(reason, currentTree string) error {
 	if err = s.write("last.json", accepted); err != nil {
 		return err
 	}
-	if err = MarkReviewed(s.root, currentTree); err != nil {
+	mark := MarkReviewed
+	if r.Mode == "ai" {
+		mark = MarkReviewedWithoutStatic
+	}
+	if err = mark(s.root, currentTree); err != nil {
 		return err
 	}
 	// An undo that ran after the check above withdrew the approvals it knew
@@ -346,31 +372,56 @@ func (s *Store) Override(reason, currentTree string) error {
 	return nil
 }
 
-// MarkReviewed creates the approval ref for a reviewed tree.
+// reviewOnlyRef marks an approval that only the review gave, with no static
+// half beside it. The push gate refuses such an approval once the static half
+// can run, so `--mode ai` stands in for it only while it cannot.
+func reviewOnlyRef(tree string) string { return "refs/slopcop/review-only/" + tree }
+
+// MarkReviewed creates the approval ref for a reviewed tree, and withdraws
+// any mark that a review alone approved it.
 func MarkReviewed(root, tree string) error {
-	_, err := gitx.Run(root, "update-ref", "refs/slopcop/reviewed/"+tree, tree)
-	return err
+	return updateRefs(root, "delete "+reviewOnlyRef(tree), "update "+approvalRef(tree)+" "+tree)
+}
+
+// MarkReviewedWithoutStatic creates the approval ref for a tree only a review
+// checked, marked as such for the push gate.
+func MarkReviewedWithoutStatic(root, tree string) error {
+	return updateRefs(root, "update "+reviewOnlyRef(tree)+" "+tree, "update "+approvalRef(tree)+" "+tree)
+}
+
+// ReviewedWithoutStatic reports whether the tree's approval came from a
+// review alone.
+func ReviewedWithoutStatic(root, tree string) (bool, error) {
+	return refExists(root, reviewOnlyRef(tree))
 }
 
 // Unmark removes the approval ref for a tree. Deleting an absent ref succeeds.
 func Unmark(root, tree string) error {
-	ref := "refs/slopcop/reviewed/" + tree
-	found, err := Reviewed(root, tree)
-	if err != nil || !found {
-		return err
-	}
-	_, err = gitx.Run(root, "update-ref", "-d", ref)
+	return updateRefs(root, "delete "+approvalRef(tree), "delete "+reviewOnlyRef(tree))
+}
+
+func approvalRef(tree string) string { return "refs/slopcop/reviewed/" + tree }
+
+// updateRefs applies update-ref commands in one transaction, so an approval
+// and its review-only mark never part, even when checks in two worktrees of
+// the same repository, which share these refs but not a review lock, change
+// them at once.
+func updateRefs(root string, commands ...string) error {
+	_, err := gitx.RunInput(root, nil, []byte(strings.Join(commands, "\n")+"\n"), "update-ref", "--stdin")
 	return err
 }
 
-// Reviewed reports whether the exact tree has an approval ref.
-func Reviewed(root, tree string) (bool, error) {
-	ref := "refs/slopcop/reviewed/" + tree
+func refExists(root, ref string) (bool, error) {
 	found, err := gitx.Run(root, "for-each-ref", "--format=%(refname)", ref)
 	if err != nil {
 		return false, err
 	}
 	return found == ref, nil
+}
+
+// Reviewed reports whether the exact tree has an approval ref.
+func Reviewed(root, tree string) (bool, error) {
+	return refExists(root, "refs/slopcop/reviewed/"+tree)
 }
 
 // NewCapture resolves the base tree and records the diffstat for a snapshot

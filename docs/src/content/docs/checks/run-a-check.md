@@ -180,6 +180,28 @@ prompt, ten-second limit) and adds a line when the clone explains the failure:
 origin's default branch was renamed and `origin/HEAD` still names the old one,
 or the base is not on origin's default branch. Follow that line.
 
+### The first push of a new repository
+
+Before anything is pushed to a new repository, origin has no branches, so the
+service cannot read any commit of it and the static check answers
+`base_not_found`. Pushing the base, its usual remedy, is what the push gate
+blocks until a check approves the tree. The line after the remedy says so and
+gives the way through: while origin has no branches, a passing review-only
+check approves the tree on its own, and stderr says `approved without a static
+check`.
+
+```console
+slopcop check --mode ai --base-exact <first-commit>
+git push -u origin main
+slopcop check --mode static --base-exact <first-commit>
+```
+
+The last check runs the static half on the same change once the service can
+read the base. A repository with a single commit has nothing to check that
+commit against, so no check can approve it; the hint says so, and the way
+through is a person pushing it from a terminal, since the gate guards agents. After the first push, a review-only check no longer approves a
+tree; see [which results approve the tree](/checks/exit-codes/#which-results-approve-the-tree).
+
 ## An empty patch
 
 An empty patch is a real check, not a skip: one request goes out and the
