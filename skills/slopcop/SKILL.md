@@ -698,8 +698,9 @@ The push gate, in Claude Code, Codex, Grok, and Copilot CLI, blocks `git push`,
 `gh pr create`, and GitHub MCP tools that push files or open a pull request
 until HEAD has exactly that tree. Copilot CLI does not pass on the gate's
 reason: there, a push "Denied by preToolUse hook" is the gate. Never write, read, or delete `refs/slopcop/`
-or `.git/slopcop` yourself; the gate blocks any command that names either,
-and blocks `slopcop override --accept`, which only the user runs.
+or `.git/slopcop` yourself; the gate blocks any command that could, and blocks
+`slopcop override --accept`, which only the user runs. Naming them as text is
+fine: a `grep` pattern, `echo`, a `gh` body, a commit message.
 After checking a dirty tree, commit exactly that state,
 including untracked files, before pushing. The gate judges a whole command
 line before any of it runs. It lets `slopcop override --reason "..." && git push`

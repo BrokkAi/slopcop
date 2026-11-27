@@ -52,6 +52,55 @@ func TestGatePushCommands(t *testing.T) {
 		{"git-lfs push", false},
 		{"git status && echo push", false},
 		{"git status | grep push", false},
+		// Text the shell does not run as a command.
+		{"python3 - <<'EOF'\np = 'internal/cli/gate_test.go'\ns = open(p).read().replace('\"git \" + \"push origin HEAD\"', '\"git push origin HEAD\"')\nopen(p, 'w').write(s)\nEOF", false},
+		{`sed -i '' 's/"git " + "push origin HEAD"/"git push origin HEAD"/' file.go`, false},
+		{`git commit -m "make git push retry"`, false},
+		{`gh issue comment 1 --body "run git push after the check"`, false},
+		{"cat > notes.md <<'EOF'\ngit push origin HEAD\nEOF", false},
+		{"git status # then git push", false},
+		{`python3 -c "print('git push')"`, false},
+		// Code the line runs.
+		{`bash -c "git push"`, true},
+		{`sh -c 'cd x && git push origin HEAD'`, true},
+		{`eval "git push"`, true},
+		{`sudo -u me sh -c 'git push'`, true},
+		{`echo "git push" | sh`, true},
+		{"sh <<'EOF'\ngit push\nEOF", true},
+		{"cat <<EOF\n$(git push)\nEOF", true},
+		{`echo "$(git push)"`, true},
+		{`python3 -c "import os; os.system('git push')"`, true},
+		{"python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'push', 'origin', 'HEAD'])\nEOF", true},
+		{`node -e "require('child_process').execSync('gh pr create --fill')"`, true},
+		{`python3 -c "import os; os.system('git -C . push origin HEAD')"`, true},
+		{`python3 -c "import subprocess; subprocess.run(['git', '-c', 'k=v', 'push'])"`, true},
+		{`bash <<< "git push"`, true},
+		{`ruby -e 'system "git push origin HEAD"'`, true},
+		{"source /dev/stdin <<< 'git push origin HEAD'", true},
+		{`git -c alias.publish='!git push origin HEAD' publish`, true},
+		{`git -c core.editor='git push origin HEAD; true' commit --allow-empty`, true},
+		{`printf 'git push origin HEAD\n' | sed -n e`, true},
+		{`printf 'git push origin HEAD\n' | (cd .; sh)`, true},
+		{`printf 'git push origin HEAD\n' | grep push`, false},
+		{`bash -c 'source /dev/stdin' <<< 'git push origin HEAD'`, true},
+		{`git "push" origin HEAD`, true},
+		{`git -C . 'push'`, true},
+		{`gh "pr" "create" --fill`, true},
+		{"source /dev/stdin <<'EOF'\ngit push origin HEAD\nEOF", true},
+		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; sh /tmp/push.sh", true},
+		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; source /tmp/push.sh", true},
+		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; . /tmp/push.sh", true},
+		{`bash -c "$(printf 'git push origin HEAD')"`, true},
+		{"printf '#!/bin/sh\\ngit push origin HEAD\\n' > /tmp/p.sh; chmod +x /tmp/p.sh; /tmp/p.sh", true},
+		{`cd docs && git commit -m "explain git push"`, false},
+		{`eval "$(echo 'git push origin HEAD')"`, true},
+		{"printf 'import os; os.system(\"git push\")' > /tmp/p.py && python3 /tmp/p.py", true},
+		{"cat > script.sh <<EOF\necho '$(git push origin HEAD)'\nEOF", true},
+		{`GIT_EDITOR='git push origin HEAD #' git commit --allow-empty`, true},
+		{`printf 'git push origin HEAD' | python3 -c 'import os,sys; os.system(sys.stdin.read())'`, true},
+		{"sed -n 'e git push origin HEAD' /etc/hosts", true},
+		{`make deploy ARGS="git push origin HEAD"`, true},
+		{`python3 -c"import os; os.system('git push origin HEAD')"`, true},
 	} {
 		if got := pushCommand(tc.cmd); got != tc.want {
 			t.Errorf("%q: got %v", tc.cmd, got)
@@ -159,6 +208,191 @@ func TestGateBlocksForgedApprovals(t *testing.T) {
 		}
 		if tc.blocked && !strings.Contains(errOut.String(), "slopcop override") {
 			t.Errorf("%s: reason %q", tc.command, errOut.String())
+		}
+	}
+}
+
+// TestForgedApproval covers which commands that name the approval refs or
+// the state directory the gate blocks: those that could write, remove or
+// read them. Commands that only carry the name as text pass.
+func TestForgedApproval(t *testing.T) {
+	blocked := []string{
+		// git's ref plumbing, porcelain and reads.
+		"git update-ref refs/slopcop/reviewed/abc abc",
+		"git update-ref -d refs/slopcop/reviewed/abc",
+		"git -C ../other update-ref refs/slopcop/reviewed/abc abc",
+		"git update-ref --stdin <<EOF\nupdate refs/slopcop/reviewed/abc abc\nEOF",
+		"printf 'update refs/slopcop/reviewed/abc abc\\n' | git update-ref --stdin",
+		"echo refs/slopcop/reviewed/abc | xargs -I{} git update-ref {} abc",
+		"T=refs/slopcop/reviewed/abc; git update-ref $T abc",
+		"git branch -f refs/slopcop/reviewed/abc abc",
+		"git tag refs/slopcop/reviewed/abc abc",
+		"git symbolic-ref refs/slopcop/reviewed/abc refs/heads/main",
+		"git for-each-ref refs/slopcop",
+		"git show-ref refs/slopcop/reviewed/abc",
+		"git log refs/slopcop/reviewed/abc",
+		"git grep pattern refs/slopcop/reviewed/abc",
+		"git fetch . +HEAD:refs/slopcop/reviewed/abc",
+		// Files under .git.
+		"echo abc > .git/refs/slopcop/reviewed/abc",
+		"echo abc >.git/refs/slopcop/reviewed/abc",
+		`echo "abc refs/slopcop/reviewed/abc" >> .git/packed-refs`,
+		"echo abc | tee .git/refs/slopcop/reviewed/abc",
+		"echo 'abc refs/slopcop/reviewed/abc' | tee -a .git/packed-refs",
+		"cp /tmp/x .git/refs/slopcop/reviewed/abc",
+		"mv /tmp/x .git/refs/slopcop/reviewed/abc",
+		"mkdir -p .git/refs/slopcop/reviewed",
+		"ln -s ../heads/main .git/refs/slopcop/reviewed/abc",
+		"find .git/refs/slopcop -delete",
+		"sed -i 's/x/refs\\/slopcop\\/reviewed\\/abc/' .git/packed-refs",
+		"cat > .git/refs/slopcop/reviewed/abc <<EOF\nabc\nEOF",
+		"cat <<EOF > .git/refs/slopcop/reviewed/abc\nabc\nEOF",
+		// Removing the state that arms the gate.
+		"rm -rf .git/slopcop",
+		"rm -rf .git/refs/slopcop",
+		"mv .git/slopcop /tmp/off",
+		`rm -rf .git\slopcop`,
+		// Reads of the state.
+		"cat .git/slopcop/state.json",
+		"ls .git/refs/slopcop/reviewed",
+		"grep -r abc .git/slopcop",
+		"head < .git/slopcop/state.json",
+		// Code that runs one of these.
+		"bash -c 'git update-ref refs/slopcop/reviewed/abc abc'",
+		"bash -lc \"rm -rf .git/slopcop\"",
+		"sh <<'EOF'\ngit update-ref refs/slopcop/reviewed/abc abc\nEOF",
+		"echo 'git update-ref refs/slopcop/reviewed/abc abc' | sh",
+		`eval "git update-ref refs/slopcop/reviewed/abc abc"`,
+		"python3 - <<'EOF'\nopen('.git/refs/slopcop/reviewed/abc', 'w').write('abc')\nEOF",
+		"python3 - <<'EOF'\nimport subprocess\nsubprocess.run(['git', 'update-ref', 'refs/slopcop/reviewed/abc', 'abc'])\nEOF",
+		`python3 -c "import shutil; shutil.rmtree('.git/slopcop')"`,
+		"python3 write.py refs/slopcop/reviewed/abc",
+		"echo refs/slopcop/reviewed/abc | python3 write.py",
+		`node -e "require('fs').writeFileSync('.git/refs/slopcop/reviewed/abc', 'abc')"`,
+		// A variable or substitution that carries the path.
+		`state=.git/slopcop; rm -rf "$state"`,
+		"T=refs/slopcop/reviewed/abc; cat > .git/$T",
+		"cat <<EOF\n$(rm -rf .git/slopcop)\nEOF",
+		"cat <<EOF\n`git update-ref refs/slopcop/reviewed/abc abc`\nEOF",
+		`ref=.git/refs/slopcop/reviewed/abc; echo abc > "$ref"`,
+		`STATE=.git/slopcop python3 -c 'import os, shutil; shutil.rmtree(os.environ["STATE"])'`,
+		"cat <<E'OF'\nrefs/slopcop\nEOF\nrm -rf .git/slopcop",
+		"cat <<\\EOF\nrefs/slopcop\nEOF\nrm -rf .git/slopcop",
+		"gh release download v1 --pattern x -Ointernal/../.git/refs/slopcop/reviewed/abc",
+		`ref=.git/refs/slopcop/reviewed/abc; printf '%s\n' abc | sed -n "w $ref"`,
+		"echo refs/slopcop\\ #; rm -rf .git/slopcop",
+		"printf 'rm -rf .git/slopcop\\n' | env sh",
+		"grep -l refs/slopcop docs | sudo tee .git/slopcop/x",
+		`python3 -c 'import subprocess; subprocess.run(["git", "fetch", ".", "HEAD:refs/slopcop/reviewed/abc"])'`,
+		"echo $[1 << true ]\nrm -rf .git/slopcop\ntrue",
+		"echo $((1 << 2)) refs/slopcop\nrm -rf .git/slopcop",
+		"echo refs/slopcop \\\n# <<EOF\nrm -rf .git/slopcop\nEOF",
+		"echo refs/slopcop\\\n#text; rm -rf .git/slopcop",
+		"echo refs/slopcop <<EOF \"a\nb\"; rm -rf .git/slopcop\nEOF",
+		"echo $((1\n<< 1))\nrm -rf .git/slopcop refs/slopcop",
+		"python3 /tmp/approve.py <<EOF\nrefs/slopcop/reviewed/abc abc\nEOF",
+		"bash /tmp/approve.sh <<EOF\nrefs/slopcop/reviewed/abc abc\nEOF",
+		"printf 'HEAD:refs/slopcop/reviewed/abc\\n' | git fetch --stdin .",
+		"rg --files -uuu .git/refs/slopcop/reviewed",
+		"printf %s .git/slopcop | python3 -c 'import shutil,sys; shutil.rmtree(sys.stdin.read())'",
+		`rg -c refs/slopcop | python3 -c "import sys; print(len(sys.stdin.readlines()))"`,
+		"printf 'rm -rf .git/slopcop\\n' | sed e",
+		"printf 'rm -rf .git/slopcop\\n' | sed 's/^//e'",
+		"printf 'rm -rf .git/slopcop\\n' | sed 's|^||e'",
+		"printf 'rm -rf .git/slopcop\\n' | sed 's|.*|&|e'",
+		"printf 'rm -rf .git/slopcop\\n' | sed 'sX^XXe'",
+		"printf 'rm -rf .git/slopcop\\n' | sed ' e'",
+		"printf 'rm -rf .git/slopcop\\n' | sed 's/^//ep'",
+		"printf %s .git/slopcop | (cd .; python3 -c 'import shutil,sys; shutil.rmtree(sys.stdin.read())')",
+		`printf '%s\n' .git/slopcop | awk 'BEGIN {getline p; system("rm -rf " p)}'`,
+		"grep --exclude-from .git/slopcop/config pattern docs/",
+		"printf '#!/bin/sh\\nrm -rf .git/slopcop\\n' > /tmp/r.sh; chmod +x /tmp/r.sh; /tmp/r.sh",
+		"printf 'rm -rf .git/slopcop\\n' | sed 's|^|| e'",
+		`awk 'BEGIN {ARGV[1]=".git/slopcop/last.json"; ARGC=2} {print}'`,
+		`printf %s .git/slopcop | bash -c 'cd .; python3 -c "import shutil,sys; shutil.rmtree(sys.stdin.read())"'`,
+		"printf %s .git/slopcop | (python3 -c 'import shutil,sys; shutil.rmtree(sys.stdin.read())')",
+		"printf 'e rm -rf .git/slopcop\\n' | sed -f /dev/stdin /etc/hosts",
+		`printf %s .git/slopcop | bash -c 'python3 -c "import shutil,sys; shutil.rmtree(sys.stdin.read())"'`,
+		"python3 -c 'import shutil,sys; shutil.rmtree(sys.stdin.read().strip())' <<< .git/slopcop",
+		`bash <<< "rm -rf .git/slopcop"`,
+		"rg --ignore-file .git/slopcop/config.json needle docs/",
+		"printf 'rm -rf .git/slopcop\\n' | . /dev/stdin",
+		"printf 'rm -rf .git/slopcop\\n' | source /dev/stdin",
+		"echo refs/slopcop/reviewed/abc | python3 -E approve.py",
+		// Heredocs whose end the gate cannot be sure of.
+		"sh <<'A' <<'B'\necho '\nA\nrm -rf .git/slopcop\nB",
+		"cat <<$'EOF'\nEOF\nrm -rf .git/slopcop refs/slopcop",
+		"cat <<EOF\nrefs/slopcop\nEO\\\nF\nrm -rf .git/slopcop\nEOF",
+		"echo $((1 + ((1)) << 2))\nrm -rf .git/slopcop refs/slopcop\n2",
+		"cat <<EOF\nrefs/slopcop\nrm -rf .git/slopcop",
+		// A comment hides nothing from the shell.
+		"echo refs/slopcop$(true)#text; rm -rf .git/slopcop",
+		"echo refs/slopcop # don't touch state\nrm -rf .git/slopcop",
+		"echo refs/slopcop # cat <<EOF\nrm -rf .git/slopcop\nEOF",
+		// A glued value is not a cluster of text options.
+		"gh release download v1 -O.git/refs/slopcop/reviewed/abc",
+		"grep -f.git/slopcop/state.json file",
+		// gh options that read or write files.
+		"gh release download v1 --pattern x --output .git/refs/slopcop/reviewed/abc",
+		"gh pr create --title x --body-file .git/slopcop/state.json",
+		// A text tool in a line that also writes.
+		"grep -rn refs/slopcop docs && git update-ref refs/slopcop/reviewed/abc abc",
+		`gh pr create --body "refs/slopcop" ; echo abc > .git/refs/slopcop/reviewed/abc`,
+	}
+	allowed := []string{
+		// Search patterns.
+		`grep -rn "refs/slopcop" docs/`,
+		"rg refs/slopcop internal",
+		"rg -n -e 'refs/slopcop/review-only' -e '.git/slopcop' docs skills",
+		`ag "refs/slopcop" .`,
+		"rg -g '*.go' 'refs/slopcop' internal/",
+		"grep -rn --include '*.md' -C 2 refs/slopcop docs",
+		"echo refs/slopcop # it's only text",
+		"git grep -n refs/slopcop -- docs",
+		`git log --grep "refs/slopcop" --oneline`,
+		"git log -S'refs/slopcop/review-only' -p",
+		// Text sent elsewhere.
+		`gh pr create --title "Gate" --body "Adds refs/slopcop/review-only/<tree> beside .git/slopcop"`,
+		"gh pr create --title Gate --body \"$(cat <<'EOF'\nThe gate blocks `git update-ref refs/slopcop/...` and `rm -rf .git/slopcop`.\nDon't worry: it's fine.\nEOF\n)\"",
+		`gh issue comment 239 --body "see refs/slopcop/review-only"`,
+		`gh pr edit 244 -b "see .git/slopcop" -t "Gate: refs/slopcop"`,
+		"gh pr create --title Gate --body \"$(cat <<EOF\nAdds refs/slopcop/review-only, no substitutions here.\nEOF\n)\"",
+		`git commit -m "Gate: mark refs/slopcop/review-only trees"`,
+		`git commit -am "drop .git/slopcop mentions"`,
+		"git commit -F- <<'EOF'\nKeep refs/slopcop/reviewed when rm -rf .git/slopcop runs\nEOF",
+		`echo "the approval lives at refs/slopcop/reviewed/<tree>"`,
+		`printf '%s\n' refs/slopcop/review-only`,
+		"echo refs/slopcop/x 2>&1 | head -1",
+		// Reading and editing ordinary files that mention them.
+		"sed -n '/refs\\/slopcop/p' docs/src/content/docs/reference/cli.md",
+		"grep -rn refs/slopcop docs | sed 's/^docs\\///'",
+		"grep -rn refs/slopcop docs | awk -F: '{print $1}'",
+		"sed -i '' 's/refs\\/slopcop\\/old/refs\\/slopcop\\/new/' docs/cli.md",
+		"cat > docs/notes.md <<'EOF'\nThe gate reads refs/slopcop/reviewed/<tree> and .git/slopcop.\nEOF",
+		// Scripts whose code only carries the name.
+		"python3 - <<'EOF'\nimport re\np = 'internal/cli/gate.go'\ns = open(p).read()\ns = s.replace('refs/slopcop/reviewed/', 'refs/slopcop/review-only/')\nopen(p, 'w').write(s)\nEOF",
+		`python3 -c "print('refs/slopcop')"`,
+		`bash -c "grep -rn refs/slopcop docs"`,
+		"bash -o pipefail -c 'echo refs/slopcop'",
+		`python3 -W ignore -c "print('refs/slopcop')"`,
+		"python3 -W ignore - <<'EOF'\nprint('refs/slopcop')\nEOF",
+		`python3 -E -c "print('refs/slopcop')"`,
+		// Neither named.
+		"git log refs/heads/slopcop-fix",
+		"slopcop check --format json",
+		"git update-ref refs/heads/topic HEAD",
+		"rm -rf .git/info/exclude.bak",
+		"cat .git/HEAD",
+		"echo '<<EOF' && echo refs/slopcop",
+	}
+	for _, command := range blocked {
+		if !forgedApproval(command) {
+			t.Errorf("allowed, want blocked: %q", command)
+		}
+	}
+	for _, command := range allowed {
+		if forgedApproval(command) {
+			t.Errorf("blocked, want allowed: %q", command)
 		}
 	}
 }

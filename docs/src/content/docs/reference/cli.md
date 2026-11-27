@@ -359,8 +359,26 @@ have run, as around `||`, every directory the push could run in is judged; a
 the directory depends on the shell (`cd $DIR`, `cd -`, `popd`) or does not
 exist yet, the gate cannot tell what would be pushed, so it blocks the push when SlopCop guards
 the session's repository, a repository the push runs in, or one the command
-names (such as the source of a `cp -r`). It also blocks any shell
-command that names `refs/slopcop/` or `.git/slopcop`.
+names (such as the source of a `cp -r`).
+
+It also blocks a shell command that could write, remove or read
+`refs/slopcop/` or `.git/slopcop`, where approvals and gate state are kept:
+`git update-ref` and other git commands given those refs, `rm`, `mv`, `cp`,
+`tee` and other commands given a path under `.git`, and any redirection to or
+from one. A command that only carries the name as text passes: a `grep`,
+`rg` or `git grep` pattern, `echo` and `printf`, `gh` arguments such as a
+pull request body, a `git commit` message, a `git log --grep` or `-S` value,
+a `sed` script that runs and writes nothing, and readers such as `cat` and
+`head` of other files. Code given to a shell (`bash -c`, `eval`, a heredoc)
+is judged by the same rules, and code given to Python, Node, Ruby or Perl
+with `-c`, `-e` or a heredoc passes unless it names `update-ref`,
+`symbolic-ref`, `packed-refs`, `--stdin`, a `.git` path or a refspec into
+those refs. Once a command line names them, it also blocks a command on it
+that runs `update-ref`, `symbolic-ref` or `--stdin`, a variable standing
+where a path goes (`rm -rf "$dir"`), and anything that runs code it reads
+from a pipe or a script file (`| sh`, `| python3 -c ...`, `python3
+script.py`, `xargs`, `env`, `sudo`), since a pipe or variable can carry the
+ref to it. A heredoc whose end the gate cannot be sure of blocks the line.
 
 ## `slopcop review show`
 

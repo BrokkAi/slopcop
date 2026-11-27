@@ -65,11 +65,17 @@ checking a dirty tree, commit exactly that state before pushing.
 The gate is a guard for the agent's workflow, not a security boundary. It
 checks HEAD in the directory Claude Code runs the command from: it does not
 follow `cd` or `git -C` in the command, read the pushed refspecs, or expand
-shell aliases. It matches commands by text, so it can also block a command
-that only mentions `git push`. Pushes from your own terminal are not affected.
-It also blocks any command that names `refs/slopcop/` or `.git/slopcop`, where
-approvals and gate state are kept, so the agent cannot forge an approval or
-turn the gate off.
+shell aliases. It matches commands by text, so it can also block an unquoted
+mention such as `echo git push`; `git push` inside a quoted argument (a commit
+message, a `sed` script) or a heredoc of data does not count, while code the
+command runs (`bash -c`, `eval`, a heredoc fed to a shell) does. Pushes from
+your own terminal are not affected.
+It also blocks any command that could write, remove or read `refs/slopcop/` or
+`.git/slopcop`, where approvals and gate state are kept, so the agent cannot
+forge an approval or turn the gate off. A command that only mentions them as
+text, such as a `grep` pattern or a pull request body, passes; see the
+[CLI reference](/reference/cli/#slopcop-config-and-slopcop-override) for
+the rule.
 The gate activates after a check creates SlopCop state in a repository, so a
 machine-wide install does not block unrelated projects.
 
