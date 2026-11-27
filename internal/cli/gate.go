@@ -203,7 +203,7 @@ func pushRuns(text, body string, piped bool, line string, depth int) bool {
 	case name == "eval":
 		return pushIn(strings.Join(args, " "), depth+1)
 	case shells[name]:
-		code, _, inline, _ := codeArgs(args, func(a string) bool {
+		code, _, inline, script := codeArgs(args, func(a string) bool {
 			return strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c")
 		}, "oO", map[string]bool{"--rcfile": true, "--init-file": true})
 		if inline {
@@ -211,12 +211,20 @@ func pushRuns(text, body string, piped bool, line string, depth int) bool {
 			// heredoc in body.
 			return pushIn(code, depth+1) || piped && raw(line) || raw(body)
 		}
-		return pushIn(body, depth+1) || piped && raw(line)
+		// A script file may be one the line wrote: printf ... > x.sh; sh x.sh.
+		return pushIn(body, depth+1) || (piped || script) && raw(line)
 	case interpreter(name):
 		// The whole command, not only the -c value, so glued code such
 		// as -c"..." counts too.
 		code := text + "\n" + body
 		// Code that runs a process may run what a pipe carries.
+		_, _, _, script := codeArgs(args, func(a string) bool {
+			return a == "-c" || a == "-e" || a == "-E" && name == "perl" || a == "--eval"
+		}, "WXr", map[string]bool{"--require": true, "--import": true})
+		if script && raw(line) {
+			// A script file may be one the line wrote.
+			return true
+		}
 		return spawnsProcess.MatchString(code) && (interpreterPush.MatchString(code) || piped && raw(line))
 	}
 	return false

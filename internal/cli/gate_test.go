@@ -87,6 +87,8 @@ func TestGatePushCommands(t *testing.T) {
 		{`git -C . 'push'`, true},
 		{`gh "pr" "create" --fill`, true},
 		{"source /dev/stdin <<'EOF'\ngit push origin HEAD\nEOF", true},
+		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; sh /tmp/push.sh", true},
+		{"printf 'import os; os.system(\"git push\")' > /tmp/p.py && python3 /tmp/p.py", true},
 		{"cat > script.sh <<EOF\necho '$(git push origin HEAD)'\nEOF", true},
 		{`GIT_EDITOR='git push origin HEAD #' git commit --allow-empty`, true},
 		{`printf 'git push origin HEAD' | python3 -c 'import os,sys; os.system(sys.stdin.read())'`, true},
