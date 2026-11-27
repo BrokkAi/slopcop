@@ -90,6 +90,8 @@ func TestGatePushCommands(t *testing.T) {
 		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; sh /tmp/push.sh", true},
 		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; source /tmp/push.sh", true},
 		{"printf 'git push origin HEAD\\n' > /tmp/push.sh; . /tmp/push.sh", true},
+		{`bash -c "$(printf 'git push origin HEAD')"`, true},
+		{`eval "$(echo 'git push origin HEAD')"`, true},
 		{"printf 'import os; os.system(\"git push\")' > /tmp/p.py && python3 /tmp/p.py", true},
 		{"cat > script.sh <<EOF\necho '$(git push origin HEAD)'\nEOF", true},
 		{`GIT_EDITOR='git push origin HEAD #' git commit --allow-empty`, true},

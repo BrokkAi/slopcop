@@ -53,6 +53,12 @@ func pushIn(command string, depth int) bool {
 	}
 	stripped, docs := stripHeredocs(command)
 	piped := false
+	// quiet says every command so far only reads its words as text: an
+	// inert command, or interpreter code that starts no process. Quoted
+	// text is skipped only on a quiet line; anywhere else a command could
+	// run what another one wrote or printed, so the line is matched whole,
+	// as the old text match did.
+	quiet := true
 	for _, seg := range segments(stripped) {
 		var body strings.Builder
 		for _, doc := range docs {
@@ -90,8 +96,14 @@ func pushIn(command string, depth int) bool {
 		// Once a pipe starts, later commands may share it, as in a
 		// subshell: printf ... | (cd x; sh).
 		piped = piped || seg.next == "|"
+		if quiet && strings.TrimSpace(seg.text) != "" && !inertCommand(seg.text) {
+			name, _ := commandName(seg.text)
+			code := seg.text + "\n" + body.String()
+			quiet = name != "" && interpreter(name) && !spawnsProcess.MatchString(code) ||
+				!runsCodeWords(seg.text) && !shellAssignment.MatchString(strings.TrimSpace(seg.text)) && !strings.Contains(seg.text, "$")
+		}
 	}
-	return false
+	return !quiet && pipedPush.MatchString(command)
 }
 
 // quotedPush reports whether a git or gh command pushes once the shell
