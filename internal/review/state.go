@@ -287,43 +287,61 @@ func (r Record) StaticRunFailedOnly() bool {
 // complete review, and a static half that blocks only because its analyzer
 // run failed when the review passed or its findings are accepted with it.
 func (s *Store) Override(reason, currentTree string) error {
-	if strings.TrimSpace(reason) == "" {
-		return errors.New("override requires a nonempty reason")
-	}
+	return s.override(reason, currentTree, nil)
+}
+
+// overridable returns the latest record when an override may accept it for
+// currentTree, and why not otherwise. It writes nothing.
+func (s *Store) overridable(currentTree string) (*Record, error) {
 	r, err := s.Last()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if r == nil {
-		return errors.New("override requires complete findings")
+		return nil, errors.New("override requires complete findings")
 	}
 	if r.StaticRequired {
-		return ErrStaticRequired
+		return nil, ErrStaticRequired
 	}
 	runFailed := r.StaticRunFailedOnly()
 	if r.StaticExit != nil && r.StaticBlocksPush && !runFailed {
 		if r.StaticStatus == "findings" {
-			return errors.New("static finding at or above the push block level does not allow override")
+			return nil, errors.New("static finding at or above the push block level does not allow override")
 		}
-		return fmt.Errorf("static status %s does not allow override", r.StaticStatus)
+		return nil, fmt.Errorf("static status %s does not allow override", r.StaticStatus)
 	}
 	// The check recorded runFailed only beside a review it judged to pass,
 	// an empty one included, or whose findings are overridable.
 	if !r.Verdict.Overridable() && !runFailed {
-		return errors.New("override requires complete findings")
+		return nil, errors.New("override requires complete findings")
 	}
 	if currentTree != r.Capture.Tree {
-		return errors.New("working tree differs from reviewed tree")
+		return nil, errors.New("working tree differs from reviewed tree")
 	}
 	// The review may have left a finding out, or its reviewers may have been
 	// told to, because of a finding override since undone.
 	if hold, err := OverridesHold(s.root, r.Verdict); err != nil {
-		return err
+		return nil, err
 	} else if !hold {
-		return errors.New("a finding override this review relied on was undone since; run slopcop check again before overriding")
+		return nil, errors.New("a finding override this review relied on was undone since; run slopcop check again before overriding")
+	}
+	return r, nil
+}
+
+// override is Override, recording the proposal it accepts when there is one.
+func (s *Store) override(reason, currentTree string, proposal *AcceptedProposal) error {
+	if strings.TrimSpace(reason) == "" {
+		return errors.New("override requires a nonempty reason")
+	}
+	r, err := s.overridable(currentTree)
+	if err != nil {
+		return err
+	}
+	if proposal != nil && !proposal.matches(*r) {
+		return ErrProposalStale
 	}
 	accepted := *r
-	accepted.Accepted = &AcceptedOverride{Reason: strings.TrimSpace(reason), Time: time.Now().UTC()}
+	accepted.Accepted = &AcceptedOverride{Reason: strings.TrimSpace(reason), Time: time.Now().UTC(), Proposal: proposal}
 	f, err := os.OpenFile(filepath.Join(s.dir, overrideLog), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 	if err != nil {
 		return err

@@ -303,4 +303,7 @@ type Record struct {
 type AcceptedOverride struct {
 	Reason string    `json:"reason"`
 	Time   time.Time `json:"time"`
+	// Proposal is set when a person accepted it with `slopcop override
+	// --accept` from a proposal an agent recorded with --propose.
+	Proposal *AcceptedProposal `json:"proposal,omitempty"`
 }

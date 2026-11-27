@@ -669,6 +669,19 @@ accepted it. Read such an entry, as for `match: words` above: if it is a
 different problem, fix it. Edit those lines and the findings can come back.
 Prefer overriding the one wrong finding.
 
+**Propose it for the user to accept: `slopcop override --propose --reason
+"concrete explanation"`.** When a permission check refuses
+`slopcop override --reason` (Claude Code's auto mode does), or the user wants
+to approve overrides themselves, propose the whole-review override instead. It
+checks that the override could be accepted now, records it with the reason, and
+approves nothing. Then tell the user the findings, your reason, and the one
+command that accepts it: `slopcop override --accept` (in Claude Code they type
+`! slopcop override --accept`). Never run `--accept` yourself: the gate blocks
+it, and the decision is theirs. Wait for them before you push. If you change
+the tree or check again before they accept, the proposal no longer applies;
+propose again. `slopcop override --pending` lists what waits for them, and the
+push gate's refusal names a pending proposal for HEAD's tree.
+
 Never override a real bug the user has not agreed to defer (see "Know when to
 stop" above), a reviewer timeout, a failed or incomplete review, or a different tree.
 Do not switch reviewers or reduce the count to bypass a failure. Tell the user every review finding you overrode and why.
@@ -685,8 +698,9 @@ The push gate, in Claude Code, Codex, Grok, and Copilot CLI, blocks `git push`,
 `gh pr create`, and GitHub MCP tools that push files or open a pull request
 until HEAD has exactly that tree. Copilot CLI does not pass on the gate's
 reason: there, a push "Denied by preToolUse hook" is the gate. Never write, read, or delete `refs/slopcop/`
-or `.git/slopcop` yourself; the gate blocks any command that could. Naming
-them as text is fine: a `grep` pattern, `echo`, a `gh` body, a commit message.
+or `.git/slopcop` yourself; the gate blocks any command that could, and blocks
+`slopcop override --accept`, which only the user runs. Naming them as text is
+fine: a `grep` pattern, `echo`, a `gh` body, a commit message.
 After checking a dirty tree, commit exactly that state,
 including untracked files, before pushing. The gate judges a whole command
 line before any of it runs. It lets `slopcop override --reason "..." && git push`

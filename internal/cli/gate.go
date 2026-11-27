@@ -15,6 +15,7 @@ import (
 
 	"github.com/BrokkAi/slopcop/internal/config"
 	"github.com/BrokkAi/slopcop/internal/gitx"
+	"github.com/BrokkAi/slopcop/internal/report"
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/spf13/cobra"
 )
@@ -260,6 +261,50 @@ func maskQuoted(text string) string {
 	return string(out)
 }
 
+// overrideWord and acceptWord match the override subcommand and its --accept
+// flag as shellWords gives them, which may run on into a shell operator, as in
+// `--accept;`, and may keep the $ of an ANSI-C quote, as in $'--accept'.
+var (
+	overrideWord = regexp.MustCompile("^\\$?override(?:$|[;&|()<>`])")
+	acceptWord   = regexp.MustCompile("^\\$?--accept(?:$|=|[;&|()<>`])")
+)
+
+// acceptsProposal reports whether a command accepts a proposed override. An
+// agent proposes an override with --propose and a person accepts it; the
+// hook refuses the agent's own --accept so that the decision stays theirs.
+// Like forgedApproval, it guards against an agent's shortcut, not an attacker.
+func acceptsProposal(command string) bool {
+	// The shell drops a backslash-newline, joining the word around it. The
+	// line is read whole, not split at separators that may sit in quotes: an
+	// unrelated command beside it that names all three is blocked too.
+	var slopcop, override, accept bool
+	for _, word := range shellWords(strings.ReplaceAll(command, "\\\n", "")) {
+		switch {
+		case strings.ContainsAny(word, " \t\n"):
+			// A quoted word with spaces is an argument value, such as a
+			// reason, or a command for a shell (bash -c '...') judged alone.
+			if acceptsProposal(word) {
+				return true
+			}
+			if strings.Contains(strings.ToLower(word), "slopcop") {
+				slopcop = true
+			}
+		case acceptWord.MatchString(word):
+			accept = true
+		case overrideWord.MatchString(word):
+			override = true
+		case strings.Contains(strings.ToLower(word), "slopcop"):
+			// slopcop, ./bin/slopcop, slopcop.exe, brokk_slopcop
+			slopcop = true
+		}
+	}
+	return slopcop && override && accept
+}
+
+// acceptByAgentText is the reason an agent's `slopcop override --accept` is
+// blocked.
+const acceptByAgentText = "slopcop: blocked: only the user accepts a proposed override, so an agent may not run `slopcop override --accept`. Ask the user to run `slopcop override --accept` themselves (in Claude Code they type `! slopcop override --accept`), and wait for them"
+
 // unsureTargetText is the reason a push is blocked when the gate cannot read
 // which repository it would push, by why.
 var unsureTargetText = map[string]string{
@@ -327,7 +372,22 @@ func gateTree(root string) error {
 	if err == nil && reviewed == tree {
 		return reviewOnlyStillStands(root, tree)
 	}
-	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there, then push: as its own command, or joined to the push with && (`slopcop override --reason \"...\" && git push`)", tree, root, root)
+	if p, ok := pendingProposal(root, tree); ok {
+		return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check, and override %s proposed for it waits for the user (reason: %s). Ask the user to accept it by running `slopcop override --accept` in %s (in Claude Code: `! slopcop override --accept`); you cannot run it yourself. Then push", tree, root, p.ID, report.Printable(p.Reason), root)
+	}
+	return fmt.Errorf("slopcop: push blocked: HEAD's tree %s in %s has no passing slopcop check. The check approves exactly the content it saw: commit the checked state unchanged (or check the committed state), run `slopcop check` in %s until it approves the tree (see the slopcop skill), or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"` there, then push: as its own command, or joined to the push with && (`slopcop override --reason \"...\" && git push`). An agent that may not run it proposes one with `slopcop override --propose --reason \"...\"` for the user to accept", tree, root, root)
+}
+
+// pendingProposal returns the newest proposed override for tree that waits
+// for a person, if any. An unreadable proposal log is read as none.
+func pendingProposal(root, tree string) (review.Proposal, bool) {
+	pending, _ := review.PendingProposals(root)
+	for _, p := range pending {
+		if p.Tree == tree {
+			return p, true
+		}
+	}
+	return review.Proposal{}, false
 }
 
 // reviewOnlyStillStands refuses an approval that a review alone gave, from
@@ -404,6 +464,9 @@ rather than allowing an unchecked push.`,
 				case shellTools[input.ToolName]:
 					if forgedApproval(input.ToolInput.Command) {
 						return gateBlock(cmd, errors.New(forgedApprovalText))
+					}
+					if acceptsProposal(input.ToolInput.Command) {
+						return gateBlock(cmd, errors.New(acceptByAgentText))
 					}
 					if !pushCommand(input.ToolInput.Command) {
 						return nil
