@@ -131,7 +131,7 @@ func (s *Store) Propose(reason, currentTree string) (Proposal, error) {
 	return p, s.appendProposalEvent(proposalEvent{Proposal: &p, Time: p.Time})
 }
 
-// Accept accepts the latest proposed override, as Override would with its
+// Accept accepts the latest proposed override for the latest check record, as Override would with its
 // reason, and records on the override that it came from that proposal. It
 // refuses when the working tree or the review changed since the proposal.
 // Only a person runs it: the push gate's hook refuses it from an agent.
@@ -140,27 +140,32 @@ func (s *Store) Accept(currentTree string) (Proposal, error) {
 	if err != nil {
 		return Proposal{}, err
 	}
-	var latest *Proposal
-	for i := len(proposals) - 1; i >= 0; i-- {
-		if proposals[i].open() {
-			latest = &proposals[i]
-			break
-		}
-	}
-	if latest == nil {
-		return Proposal{}, ErrNoProposal
-	}
 	r, err := s.Last()
 	if err != nil {
 		return Proposal{}, err
 	}
-	if r != nil && r.Accepted != nil {
-		return Proposal{}, ErrAlreadyAccepted
+	// The newest open proposal for the latest check record: the one
+	// PendingProposals lists first.
+	var latest *Proposal
+	open := false
+	for i := len(proposals) - 1; i >= 0 && latest == nil; i-- {
+		if !proposals[i].open() {
+			continue
+		}
+		open = true
+		if r != nil && proposals[i].accepted().matches(*r) {
+			latest = &proposals[i]
+		}
 	}
-	accepted := latest.accepted()
-	if r == nil || !accepted.matches(*r) || latest.Tree != currentTree {
+	switch {
+	case !open:
+		return Proposal{}, ErrNoProposal
+	case r != nil && r.Accepted != nil:
+		return Proposal{}, ErrAlreadyAccepted
+	case latest == nil || latest.Tree != currentTree:
 		return Proposal{}, ErrProposalStale
 	}
+	accepted := latest.accepted()
 	if err = s.override(latest.Reason, currentTree, &accepted); err != nil {
 		return Proposal{}, err
 	}
