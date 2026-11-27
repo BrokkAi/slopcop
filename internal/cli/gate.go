@@ -99,8 +99,9 @@ func pushIn(command string, depth int) bool {
 		if quiet && strings.TrimSpace(seg.text) != "" && !inertCommand(seg.text) {
 			name, _ := commandName(seg.text)
 			code := seg.text + "\n" + body.String()
-			quiet = name != "" && interpreter(name) && !spawnsProcess.MatchString(code) ||
-				!runsCodeWords(seg.text) && !shellAssignment.MatchString(strings.TrimSpace(seg.text)) && !strings.Contains(seg.text, "$")
+			// Any other command may run a file the line wrote:
+			// printf ... > x; chmod +x x; ./x.
+			quiet = quietBuiltins[name] || interpreter(name) && !spawnsProcess.MatchString(code)
 		}
 	}
 	return !quiet && pipedPush.MatchString(command)
@@ -126,6 +127,9 @@ func quotedPush(text string) bool {
 	}
 	return false
 }
+
+// quietBuiltins change no file a later command could run.
+var quietBuiltins = map[string]bool{"cd": true, "pushd": true, "popd": true, "true": true, "false": true, "test": true, "[": true, "pwd": true}
 
 // inertCommands never run their arguments or stdin as code, so a push in
 // their quoted arguments or heredoc is only text.
@@ -243,9 +247,10 @@ func pushRuns(text, body string, piped bool, line string, depth int) bool {
 	return false
 }
 
-// pipedPush matches a push anywhere in a line whose text a shell reads from
-// a pipe, quoted or not: echo "git push" | sh.
-var pipedPush = regexp.MustCompile(`\bgit\b[^\n|]*\bpush\b|\bgh\b[^\n|]*\bpr\s+create\b`)
+// pipedPush matches a push anywhere in a line whose text a command may run,
+// quoted or not: echo "git push" | sh, printf '...\ngit push' > x; ./x. The
+// git word stands alone (not git-lfs) or after a printf \n.
+var pipedPush = regexp.MustCompile(`(?:^|[^\w.-]|\\n)git\s[^\n|]*\bpush\b|(?:^|[^\w.-]|\\n)gh\s[^\n|]*\bpr\s+create\b`)
 
 // spawnsProcess matches interpreter code that runs another program.
 var spawnsProcess = regexp.MustCompile(`subprocess|os\.system|popen|Popen|spawn|child_process|execSync|execFile|\bexec[lv]?p?e?\b|\bsystem\b|Open3|IO\.popen|%x|qx|` + "`")

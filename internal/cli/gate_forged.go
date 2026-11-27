@@ -226,7 +226,11 @@ func forgedSegment(text, body string, piped bool, depth int) bool {
 		name = path.Base(filepath.ToSlash(name))
 	}
 	all := text + "\n" + body
-	if !namesApproval(all) && !refWriteHint.MatchString(all) && !slices.ContainsFunc(words, protectedPath) && !runsCode(name) && name != "sed" && !awkCommands[name] {
+	// A command run by its path (./x, /tmp/x) may be a script the line
+	// wrote, so it is classified too: a known tool by its base name, any
+	// other file blocked.
+	byPath := strings.ContainsAny(words[0], `/\`)
+	if !namesApproval(all) && !refWriteHint.MatchString(all) && !slices.ContainsFunc(words, protectedPath) && !runsCode(name) && name != "sed" && !awkCommands[name] && !byPath {
 		return false
 	}
 	args := words[1:]
