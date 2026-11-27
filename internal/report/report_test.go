@@ -940,9 +940,9 @@ func TestHumanCountsInconclusiveChecksAndVerboseNamesThem(t *testing.T) {
 
 	want = "No new findings | Analysis complete\n" +
 		"Inconclusive (never fail the check)\n" +
-		"  acme.a\n" +
+		"  acme.a (files not named, so it may concern the change)\n" +
 		"  acme.b (only files the change does not write)\n" +
-		"  acme.c\n" +
+		"  acme.c (files not named, so it may concern the change)\n" +
 		"  and 3 more\n"
 	if got := renderWith(t, unproven(), FormatHuman, Options{Verbose: true}); got != want {
 		t.Errorf("verbose human = %q, want %q", got, want)
@@ -1599,7 +1599,7 @@ func TestEveryFormatCarriesAnInconclusiveDetailAndTheCut(t *testing.T) {
 	detailed := unproven()
 	detailed.Inconclusive[0].Detail = "type=failed reasons=source_read_failed"
 
-	if got := renderWith(t, detailed, FormatHuman, Options{Verbose: true}); !strings.Contains(got, "  acme.a (type=failed reasons=source_read_failed)\n") {
+	if got := renderWith(t, detailed, FormatHuman, Options{Verbose: true}); !strings.Contains(got, "  acme.a (type=failed reasons=source_read_failed) (files not named, so it may concern the change)\n") {
 		t.Errorf("verbose human = %q", got)
 	}
 
@@ -1639,7 +1639,7 @@ func TestEveryFormatNamesTheFilesAnInconclusiveCheckConcerns(t *testing.T) {
 	for _, want := range []string{
 		"  acme.a in src/a.rs, src/b.rs\n",
 		"  acme.b in f1, f2, f3, f4, f5, and 2 more file(s) (only files the change does not write)\n",
-		"  acme.c\n",
+		"  acme.c (files not named, so it may concern the change)\n",
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("verbose human = %q, want %q", got, want)
@@ -2491,5 +2491,66 @@ func TestReviewMarksUnparsedReply(t *testing.T) {
 	writeReviewHuman(&out, verdict)
 	if !strings.Contains(out.String(), "    Not parsed: the reply has no `- [Pn]` finding") {
 		t.Fatalf("human: %q", out.String())
+	}
+}
+
+// BrokkAi/slopcop#141: when every inconclusive check concerns only files the
+// change does not write, the reports say the change itself was covered.
+func TestReportsSayTheChangeWasCoveredWhenEveryInconclusiveCheckIsElsewhere(t *testing.T) {
+	covered := response(service.StatusClean, "finding", []service.Finding{})
+	covered.Summary.Inconclusive = 2
+	covered.Summary.InconclusiveElsewhere = 2
+	elsewhere := []service.IncompletePolicy{
+		{PolicyID: "acme.a", Reason: "inconclusive", Files: []string{"lib/other.rs"}},
+		{PolicyID: "acme.b", Reason: "inconclusive", Files: []string{"lib/third.rs"}},
+	}
+	covered.Inconclusive = elsewhere
+	covered.InconclusiveElsewhere = elsewhere
+
+	want := "No new findings | Analysis complete\n" +
+		"Inconclusive: 2 check(s), all only about files the change does not write, " +
+		"so every check finished on the files the change writes; they never fail the check. --verbose names them.\n"
+	if got := render(t, covered, FormatHuman); got != want {
+		t.Errorf("human = %q, want %q", got, want)
+	}
+	if got := renderWith(t, covered, FormatHuman, Options{Verbose: true}); !strings.HasSuffix(got, "Every check finished on the files the change writes.\n") {
+		t.Errorf("verbose human = %q", got)
+	}
+	var document map[string]any
+	if err := json.Unmarshal([]byte(render(t, covered, FormatJSON)), &document); err != nil {
+		t.Fatalf("json: %v", err)
+	}
+	if document["changeCovered"] != true {
+		t.Errorf("changeCovered = %v", document["changeCovered"])
+	}
+
+	// Anything that leaves the change in doubt says nothing of the kind.
+	notCovered := map[string]service.Response{
+		"one in the change": unproven(),
+		"none inconclusive": response(service.StatusClean, "finding", []service.Finding{}),
+		"a check incomplete": func() service.Response {
+			r := covered
+			r.Status = service.StatusIncomplete
+			r.Summary.IncompletePolicies = 1
+			r.Incomplete = []service.IncompletePolicy{{PolicyID: "acme.slow", Reason: "timed_out"}}
+			return r
+		}(),
+		"more counted than listed": func() service.Response {
+			r := covered
+			r.Summary.Inconclusive = 3
+			return r
+		}(),
+	}
+	for name, r := range notCovered {
+		if got := render(t, r, FormatHuman); strings.Contains(got, "every check finished") {
+			t.Errorf("%s: human = %q", name, got)
+		}
+		var document map[string]any
+		if err := json.Unmarshal([]byte(render(t, r, FormatJSON)), &document); err != nil {
+			t.Fatalf("%s: json: %v", name, err)
+		}
+		if _, ok := document["changeCovered"]; ok {
+			t.Errorf("%s: changeCovered = %v", name, document["changeCovered"])
+		}
 	}
 }

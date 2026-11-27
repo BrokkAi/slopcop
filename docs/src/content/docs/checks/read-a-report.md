@@ -142,7 +142,12 @@ and the files it concerns. `json` lists them in `inconclusive`, each with
 `policyId`, `reason`, `detail` when the service sent one, `files` (the
 repository paths the rule could not finish proving, when the analyzer named
 them all), and `elsewhere` (`true` when it concerns only files the change does
-not write), beside the `summary.inconclusive` count. `sarif` adds a `note`
+not write), beside the `summary.inconclusive` count. When every inconclusive
+rule concerns only files the change does not write and every other rule
+completed, the change itself was fully checked: `human` says every check
+finished on the files the change writes, and `json` sets `changeCovered: true`.
+`--verbose` marks a rule whose files the analyzer did not name, since it may
+concern the change. `sarif` adds a `note`
 notification per rule, with one location per file. The service names at most fifty; the
 counts cover the rest, and `json`'s `inconclusiveUnlisted` says how many it
 left out when it cut the list.

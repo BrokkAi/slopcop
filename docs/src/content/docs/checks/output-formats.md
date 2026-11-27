@@ -136,6 +136,7 @@ slopcop check --format json
 | `incompleteReasons` | present when a rule did not complete: the named rules grouped by `reason` and `detail`, each with a `policies` count, most common first |
 | `inconclusive` | rules that ran but could not prove completeness, each with `policyId`, `reason`, `detail` when sent, `files` (the repository paths the check concerns) when the analyzer named them all, `elsewhere` |
 | `inconclusiveUnlisted` | present when the service cut `inconclusive`: how many of `summary.inconclusive` it does not name |
+| `changeCovered` | `true` only when some rules were inconclusive, every one concerns only files the change does not write, and every other rule completed: the inconclusive verdicts say nothing about the change itself. Absent otherwise |
 | `inlineSuppressed` | present when a [`slopcop: ignore` comment](/checks/false-positives/#ignore-in-the-code) ignored a finding: each one with the fields of a finding except `id`, and `directive` with the comment's `line`, `blanket`, `policies` and `reason`; at most 300 |
 | `directiveWarnings` | present when a `slopcop: ignore` comment ignored nothing: each with `kind` (`unused`, `missing_reason`, `malformed`), `path`, `line`, `policies`, `detail` for a malformed one, and `new`; at most 300 |
 | `failure` | present when the analysis as a whole did not complete |

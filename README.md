@@ -820,10 +820,15 @@ with the count and how many concern only files the change does not write, and
 `inconclusive`, each with `policyId`, `reason`, `detail`, `files` (when the
 analyzer named every file the check concerns) and `elsewhere` (true when it
 concerns only files the change does not write), beside the
-`summary.inconclusive` count. `sarif` adds a `note` notification per check
+`summary.inconclusive` count. When every inconclusive check concerns only files
+the change does not write and every other check completed, `human` says every
+check finished on the files the change writes, and `json` sets
+`changeCovered: true`. `--verbose` marks a check whose files the analyzer did
+not name, since it may concern the change. `sarif` adds a `note` notification per check
 with `slopcop.inconclusive` and `slopcop.elsewhere` properties and one
 location per file. The service names at most 50; the counts cover the rest.
-It does not yet say which functions or lines each one concerns. A check that timed out or
+It does not yet say which functions or lines each one concerns, nor the
+analyzer's cause beyond its reason codes. A check that timed out or
 that Bifrost judged unreliable is incomplete and counts wherever it is.
 
 The service applies `--fail-on` and sets the status; the exit code follows it.
