@@ -29,6 +29,7 @@ func TestPushTargetsFollowCdAndGitC(t *testing.T) {
 		{"cd " + b + "; git push", []string{b}},
 		{"cd " + b + "\ngit push", []string{b}},
 		{`cd "` + b + `" && git push origin HEAD`, []string{b}},
+		{`git -C ` + b + ` "push"`, []string{b}},
 		{"builtin cd -P " + b + " && git push", []string{b}},
 		{"cd " + b + " && cd sub && git push", []string{filepath.Join(b, "sub")}},
 		// The push runs only if cd succeeded, so it would run there.

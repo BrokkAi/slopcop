@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -17,10 +18,6 @@ import (
 	"github.com/BrokkAi/slopcop/internal/review"
 	"github.com/spf13/cobra"
 )
-
-// shellSeparator splits a command line at the operators that start a new
-// command: ;, &, &&, |, ||, newlines, subshells and command substitution.
-var shellSeparator = regexp.MustCompile("[;&|\n()`]")
 
 // shellWord is one shell word: quoted parts, backslash escapes such as
 // `my\ repo`, and plain characters, run together.
@@ -38,39 +35,230 @@ var ghPRCreate = regexp.MustCompile(`\bgh\b[^\n;&|]*\bpr\s+create\b`)
 // pushCommand recognizes the git push and gh pr create forms that checkpoint
 // guarded, in any command of a chained command line. It is deliberately
 // conservative: this is a prompt guard, not a shell parser or a security
-// boundary, so a quoted "git push" inside another command still counts.
+// boundary, so an unquoted `echo git push` still counts. Text the shell does
+// not run as a command does not: a quoted argument (git commit -m "git push",
+// a sed script), a heredoc body that is only data, a comment. Code the line
+// runs does: bash -c and eval code, a heredoc fed to a shell, a command
+// substitution in an unquoted heredoc, a pipe into a shell, and interpreter
+// code that spawns a process and names git push.
 func pushCommand(command string) bool {
-	for _, part := range shellSeparator.Split(command, -1) {
-		if gitPush.MatchString(part) || ghPRCreate.MatchString(part) {
+	return pushIn(command, 0)
+}
+
+// pushIn is pushCommand for a command line or code a shell in one runs.
+func pushIn(command string, depth int) bool {
+	if depth > 8 {
+		return gitPush.MatchString(command) || ghPRCreate.MatchString(command)
+	}
+	stripped, docs := stripHeredocs(command)
+	piped := false
+	for _, seg := range segments(stripped) {
+		var body strings.Builder
+		for _, doc := range docs {
+			if doc.at >= seg.start && doc.at < seg.start+len(seg.text) {
+				// An unquoted body runs its command substitutions, and
+				// one whose end is unclear may hide a push.
+				// Quotes in the body do not stop a substitution, so look
+				// for a push in the raw text of any that has one.
+				if doc.expands && (strings.Contains(doc.body, "$(") || strings.Contains(doc.body, "`")) && pipedPush.MatchString(doc.body) ||
+					doc.unsure && (gitPush.MatchString(doc.body) || ghPRCreate.MatchString(doc.body)) {
+					return true
+				}
+				body.WriteString(doc.body)
+				body.WriteByte('\n')
+			}
+		}
+		// Quoted text and a heredoc of data are skipped only for commands
+		// known not to run their arguments; any other command is matched
+		// on its whole text, as source /dev/stdin <<< 'git push' runs it.
+		text := seg.text
+		if inertCommand(seg.text) {
+			text = maskQuoted(seg.text)
+		} else if !runsCodeWords(seg.text) {
+			text += "\n" + body.String()
+		}
+		if gitPush.MatchString(text) || ghPRCreate.MatchString(text) || quotedPush(seg.text) ||
+			pushRuns(seg.text, body.String(), piped, command, depth) {
 			return true
 		}
+		// A command that may run what a pipe carries (sed -n e, awk)
+		// sees the line as the old text match did.
+		if piped && !inertCommand(seg.text) && pipedPush.MatchString(command) {
+			return true
+		}
+		// Once a pipe starts, later commands may share it, as in a
+		// subshell: printf ... | (cd x; sh).
+		piped = piped || seg.next == "|"
 	}
 	return false
 }
 
-// approvalRef matches a mention of SlopCop's approval refs, as a ref name or
-// as a path under .git, with either path separator.
-var approvalRef = regexp.MustCompile(`refs[/\\]+slopcop\b`)
-
-// reviewStatePath matches the repository-local state directory that arms the
-// push gate. Removing it would turn the gate off without an approval.
-var reviewStatePath = regexp.MustCompile(`\.git[/\\]+slopcop(?:[/\\]|\b)`)
-
-// forgedApproval reports whether a command names SlopCop's approval refs. Only
-// slopcop check and slopcop override write them, and neither is run with the
-// ref on its command line, so an agent's command that names one is most
-// likely writing an approval the check did not give (git update-ref, or a
-// file under .git/refs). It also names the state directory that arms the
-// user-level gate so a command cannot simply disable enforcement. Reading
-// either is blocked too: an agent has no need to. Like pushCommand, this
-// guards against an agent's shortcut, not an attacker.
-func forgedApproval(command string) bool {
-	return approvalRef.MatchString(command) || reviewStatePath.MatchString(command)
+// quotedPush reports whether a git or gh command pushes once the shell
+// removes its quotes: git "push" origin HEAD, gh "pr" create. Masking
+// quoted text would hide those words.
+func quotedPush(text string) bool {
+	name, args := commandName(text)
+	switch name {
+	case "git":
+		i := 0
+		for i < len(args) && strings.HasPrefix(args[i], "-") {
+			if gitValueOptions[args[i]] {
+				i++
+			}
+			i++
+		}
+		return i < len(args) && args[i] == "push"
+	case "gh":
+		return len(args) >= 2 && args[0] == "pr" && args[1] == "create"
+	}
+	return false
 }
 
-// forgedApprovalText is the reason a command that names the approval refs is
-// blocked.
-const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"`"
+// inertCommands never run their arguments or stdin as code, so a push in
+// their quoted arguments or heredoc is only text.
+var inertCommands = map[string]bool{"git": true, "gh": true, "echo": true, "printf": true}
+
+// commandName is a command's name, after keywords such as if and command and
+// variable assignments, and the rest of its words.
+func commandName(text string) (string, []string) {
+	words := shellWords(text)
+	for len(words) > 0 && (commandPrefixes[words[0]] || shellAssignment.MatchString(words[0])) {
+		words = words[1:]
+	}
+	if len(words) == 0 || words[0] == "" || words[0] == "." {
+		if len(words) > 0 {
+			return words[0], words[1:]
+		}
+		return "", nil
+	}
+	return path.Base(filepath.ToSlash(words[0])), words[1:]
+}
+
+// inertCommand reports whether a command only reads its arguments as text
+// or paths: git, gh, echo, printf, the search tools and readers, and sed
+// with no script that runs a command.
+func inertCommand(text string) bool {
+	if words := shellWords(text); len(words) > 0 && shellAssignment.MatchString(words[0]) {
+		// GIT_EDITOR='...' git commit runs the editor as shell code.
+		return false
+	}
+	name, args := commandName(text)
+	switch {
+	case name == "git":
+		// A -c setting can run shell code: an alias, core.editor,
+		// core.sshCommand.
+		return !slices.ContainsFunc(args, func(a string) bool {
+			return a == "-c" || strings.HasPrefix(a, "-c") && !strings.HasPrefix(a, "--") || strings.HasPrefix(a, "!")
+		})
+	case inertCommands[name], searchCommands[name], readCommands[name]:
+		return true
+	case name == "sed":
+		return !slices.ContainsFunc(args, sedExecute.MatchString) && len(optionValues(args, "f", "--file")) == 0
+	}
+	return false
+}
+
+// runsCodeWords reports whether a command is a shell, eval, an interpreter
+// or a wrapper, whose code pushRuns reads.
+func runsCodeWords(text string) bool {
+	name, _ := commandName(text)
+	return runsCode(name)
+}
+
+// pushRuns reports whether one command runs code that pushes: a shell's -c
+// code, heredoc or eval arguments, a shell reading a pipe from a line that
+// names a push, or interpreter code that spawns git push. line is the whole
+// command line.
+func pushRuns(text, body string, piped bool, line string, depth int) bool {
+	if strs := hereStrings(text); len(strs) > 0 {
+		body += strings.Join(strs, "\n") + "\n"
+	}
+	words := shellWords(text)
+	for len(words) > 0 && (commandPrefixes[words[0]] || shellAssignment.MatchString(words[0])) {
+		words = words[1:]
+	}
+	if len(words) == 0 || words[0] == "" {
+		return false
+	}
+	if words[0] == "source" || words[0] == "." {
+		// source runs a file, stdin included, as shell code.
+		return pipedPush.MatchString(text+"\n"+body) || piped && pipedPush.MatchString(line)
+	}
+	if wrappers[path.Base(filepath.ToSlash(words[0]))] {
+		// sudo -u me sh -c ..., env X=1 bash -c ...: the code runner is
+		// further on, after the wrapper's options and their values.
+		j := slices.IndexFunc(words, func(w string) bool {
+			w = path.Base(filepath.ToSlash(w))
+			return w == "eval" || shells[w] || interpreter(w)
+		})
+		if j < 0 {
+			return false
+		}
+		words = words[j:]
+	}
+	name, args := path.Base(filepath.ToSlash(words[0])), words[1:]
+	raw := pipedPush.MatchString
+	switch {
+	case name == "eval":
+		return pushIn(strings.Join(args, " "), depth+1)
+	case shells[name]:
+		code, _, inline, _ := codeArgs(args, func(a string) bool {
+			return strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, "c")
+		}, "oO", map[string]bool{"--rcfile": true, "--init-file": true})
+		if inline {
+			// The code may run its stdin: a pipe, or a here-string or
+			// heredoc in body.
+			return pushIn(code, depth+1) || piped && raw(line) || raw(body)
+		}
+		return pushIn(body, depth+1) || piped && raw(line)
+	case interpreter(name):
+		// The whole command, not only the -c value, so glued code such
+		// as -c"..." counts too.
+		code := text + "\n" + body
+		// Code that runs a process may run what a pipe carries.
+		return spawnsProcess.MatchString(code) && (interpreterPush.MatchString(code) || piped && raw(line))
+	}
+	return false
+}
+
+// pipedPush matches a push anywhere in a line whose text a shell reads from
+// a pipe, quoted or not: echo "git push" | sh.
+var pipedPush = regexp.MustCompile(`\bgit\b[^\n|]*\bpush\b|\bgh\b[^\n|]*\bpr\s+create\b`)
+
+// spawnsProcess matches interpreter code that runs another program.
+var spawnsProcess = regexp.MustCompile(`subprocess|os\.system|popen|Popen|spawn|child_process|execSync|execFile|\bexec[lv]?p?e?\b|\bsystem\b|Open3|IO\.popen|%x|qx|` + "`")
+
+// interpreterPush matches git push in interpreter code, as a command string
+// (global options such as -C dir included) or as a list of arguments, and
+// gh pr create the same way.
+var interpreterPush = regexp.MustCompile(`\bgit\b[^'"\n]*\bpush\b|['"]git['"](?:\s*,\s*['"][^'"\n]*['"])*?\s*,\s*['"]push['"]|\bgh\b[^'"\n]*\bpr\s+create\b|['"]gh['"]\s*,\s*['"]pr['"]\s*,\s*['"]create['"]`)
+
+// maskQuoted blanks the inside of quoted strings, keeping the quotes, so a
+// pattern matched over it sees only the words the shell runs and the shape
+// of each quoted word.
+func maskQuoted(text string) string {
+	out := []byte(text)
+	var quote byte
+	for i := 0; i < len(out); i++ {
+		c := out[i]
+		switch {
+		case quote != 0 && c == quote:
+			quote = 0
+		case quote == '"' && c == '\\' && i+1 < len(out):
+			out[i], out[i+1] = ' ', ' '
+			i++
+		case quote != 0:
+			if c != '\n' {
+				out[i] = ' '
+			}
+		case c == '\\' && i+1 < len(out):
+			i++
+		case c == '\'' || c == '"':
+			quote = c
+		}
+	}
+	return string(out)
+}
 
 // unsureTargetText is the reason a push is blocked when the gate cannot read
 // which repository it would push, by why.

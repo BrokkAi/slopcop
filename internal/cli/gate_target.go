@@ -29,10 +29,11 @@ import (
 const unknownDir = ""
 
 // segment is one command of a command line and the operator after it, ""
-// at the end.
+// at the end. start is where text begins in the command line.
 type segment struct {
-	text string
-	next string
+	text  string
+	next  string
+	start int
 }
 
 // segments splits a command line at the operators that end a command: &&,
@@ -50,7 +51,7 @@ func segments(command string) []segment {
 	// commands as one outside them does.
 	var parens, backticks []byte
 	emit := func(i int, op string) {
-		parts = append(parts, segment{text: command[start:i], next: op})
+		parts = append(parts, segment{text: command[start:i], next: op, start: start})
 		start = i + len(op)
 	}
 	for i := 0; i < len(command); i++ {
@@ -127,7 +128,7 @@ func segments(command string) []segment {
 		emit(i, op)
 		i += len(op) - 1
 	}
-	return append(parts, segment{text: command[start:]})
+	return append(parts, segment{text: command[start:], start: start})
 }
 
 // backslashSeparates says a backslash is a path separator unless it escapes
@@ -429,12 +430,16 @@ func pushTargets(cwd, command string) ([]string, string) {
 		piped := prev == "|" || seg.next == "|"
 		prev = seg.next
 		words := shellWords(seg.text)
+		// quotedPush also finds a push whose words are quoted, such as
+		// git "push"; name tells its git from its gh.
+		name, _ := commandName(seg.text)
+		quoted := quotedPush(seg.text)
 		switch {
-		case gitPush.MatchString(seg.text):
+		case gitPush.MatchString(seg.text) || quoted && name == "git":
 			for _, dir := range dirs {
 				add(gitDir(dir, words))
 			}
-		case ghPRCreate.MatchString(seg.text):
+		case ghPRCreate.MatchString(seg.text) || quoted:
 			for _, dir := range dirs {
 				add(dir)
 			}
