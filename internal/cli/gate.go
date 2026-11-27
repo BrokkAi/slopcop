@@ -182,8 +182,9 @@ func pushRuns(text, body string, piped bool, line string, depth int) bool {
 		return false
 	}
 	if words[0] == "source" || words[0] == "." {
-		// source runs a file, stdin included, as shell code.
-		return pipedPush.MatchString(text+"\n"+body) || piped && pipedPush.MatchString(line)
+		// source runs a file, stdin included, as shell code, and the
+		// file may be one the line wrote.
+		return pipedPush.MatchString(text+"\n"+body) || pipedPush.MatchString(line)
 	}
 	if wrappers[path.Base(filepath.ToSlash(words[0]))] {
 		// sudo -u me sh -c ..., env X=1 bash -c ...: the code runner is
