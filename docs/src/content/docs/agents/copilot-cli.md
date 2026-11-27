@@ -43,9 +43,10 @@ Your other settings and hooks in the file are left as they were, and
 
 Copilot CLI also runs the hooks in a repository's `.claude/settings.json` and
 `.claude/settings.local.json`, where earlier SlopCop releases put the Claude
-Code hooks. Those see that Copilot is running them (`COPILOT_HOOK_DEPTH`) and
-do nothing, so each stop is checked once. It does not read
-`~/.claude/settings.json`.
+Code hooks. Those see that Copilot is running them (`COPILOT_HOOK_DEPTH`). When
+`~/.copilot/settings.json` holds SlopCop's own hook and gate, they do nothing,
+so each stop and push is checked once; until then they check for Copilot.
+Copilot does not read `~/.claude/settings.json`.
 
 ## Copilot as a reviewer
 

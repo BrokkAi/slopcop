@@ -63,21 +63,53 @@ func TestCopilotHookHoldsTheAgentForFindingsInItsFiles(t *testing.T) {
 	}
 }
 
-func TestTheClaudeCodeHookDoesNothingUnderCopilot(t *testing.T) {
+// installCopilotHooks writes SlopCop's Copilot CLI Stop hook and push gate
+// into settings.json under a new COPILOT_HOME, as init does.
+func installCopilotHooks(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("COPILOT_HOME", home)
+	settings := `{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"slopcop hook copilot || true","timeout":720}]}],` +
+		`"PreToolUse":[{"matcher":"^(Bash|mcp__.+__(create_pull_request|push_files))$","hooks":[{"type":"command","command":"slopcop gate --hook copilot"}]}]}}`
+	if err := os.WriteFile(filepath.Join(home, "settings.json"), []byte(settings), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestTheClaudeCodeHookLeavesTheStopToCopilotsOwnHook(t *testing.T) {
 	isolateHook(t)
+	installCopilotHooks(t)
 	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
 	writeFile(t, repo, "demo.go", "package demo\n")
-	writeSessionEdits(t, repo, "demo.go")
+	transcript := writeCopilotEdits(t, repo, "demo.go")
 	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
 	server := fake.start(t, repo)
 	t.Setenv("COPILOT_HOOK_DEPTH", "1")
 
-	if output := runTestHook(t, server.URL, stopPayload(repo, false)); output != (hookOutput{}) || fake.checks != 0 {
+	if output := runTestHook(t, server.URL, copilotStopPayload(repo, transcript, false)); output != (hookOutput{}) || fake.checks != 0 {
 		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
 	}
 }
 
-func TestTheGateRunsForCopilotAndOnlyOnceUnderIt(t *testing.T) {
+// A repository's legacy Claude Code hook still checks a Copilot session when
+// Copilot has no SlopCop hook of its own, reading Copilot's session.
+func TestTheClaudeCodeHookChecksForCopilotWithoutItsOwnHook(t *testing.T) {
+	isolateHook(t)
+	t.Setenv("COPILOT_HOME", t.TempDir())
+	repo := newRepo(t, "https://github.com/BrokkAi/slopcop.git")
+	writeFile(t, repo, "demo.go", "package demo\n")
+	transcript := writeCopilotEdits(t, repo, "demo.go")
+	fake := &fakeService{active: []string{"BrokkAi/slopcop"}, findings: []string{"demo.go"}}
+	server := fake.start(t, repo)
+	t.Setenv("COPILOT_HOOK_DEPTH", "1")
+
+	output := runTestHook(t, server.URL, copilotStopPayload(repo, transcript, false))
+	if output.Decision != "block" || !strings.Contains(output.Reason, "Fix demo.go") || fake.checks != 1 {
+		t.Fatalf("output = %+v, checks = %d", output, fake.checks)
+	}
+}
+
+func TestTheGateRunsOnceUnderCopilot(t *testing.T) {
 	t.Setenv("GROK_HOOK_EVENT", "")
 	t.Setenv("COPILOT_HOOK_DEPTH", "1")
 	unchecked := armedRepo(t, false)
@@ -87,15 +119,22 @@ func TestTheGateRunsForCopilotAndOnlyOnceUnderIt(t *testing.T) {
 		"hook_event_name": "PreToolUse", "session_id": hookSession, "cwd": unchecked, "tool_name": "Bash",
 		"tool_input": map[string]any{"command": "git push origin HEAD", "description": "Push", "mode": "sync"},
 	})
-	for hook, blocks := range map[string]bool{"copilot": true, "claude": false} {
+	blocked := func(hook string) bool {
 		cmd := newGateCommand()
 		cmd.SetIn(bytes.NewReader(payload))
 		cmd.SetArgs([]string{"--hook", hook})
 		var errOut bytes.Buffer
 		cmd.SetErr(&errOut)
-		err := cmd.Execute()
-		if blocked := err != nil && strings.Contains(errOut.String(), "push blocked"); blocked != blocks {
-			t.Errorf("%s gate: err %v, stderr %q, want blocked %t", hook, err, errOut.String(), blocks)
-		}
+		return cmd.Execute() != nil && strings.Contains(errOut.String(), "push blocked")
+	}
+	// Without Copilot's own gate, the repository's Claude Code gate judges
+	// the push.
+	t.Setenv("COPILOT_HOME", t.TempDir())
+	if !blocked("claude") {
+		t.Error("the Claude Code gate let the push through with no Copilot gate installed")
+	}
+	installCopilotHooks(t)
+	if copilot, claude := blocked("copilot"), blocked("claude"); !copilot || claude {
+		t.Errorf("with Copilot's gate installed: copilot blocks %t, claude blocks %t; want true, false", copilot, claude)
 	}
 }

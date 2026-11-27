@@ -120,11 +120,14 @@ func runHook(cmd *cobra.Command, harness, serviceURL, version string) (output ho
 	}
 	// Copilot CLI runs the hooks in a repository's .claude/settings.json and
 	// .claude/settings.local.json too, where an earlier release put SlopCop's
-	// Claude Code hook, and hands them its own session. Its own hook handles
-	// the stop. Copilot sets COPILOT_HOOK_DEPTH for every hook it runs and
-	// not for its agent's commands.
+	// Claude Code hook, and hands them its own session. When its own hook is
+	// installed, that one handles the stop; otherwise this one does, as
+	// Copilot's.
 	if harness == attribution.ClaudeHarness && underCopilotHook() {
-		return hookOutput{}
+		if copilotHookInstalled(false) {
+			return hookOutput{}
+		}
+		harness = attribution.CopilotHarness
 	}
 	input.Harness = harness
 	input.StopHookActive = input.StopHookActive || input.StopHookActiveCamel
@@ -444,7 +447,18 @@ func boundedHookText(text string) string {
 }
 
 // underCopilotHook reports whether Copilot CLI is running this process as a
-// hook.
+// hook. Copilot sets COPILOT_HOOK_DEPTH for every hook it runs and not for
+// its agent's commands (checked live with 1.0.114).
 func underCopilotHook() bool {
 	return os.Getenv("COPILOT_HOOK_DEPTH") != ""
+}
+
+// copilotHookInstalled reports whether Copilot CLI's user-level settings hold
+// SlopCop's own push gate, with gate set, or its Stop hook.
+func copilotHookInstalled(gate bool) bool {
+	p := agenthooks.Find()["copilot"]
+	if gate {
+		return p.Gate
+	}
+	return p.Stop
 }

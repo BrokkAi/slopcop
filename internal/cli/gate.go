@@ -194,9 +194,10 @@ from stdin and blocks malformed input rather than allowing an unchecked push.`,
 				if hook == "claude" && os.Getenv("GROK_HOOK_EVENT") != "" {
 					return nil
 				}
-				// Copilot CLI runs a repository's Claude Code settings too,
-				// beside its own gate.
-				if hook == "claude" && underCopilotHook() {
+				// Copilot CLI runs a repository's Claude Code settings too.
+				// When its own gate is installed, that one judges the push;
+				// otherwise this one does, as the payloads are alike.
+				if hook == "claude" && underCopilotHook() && copilotHookInstalled(true) {
 					return nil
 				}
 				var input gateInput
