@@ -73,6 +73,14 @@ func forgedApproval(command string) bool {
 // blocked.
 const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .git/slopcop state; nothing else may write or remove them. Run `slopcop check` until it approves the tree, or for review findings that are wrong, or a static analyzer run that keeps failing, run `slopcop override --reason \"...\"`"
 
+// overrideWord and acceptWord match the override subcommand and its --accept
+// flag as shellWords gives them, which may run on into a shell operator, as in
+// `--accept;`.
+var (
+	overrideWord = regexp.MustCompile("^override(?:$|[;&|()<>`])")
+	acceptWord   = regexp.MustCompile("^--accept(?:$|=|[;&|()<>`])")
+)
+
 // acceptsProposal reports whether a command accepts a proposed override. An
 // agent proposes an override with --propose and a person accepts it; the
 // hook refuses the agent's own --accept so that the decision stays theirs.
@@ -84,10 +92,10 @@ func acceptsProposal(command string) bool {
 	var slopcop, override, accept bool
 	for _, word := range shellWords(strings.ReplaceAll(command, "\\\n", "")) {
 		switch {
-		case word == "override":
-			override = true
-		case word == "--accept" || strings.HasPrefix(word, "--accept="):
+		case acceptWord.MatchString(word):
 			accept = true
+		case overrideWord.MatchString(word):
+			override = true
 		case strings.Contains(strings.ToLower(word), "slopcop"):
 			// slopcop, ./bin/slopcop, slopcop.exe, brokk_slopcop
 			slopcop = true

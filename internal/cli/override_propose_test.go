@@ -63,6 +63,9 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 		`slopcop override --root "/tmp/repo;copy" --accept`,
 		"slopcop override --root '/tmp/repo (copy)' --accept",
 		"slopcop.exe override --accept",
+		"slopcop override --accept; git push",
+		"slopcop override --accept&& git push",
+		"(slopcop override --accept)",
 		"python -m brokk_slopcop override --accept",
 	} {
 		if blocked, reason := gateHook(t, repo, command); !blocked || !strings.Contains(reason, "only the user accepts a proposed override") {
