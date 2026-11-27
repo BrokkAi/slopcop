@@ -478,8 +478,14 @@ the gate. The [GitHub Action](/checks/ci/) runs it for you.
 
 Update slopcop to the latest release. A slopcop installed by the install script
 replaces its own binary, after checking the download against the release's
-checksums; one installed through npm, pip, pipx or uv is told the command to
-run. See [Automatic updates](/get-started/install/#automatic-updates).
+checksums. Every install first asks GitHub for the latest release, so one
+installed through npm, pip, pipx or uv is told whether it is behind, which
+versions it has and can get, and the command to run. See [Automatic
+updates](/get-started/install/#automatic-updates).
+
+| Flag | Meaning |
+| --- | --- |
+| `--check` | Only report; never install. Exits `0` when up to date, `1` when a newer release is available, and `2` when the latest release could not be read or this is not a release build. |
 
 ## `slopcop version`
 

@@ -170,7 +170,9 @@ The line goes to stderr. An update that fails never fails the command: it
 prints the upgrade notice with the reason, and is tried again a day later.
 `slopcop update` does the same on request. A slopcop installed through npm,
 pip, pipx or uv is not replaced, because that tool owns the file; it gets the
-notice above, and `slopcop update` names the command to run. Nothing updates
+notice above, and `slopcop update` says whether it is behind and names the
+command to run. `slopcop update --check` only reports, for any install: it
+exits `0` when up to date and `1` when a newer release is available. Nothing updates
 itself when `$SLOPCOP_NO_AUTO_UPDATE` or `$CI` is set, so a job keeps the
 version it installed, or in a `Stop` hook run. Only a release build is replaced:
 a `dev` build, or one built ahead of a release, stays as built, and a
