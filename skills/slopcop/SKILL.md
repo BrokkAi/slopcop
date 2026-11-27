@@ -656,10 +656,13 @@ explanation"`.** This accepts every finding of the last **complete** review of
 the current snapshot, only when the static half has no new findings at or
 above the push level and completed, was skipped, or did not run. It also
 accepts a static half whose analyzer run failed (`runFailures`) beside a clean
-or overridable review, for a run that keeps failing after a retry. It does not
-carry over: the next change is reviewed afresh and the findings can come back.
-Later review rounds show the reviewers this reason beside the findings it
-accepted. Prefer overriding the one wrong finding.
+or overridable review, for a run that keeps failing after a retry. Later
+review rounds of the branch show the reviewers this reason beside the findings
+it accepted, and a finding that repeats one of them at lines you have not
+changed since is left out, under `review.overridden` with the `round` that
+accepted it. Read such an entry, as for `match: words` above: if it is a
+different problem, fix it. Edit those lines and the findings can come back.
+Prefer overriding the one wrong finding.
 
 Never override a real bug the user has not agreed to defer (see "Know when to
 stop" above), a reviewer timeout, a failed or incomplete review, or a different tree.

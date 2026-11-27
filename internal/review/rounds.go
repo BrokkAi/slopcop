@@ -195,15 +195,22 @@ func sameTree(a, b Capture) bool {
 }
 
 // appendRound numbers a new round after the last and drops the oldest
-// rounds past maxRounds.
+// rounds past maxRounds. Rounds without an override reason go first: a reason
+// keeps its accepted findings out of later rounds, so dropping it would let a
+// long loop raise them again.
 func appendRound(rounds []Round, r Record, findings []Finding) []Round {
 	round := Round{Number: 1, Time: r.Time, Capture: r.Capture, Findings: findings}
 	if n := len(rounds); n > 0 {
 		round.Number = rounds[n-1].Number + 1
 	}
 	rounds = append(rounds, round)
-	if len(rounds) > maxRounds {
-		rounds = rounds[len(rounds)-maxRounds:]
+	for len(rounds) > maxRounds {
+		// The new round has no reason yet, and is never the one dropped.
+		i := slices.IndexFunc(rounds[:len(rounds)-1], func(r Round) bool { return r.Override == "" })
+		if i < 0 {
+			i = 0
+		}
+		rounds = slices.Delete(rounds, i, i+1)
 	}
 	return rounds
 }
@@ -239,6 +246,7 @@ func (s *Store) overrideRound(r Record, reason string) error {
 // capture. A review that left large data files out says nothing about
 // them, so findings about files outside its diff, or with no location,
 // stay, with their rounds' reasons, for a later review that covers them.
+// So do the findings an override accepted at lines unchanged in capture.
 func (s *Store) clearRounds(branch string, capture Capture) error {
 	// Read before removing: an earlier release's findings.json may be the
 	// only history.
@@ -253,59 +261,89 @@ func (s *Store) clearRounds(branch string, capture Capture) error {
 		return nil
 	}
 	var kept []Round
-	if capture.DiffTree != "" {
-		reviewed := ChangedPaths(capture.Numstat)
-		for _, round := range rounds {
-			round.Findings = slices.DeleteFunc(slices.Clone(round.Findings), func(f Finding) bool {
-				// A finding without a location may be about an omitted file.
-				return reviewed[f.Path]
-			})
-			if len(round.Findings) > 0 {
-				kept = append(kept, round)
-			}
+	reviewed := ChangedPaths(capture.Numstat)
+	for _, round := range rounds {
+		// A finding an override accepted stays while its lines are
+		// unchanged, with the round's reason: the review may be clean only
+		// because its reviewers heeded that reason, and the next one should
+		// see it too.
+		accepted := map[string]bool{}
+		for _, a := range acceptedIn(s.root, round, capture) {
+			accepted[a.finding.instance()] = true
+		}
+		round.Findings = slices.DeleteFunc(slices.Clone(round.Findings), func(f Finding) bool {
+			// A review that left large data files out says nothing about
+			// them; a finding without a location may be about one.
+			omitted := capture.DiffTree != "" && !reviewed[f.Path]
+			return !omitted && !accepted[f.instance()]
+		})
+		if len(round.Findings) > 0 {
+			kept = append(kept, round)
 		}
 	}
 	return s.writeRounds(branch, kept)
 }
 
-// hunkHeader matches the old-side range of a unified diff hunk.
-var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+`)
+// hunkHeader matches the old and new ranges of a unified diff hunk.
+var hunkHeader = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
 
-// linesChanged reports whether lines start to end of path in tree from
-// differ in tree to. Lines inserted strictly between two cited lines count;
-// lines inserted before or after the range do not.
-func linesChanged(root, from, to, path string, start, end int) (bool, error) {
+// hunk is one change of a -U0 diff: count lines from start on the old side
+// replaced by those on the new side. A count of 0 on a side is an insertion,
+// or a deletion, after line start of that side.
+type hunk struct{ oldStart, oldCount, newStart, newCount int }
+
+// diffHunks lists the changes to path from tree from to tree to.
+func diffHunks(root, from, to, path string) ([]hunk, error) {
 	if from == to {
-		return false, nil
+		return nil, nil
 	}
 	// --text gives hunks for a file with a NUL byte, whose lines a reviewer can
 	// cite from the readable text in its prompt.
 	out, err := gitx.RunWithoutRepoAttributes(root, "diff", "--text", "--no-color", "--no-ext-diff", "--ignore-submodules=none", "--no-textconv", "--no-renames", "-U0", from, to, "--", ":(literal)"+path)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
+	var hunks []hunk
 	for _, line := range strings.Split(string(out), "\n") {
 		match := hunkHeader.FindStringSubmatch(line)
 		if match == nil {
 			continue
 		}
-		first, _ := strconv.Atoi(match[1])
-		count := 1
-		if match[2] != "" {
-			count, _ = strconv.Atoi(match[2])
-		}
-		if count == 0 {
-			// An insertion after line `first` of the old file.
-			if first >= start && first < end {
-				return true, nil
+		number := func(start, count string) (int, int) {
+			n, _ := strconv.Atoi(start)
+			c := 1
+			if count != "" {
+				c, _ = strconv.Atoi(count)
 			}
-			continue
+			return n, c
 		}
-		if first <= end && first+count-1 >= start {
-			return true, nil
-		}
+		var h hunk
+		h.oldStart, h.oldCount = number(match[1], match[2])
+		h.newStart, h.newCount = number(match[3], match[4])
+		hunks = append(hunks, h)
 	}
-	return false, nil
+	return hunks, nil
+}
+
+// touches reports whether count changed lines from first, on one side of a
+// hunk, change lines start to end of that side. Lines inserted strictly
+// between two of them count; lines inserted before or after them do not.
+func touches(first, count, start, end int) bool {
+	if count == 0 {
+		return first >= start && first < end
+	}
+	return first <= end && first+count-1 >= start
+}
+
+// linesChanged reports whether lines start to end of path in tree from
+// differ in tree to. Lines inserted strictly between two cited lines count;
+// lines inserted before or after the range do not.
+func linesChanged(root, from, to, path string, start, end int) (bool, error) {
+	hunks, err := diffHunks(root, from, to, path)
+	if err != nil {
+		return false, err
+	}
+	return slices.ContainsFunc(hunks, func(h hunk) bool { return touches(h.oldStart, h.oldCount, start, end) }), nil
 }
 
 // inert keeps quoted text from closing the element that fences it.
@@ -442,4 +480,111 @@ func earlierRounds(root string, rounds []Round, capture Capture) string {
 	b.WriteString("</earlier_rounds>\n")
 	b.WriteString(historyRules)
 	return b.String()
+}
+
+// acceptedFinding is a finding of an earlier round whose findings the author
+// accepted with `slopcop override --reason`, at lines that have not changed
+// since. A later round's finding that repeats it at those lines is left out
+// like a finding the author overrode one by one: the reason sticks until the
+// lines change or a review of the branch is clean.
+type acceptedFinding struct {
+	round   int
+	finding Finding
+	// now is finding with its lines where they are in the reviewed tree.
+	now Finding
+	// hunks are the changes to the finding's file since that round, to tell
+	// whether the lines a repeat cites changed too.
+	hunks []hunk
+}
+
+// acceptedFindings lists the findings of the overridden rounds whose cited
+// lines are unchanged in capture, newest round first. A round of capture's
+// own tree is left out: its override covers that tree already, and a review
+// of it is that round, not a later one.
+func acceptedFindings(root string, rounds []Round, capture Capture) []acceptedFinding {
+	var accepted []acceptedFinding
+	for i := len(rounds) - 1; i >= 0; i-- {
+		if rounds[i].Capture.CheckedTree() != capture.CheckedTree() {
+			accepted = append(accepted, acceptedIn(root, rounds[i], capture)...)
+		}
+	}
+	return accepted
+}
+
+// acceptedIn lists the findings an overridden round accepted whose cited
+// lines are unchanged in capture, each with its lines where they are now. A
+// finding without lines, or whose file is no longer in the change, renamed
+// included, does not stick: what became of it cannot be told from its lines.
+func acceptedIn(root string, round Round, capture Capture) []acceptedFinding {
+	if round.Override == "" {
+		return nil
+	}
+	changed := ChangedPaths(capture.Numstat)
+	files := map[string][]hunk{}
+	unreadable := map[string]bool{}
+	var accepted []acceptedFinding
+	for _, f := range round.Findings {
+		if f.Malformed || f.StartLine == nil || f.EndLine == nil || !changed[f.Path] || unreadable[f.Path] {
+			continue
+		}
+		hunks, seen := files[f.Path]
+		if !seen {
+			var err error
+			if hunks, err = diffHunks(root, round.Capture.CheckedTree(), capture.CheckedTree(), f.Path); err != nil {
+				unreadable[f.Path] = true
+				continue
+			}
+			files[f.Path] = hunks
+		}
+		if slices.ContainsFunc(hunks, func(h hunk) bool { return touches(h.oldStart, h.oldCount, *f.StartLine, *f.EndLine) }) {
+			continue
+		}
+		// No change touches the lines, so every change is before or after
+		// them, and the lines move by what the changes before them add.
+		shift := 0
+		for _, h := range hunks {
+			if (h.oldCount == 0 && h.oldStart < *f.StartLine) || (h.oldCount > 0 && h.oldStart+h.oldCount-1 < *f.StartLine) {
+				shift += h.newCount - h.oldCount
+			}
+		}
+		start, end := *f.StartLine+shift, *f.EndLine+shift
+		now := f
+		now.StartLine, now.EndLine = &start, &end
+		accepted = append(accepted, acceptedFinding{round: round.Number, finding: f, now: now, hunks: hunks})
+	}
+	return accepted
+}
+
+// matchAccepted returns the accepted finding f repeats, and how it matched:
+// f is in the same file within nearLines of it, the lines f cites have not
+// changed since its round either, and it has the same text or enough of the
+// same words, as matchOverride judges. A finding without lines, or a
+// malformed one, repeats none.
+func matchAccepted(accepted []acceptedFinding, f Finding) (found acceptedFinding, match string) {
+	if f.Malformed || f.StartLine == nil || f.EndLine == nil {
+		return acceptedFinding{}, ""
+	}
+	text := findingID(f, 0)
+	words := contentWords(f)
+	bestScore := 0.0
+	for _, a := range accepted {
+		if !samePath(a.finding.Path, f.Path) || !nearEachOther(a.now, f) ||
+			slices.ContainsFunc(a.hunks, func(h hunk) bool { return touches(h.newStart, h.newCount, *f.StartLine, *f.EndLine) }) {
+			continue
+		}
+		if findingID(a.finding, 0) == text {
+			return a, MatchText
+		}
+		if len(words) < minMatchWords {
+			continue
+		}
+		other := contentWords(a.finding)
+		if len(other) < minMatchWords {
+			continue
+		}
+		if score := similarity(words, other); score >= nearMatch && score > bestScore {
+			found, match, bestScore = a, MatchWords, score
+		}
+	}
+	return found, match
 }

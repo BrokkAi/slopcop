@@ -2405,6 +2405,36 @@ func TestReviewFindingsCarryIdsAndOverriddenOnesAreSetApart(t *testing.T) {
 	}
 }
 
+// TestARepeatOfAnAcceptedRoundNamesItsRound checks that a finding left out
+// because an earlier round's override accepted it says which round, in every
+// format, and is not offered an undo it does not have.
+func TestARepeatOfAnAcceptedRoundNamesItsRound(t *testing.T) {
+	text := "- [P2] Slow loop `internal/y.go:3`"
+	repeat := review.ParseFindings("1-terra", text, nil)[0]
+	verdict := review.Verdict{Status: review.StatusClean, Reviewers: []review.Reviewer{
+		{Name: "1-terra", Status: review.StatusFindings, Text: text},
+	}, Overridden: []review.OverriddenFinding{{Finding: repeat, OverrideID: "rv-0123456789ab", Match: review.MatchWords, Round: 2}}}
+	options := Options{Review: &verdict, Status: "clean"}
+
+	var out bytes.Buffer
+	if err := Write(&out, service.Response{Status: service.StatusClean}, FormatJSON, options); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"round": 2`) {
+		t.Fatalf("json: %s", out.String())
+	}
+	run := sarifLogWithReview(options, sarifRun{}).Runs[1]
+	if len(run.Results) != 1 || run.Results[0].Properties["slopcop.overrideRound"] != 2 || !strings.Contains(run.Results[0].Suppressions[0].Justification, "review round 2") {
+		t.Fatalf("sarif: %+v", run.Results)
+	}
+	out.Reset()
+	writeReviewHuman(&out, verdict)
+	want := repeat.ID + " [P2] internal/y.go:3 Slow loop (1-terra) (repeats rv-0123456789ab of round 2, which you accepted with `slopcop override --reason`, at lines unchanged since by similar words; read it, and if it is a different problem fix it)\n"
+	if !strings.Contains(out.String(), want) || strings.Contains(out.String(), "--undo") {
+		t.Errorf("human report missing %q:\n%s", want, out.String())
+	}
+}
+
 // TestStaticSummaryOmitsReviewFindingsWithoutReview checks that a static-only
 // report does not claim the review found nothing.
 func TestStaticSummaryOmitsReviewFindingsWithoutReview(t *testing.T) {

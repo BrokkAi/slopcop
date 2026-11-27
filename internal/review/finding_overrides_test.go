@@ -143,7 +143,7 @@ func TestApplyOverridesSettlesTheStatus(t *testing.T) {
 		for i, text := range test.texts {
 			v.Reviewers = append(v.Reviewers, Reviewer{Name: string(rune('1'+i)) + "-terra", Status: StatusFindings, Text: text})
 		}
-		v.applyOverrides(overrides)
+		v.applyOverrides(overrides, nil)
 		if v.Status != test.want || len(v.Findings()) != test.findings || len(v.Overridden) != len(test.texts) {
 			t.Errorf("%s: status %s, findings %+v, overridden %+v", test.name, v.Status, v.Findings(), v.Overridden)
 		}
@@ -376,7 +376,7 @@ func TestOverriddenInstancesAreFilteredOneByOne(t *testing.T) {
 		{Name: "1-terra", Status: StatusFindings, Text: near},
 		{Name: "2-sol", Status: StatusFindings, Text: far},
 	}}
-	v.applyOverrides([]FindingOverride{{ID: first.ID, Finding: first, Reason: "x"}})
+	v.applyOverrides([]FindingOverride{{ID: first.ID, Finding: first, Reason: "x"}}, nil)
 	// Both carry the same id; only the one at the overridden place is left out.
 	if len(v.Overridden) != 1 || v.Overridden[0].Reviewer != "1-terra" || len(v.Findings()) != 1 || v.Findings()[0].Reviewer != "2-sol" || v.Status != StatusFindings {
 		t.Fatalf("%+v", v)
@@ -440,7 +440,7 @@ func TestAnOverrideStoredRelativeStillMatchesItsAbsoluteCitation(t *testing.T) {
 	if err != nil || o.Finding.Path != "change.txt" {
 		t.Fatalf("%+v %v", o, err)
 	}
-	v.applyOverrides([]FindingOverride{o})
+	v.applyOverrides([]FindingOverride{o}, nil)
 	if v.Status != StatusClean || len(v.Overridden) != 1 {
 		t.Fatalf("%+v", v)
 	}

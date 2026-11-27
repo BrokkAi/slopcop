@@ -312,7 +312,10 @@ Each review is shown the findings of every earlier round since the last
 clean review, with whether the lines a finding cites have changed since, and
 the reason of an override beside the findings it accepted. Reviewers are told
 not to raise an answered point again unless the code shows the reason is
-wrong, so write the reason for them: say why the finding does not hold.
+wrong, so write the reason for them: say why the finding does not hold. A
+finding that repeats one an override accepted, at lines unchanged since that
+round, is left out and listed under `review.overridden` with its `round`; it
+does not fail the check.
 
 The PreToolUse hook runs `slopcop gate --hook claude` in Claude Code (and
 Grok) and `slopcop gate --hook codex` in Codex. It blocks `git push`, `gh pr create`, and the GitHub MCP tools that push files or
