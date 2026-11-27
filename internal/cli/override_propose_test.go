@@ -37,7 +37,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	}
 	code, stdout, stderr := runCLI(t, "override", "--root", repo, "--propose", "--reason", "the npm job needs goreleaser")
 	if code != 0 || !strings.Contains(stdout, "nothing is approved until a person accepts it") ||
-		!strings.Contains(stdout, "ask the user to accept it by running `slopcop override --accept`") {
+		!strings.Contains(stdout, "ask the user to accept it by running `slopcop override --accept --root ") {
 		t.Fatalf("propose: exit = %d, stdout = %q, stderr = %q", code, stdout, stderr)
 	}
 	if ok, _ := review.ReviewedWithoutStatic(repo, tree); ok {

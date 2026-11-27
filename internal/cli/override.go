@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -138,7 +139,13 @@ func runOverride(cmd *cobra.Command, opts *overrideOptions, args []string, servi
 		return errors.New("--reason is required: say why the findings do not hold; later reviewers are shown it")
 	}
 	if opts.propose {
-		return proposeOverride(cmd.OutOrStdout(), repo, opts.reason)
+		accept := acceptCommand
+		// Run elsewhere with --root, the person must accept it in that
+		// repository too.
+		if cwd, err := os.Getwd(); err != nil || !sameRepo(cwd, repo) {
+			accept += " --root " + quoteShellArg(repo)
+		}
+		return proposeOverride(cmd.OutOrStdout(), repo, opts.reason, accept)
 	}
 	if len(args) > 0 {
 		id := strings.TrimSpace(args[0])
@@ -307,7 +314,7 @@ const acceptCommand = "slopcop override --accept"
 
 // proposeOverride records a proposed override of the latest review for the
 // working tree, for a person to accept.
-func proposeOverride(out io.Writer, repo, reason string) error {
+func proposeOverride(out io.Writer, repo, reason, accept string) error {
 	store, tree, err := openOverrideStore(repo)
 	if err != nil {
 		return err
@@ -320,8 +327,22 @@ func proposeOverride(out io.Writer, repo, reason string) error {
 	fmt.Fprintf(out, "slopcop: proposed override %s of the review for tree %s; nothing is approved until a person accepts it.\n"+
 		"  Reason: %s\n"+
 		"slopcop: ask the user to accept it by running `%s` (in Claude Code: `! %s`); you cannot run it yourself.\n",
-		p.ID, p.Tree, report.Printable(p.Reason), acceptCommand, acceptCommand)
+		p.ID, p.Tree, report.Printable(p.Reason), accept, accept)
 	return nil
+}
+
+// sameRepo says dir is in the checkout whose top level is repo.
+func sameRepo(dir, repo string) bool {
+	top, err := gitx.Toplevel(dir)
+	return err == nil && top == repo
+}
+
+// quoteShellArg quotes s for a POSIX shell when it needs it.
+func quoteShellArg(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_./:@+") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // acceptProposal accepts the latest proposed override, and returns the
