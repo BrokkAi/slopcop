@@ -39,6 +39,9 @@ type Proposal struct {
 	Reason string `json:"reason"`
 	// AcceptedAt is set once a person accepted it.
 	AcceptedAt *time.Time `json:"acceptedAt,omitempty"`
+	// Retired is set when a person accepted another proposal for the same
+	// check record; it can no longer be accepted.
+	Retired bool `json:"retired,omitempty"`
 }
 
 // AcceptedProposal is the proposal an override was accepted from, as the
@@ -67,7 +70,9 @@ var ErrProposalStale = errors.New("the latest proposed override is for a tree or
 type proposalEvent struct {
 	Proposal *Proposal `json:"proposal,omitempty"`
 	Accepted string    `json:"accepted,omitempty"`
-	Time     time.Time `json:"time"`
+	// Retired are the proposals the acceptance made moot.
+	Retired []string  `json:"retired,omitempty"`
+	Time    time.Time `json:"time"`
 }
 
 // matches says the proposal answers record r: the same tree, review and
@@ -88,6 +93,9 @@ func recordDigest(r Record) string {
 	sum := sha256.Sum256(b)
 	return hex.EncodeToString(sum[:])
 }
+
+// open says the proposal may still be accepted.
+func (p Proposal) open() bool { return p.AcceptedAt == nil && !p.Retired }
 
 func (p Proposal) accepted() AcceptedProposal {
 	return AcceptedProposal{ID: p.ID, ProposedAt: p.Time, Tree: p.Tree, ReviewTime: p.ReviewTime, Findings: p.Findings, Record: p.Record}
@@ -134,7 +142,7 @@ func (s *Store) Accept(currentTree string) (Proposal, error) {
 	}
 	var latest *Proposal
 	for i := len(proposals) - 1; i >= 0; i-- {
-		if proposals[i].AcceptedAt == nil {
+		if proposals[i].open() {
 			latest = &proposals[i]
 			break
 		}
@@ -158,7 +166,13 @@ func (s *Store) Accept(currentTree string) (Proposal, error) {
 	}
 	now := time.Now().UTC()
 	latest.AcceptedAt = &now
-	return *latest, s.appendProposalEvent(proposalEvent{Accepted: latest.ID, Time: now})
+	var retired []string
+	for _, p := range proposals {
+		if p.open() && p.Record == latest.Record {
+			retired = append(retired, p.ID)
+		}
+	}
+	return *latest, s.appendProposalEvent(proposalEvent{Accepted: latest.ID, Retired: retired, Time: now})
 }
 
 // PendingProposals returns the proposed overrides not yet accepted that
@@ -180,7 +194,7 @@ func PendingProposals(root string) ([]Proposal, error) {
 	}
 	var pending []Proposal
 	for i := len(proposals) - 1; i >= 0; i-- {
-		if p := proposals[i]; p.AcceptedAt == nil && p.accepted().matches(*r) {
+		if p := proposals[i]; p.open() && p.accepted().matches(*r) {
 			pending = append(pending, p)
 		}
 	}
@@ -213,6 +227,9 @@ func loadProposals(dir string) ([]Proposal, error) {
 				if proposals[i].ID == e.Accepted && proposals[i].AcceptedAt == nil {
 					at := e.Time
 					proposals[i].AcceptedAt = &at
+				}
+				if slices.Contains(e.Retired, proposals[i].ID) {
+					proposals[i].Retired = true
 				}
 			}
 		}

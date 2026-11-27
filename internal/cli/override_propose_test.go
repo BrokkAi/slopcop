@@ -59,6 +59,11 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 		"slopcop override \\\n  --accept",
 		"slopcop --accept=true override",
 		"./bin/slopcop override --root . --accept",
+		"slopcop override --acc\\\nept",
+		`slopcop override --root "/tmp/repo;copy" --accept`,
+		"slopcop override --root '/tmp/repo (copy)' --accept",
+		"slopcop.exe override --accept",
+		"python -m brokk_slopcop override --accept",
 	} {
 		if blocked, reason := gateHook(t, repo, command); !blocked || !strings.Contains(reason, "only the user accepts a proposed override") {
 			t.Errorf("%s: blocked = %v, reason = %q", command, blocked, reason)
@@ -116,7 +121,7 @@ func TestProposeThenAcceptAnOverride(t *testing.T) {
 	if code, stdout, _ = runCLI(t, "override", "--root", repo, "--pending"); code != 0 || stdout != "slopcop: no proposed override waits for a person in this clone\n" {
 		t.Fatalf("pending after accept: exit = %d, stdout = %q", code, stdout)
 	}
-	if code, _, stderr = runCLI(t, "override", "--root", repo, "--accept"); code == 0 || !strings.Contains(stderr, "already accepted") {
+	if code, _, stderr = runCLI(t, "override", "--root", repo, "--accept"); code == 0 || !strings.Contains(stderr, "no override is proposed") {
 		t.Fatalf("second accept: exit = %d, stderr = %q", code, stderr)
 	}
 }

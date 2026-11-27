@@ -78,28 +78,22 @@ const forgedApprovalText = "slopcop: blocked: SlopCop owns refs/slopcop/ and .gi
 // hook refuses the agent's own --accept so that the decision stays theirs.
 // Like forgedApproval, it guards against an agent's shortcut, not an attacker.
 func acceptsProposal(command string) bool {
-	// The shell joins a line continued with a backslash.
-	command = strings.ReplaceAll(command, "\\\n", " ")
-	for _, part := range shellSeparator.Split(command, -1) {
-		var slopcop, override, accept bool
-		// shellWords removes quotes and backslashes as the shell does, so
-		// '--accept' and --acc"ept" are --accept, while a quoted reason that
-		// mentions --accept is one word of its own.
-		for _, word := range shellWords(part) {
-			switch {
-			case filepath.Base(word) == "slopcop":
-				slopcop = true
-			case word == "override":
-				override = true
-			case word == "--accept" || strings.HasPrefix(word, "--accept="):
-				accept = true
-			}
-		}
-		if slopcop && override && accept {
-			return true
+	// The shell drops a backslash-newline, joining the word around it. The
+	// line is read whole, not split at separators that may sit in quotes: an
+	// unrelated command beside it that names all three is blocked too.
+	var slopcop, override, accept bool
+	for _, word := range shellWords(strings.ReplaceAll(command, "\\\n", "")) {
+		switch {
+		case word == "override":
+			override = true
+		case word == "--accept" || strings.HasPrefix(word, "--accept="):
+			accept = true
+		case strings.Contains(strings.ToLower(word), "slopcop"):
+			// slopcop, ./bin/slopcop, slopcop.exe, brokk_slopcop
+			slopcop = true
 		}
 	}
-	return false
+	return slopcop && override && accept
 }
 
 // acceptByAgentText is the reason an agent's `slopcop override --accept` is
