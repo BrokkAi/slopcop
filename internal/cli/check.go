@@ -504,6 +504,9 @@ func runCheck(cmd *cobra.Command, opts *checkOptions, serviceFlag, version strin
 	if notice := runFailureNotice(static, verdict, prepared, mode, blockLevel); notice != "" {
 		fmt.Fprintln(cmd.ErrOrStderr(), notice)
 	}
+	if notice := incompletePoliciesNotice(static.response, format); notice != "" {
+		fmt.Fprintln(cmd.ErrOrStderr(), notice)
+	}
 	// In every format, since an agent reads json and pushes on approved.
 	if reviewOnlyRefused {
 		fmt.Fprintf(cmd.ErrOrStderr(), reviewOnlyRefusedNotice+"\n", shortSHA(prepared.snapshot.Tree))
