@@ -156,8 +156,12 @@ worktrees and branches, and not committed, so it does not change the reviewed
 tree. It is yours alone: it is not in your workspace, and `-w` does not apply.
 
 `slopcop override --reason "..."` without an id is the other form: it accepts
-every finding of the latest complete review for the current tree only, and the
-next change is reviewed afresh.
+every finding of the latest complete review for the current tree only. Later
+reviews of the same branch are shown the reason beside those findings. A later
+finding that repeats one of them, in the same or other words, at lines that
+have not changed since, is left out and listed under `review.overridden` with
+the `round` whose override accepted it. Once you edit those lines, or a review
+of the branch is clean, the findings can come back.
 
 ## Add a word to the dictionary
 

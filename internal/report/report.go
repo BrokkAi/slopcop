@@ -2115,7 +2115,9 @@ type reviewJSON struct {
 	Findings []review.Finding `json:"findings"`
 	// Overridden lists the reported findings that matched a review finding
 	// overridden with `slopcop override <rv-id>`, each with the id of the
-	// override it matched.
+	// override it matched, and those that repeat, at lines unchanged since, a
+	// finding of an earlier round accepted with `slopcop override --reason`,
+	// each with that finding's id and round.
 	Overridden []review.OverriddenFinding `json:"overridden,omitempty"`
 	// Incomplete is set when fewer reviewers finished than review.minCompleted.
 	Incomplete bool `json:"incomplete,omitempty"`
@@ -2173,7 +2175,12 @@ func sarifLogWithReview(options Options, static sarifRun) sarifDocument {
 	for _, overridden := range v.Overridden {
 		result := reviewSARIFResult(overridden.Finding)
 		result.Properties["slopcop.overrideId"] = overridden.OverrideID
-		result.Suppressions = []sarifSuppression{{Kind: "external", Justification: "overridden with slopcop override " + overridden.OverrideID}}
+		justification := "overridden with slopcop override " + overridden.OverrideID
+		if overridden.Round > 0 {
+			result.Properties["slopcop.overrideRound"] = overridden.Round
+			justification = fmt.Sprintf("repeats %s of review round %d, accepted with slopcop override --reason at lines unchanged since", overridden.OverrideID, overridden.Round)
+		}
+		result.Suppressions = []sarifSuppression{{Kind: "external", Justification: justification}}
 		run.Results = append(run.Results, result)
 	}
 	for _, r := range v.Reviewers {
@@ -2323,6 +2330,14 @@ func writeReviewWithOverride(w io.Writer, v review.Verdict, override *review.Ove
 		fmt.Fprintf(w, "  %d findings left out: they match findings you overrode (they do not fail the check)\n", count)
 	}
 	for _, f := range v.Overridden {
+		if f.Round > 0 {
+			how := ""
+			if f.Match == review.MatchWords {
+				how = " by similar words; read it, and if it is a different problem fix it"
+			}
+			fmt.Fprintf(w, "    %s (repeats %s of round %d, which you accepted with `slopcop override --reason`, at lines unchanged since%s)\n", ReviewFindingLine(f.Finding), printable(f.OverrideID), f.Round, how)
+			continue
+		}
 		how := ""
 		if f.Match == review.MatchWords {
 			how = " by similar words; read it, and if it is a different problem run `slopcop override --undo " + printable(f.ID) + "` and fix it"

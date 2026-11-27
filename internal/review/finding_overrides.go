@@ -215,7 +215,7 @@ func UndoFindingOverride(root, id string) (removed FindingOverride, found bool, 
 		// as they are now.
 		replayed, _ := Replay(record.Verdict)
 		for _, v := range []Verdict{record.Verdict, replayed} {
-			v.applyOverrides(overrides)
+			v.applyOverrides(overrides, nil)
 			if i := slices.IndexFunc(v.Overridden, func(f OverriddenFinding) bool { return f.ID == id }); i >= 0 {
 				target = v.Overridden[i].OverrideID
 				break
@@ -261,7 +261,9 @@ func UndoFindingOverride(root, id string) (removed FindingOverride, found bool, 
 func (v Verdict) usedOverrides() []string {
 	ids := slices.Clone(v.PromptOverrides)
 	for _, f := range v.Overridden {
-		if !slices.Contains(ids, f.OverrideID) {
+		// An earlier round's override is not a finding override: it has no
+		// undo, and it is kept with the round.
+		if f.Round == 0 && !slices.Contains(ids, f.OverrideID) {
 			ids = append(ids, f.OverrideID)
 		}
 	}
@@ -306,11 +308,10 @@ func (v *Verdict) settleOverrides(root string) {
 // reportedFinding finds the finding with the given id in the latest review
 // of the checkout, then in the rounds still on record, newest first.
 func reportedFinding(root, id string) (Finding, bool, error) {
-	gitDir, err := gitx.Run(root, "rev-parse", "--absolute-git-dir")
+	store, err := stateStore(root)
 	if err != nil {
 		return Finding{}, false, err
 	}
-	store := &Store{root: root, dir: filepath.Join(gitDir, "slopcop")}
 	last, err := store.Last()
 	if err != nil {
 		return Finding{}, false, err
@@ -347,30 +348,51 @@ func reportedFinding(root, id string) (Finding, bool, error) {
 }
 
 // ApplyFindingOverrides is applyOverrides with the clone's finding
-// overrides, for a verdict read back from the record rather than made by Run.
+// overrides and the overrides of the earlier rounds of the verdict's branch,
+// for a verdict read back from the record rather than made by Run.
 func ApplyFindingOverrides(root string, v Verdict) (Verdict, error) {
 	overrides, err := LoadFindingOverrides(root)
 	if err != nil {
 		return v, err
 	}
-	v.applyOverrides(overrides)
+	store, err := stateStore(root)
+	if err != nil {
+		return v, err
+	}
+	rounds, err := store.roundsOn(v.Capture.Branch)
+	if err != nil {
+		return v, err
+	}
+	v.applyOverrides(overrides, acceptedFindings(root, rounds, v.Capture))
 	return v, nil
 }
 
+// stateStore is the checkout's review state, for reading without its lock.
+func stateStore(root string) (*Store, error) {
+	gitDir, err := gitx.Run(root, "rev-parse", "--absolute-git-dir")
+	if err != nil {
+		return nil, err
+	}
+	return &Store{root: root, dir: filepath.Join(gitDir, "slopcop")}, nil
+}
+
 // applyOverrides sets Overridden to the reported findings that match a
-// finding override. When every finding is overridden, a review with findings
-// is clean, or failed
+// finding override, or repeat a finding an earlier round's override accepted
+// at lines unchanged since. When every finding is overridden, a review with
+// findings is clean, or failed
 // when too few reviewers finished: the status a review would have had if the
 // reviewers had reported nothing. Status must be the reviewers' own status,
 // before any earlier applyOverrides.
-func (v *Verdict) applyOverrides(overrides []FindingOverride) {
+func (v *Verdict) applyOverrides(overrides []FindingOverride, accepted []acceptedFinding) {
 	v.Overridden = nil
-	if len(overrides) == 0 {
+	if len(overrides) == 0 && len(accepted) == 0 {
 		return
 	}
 	for _, f := range v.reported() {
 		if id, match := matchOverride(overrides, f); id != "" {
 			v.Overridden = append(v.Overridden, OverriddenFinding{Finding: f, OverrideID: id, Match: match})
+		} else if a, match := matchAccepted(accepted, f); match != "" {
+			v.Overridden = append(v.Overridden, OverriddenFinding{Finding: f, OverrideID: a.finding.ID, Match: match, Round: a.round})
 		}
 	}
 	if v.Status == StatusFindings && len(v.Overridden) > 0 && len(v.Findings()) == 0 {

@@ -391,7 +391,7 @@ func TestKimiOverrideCannotApproveAChangedFileItFailedToRead(t *testing.T) {
 		t.Fatal("a whole-review override could approve a change the reviewer did not read")
 	}
 	f := v.Findings()[0]
-	v.applyOverrides([]FindingOverride{{ID: f.ID, Finding: f}})
+	v.applyOverrides([]FindingOverride{{ID: f.ID, Finding: f}}, nil)
 	if v.Status != StatusFailed || !strings.Contains(v.Error, "could not read changed file") {
 		t.Fatalf("overriding the finding approved an unread change: %+v", v)
 	}

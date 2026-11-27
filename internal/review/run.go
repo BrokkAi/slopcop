@@ -77,6 +77,14 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		save()
 		return v
 	}
+	rounds, err := store.roundsOn(branch)
+	if err != nil {
+		v.Error = "read earlier review rounds: " + err.Error()
+		return v
+	}
+	// Like the finding overrides, the earlier rounds' overrides are not part
+	// of the reuse key.
+	accepted := acceptedFindings(opts.Root, rounds, capture)
 	// Only a review every reviewer finished is reused; a reviewer that
 	// failed gets another chance on the next check. Its status is worked out
 	// again from the replies, since the finding overrides may have changed
@@ -86,7 +94,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		v = previous.Verdict
 		v.Reused = true
 		v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
-		v.applyOverrides(overrides)
+		v.applyOverrides(overrides, accepted)
 		v.settleOverrides(opts.Root)
 		save()
 		return v
@@ -103,11 +111,6 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 		v.Reused = true
 		v.settleOverrides(opts.Root)
 		save()
-		return v
-	}
-	rounds, err := store.roundsOn(branch)
-	if err != nil {
-		v.Error = "read earlier review rounds: " + err.Error()
 		return v
 	}
 	// A failed record invalidates override eligibility before any adapter starts.
@@ -168,7 +171,7 @@ func Run(ctx context.Context, store *Store, capture Capture, opts Options) Verdi
 	v.Reviewers = p.run(order)
 	v.DurationsMs = p.durations
 	v.Status, v.Incomplete = reviewStatus(v.Reviewers, minCompleted)
-	v.applyOverrides(overrides)
+	v.applyOverrides(overrides, accepted)
 	v.settleOverrides(opts.Root)
 	r := Record{Mode: opts.Mode, Verdict: v, ReuseKey: key, ContentKey: contentKey}
 	if err = store.saveOn(branch, r); err != nil {
