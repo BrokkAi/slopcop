@@ -44,7 +44,7 @@ var releases = "https://github.com/BrokkAi/slopcop/releases"
 func SelfManaged(executable string) bool {
 	// A Windows path is judged the same on any platform.
 	name := strings.TrimSuffix(strings.ToLower(path.Base(strings.ReplaceAll(executable, `\`, "/"))), ".exe")
-	return name == "slopcop" && upgradeCommand(executable) == InstallGuide
+	return name == "slopcop" && ChannelOf(executable) == Unmanaged
 }
 
 // autoUpdates reports whether this process may replace its own binary: not

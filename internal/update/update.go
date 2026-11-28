@@ -161,18 +161,18 @@ func (n *Notifier) record(now time.Time) {
 // through, judged by where it lives, or the install guide when it cannot
 // tell.
 func upgradeCommand(executable string) string {
-	// Backslashes are Windows separators; a Unix path almost never has one.
-	path := strings.ToLower(strings.ReplaceAll(executable, `\`, "/"))
-	switch {
-	case strings.Contains(path, "/_npx/") && strings.Contains(path, "/node_modules/@brokkai/slopcop/"):
+	switch ChannelOf(executable) {
+	case NPX:
 		return "npx @brokkai/slopcop@latest"
-	case strings.Contains(path, "/node_modules/@brokkai/slopcop/"):
+	case NPM:
 		return "npm install --global @brokkai/slopcop@latest"
-	case strings.Contains(path, "/brokk_slopcop/_bin/") && strings.Contains(path, "/pipx/"):
+	case NPMProject:
+		return "npm install @brokkai/slopcop@latest, in the project that depends on it"
+	case Pipx:
 		return "pipx upgrade brokk-slopcop"
-	case strings.Contains(path, "/brokk_slopcop/_bin/") && strings.Contains(path, "/uv/tools/"):
+	case UV:
 		return "uv tool upgrade brokk-slopcop"
-	case strings.Contains(path, "/brokk_slopcop/_bin/"):
+	case Pip:
 		return "pip install --upgrade brokk-slopcop"
 	default:
 		return InstallGuide

@@ -117,10 +117,9 @@ func TestAnUnreadableStampStillNotifies(t *testing.T) {
 	}
 }
 
+// A global npm install is judged on disk, so TestAGlobalNpmInstallIsUpgradedInItsOwnPrefix covers it.
 func TestUpgradeCommandFollowsTheInstallChannel(t *testing.T) {
 	for _, test := range []struct{ executable, want string }{
-		{"/usr/local/lib/node_modules/@brokkai/slopcop/native/darwin_arm64/slopcop", "npm install --global @brokkai/slopcop@latest"},
-		{`C:\Users\a\AppData\Roaming\npm\node_modules\@brokkai\slopcop\native\windows_amd64\slopcop.exe`, "npm install --global @brokkai/slopcop@latest"},
 		{"/home/a/.npm/_npx/0123/node_modules/@brokkai/slopcop/native/linux_amd64/slopcop", "npx @brokkai/slopcop@latest"},
 		{"/home/a/.local/share/pipx/venvs/brokk-slopcop/lib/python3.12/site-packages/brokk_slopcop/_bin/slopcop", "pipx upgrade brokk-slopcop"},
 		{"/home/a/.local/share/uv/tools/brokk-slopcop/lib/python3.12/site-packages/brokk_slopcop/_bin/slopcop", "uv tool upgrade brokk-slopcop"},

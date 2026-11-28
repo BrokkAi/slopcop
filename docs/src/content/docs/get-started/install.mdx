@@ -187,8 +187,9 @@ slopcop: updated from v0.0.7 to v0.0.9; the next run uses it.
 
 An update that fails never fails the command: it prints the upgrade notice with
 the reason, and is tried again a day later. `slopcop update` does the same on
-request. A slopcop installed through npm, pip, pipx or uv is not replaced,
-because that tool owns the file; it gets the notice above. Nothing updates
+request. A slopcop installed through npm, pip, pipx or uv is not replaced
+after a command, because that tool owns the file; it gets the notice above.
+`slopcop update` runs that tool's upgrade for it. Nothing updates
 itself when `SLOPCOP_NO_AUTO_UPDATE` or `CI` is set, so a job keeps the version
 it installed.
 
@@ -198,7 +199,8 @@ again.
 
 ## Upgrade
 
-Use the channel you installed from:
+`slopcop update` runs the upgrade for npm, pip, pipx and uv installs. To run it
+yourself, use the channel you installed from:
 
 | Channel | Upgrade |
 | --- | --- |

@@ -169,10 +169,18 @@ slopcop: updated from v0.0.7 to v0.0.9; the next run uses it.
 The line goes to stderr. An update that fails never fails the command: it
 prints the upgrade notice with the reason, and is tried again a day later.
 `slopcop update` does the same on request. A slopcop installed through npm,
-pip, pipx or uv is not replaced, because that tool owns the file; it gets the
-notice above, and `slopcop update` says whether it is behind and names the
-command to run. `slopcop update --check` only reports, for any install: it
-exits `0` when up to date and `1` when a newer release is available. Nothing updates
+pip, pipx or uv is not replaced after a command, because that tool owns the
+file; it gets the notice above. `slopcop update` runs that tool for it, with
+the tool's output shown as it goes: `npm install --global
+@brokkai/slopcop@<release>`, `pipx upgrade brokk-slopcop`, `uv tool upgrade
+brokk-slopcop`, or `<python> -m pip install --upgrade brokk-slopcop==<release>`
+with the Python that owns the install (adding `--user` for a user-site
+install). It then checks the new binary's version.
+When the tool fails, for example because a global install needs `sudo`,
+`slopcop update` exits non-zero and names the command to run by hand. An `npx`
+run always fetches the latest release, so it has nothing to update.
+`slopcop update --check` only reports, for any install: it exits `0` when up
+to date and `1` when a newer release is available. Nothing updates
 itself when `$SLOPCOP_NO_AUTO_UPDATE` or `$CI` is set, so a job keeps the
 version it installed, or in a `Stop` hook run. Only a release build is replaced:
 a `dev` build, or one built ahead of a release, stays as built, and a
