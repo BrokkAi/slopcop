@@ -36,6 +36,9 @@ type shellCmd struct {
 	// words are the command name and its arguments, after any command or
 	// builtin prefix, rendered.
 	words []string
+	// bypass says a command or builtin prefix was taken off, so the name
+	// does not run a function.
+	bypass bool
 	// dyn says a word holds an expansion, or a glob or brace that may
 	// reach a dot file, so its value is not known before the shell runs.
 	dyn []bool
@@ -197,6 +200,35 @@ func (c *cmdCollector) walk(node syntax.Node, pipe bool) {
 // stmt gathers a statement: its simple command, if it is one, and the
 // commands inside it.
 func (c *cmdCollector) stmt(s *syntax.Stmt, pipe bool) {
+	cmd, inner := c.simple(s, pipe)
+	if cmd != nil {
+		c.cmds = append(c.cmds, cmd)
+	}
+	switch x := s.Cmd.(type) {
+	case *syntax.CallExpr, *syntax.DeclClause, *syntax.TestClause, *syntax.ArithmCmd, *syntax.LetClause:
+		c.walk(x, pipe)
+	default:
+		if x != nil {
+			c.walk(x, inner)
+		}
+	}
+	// Command substitutions in redirections and unquoted heredoc bodies run
+	// as the shell reads them.
+	for _, r := range s.Redirs {
+		if r.Word != nil {
+			c.walk(r.Word, pipe)
+		}
+		if r.Hdoc != nil {
+			c.walk(r.Hdoc, pipe)
+		}
+	}
+}
+
+// simple is a statement's simple command, without the commands inside it,
+// or for a compound command its redirections as a command with no words
+// (nil when it has none); and whether the commands inside it read a pipe
+// or the compound command's heredoc or here-string.
+func (c *cmdCollector) simple(s *syntax.Stmt, pipe bool) (*shellCmd, bool) {
 	cmd := &shellCmd{pipe: pipe}
 	var raw []string
 	for _, r := range s.Redirs {
@@ -221,12 +253,21 @@ func (c *cmdCollector) stmt(s *syntax.Stmt, pipe bool) {
 		}
 		// command and builtin run the next word in the same shell.
 		for len(cmd.words) > 0 && (cmd.words[0] == "command" || cmd.words[0] == "builtin") {
+			isCommand := cmd.words[0] == "command"
 			cmd.words, cmd.dyn, masked = cmd.words[1:], cmd.dyn[1:], masked[1:]
+			cmd.bypass = true
+			// command -p runs the command with a default PATH (builtin
+			// has no -p); -- ends the options, so a -p after it is the
+			// command.
+			for isCommand && len(cmd.words) > 0 && cmd.words[0] == "-p" {
+				cmd.words, cmd.dyn, masked = cmd.words[1:], cmd.dyn[1:], masked[1:]
+			}
+			if len(cmd.words) > 0 && cmd.words[0] == "--" {
+				cmd.words, cmd.dyn, masked = cmd.words[1:], cmd.dyn[1:], masked[1:]
+			}
 		}
 		cmd.raw = c.rawText(x, raw)
 		cmd.masked = strings.Join(masked, " ")
-		c.cmds = append(c.cmds, cmd)
-		c.walk(x, pipe)
 	case *syntax.DeclClause:
 		// export, local, declare: judged as a command named after the
 		// keyword, whose arguments are its assignments.
@@ -239,8 +280,6 @@ func (c *cmdCollector) stmt(s *syntax.Stmt, pipe bool) {
 		}
 		cmd.raw = c.rawText(x, raw)
 		cmd.masked = cmd.raw
-		c.cmds = append(c.cmds, cmd)
-		c.walk(x, pipe)
 	case *syntax.TestClause, *syntax.ArithmCmd, *syntax.LetClause:
 		// [[ ]], (( )) and let: judged as a command of that name.
 		keyword := "[["
@@ -253,29 +292,15 @@ func (c *cmdCollector) stmt(s *syntax.Stmt, pipe bool) {
 		cmd.words, cmd.dyn = []string{keyword}, []bool{false}
 		cmd.raw = c.rawText(x, raw)
 		cmd.masked = cmd.raw
-		c.cmds = append(c.cmds, cmd)
-		c.walk(x, pipe)
 	default:
 		// A compound command, or redirections alone: its redirections
 		// are judged as a command with no words.
-		if len(s.Redirs) > 0 {
-			cmd.raw = strings.Join(raw, " ")
-			c.cmds = append(c.cmds, cmd)
+		if len(s.Redirs) == 0 {
+			return nil, inner
 		}
-		if x != nil {
-			c.walk(x, inner)
-		}
+		cmd.raw = strings.Join(raw, " ")
 	}
-	// Command substitutions in redirections and unquoted heredoc bodies run
-	// as the shell reads them.
-	for _, r := range s.Redirs {
-		if r.Word != nil {
-			c.walk(r.Word, pipe)
-		}
-		if r.Hdoc != nil {
-			c.walk(r.Hdoc, pipe)
-		}
-	}
+	return cmd, inner
 }
 
 // rawText is a command's source and its redirections, with each
@@ -283,6 +308,28 @@ func (c *cmdCollector) stmt(s *syntax.Stmt, pipe bool) {
 // over it sees git \<newline>push as git push.
 func (c *cmdCollector) rawText(n syntax.Node, redirs []string) string {
 	return strings.ReplaceAll(strings.Join(append([]string{c.text(n)}, redirs...), " "), "\\\n", "")
+}
+
+// stdinBody is the text a heredoc or here-string gives.
+func (c *cmdCollector) stdinBody(r *syntax.Redirect) string {
+	if r.Op == syntax.WordHdoc {
+		text, _ := c.word(r.Word)
+		return text
+	}
+	if r.Hdoc == nil || len(r.Hdoc.Parts) == 0 {
+		return ""
+	}
+	stop, _ := c.word(r.Word)
+	body := heredocBody(c.src[r.Hdoc.Parts[0].Pos().Offset():r.Hdoc.End().Offset()], stop, r.Op == syntax.DashHdoc)
+	if r.Op == syntax.DashHdoc {
+		// <<- strips the leading tabs of every line.
+		lines := strings.Split(body, "\n")
+		for i, line := range lines {
+			lines[i] = strings.TrimLeft(line, "\t")
+		}
+		body = strings.Join(lines, "\n")
+	}
+	return body
 }
 
 // redirect records a redirection on cmd and returns its source without a
