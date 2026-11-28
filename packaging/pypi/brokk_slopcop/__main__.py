@@ -33,6 +33,10 @@ def main() -> int:
         return 2
 
     argv = [str(binary), *sys.argv[1:]]
+    # `slopcop update` upgrades this install with the Python that owns it,
+    # not whichever pip is first on PATH.
+    if sys.executable:
+        os.environ["SLOPCOP_PYTHON"] = sys.executable
     if os.name == "nt":
         # os.execv does not hand the process over on Windows, so run the binary
         # as a child and pass its exit code on unchanged.
