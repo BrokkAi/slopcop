@@ -149,22 +149,6 @@ var quietBuiltins = map[string]bool{"cd": true, "pushd": true, "popd": true, "tr
 // their quoted arguments or heredoc is only text.
 var inertCommands = map[string]bool{"git": true, "gh": true, "echo": true, "printf": true}
 
-// commandName is a command's name, after keywords such as if and command and
-// variable assignments, and the rest of its words.
-func commandName(text string) (string, []string) {
-	words := shellWords(text)
-	for len(words) > 0 && (commandPrefixes[words[0]] || shellAssignment.MatchString(words[0])) {
-		words = words[1:]
-	}
-	if len(words) == 0 || words[0] == "" || words[0] == "." {
-		if len(words) > 0 {
-			return words[0], words[1:]
-		}
-		return "", nil
-	}
-	return path.Base(filepath.ToSlash(words[0])), words[1:]
-}
-
 // inertCommand reports whether a command only reads its arguments as text
 // or paths: git, gh, echo, printf, the search tools and readers, and sed
 // with no script that runs a command.
@@ -337,7 +321,8 @@ const acceptByAgentText = "slopcop: blocked: only the user accepts a proposed ov
 // unsureTargetText is the reason a push is blocked when the gate cannot read
 // which repository it would push, by why.
 var unsureTargetText = map[string]string{
-	unsureShell:   "slopcop: push blocked: the gate cannot tell which repository this push runs in, because a directory on the command line depends on the shell ($VAR, $(...), cd -, popd). Push with a path it can read: run it from the repository, or use `cd <path> && git push` or `git -C <path> push`",
+	unsureShell:   "slopcop: push blocked: the gate cannot tell which repository this push runs in, because a directory on the command line depends on the shell ($VAR, $(...), cd -, popd), or the push or a cd runs in code the gate does not follow (a function, eval, source, trap, bash -c, a script the line writes). Push with a command it can read, on its own: run it from the repository, or use `cd <path> && git push` or `git -C <path> push`",
+	unsureLimit:   "slopcop: push blocked: this command line is too long or deeply nested for the gate to follow where its push runs. Push with a simpler command, on its own: run it from the repository, or use `cd <path> && git push` or `git -C <path> push`",
 	unsureMissing: "slopcop: push blocked: a directory this push runs in does not exist yet, so the gate cannot judge what it would push; the same command makes it, as git worktree add, git clone or cp -r do. Make the directory first, then push from it as a command of its own",
 }
 
@@ -520,9 +505,20 @@ rather than allowing an unchecked push.`,
 					// sight, a push it cannot read is none of its business.
 					// In sight are the session's, the pushes' and any the
 					// line names, such as the source of a cp -r.
-					if unsure != "" && (gateArmed(input.CWD) || slices.ContainsFunc(targets, gateArmed) ||
-						slices.ContainsFunc(namedDirs(input.CWD, input.ToolInput.Command), gateArmed)) {
+					// A line too long or deep to follow is blocked wherever
+					// it runs, as is one naming more directories than it
+					// looks at.
+					if unsure == unsureLimit {
 						return gateBlock(cmd, errors.New(unsureTargetText[unsure]))
+					}
+					if unsure != "" {
+						named, limited := namedDirs(input.CWD, input.ToolInput.Command)
+						if limited || len(named) >= maxNamedDirs {
+							return gateBlock(cmd, errors.New(unsureTargetText[unsureLimit]))
+						}
+						if gateArmed(input.CWD) || slices.ContainsFunc(targets, gateArmed) || slices.ContainsFunc(named, gateArmed) {
+							return gateBlock(cmd, errors.New(unsureTargetText[unsure]))
+						}
 					}
 					if len(targets) > 0 {
 						roots = targets
