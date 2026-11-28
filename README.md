@@ -178,7 +178,9 @@ with the Python that owns the install (adding `--user` for a user-site
 install). It then checks the new binary's version.
 When the tool fails, for example because a global install needs `sudo`,
 `slopcop update` exits non-zero and names the command to run by hand. An `npx`
-run always fetches the latest release, so it has nothing to update. Nothing updates
+run always fetches the latest release, so it has nothing to update.
+`slopcop update --check` only reports, for any install: it exits `0` when up
+to date and `1` when a newer release is available. Nothing updates
 itself when `$SLOPCOP_NO_AUTO_UPDATE` or `$CI` is set, so a job keeps the
 version it installed, or in a `Stop` hook run. Only a release build is replaced:
 a `dev` build, or one built ahead of a release, stays as built, and a

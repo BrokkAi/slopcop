@@ -478,8 +478,19 @@ the gate. The [GitHub Action](/checks/ci/) runs it for you.
 
 Update slopcop to the latest release. A slopcop installed by the install script
 replaces its own binary, after checking the download against the release's
-checksums; one installed through npm, pip, pipx or uv is told the command to
-run. See [Automatic updates](/get-started/install/#automatic-updates).
+checksums. Every install first asks GitHub for the latest release. One
+installed through npm, pip, pipx or uv is upgraded by running that tool, with
+its output shown: `npm install --global @brokkai/slopcop@<release>`, `pipx
+upgrade brokk-slopcop`, `uv tool upgrade brokk-slopcop`, or `<python> -m pip
+install --upgrade brokk-slopcop==<release>` with the Python that owns the
+install. slopcop then checks the new binary's version. When the tool fails, it
+exits non-zero and names the command to run by hand. An `npx` run always runs
+the latest release, and a project's npm dependency is left to the project. See
+[Automatic updates](/get-started/install/#automatic-updates).
+
+| Flag | Meaning |
+| --- | --- |
+| `--check` | Only report; never install. Exits `0` when up to date, `1` when a newer release is available, and `2` when the latest release could not be read or this is not a release build. |
 
 ## `slopcop version`
 

@@ -69,8 +69,13 @@ func noticeUpdates(cmd *cobra.Command, client *service.Client, version string) {
 	}
 }
 
+// updateAvailable is the exit code of `slopcop update --check` when a newer
+// release is out: distinct from 0 (up to date) and 2 (the check failed).
+const updateAvailable = 1
+
 func newUpdateCommand(version string) *cobra.Command {
-	return &cobra.Command{
+	var check bool
+	command := &cobra.Command{
 		Use:   "update",
 		Short: "Update slopcop to the latest release",
 		Long: `Update slopcop to the latest release.
@@ -85,54 +90,86 @@ tool, with its output shown as it goes: npm install --global, pipx upgrade,
 uv tool upgrade, or the owning Python's -m pip install --upgrade. When the
 tool fails, the command exits non-zero and names the command to run by hand,
 for example with sudo. An npx run always fetches the latest release, so it
-has nothing to update.`,
+has nothing to update.
+
+With --check it only reports and never installs: it exits 0 when up to date,
+1 when a newer release is available, and 2 when the latest release could not
+be read or this is not a release build.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), version)
+			executable, err := update.Executable()
+			if err != nil {
+				return err
+			}
+			return runUpdate(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), version, check, updateSource{
+				executable: executable,
+				latest:     update.Latest,
+				apply:      update.Apply,
+				run:        runProgram,
+			})
 		},
 	}
+	command.Flags().BoolVar(&check, "check", false, "only report whether a newer release is available: exit 0 when up to date, 1 when one is, 2 on failure or a non-release build; never install")
+	return command
 }
 
-func runUpdate(ctx context.Context, out, errOut io.Writer, version string) error {
-	executable, err := update.Executable()
-	if err != nil {
-		return err
-	}
+// updateSource is what runUpdate reads and changes, so a test can stand in
+// for the running binary, the release server and the package manager.
+type updateSource struct {
+	executable string
+	latest     func(ctx context.Context) (string, error)
+	apply      func(ctx context.Context, tag, executable string) error
+	run        programRunner
+}
+
+func runUpdate(ctx context.Context, out, errOut io.Writer, version string, check bool, source updateSource) error {
 	if !update.IsRelease(version) {
+		if check {
+			// Not up to date and not behind: a script must not read it as either.
+			return fmt.Errorf("%s is not a release build, so it cannot be compared with the latest release", version)
+		}
 		fmt.Fprintf(out, "slopcop: %s is not a release build, so it is left as it is\n", version)
 		return nil
 	}
-	channel := update.ChannelOf(executable)
-	if channel == update.NPX {
+	channel := update.ChannelOf(source.executable)
+	if channel == update.NPX && !check {
+		// --check still compares, since an npx run can name an older release.
 		fmt.Fprintln(out, "slopcop: npx @brokkai/slopcop@latest always runs the latest release, so there is nothing to update")
 		return nil
 	}
+	selfManaged := update.SelfManaged(source.executable)
+	upgrade := "slopcop update"
+	if !selfManaged {
+		upgrade = update.UpgradeCommand(source.executable)
+	}
 	lookup, cancel := context.WithTimeout(ctx, updateWait)
 	defer cancel()
-	latest, err := update.Latest(lookup)
+	latest, err := source.latest(lookup)
 	if err != nil {
+		if !selfManaged && !check {
+			return fmt.Errorf("%w. Upgrade: %s", err, upgrade)
+		}
 		return err
 	}
 	if !update.Newer(latest, version) {
 		fmt.Fprintf(out, "slopcop: %s is up to date (latest release %s)\n", version, latest)
 		return nil
 	}
-	if channel == update.NPMProject {
-		// The project pins this version; changing its package.json is the
-		// project's call.
-		fmt.Fprintf(out, "slopcop: %s is available (you have %s). This slopcop is a project's npm dependency; upgrade it there: npm install @brokkai/slopcop@%s\n", latest, version, strings.TrimPrefix(latest, "v"))
+	// A project's npm dependency is pinned by the project, so changing it is
+	// the project's call.
+	if check || channel == update.NPMProject || channel == update.Unmanaged && !selfManaged {
+		fmt.Fprintf(out, "slopcop: %s → %s available. Upgrade: %s\n", version, latest, upgrade)
+		if check {
+			return silentExit{updateAvailable}
+		}
 		return nil
 	}
 	if channel != update.Unmanaged {
 		// A package manager's install can take minutes, and shows its own
 		// progress, so it is not held to the download's bound.
-		return updateThroughPackageManager(ctx, out, errOut, executable, version, latest, runProgram)
+		return updateThroughPackageManager(ctx, out, errOut, source.executable, version, latest, source.run)
 	}
-	if !update.SelfManaged(executable) {
-		fmt.Fprintf(out, "slopcop: this slopcop is not one it updates itself. Upgrade: %s\n", update.UpgradeCommand(executable))
-		return nil
-	}
-	if err := update.Apply(lookup, latest, executable); err != nil {
+	if err := source.apply(lookup, latest, source.executable); err != nil {
 		return errors.New("updating to " + latest + " failed: " + err.Error())
 	}
 	fmt.Fprintf(out, "slopcop: updated from %s to %s\n", version, latest)
